@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -59,17 +60,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetProject":
 		return p.getJSON(ctx, req, "vproj", str(req.Input["id"]))
 	case "DeleteProject":
-		return p.deleteJSON(ctx, req, "vproj", str(req.Input["id"]))
+		return p.deleteProject(ctx, req)
 	case "CreateProjectEnv":
 		return p.createEnv(ctx, req)
 	case "ListProjectEnv":
-		return p.listPrefixed(ctx, req, "venv", str(req.Input["id"])+"/", "envs")
+		return p.listPrefixed(ctx, req, "venv", p.projectID(ctx, req)+"/", "envs")
 	case "DeleteProjectEnv":
-		return p.deleteJSON(ctx, req, "venv", str(req.Input["id"])+"/"+str(req.Input["envId"]))
+		return p.deleteJSON(ctx, req, "venv", p.projectID(ctx, req)+"/"+str(req.Input["envId"]))
 	case "AddProjectDomain":
 		return p.addDomain(ctx, req)
 	case "ListProjectDomains":
-		return p.listPrefixed(ctx, req, "vdom", str(req.Input["id"])+"/", "domains")
+		return p.listPrefixed(ctx, req, "vdom", p.projectID(ctx, req)+"/", "domains")
 	case "CreateDeployment":
 		return p.createDeployment(ctx, req)
 	case "ListDeployments":
@@ -78,6 +79,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.getJSON(ctx, req, "vdeploy", str(req.Input["id"]))
 	case "DeleteDeployment":
 		id := str(req.Input["id"])
+		if _, err := p.getJSON(ctx, req, "vdeploy", id); err != nil {
+			return nil, err
+		}
 		_ = p.col(req, "vdeploy").Delete(ctx, id)
 		return &spi.Response{Output: map[string]any{"uid": id, "state": "DELETED"}}, nil
 	case "KvCommand":
@@ -92,6 +96,9 @@ func (p *Pack) createProject(ctx context.Context, req *spi.Request) (*spi.Respon
 	if name == "" {
 		return nil, &spi.Fault{Code: "bad_request", Message: "Project name is required", HTTPStatus: 400, Fault: "client"}
 	}
+	if _, exists, _ := p.col(req, "vproj").Get(ctx, "name:"+name); exists {
+		return nil, &spi.Fault{Code: "conflict", Message: "A project with the same name already exists.", HTTPStatus: 409, Fault: "client"}
+	}
 	id := "prj_" + p.deps.Rand.Hex(12)
 	now := p.deps.Clock.Now().UnixMilli()
 	rec := map[string]any{"id": id, "name": name, "accountId": req.Identity.Account, "createdAt": now, "updatedAt": now, "framework": req.Input["framework"]}
@@ -101,9 +108,13 @@ func (p *Pack) createProject(ctx context.Context, req *spi.Request) (*spi.Respon
 }
 
 func (p *Pack) createEnv(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	pid := str(req.Input["id"])
-	if _, err := p.getJSON(ctx, req, "vproj", pid); err != nil {
+	got, err := p.getJSON(ctx, req, "vproj", str(req.Input["id"]))
+	if err != nil {
 		return nil, err
+	}
+	pid := str(got.Output["id"])
+	if str(req.Input["key"]) == "" {
+		return nil, &spi.Fault{Code: "bad_request", Message: "Env key is required", HTTPStatus: 400, Fault: "client"}
 	}
 	eid := "env_" + p.deps.Rand.Hex(10)
 	target := req.Input["target"]
@@ -116,11 +127,15 @@ func (p *Pack) createEnv(ctx context.Context, req *spi.Request) (*spi.Response, 
 }
 
 func (p *Pack) addDomain(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	pid := str(req.Input["id"])
-	if _, err := p.getJSON(ctx, req, "vproj", pid); err != nil {
+	got, err := p.getJSON(ctx, req, "vproj", str(req.Input["id"]))
+	if err != nil {
 		return nil, err
 	}
+	pid := str(got.Output["id"])
 	name := str(req.Input["name"])
+	if name == "" {
+		return nil, &spi.Fault{Code: "bad_request", Message: "Domain name is required", HTTPStatus: 400, Fault: "client"}
+	}
 	now := p.deps.Clock.Now().UnixMilli()
 	rec := map[string]any{"name": name, "apexName": name, "projectId": pid, "verified": true, "createdAt": now, "updatedAt": now}
 	_ = p.col(req, "vdom").Put(ctx, pid+"/"+name, mustJSON(rec))
@@ -129,6 +144,9 @@ func (p *Pack) addDomain(ctx context.Context, req *spi.Request) (*spi.Response, 
 
 func (p *Pack) createDeployment(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := str(req.Input["name"])
+	if name == "" {
+		return nil, &spi.Fault{Code: "bad_request", Message: "Deployment name is required", HTTPStatus: 400, Fault: "client"}
+	}
 	project := str(req.Input["project"])
 	if project == "" {
 		project = name
@@ -215,6 +233,27 @@ func (p *Pack) getJSON(ctx context.Context, req *spi.Request, col, key string) (
 	return &spi.Response{Output: rec}, nil
 }
 
+func (p *Pack) projectID(ctx context.Context, req *spi.Request) string {
+	got, err := p.getJSON(ctx, req, "vproj", str(req.Input["id"]))
+	if err != nil {
+		return str(req.Input["id"])
+	}
+	return str(got.Output["id"])
+}
+
+func (p *Pack) deleteProject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	got, err := p.getJSON(ctx, req, "vproj", str(req.Input["id"]))
+	if err != nil {
+		return nil, err
+	}
+	id, name := str(got.Output["id"]), str(got.Output["name"])
+	_ = p.col(req, "vproj").Delete(ctx, id)
+	if name != "" {
+		_ = p.col(req, "vproj").Delete(ctx, "name:"+name)
+	}
+	return &spi.Response{Status: http.StatusOK, Output: map[string]any{}}, nil
+}
+
 func (p *Pack) deleteJSON(ctx context.Context, req *spi.Request, col, key string) (*spi.Response, error) {
 	if _, err := p.getJSON(ctx, req, col, key); err != nil {
 		return nil, err
@@ -273,13 +312,14 @@ func hydrate(req *spi.Request) {
 }
 
 func str(v any) string {
-	if v == nil {
+	switch t := v.(type) {
+	case nil:
 		return ""
+	case string:
+		return t
+	default:
+		return fmt.Sprint(t)
 	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
 }
 
 func first(v any, fallback string) string {

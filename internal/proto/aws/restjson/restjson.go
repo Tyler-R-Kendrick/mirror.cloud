@@ -345,10 +345,16 @@ func vercelOp(svc *model.Service, r *http.Request) *model.Operation {
 }
 
 func vercelRoute(r *http.Request) string {
-	path := r.URL.Path
-	parts := strings.Split(strings.Trim(path, "/"), "/")
+	path := strings.Trim(r.URL.Path, "/")
+	if path == "" {
+		return "KvCommand"
+	}
+	parts := strings.Split(path, "/")
 	if len(parts) > 0 && len(parts[0]) >= 2 && parts[0][0] == 'v' && parts[0][1] >= '0' && parts[0][1] <= '9' {
 		parts = parts[1:]
+	}
+	if len(parts) == 0 || parts[0] == "" {
+		return "KvCommand"
 	}
 	m := r.Method
 	join := strings.Join(parts, "/")
@@ -384,7 +390,7 @@ func vercelRoute(r *http.Request) string {
 	case len(parts) == 2 && parts[0] == "deployments" && m == http.MethodDelete:
 		return "DeleteDeployment"
 	}
-	return "KvCommand"
+	return "Unknown"
 }
 
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {

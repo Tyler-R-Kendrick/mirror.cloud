@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 831 of 907 direct upstream test functions are explicitly traced (91.6%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 832 of 907 direct upstream test functions are explicitly traced (91.7%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,792 tests across 221 Go packages. The 2,602-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-eight new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. Two equivalent SNS mutants are excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,793 tests across 221 Go packages. The 2,602-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-eight new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. Two equivalent SNS mutants are excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 95 / 180 |
+| LocalStack SNS test functions explicitly traced | 96 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -50,6 +50,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_with_invalid_attributes` | `TestSNSPlatformEndpointAttributeValidation` rejects invalid create attributes |
 | `test_sns.py::TestSNSPlatformEndpoint::test_publish_disabled_endpoint` | `TestSNSPublishDisabledPlatformEndpoint` verifies the `EndpointDisabled` fault |
 | `test_sns.py::TestSNSPlatformEndpoint::test_publish_to_platform_endpoint_is_dispatched` | `TestSNSPlatformEndpointSubscriptionDispatch` verifies platform-specific delivery on the bus |
+| `test_sns.py::TestSNSPlatformEndpoint::test_publish_to_gcm` | `TestSNSPlatformEndpointPlatformPayloadSelection` verifies APNS and GCM structured payloads are selected per endpoint platform |
 | `test_sns.py::TestSNSPlatformEndpoint::test_subscribe_platform_endpoint` | `TestSNSPlatformEndpointSubscriptionDispatch` rejects nonexistent application endpoints before accepting a real endpoint |
 | `test_sns.py::TestSNSPlatformEndpoint::test_create_platform_endpoint_custom_data` | `TestSNSPlatformEndpointAttributeValidation` preserves custom endpoint data |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_double_custom_data` | `TestSNSPlatformEndpointCustomUserDataPrecedence` uses the top-level parameter when `CustomUserData` is also present in attributes |

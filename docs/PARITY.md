@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 802 of 907 direct upstream test functions are explicitly traced (88.4%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 806 of 907 direct upstream test functions are explicitly traced (88.9%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,761 tests across 221 Go packages. The 2,597-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-two new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,762 tests across 221 Go packages. The 2,598-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-three new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,9 +18,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 66 / 180 |
+| LocalStack SNS test functions explicitly traced | 70 / 180 |
 
-The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
+The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
 Initial SNS trace rows:
 
@@ -86,6 +86,10 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSubscriptionCrudV2::test_subscribe_sms_obscure_phone_number` | `TestSNSObscureSMSPhoneSubscription` accepts AWS-compatible separated phone digits and rejects malformed separators |
 | `test_sns.py::TestSNSSubscriptionCrudV2::test_create_topic_name_constraints` | `TestSNSTopicNameConstraints` covers the 256-character boundary, FIFO suffix coupling, and invalid names |
 | `test_sns.py::TestSNSPublishCrud::test_publish_with_empty_subject` | `TestSNSSubjectValidation` preserves empty-subject rejection and adds length/control-character checks |
+| `test_sns.py::TestSNSTopicCrudV2::test_topic_add_permission` | `TestSNSTopicPermissionLifecycle` stores an added policy statement |
+| `test_sns.py::TestSNSTopicCrudV2::test_topic_add_multiple_permissions` | `TestSNSTopicPermissionLifecycle` stores multiple independent policy statements |
+| `test_sns.py::TestSNSTopicCrudV2::test_topic_remove_permission` | `TestSNSTopicPermissionLifecycle` removes only the selected policy statement |
+| `test_sns.py::TestSNSTopicCrudV2::test_remove_permission_errors` | `TestSNSTopicPermissionLifecycle` rejects removing a missing label |
 | `test_sns.py::TestSNSMultiRegions::test_cross_region_access` | `TestSNSCrossRegionTopicAccessRejected` preserves the cross-region topic access fault |
 | `test_sns.py::TestSNSTopicCrud::test_topic_delivery_policy_crud` | `TestSNSTopicDeliveryPolicyCRUD` characterizes effective policy defaults, nested updates, null values, and empty-string deletion |
 | `test_sns.py::TestSNSTopicCrud::test_tags` | `TestSNSTopicTagLifecycle` verifies empty tag projection |

@@ -18281,6 +18281,18 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSubjectValidation",
 		},
 		{
+			name: "sns-remove-missing-permission-succeeds",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `if !found {
+		return nil, &spi.Fault{Code: "NotFound", Message: "Label", HTTPStatus: 404, Fault: "client"}
+	}`,
+			new:  `if false {
+		return nil, &spi.Fault{Code: "NotFound", Message: "Label", HTTPStatus: 404, Fault: "client"}
+	}`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTopicPermissionLifecycle",
+		},
+		{
 			name: "sns-ignore-cross-region-sqs-owner",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "targetReq.Identity.Region = parts[3]",

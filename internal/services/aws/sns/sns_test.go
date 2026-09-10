@@ -1954,6 +1954,39 @@ func TestSNSPermissionValidation(t *testing.T) {
 	}
 }
 
+func TestSNSTopicPermissionLifecycle(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "permission-lifecycle"}).Output["TopicArn"])
+	add := func(label string) {
+		t.Helper()
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "AddPermission", Input: map[string]any{
+			"TopicArn": topic, "Label": label, "AWSAccountIds": []any{"2"}, "ActionNames": []any{"Publish"},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("grant-one")
+	add("grant-two")
+	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}})
+	if err != nil || !strings.Contains(str(asMap(attrs.Output["Attributes"])["Policy"]), "grant-one") || !strings.Contains(str(asMap(attrs.Output["Attributes"])["Policy"]), "grant-two") {
+		t.Fatalf("added permissions=%#v err=%v", attrs, err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "RemovePermission", Input: map[string]any{"TopicArn": topic, "Label": "grant-one"}}); err != nil {
+		t.Fatal(err)
+	}
+	attrs, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}})
+	policy := str(asMap(attrs.Output["Attributes"])["Policy"])
+	if err != nil || strings.Contains(policy, "grant-one") || !strings.Contains(policy, "grant-two") {
+		t.Fatalf("removed permission policy=%q err=%v", policy, err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "RemovePermission", Input: map[string]any{"TopicArn": topic, "Label": "missing"}}); err == nil {
+		t.Fatal("removed missing permission")
+	}
+}
+
 func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

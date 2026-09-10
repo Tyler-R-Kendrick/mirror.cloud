@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -33,6 +34,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	}
 	if svc.ID == "vercel.api" {
 		return vercelOp(svc, r), nil
+	}
+	if svc.ID == "cloudflare.kv" {
+		return cloudflareOp(svc, r), nil
 	}
 	// An X-Amz-Target names an operation outright, and an explicit statement
 	// beats one inferred from a path. No SDK sends it for a restJson1 service,
@@ -336,6 +340,44 @@ func opensearchOp(svc *model.Service, r *http.Request) *model.Operation {
 	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
 }
 
+func cloudflareOp(svc *model.Service, r *http.Request) *model.Operation {
+	name := cloudflareRoute(r)
+	if op := svc.OperationByName(name); op != nil {
+		return op
+	}
+	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+}
+
+func cloudflareRoute(r *http.Request) string {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) >= 2 && parts[0] == "client" && parts[1] == "v4" {
+		parts = parts[2:]
+	}
+	m := r.Method
+	if len(parts) >= 5 && parts[0] == "accounts" && parts[2] == "storage" && parts[3] == "kv" && parts[4] == "namespaces" {
+		if len(parts) == 5 && m == http.MethodPost {
+			return "CreateNamespace"
+		}
+		if len(parts) == 5 && m == http.MethodGet {
+			return "ListNamespaces"
+		}
+		if len(parts) == 6 && m == http.MethodGet {
+			return "GetNamespace"
+		}
+		if len(parts) >= 8 && parts[6] == "values" {
+			switch m {
+			case http.MethodPut:
+				return "PutValue"
+			case http.MethodGet:
+				return "GetValue"
+			case http.MethodDelete:
+				return "DeleteValue"
+			}
+		}
+	}
+	return "Unknown"
+}
+
 func vercelOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := vercelRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -396,6 +438,10 @@ func vercelRoute(r *http.Request) string {
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
 	body, _ := io.ReadAll(r.Body)
 	in := map[string]any{}
+	if svc.ID == "cloudflare.kv" && op.Name == "PutValue" {
+		in["value"] = string(body)
+		return &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}, nil
+	}
 	if len(body) > 0 && body[0] == '[' {
 		var cmd []any
 		_ = json.Unmarshal(body, &cmd)
@@ -436,6 +482,9 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			w.Header().Add(k, v)
 		}
 	}
+	if svc.ID == "cloudflare.kv" {
+		return encodeCloudflare(w, status, resp)
+	}
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", "application/json")
 	}
@@ -448,6 +497,34 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		return nil
 	}
 	return json.NewEncoder(w).Encode(resp.Output)
+}
+
+func encodeCloudflare(w http.ResponseWriter, status int, resp *spi.Response) error {
+	if resp.Output != nil {
+		if raw, ok := resp.Output["_raw"].(string); ok {
+			if w.Header().Get("Content-Type") == "" {
+				w.Header().Set("Content-Type", "text/plain")
+			}
+			w.WriteHeader(status)
+			_, err := io.WriteString(w, raw)
+			return err
+		}
+	}
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(status)
+	var result any
+	if resp.Output != nil {
+		if lst, ok := resp.Output["_list"]; ok {
+			result = lst
+		} else if _, ok := resp.Output["_null"]; ok {
+			result = nil
+		} else {
+			result = resp.Output
+		}
+	}
+	return json.NewEncoder(w).Encode(map[string]any{"success": true, "errors": []any{}, "messages": []any{}, "result": result})
 }
 
 func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.ResponseWriter, f *spi.Fault, requestID string) error {
@@ -463,6 +540,19 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	if svc.ID == "vercel.api" {
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
+	}
+	if svc.ID == "cloudflare.kv" {
+		var code any = f.Code
+		if n, err := strconv.Atoi(f.Code); err == nil {
+			code = n
+		}
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{
+			"success":  false,
+			"errors":   []any{map[string]any{"code": code, "message": f.Message}},
+			"messages": []any{},
+			"result":   nil,
+		})
 	}
 	w.Header().Set("x-amzn-errortype", f.Code)
 	w.WriteHeader(status)

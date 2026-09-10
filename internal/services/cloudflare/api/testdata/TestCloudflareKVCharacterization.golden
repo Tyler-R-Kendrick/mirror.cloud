@@ -1,0 +1,50 @@
+{
+  "after_del": {
+    "error": "10009",
+    "message": "key not found",
+    "status": 404
+  },
+  "create": {
+    "id": "7c5891299f6489f8",
+    "supports_url_encoding": true,
+    "title": "snap"
+  },
+  "del": {
+    "_null": true
+  },
+  "duplicate": {
+    "error": "10014",
+    "message": "A namespace with this account ID and title already exists",
+    "status": 400
+  },
+  "empty": {
+    "error": "10007",
+    "message": "Title is required",
+    "status": 400
+  },
+  "get": {
+    "id": "7c5891299f6489f8",
+    "supports_url_encoding": true,
+    "title": "snap"
+  },
+  "get_value": {
+    "_raw": "v"
+  },
+  "list": {
+    "_list": [
+      {
+        "id": "7c5891299f6489f8",
+        "supports_url_encoding": true,
+        "title": "snap"
+      }
+    ]
+  },
+  "missing_ns": {
+    "error": "10013",
+    "message": "Namespace not found",
+    "status": 404
+  },
+  "put": {
+    "_null": true
+  }
+}

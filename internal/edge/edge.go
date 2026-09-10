@@ -451,6 +451,12 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			}
 		}
 	}
+	if cloudflareRequest(r) {
+		return s.bundle.ServiceByID("cloudflare.kv")
+	}
+	if vercelRequest(r) {
+		return s.bundle.ServiceByID("vercel.api")
+	}
 	if svc := s.resolveByModel(r); svc != nil {
 		return svc
 	}
@@ -460,9 +466,6 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	path := r.URL.Path
 	if strings.Contains(path, "/storage/v1") || strings.Contains(path, "/upload/storage") {
 		return s.bundle.ServiceByID("gcp.storage")
-	}
-	if vercelRequest(r) {
-		return s.bundle.ServiceByID("vercel.api")
 	}
 	if strings.Contains(path, "/2015-03-31/") {
 		return s.bundle.ServiceByID("aws.lambda")
@@ -487,6 +490,17 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
+}
+
+func cloudflareRequest(r *http.Request) bool {
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Contains(host, "cloudflare") {
+		return true
+	}
+	return strings.Contains(r.URL.Path, "/client/v4/")
 }
 
 func vercelRequest(r *http.Request) bool {

@@ -520,10 +520,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if want != "" && str(m["TopicArn"]) != want {
 				continue
 			}
-			if confirmed, ok := m["Confirmed"].(bool); ok && !confirmed {
-				m["SubscriptionArn"] = "PendingConfirmation"
-			}
-			subs = append(subs, m)
+			subs = append(subs, subscriptionSummary(req, m))
 		}
 		page, next, fault := snsPage(req.Input, subs)
 		if fault != nil {
@@ -676,6 +673,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"PhoneNumbers": nums}}, nil
 	default:
 		return nil, spi.NotImplemented("aws.sns", req.Operation, "emulate")
+	}
+}
+
+func subscriptionSummary(req *spi.Request, sub map[string]any) map[string]any {
+	arn := str(sub["SubscriptionArn"])
+	if confirmed, ok := sub["Confirmed"].(bool); ok && !confirmed {
+		arn = "PendingConfirmation"
+	}
+	return map[string]any{
+		"Endpoint": str(sub["Endpoint"]), "Owner": req.Identity.Account,
+		"Protocol": str(sub["Protocol"]), "SubscriptionArn": arn, "TopicArn": str(sub["TopicArn"]),
 	}
 }
 

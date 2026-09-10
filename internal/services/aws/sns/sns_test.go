@@ -1675,6 +1675,38 @@ func TestSNSListSubscriptionsByTopicARNValidation(t *testing.T) {
 	}
 }
 
+func TestSNSSubscriptionListProjection(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "subscription-list"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:queue",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptionsByTopic", Input: map[string]any{"TopicArn": topic.Output["TopicArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs := asSlice(listed.Output["Subscriptions"])
+	if len(subs) != 1 {
+		t.Fatalf("subscriptions %#v", listed.Output)
+	}
+	entry := asMap(subs[0])
+	want := map[string]any{"Endpoint": "arn:aws:sqs:us-east-1:1:queue", "Owner": "1", "Protocol": "sqs", "SubscriptionArn": str(subs[0].(map[string]any)["SubscriptionArn"]), "TopicArn": topic.Output["TopicArn"]}
+	if !reflect.DeepEqual(entry, want) {
+		t.Fatalf("subscription summary %#v, want %#v", entry, want)
+	}
+	if _, leaked := entry["Confirmed"]; leaked {
+		t.Fatalf("subscription leaked internal fields %#v", entry)
+	}
+}
+
 func TestSNSSubscriptionAttributesARNValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

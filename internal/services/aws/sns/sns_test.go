@@ -1388,6 +1388,9 @@ func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
 	if _, err := call("DeletePlatformApplication", map[string]any{"PlatformApplicationArn": appARN}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := call("GetEndpointAttributes", map[string]any{"EndpointArn": endpointARN}); err == nil {
+		t.Fatal("found endpoint for deleted application")
+	}
 	if _, err := call("ListEndpointsByPlatformApplication", map[string]any{"PlatformApplicationArn": appARN}); err == nil {
 		t.Fatal("listed endpoints for deleted application")
 	}

@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 845 of 907 direct upstream test functions are explicitly traced (93.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 847 of 907 direct upstream test functions are explicitly traced (93.4%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The full 2,602-entry mutation inventory is green (`make test-mutation`, 2,898.6s); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 109 / 180 |
+| LocalStack SNS test functions explicitly traced | 111 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -39,6 +39,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPlatformApplicationCrud::test_set_platform_application_attributes_invalid_arn` | `TestSNSPlatformApplicationValidation` rejects a malformed set ARN |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint` | `TestSNSPlatformEndpointLifecycleValidation` creates an endpoint |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_idempotency` | `TestSNSPlatformEndpointLifecycleValidation` verifies repeated-token idempotency |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_check_idempotency` | `TestSNSPlatformEndpointLifecycleValidation` returns the same endpoint for repeated token/custom-data requests and rejects conflicting attributes |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_non_existent_app` | `TestSNSPlatformEndpointLifecycleValidation` rejects a missing application |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_get_platform_endpoint_attributes_non_existent_endpoint` | `TestSNSPlatformEndpointLifecycleValidation` rejects lookup of a missing endpoint |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_list_platform_endpoints` | `TestSNSPlatformEndpointLifecycleValidation` and `TestSNSPlatformEndpointListProjection` verify AWS's endpoint ARN and public listing shape |
@@ -86,6 +87,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSubscriptionHttp::test_redrive_policy_http_subscription` | `TestSNSHTTPSubscriptionRedrive` sends failed HTTP notifications to the configured SQS DLQ |
 | `test_sns.py::TestSNSSubscriptionCrud::test_redrive_policy_sqs_queue_subscription` | `TestSNSSQSSubscriptionRedrive` sends failed SQS subscription notifications to the configured DLQ |
 | `test_sns.py::TestSNSSubscriptionLambda::test_redrive_policy_lambda_subscription` | `TestSNSLambdaSubscriptionRedrive` sends failed Lambda subscription notifications to the configured DLQ |
+| `test_sns.py::TestSNSSubscriptionSQS::test_subscription_after_failure_to_deliver` | `TestSNSSQSSubscriptionRedrive` preserves a subscription after its queue is deleted and redrives subsequent deliveries |
 | `test_sns.py::TestSNSSubscriptionHttp::test_subscribe_external_http_endpoint_content_type` | `TestSNSHTTPDeliveryPolicy` verifies raw HTTP bodies, policy-selected content type, and SNS message-type headers |
 | `test_sns.py::TestSNSSubscriptionSQS::test_attribute_raw_subscribe` | `TestSNSSQSRawDeliveryPreservesMessageAttributes` verifies raw SQS delivery carries string and binary message attributes |
 | `test_sns.py::TestSNSSubscriptionSQS::test_message_attributes_not_missing` | `TestSNSSQSRawDeliveryPreservesMessageAttributes` verifies raw SQS delivery does not drop message attributes |

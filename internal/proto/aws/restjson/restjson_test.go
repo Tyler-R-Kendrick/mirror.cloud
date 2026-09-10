@@ -413,6 +413,45 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	if w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"errors"`) || !strings.Contains(w.Body.String(), `"NOT_FOUND"`) {
 		t.Fatalf("rw fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
+
+	fly := &model.Service{ID: "fly.machines"}
+	for _, test := range []struct{ method, path, want string }{
+		{http.MethodPost, "/v1/apps", "CreateApp"},
+		{http.MethodGet, "/v1/apps", "ListApps"},
+		{http.MethodGet, "/v1/apps/web", "GetApp"},
+		{http.MethodDelete, "/v1/apps/web", "DeleteApp"},
+		{http.MethodPost, "/v1/apps/web/machines", "CreateMachine"},
+		{http.MethodGet, "/v1/apps/web/machines", "ListMachines"},
+		{http.MethodGet, "/v1/apps/web/machines/1", "GetMachine"},
+		{http.MethodDelete, "/v1/apps/web/machines/1", "DeleteMachine"},
+	} {
+		req := httptest.NewRequest(test.method, test.path, nil)
+		op, err := codec.Route(fly, req)
+		if err != nil || op.Name != test.want {
+			t.Errorf("fly %s %s: %#v %v, want %s", test.method, test.path, op, err, test.want)
+		}
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(fly, &model.Operation{Name: "ListApps"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"name": "web"}}, "_wrap": "apps"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"apps"`) || !strings.Contains(w.Body.String(), `"total_apps":1`) {
+		t.Fatalf("fly list encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(fly, &model.Operation{Name: "CreateApp"}, w, &spi.Response{Status: 201, Output: map[string]any{"_wrap": "app", "app": map[string]any{"id": "1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 201 || !strings.Contains(w.Body.String(), `"id":"1"`) || strings.Contains(w.Body.String(), `"_wrap"`) {
+		t.Fatalf("fly encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(fly, &model.Operation{Name: "GetApp"}, w, &spi.Fault{Code: "not_found", Message: "app not found", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"error":"app not found"`) {
+		t.Fatalf("fly fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
 }
 
 func jsonQuote(s string) string {

@@ -848,6 +848,20 @@
     ]
   },
   {
+    "ID": "fly.machines",
+    "Protocol": "restJson1",
+    "Ops": [
+      "CreateApp",
+      "ListApps",
+      "GetApp",
+      "DeleteApp",
+      "CreateMachine",
+      "ListMachines",
+      "GetMachine",
+      "DeleteMachine"
+    ]
+  },
+  {
     "ID": "aws.kms",
     "Protocol": "awsJson1_1",
     "Ops": [

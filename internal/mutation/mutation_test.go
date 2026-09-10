@@ -19683,7 +19683,7 @@ var mutants = []mutant{
 	{
 		name: "sns-accept-invalid-filter-policy",
 		file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-		old:  "if fault := validateFilterPolicy(value); fault != nil {",
+		old:  "if fault := validateFilterPolicy(value, str(rec[\"FilterPolicyScope\"])); fault != nil {",
 		new:  "if false {",
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSFilterPolicyScopeCharacterization",
@@ -21973,6 +21973,47 @@ var mutants = []mutant{
 		new:  "if versioned && wantVer == \"\" {\n\t\tvid := \"null\"\n\t\tif versioningStatus == \"Enabled\" {\n\t\t\tvid = p.deps.Rand.Hex(16)\n\t\t}",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketVersioningState",
+	},
+
+	{
+		name: "sns-accept-too-many-filter-keys",
+		file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+		old:  "if keys > 5 {\n\t\treturn filterPolicyFault(\"\")\n\t}",
+		new:  "if false {\n\t\treturn filterPolicyFault(\"\")\n\t}",
+		pkg:  "./internal/services/aws/sns",
+		run:  "TestSNSFilterPolicyConstraints",
+	},
+	{
+		name: "sns-accept-nested-filter-on-attributes",
+		file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+		old:  "if scope != \"MessageBody\" {\n\t\t\t\treturn filterPolicyFault(\"nested filter policy requires FilterPolicyScope=MessageBody\")\n\t\t\t}",
+		new:  "if false {\n\t\t\t\treturn filterPolicyFault(\"nested filter policy requires FilterPolicyScope=MessageBody\")\n\t\t\t}",
+		pkg:  "./internal/services/aws/sns",
+		run:  "TestSNSFilterPolicyConstraints",
+	},
+	{
+		name: "sns-accept-over-complex-filter-policy",
+		file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+		old:  "if filterCombinations(policy) > 150 {\n\t\treturn filterPolicyFault(\"\")\n\t}",
+		new:  "if false {\n\t\treturn filterPolicyFault(\"\")\n\t}",
+		pkg:  "./internal/services/aws/sns",
+		run:  "TestSNSFilterPolicyConstraints",
+	},
+	{
+		name: "sns-ignore-cidr-filter",
+		file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+		old:  "if cidr := str(m[\"cidr\"]); cidr != \"\" {",
+		new:  "if false && str(m[\"cidr\"]) != \"\" {",
+		pkg:  "./internal/services/aws/sns",
+		run:  "TestSNSFilterOperators",
+	},
+	{
+		name: "sns-accept-unissued-confirm-token",
+		file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+		old:  "if !ok {\n\t\t\tif str(req.Input[\"TopicArn\"]) != \"\" {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: Token\", HTTPStatus: 400, Fault: \"client\"}\n\t\t\t}",
+		new:  "if !ok {\n\t\t\tif false {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: Token\", HTTPStatus: 400, Fault: \"client\"}\n\t\t\t}",
+		pkg:  "./internal/services/aws/sns",
+		run:  "TestSNSConfirmSubscriptionTokenValidation",
 	},
 }
 

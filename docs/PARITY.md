@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 828 of 907 direct upstream test functions are explicitly traced (91.3%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 829 of 907 direct upstream test functions are explicitly traced (91.4%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green: 2,791 tests across 221 Go packages. The 2,602-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-eight new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. Two equivalent SNS mutants are excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 92 / 180 |
+| LocalStack SNS test functions explicitly traced | 93 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -76,6 +76,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPublishCrud::test_publish_batch_too_long_message` | `TestSNSMessageStructureAndSizeValidation` rejects a PublishBatch whose aggregate message size exceeds 256 KiB |
 | `test_sns.py::TestSNSPublishCrud::test_message_structure_json_exc` | `TestSNSMessageStructureAndSizeValidation` rejects malformed structured-message JSON, missing defaults, and non-string values |
 | `test_sns.py::TestSNSSubscriptionCrud::test_validate_set_sub_attributes` | `TestSNSSubscriptionAttributeValidation` rejects unknown, malformed, and invalid JSON subscription attributes before changing state |
+| `test_sns.py::TestSNSSubscriptionCrud::test_not_found_error_on_set_subscription_attributes` | `TestSNSSetSubscriptionAttributesAfterUnsubscribe` verifies deleted subscriptions reject attribute updates with NotFound |
 | `test_sns.py::TestSNSSubscriptionCrud::test_create_subscriptions_with_attributes` | `TestSNSSubscriptionAttributesProjection` verifies case-insensitive raw delivery normalization and FilterPolicy/FilterPolicyScope projection |
 | `test_sns.py::TestSNSSubscriptionHttp::test_http_subscription_response` | `TestSNSPendingEmailSubscription` verifies pending versus returned subscription ARN semantics for HTTP subscriptions |
 | `test_sns.py::TestSNSSubscriptionHttp::test_redrive_policy_http_subscription` | `TestSNSHTTPSubscriptionRedrive` sends failed HTTP notifications to the configured SQS DLQ |

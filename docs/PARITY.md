@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 781 of 907 direct upstream test functions are explicitly traced (86.1%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 782 of 907 direct upstream test functions are explicitly traced (86.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,575-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the thirty-three new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,576-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the thirty-four new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 45 / 180 |
+| LocalStack SNS test functions explicitly traced | 46 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -41,7 +41,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_list_platform_endpoints` | `TestSNSPlatformEndpointLifecycleValidation` verifies the endpoint listing |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_delete_platform_endpoint` | `TestSNSPlatformEndpointLifecycleValidation` verifies endpoint deletion |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_delete_endpoints_of_deleted_app` | `TestSNSPlatformEndpointLifecycleValidation` verifies endpoint cleanup |
-| `test_sns.py::TestSNSPlatformEndpointCrud::test_get_platform_endpoint_attributes` | `TestSNSPlatformEndpointAttributeValidation` reads endpoint attributes |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_get_platform_endpoint_attributes` | `TestSNSPlatformEndpointAttributesProjection` verifies AWS's public `Enabled`, `Token`, and optional `CustomUserData` attribute shape without leaking internal endpoint fields |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_set_platform_endpoint_attributes` | `TestSNSPlatformEndpointAttributeValidation` updates and reads endpoint attributes |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_set_platform_endpoint_attributes_invalid_attributes` | `TestSNSPlatformEndpointAttributeValidation` rejects unknown, malformed, and oversized attributes |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_with_invalid_attributes` | `TestSNSPlatformEndpointAttributeValidation` rejects invalid create attributes |

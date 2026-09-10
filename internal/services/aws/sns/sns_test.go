@@ -1201,6 +1201,44 @@ func TestSNSPlatformApplicationValidation(t *testing.T) {
 	}
 }
 
+func TestSNSPlatformApplicationAttributesProjection(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "application-attributes", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := app.Output["PlatformApplicationArn"]
+	get, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetPlatformApplicationAttributes", Input: map[string]any{"PlatformApplicationArn": arn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := asMap(get.Output["Attributes"]); !reflect.DeepEqual(got, map[string]any{"Enabled": "true"}) {
+		t.Fatalf("initial application attributes %#v", got)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetPlatformApplicationAttributes", Input: map[string]any{
+		"PlatformApplicationArn": arn, "Attributes": map[string]any{"SuccessFeedbackSampleRate": "50"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	get, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetPlatformApplicationAttributes", Input: map[string]any{"PlatformApplicationArn": arn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"Enabled": "true", "SuccessFeedbackSampleRate": "50"}
+	if got := asMap(get.Output["Attributes"]); !reflect.DeepEqual(got, want) {
+		t.Fatalf("updated application attributes %#v, want %#v", got, want)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListPlatformApplications"})
+	if err != nil || len(asSlice(listed.Output["PlatformApplications"])) != 1 || !reflect.DeepEqual(asMap(asSlice(listed.Output["PlatformApplications"])[0])["Attributes"], want) {
+		t.Fatalf("listed application attributes %#v err=%v", listed, err)
+	}
+}
+
 func TestSNSPublishDisabledPlatformEndpoint(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

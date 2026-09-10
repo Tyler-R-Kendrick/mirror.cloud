@@ -300,7 +300,8 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 			return nil, fault
 		}
 		arn := "arn:" + snsPartition(req.Identity.Region) + ":sns:" + req.Identity.Region + ":" + req.Identity.Account + ":app/" + plat + "/" + name
-		rec := map[string]any{"PlatformApplicationArn": arn, "Name": name, "Platform": plat, "Attributes": attrs}
+		publicAttrs := map[string]any{"Enabled": "true"}
+		rec := map[string]any{"PlatformApplicationArn": arn, "Name": name, "Platform": plat, "Attributes": publicAttrs}
 		b, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{"PlatformApplicationArn": arn}}, nil
@@ -310,7 +311,7 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		for _, kv := range kvs {
 			var rec map[string]any
 			_ = json.Unmarshal(kv.Value, &rec)
-			out = append(out, rec)
+			out = append(out, map[string]any{"PlatformApplicationArn": rec["PlatformApplicationArn"], "Attributes": rec["Attributes"]})
 		}
 		return &spi.Response{Output: map[string]any{"PlatformApplications": out}}, nil
 	case "DeletePlatformApplication":
@@ -336,7 +337,16 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		rec := map[string]any{"PlatformApplicationArn": arn}
 		_ = json.Unmarshal(b, &rec)
-		rec["Attributes"] = flattenAttrEntries(req.Input, "Attributes")
+		updated := map[string]any{"Enabled": "true"}
+		if existing, ok := rec["Attributes"].(map[string]any); ok {
+			for key, value := range existing {
+				updated[key] = value
+			}
+		}
+		for key, value := range flattenAttrEntries(req.Input, "Attributes") {
+			updated[key] = value
+		}
+		rec["Attributes"] = updated
 		nb, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, nb)
 		return &spi.Response{Output: map[string]any{}}, nil

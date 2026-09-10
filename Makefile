@@ -32,6 +32,7 @@ test-snapshot:
 	$(GO) test ./internal/services/aws/dynamodb -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/aws/sqs -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/aws/states -run 'Characterization$$' -count=1
+	$(GO) test ./internal/services/vercel/api -run 'Characterization$$' -count=1
 
 test-chaos:
 	$(GO) test ./internal/chaos -count=1

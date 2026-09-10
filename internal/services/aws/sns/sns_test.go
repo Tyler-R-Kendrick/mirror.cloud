@@ -1226,6 +1226,42 @@ func TestSNSFIFOTopicToSQSWithoutQueueDeduplication(t *testing.T) {
 	}
 }
 
+func TestSNSFIFOPublishBatchRedrivesToFIFODLQ(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	for _, name := range []string{"sns-fifo-source.fifo", "sns-fifo-dlq.fifo"} {
+		if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+			"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true"},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	topic := invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "sns-fifo-redrive.fifo", "Attributes": map[string]any{"FifoTopic": "true"}})
+	topicARN := str(topic.Output["TopicArn"])
+	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:sns-fifo-source.fifo"})
+	invokeSNS(t, p, id, "SetSubscriptionAttributes", map[string]any{
+		"SubscriptionArn": sub.Output["SubscriptionArn"], "AttributeName": "RedrivePolicy",
+		"AttributeValue": `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:1:sns-fifo-dlq.fifo"}`,
+	})
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteQueue", Input: map[string]any{"QueueName": "sns-fifo-source.fifo"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := []any{
+		map[string]any{"Id": "one", "Message": "first", "MessageGroupId": "group", "MessageDeduplicationId": "dedup-one"},
+		map[string]any{"Id": "two", "Message": "second", "MessageGroupId": "group", "MessageDeduplicationId": "dedup-two"},
+	}
+	batch := invokeSNS(t, p, id, "PublishBatch", map[string]any{"TopicArn": topicARN, "Entries": entries})
+	if len(asSlice(batch.Output["Successful"])) != len(entries) {
+		t.Fatalf("publish batch=%#v", batch.Output)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "sns-fifo-dlq.fifo", "AttributeNames": []any{"All"}, "MaxNumberOfMessages": 10}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != len(entries) {
+		t.Fatalf("FIFO DLQ messages=%#v err=%v", received, err)
+	}
+}
+
 func TestSNSPublishBatchToFIFOSQS(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

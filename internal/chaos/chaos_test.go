@@ -37,6 +37,7 @@ import (
 	cfapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
 	doapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
+	hzapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hetzner/v1"
 	hsapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hostinger/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -7901,6 +7902,64 @@ func TestDigitalOceanConcurrentDropletCreateGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDroplets", Input: map[string]any{}})
+	if err != nil || got.Output["_list"] == nil {
+		t.Fatalf("list after concurrent create %#v %v", got, err)
+	}
+}
+
+func TestHetznerConcurrentDuplicateServers(t *testing.T) {
+	p := hzapi.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errCh := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateServer", Input: map[string]any{"name": "race"}})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	winners := 0
+	for err := range errCh {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.HTTPStatus != 409 || fault.Code != "uniqueness_error" {
+			t.Fatalf("concurrent create: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful creates = %d, want 1", winners)
+	}
+}
+
+func TestHetznerConcurrentSSHKeyCreateGet(t *testing.T) {
+	p := hzapi.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSSHKey", Input: map[string]any{"name": "k", "public_key": "ssh-ed25519 " + strconv.Itoa(n)}}); err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSSHKeys", Input: map[string]any{}})
 	if err != nil || got.Output["_list"] == nil {
 		t.Fatalf("list after concurrent create %#v %v", got, err)
 	}

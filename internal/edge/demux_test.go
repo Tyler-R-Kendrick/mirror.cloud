@@ -85,6 +85,8 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		{http.MethodGet, "", "localhost", "/ctr?restype=container", "azure.blobs"},
 		{http.MethodGet, "", "localhost", "/v2/droplets", "digitalocean.v2"},
 		{http.MethodGet, "", "api.digitalocean.com", "/v2/domains", "digitalocean.v2"},
+		{http.MethodGet, "", "localhost", "/v1/servers", "hetzner.v1"},
+		{http.MethodGet, "", "api.hetzner.cloud", "/v1/ssh_keys", "hetzner.v1"},
 		{http.MethodPost, "", "localhost", "/2015-03-31/functions", "aws.lambda"},
 		{http.MethodGet, "", "localhost", "/restapis", "aws.apigateway"},
 		{http.MethodGet, "", "localhost", "/2013-04-01/hostedzone", "aws.route53"},

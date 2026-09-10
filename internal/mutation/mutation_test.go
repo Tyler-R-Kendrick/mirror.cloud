@@ -21724,6 +21724,38 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
+	{
+		name: "hetzner-accept-empty-server",
+		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
+		old:  "if name == \"\" {\n\t\treturn nil, hzFault(\"invalid_input\", \"server name is required\", 400)",
+		new:  "if false {\n\t\treturn nil, hzFault(\"invalid_input\", \"server name is required\", 400)",
+		pkg:  "./internal/services/hetzner/v1",
+		run:  "TestCreateServerRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "hetzner-accept-duplicate-server",
+		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
+		old:  `if _, exists, _ := p.col(req, "hzsname").Get(ctx, name); exists {`,
+		new:  `if _, exists, _ := p.col(req, "hzsname").Get(ctx, name); false {`,
+		pkg:  "./internal/services/hetzner/v1",
+		run:  "TestCreateServerRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "hetzner-get-missing-server-as-empty",
+		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
+		old:  "b, ok, _ := p.col(req, \"hzsrv\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, hzFault(\"not_found\", \"Server not found\", 404)",
+		new:  "b, ok, _ := p.col(req, \"hzsrv\").Get(ctx, id)\n\tif false {\n\t\treturn nil, hzFault(\"not_found\", \"Server not found\", 404)",
+		pkg:  "./internal/services/hetzner/v1",
+		run:  "TestServerAndSSHKeyLifecycle",
+	},
+	{
+		name: "hetzner-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if svc.ID == \"hetzner.v1\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"error\": map[string]any{\"code\": f.Code, \"message\": f.Message}})",
+		new:  "if false && svc.ID == \"hetzner.v1\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"error\": map[string]any{\"code\": f.Code, \"message\": f.Message}})",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

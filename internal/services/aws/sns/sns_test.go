@@ -666,6 +666,17 @@ func TestSNSPartitionARNs(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	ctx := context.Background()
+	standard, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}, Operation: "CreateTopic", Input: map[string]any{"Name": "regional-topic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRegion, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-west-2"}, Operation: "CreateTopic", Input: map[string]any{"Name": "regional-topic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if str(standard.Output["TopicArn"]) == str(otherRegion.Output["TopicArn"]) {
+		t.Fatalf("regional topic ARNs collided: %q", standard.Output["TopicArn"])
+	}
 	id := spi.Identity{Account: "1", Region: "us-gov-west-1"}
 	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "partition-topic"}})
 	if err != nil {

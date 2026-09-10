@@ -3030,6 +3030,7 @@ func TestSNSSetSubscriptionAttributesAfterUnsubscribe(t *testing.T) {
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "deleted-subscription"}).Output["TopicArn"])
 	sub := str(invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:deleted-subscription"}).Output["SubscriptionArn"])
 	invokeSNS(t, p, id, "Unsubscribe", map[string]any{"SubscriptionArn": sub})
+	invokeSNS(t, p, id, "Unsubscribe", map[string]any{"SubscriptionArn": sub})
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": sub, "AttributeName": "RawMessageDelivery", "AttributeValue": "true"}})
 	fault, ok := err.(*spi.Fault)
 	if !ok || fault.Code != "NotFound" {

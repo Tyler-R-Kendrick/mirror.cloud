@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -379,16 +380,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		sub := str(req.Input["TopicArn"]) + ":" + p.deps.Rand.UUID()
 		attrs := asMap(req.Input["Attributes"])
-		if raw := str(attrs["FilterPolicy"]); raw != "" {
-			if fault := validateFilterPolicy(raw); fault != nil {
-				return nil, fault
-			}
-		}
 		if str(req.Input["FilterPolicy"]) != "" {
 			attrs["FilterPolicy"] = req.Input["FilterPolicy"]
-			if fault := validateFilterPolicy(str(req.Input["FilterPolicy"])); fault != nil {
-				return nil, fault
-			}
 		}
 		if str(req.Input["RawMessageDelivery"]) != "" {
 			attrs["RawMessageDelivery"] = strings.ToLower(str(req.Input["RawMessageDelivery"]))
@@ -412,6 +405,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if requestedScope == "" {
 			requestedScope = "MessageAttributes"
+		}
+		if requestedFilter != "" {
+			if fault := validateFilterPolicy(requestedFilter, requestedScope); fault != nil {
+				return nil, fault
+			}
 		}
 		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
 		for _, kv := range kvs {
@@ -1422,6 +1420,13 @@ func clauseMatch(want any, got string, present bool) bool {
 		}
 		if num, ok := m["numeric"].([]any); ok && numericMatch(num, got) {
 			return true
+		}
+		if cidr := str(m["cidr"]); cidr != "" {
+			_, network, err := net.ParseCIDR(cidr)
+			ip := net.ParseIP(got)
+			if err == nil && ip != nil && network.Contains(ip) {
+				return true
+			}
 		}
 	}
 	return false

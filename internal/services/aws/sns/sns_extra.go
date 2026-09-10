@@ -140,7 +140,7 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 			return nil, fault
 		}
 		if k == "FilterPolicy" && value != "" {
-			if fault := validateFilterPolicy(value); fault != nil {
+			if fault := validateFilterPolicy(value, str(rec["FilterPolicyScope"])); fault != nil {
 				return nil, fault
 			}
 		}
@@ -249,19 +249,157 @@ func (p *Pack) dataProtection(ctx context.Context, req *spi.Request) (*spi.Respo
 	return &spi.Response{Output: map[string]any{"DataProtectionPolicy": string(b)}}, nil
 }
 
-func validateFilterPolicy(raw string) *spi.Fault {
+var filterOperators = map[string]struct{}{
+	"numeric": {}, "prefix": {}, "suffix": {}, "anything-but": {},
+	"exists": {}, "equals-ignore-case": {}, "cidr": {},
+}
+
+func validateFilterPolicy(raw, scope string) *spi.Fault {
 	var policy map[string]any
 	if json.Unmarshal([]byte(raw), &policy) != nil || policy == nil {
-		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicy", HTTPStatus: 400, Fault: "client"}
+		return filterPolicyFault("")
+	}
+	if scope == "" {
+		scope = "MessageAttributes"
+	}
+	keys := 0
+	for key := range policy {
+		if key != "$or" {
+			keys++
+		}
+	}
+	if keys > 5 {
+		return filterPolicyFault("")
+	}
+	if fault := walkFilterPolicy(policy, scope); fault != nil {
+		return fault
+	}
+	if filterCombinations(policy) > 150 {
+		return filterPolicyFault("")
 	}
 	return nil
+}
+
+func walkFilterPolicy(policy map[string]any, scope string) *spi.Fault {
+	for key, value := range policy {
+		if key == "$or" {
+			alts, ok := value.([]any)
+			if !ok {
+				return filterPolicyFault("")
+			}
+			for _, alt := range alts {
+				child, ok := alt.(map[string]any)
+				if !ok {
+					return filterPolicyFault("")
+				}
+				if fault := walkFilterPolicy(child, scope); fault != nil {
+					return fault
+				}
+			}
+			continue
+		}
+		switch v := value.(type) {
+		case []any:
+			for _, item := range v {
+				if _, isList := item.([]any); isList {
+					return filterPolicyFault("")
+				}
+				if op, ok := item.(map[string]any); ok {
+					if fault := validateFilterOperator(op); fault != nil {
+						return fault
+					}
+				}
+			}
+		case map[string]any:
+			if isFilterOperator(v) {
+				if fault := validateFilterOperator(v); fault != nil {
+					return fault
+				}
+				continue
+			}
+			if scope != "MessageBody" {
+				return filterPolicyFault("nested filter policy requires FilterPolicyScope=MessageBody")
+			}
+			if fault := walkFilterPolicy(v, scope); fault != nil {
+				return fault
+			}
+		default:
+			return filterPolicyFault(`"` + key + `" must be an object or an array`)
+		}
+	}
+	return nil
+}
+
+func isFilterOperator(m map[string]any) bool {
+	for key := range m {
+		if _, ok := filterOperators[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func validateFilterOperator(m map[string]any) *spi.Fault {
+	if len(m) != 1 {
+		return filterPolicyFault("")
+	}
+	for key := range m {
+		if _, ok := filterOperators[key]; !ok {
+			return filterPolicyFault("")
+		}
+	}
+	return nil
+}
+
+func filterCombinations(policy map[string]any) int {
+	n := 1
+	for key, value := range policy {
+		if key == "$or" {
+			sum := 0
+			alts, _ := value.([]any)
+			for _, alt := range alts {
+				if child, ok := alt.(map[string]any); ok {
+					sum += filterCombinations(child)
+				}
+			}
+			if sum == 0 {
+				sum = 1
+			}
+			n *= sum
+			continue
+		}
+		switch v := value.(type) {
+		case []any:
+			if len(v) > 0 {
+				n *= len(v)
+			}
+		case map[string]any:
+			if !isFilterOperator(v) {
+				if child := filterCombinations(v); child > 0 {
+					n *= child
+				}
+			}
+		}
+	}
+	return n
+}
+
+func filterPolicyFault(detail string) *spi.Fault {
+	msg := "Invalid parameter: FilterPolicy"
+	if detail != "" {
+		msg += ": " + detail
+	}
+	return &spi.Fault{Code: "InvalidParameter", Message: msg, HTTPStatus: 400, Fault: "client"}
 }
 
 func validateSubscriptionAttribute(name, value string) *spi.Fault {
 	switch name {
 	case "FilterPolicy":
 		if value != "" {
-			return validateFilterPolicy(value)
+			var policy map[string]any
+			if json.Unmarshal([]byte(value), &policy) != nil || policy == nil {
+				return filterPolicyFault("")
+			}
 		}
 	case "FilterPolicyScope":
 		if value != "MessageAttributes" && value != "MessageBody" {

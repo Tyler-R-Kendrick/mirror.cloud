@@ -36,6 +36,7 @@ import (
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
+	snsservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -74,6 +75,32 @@ func (c *delayedRetryWaitClock) blockSecondWait() {
 
 func testS3Destination() map[string]any {
 	return map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN}
+}
+
+func TestSNSFirehoseSubscriptionRetainsRecord(t *testing.T) {
+	deps := spitest.Deps(t)
+	firehose := New(deps)
+	defer firehose.Close()
+	sns := snsservice.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	call(firehose, "CreateDeliveryStream", map[string]any{"DeliveryStreamName": "events", "S3DestinationConfiguration": testS3Destination()})
+	topic, _ := call(sns, "CreateTopic", map[string]any{"Name": "events"}).Output["TopicArn"].(string)
+	streamARN := "arn:aws:firehose:us-east-1:123456789012:deliverystream/events"
+	call(sns, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "firehose", "Endpoint": streamARN})
+	call(sns, "Publish", map[string]any{"TopicArn": topic, "Message": "hello"})
+	records, _, err := firehose.col(&spi.Request{Identity: id}, "fhrec:events").List(ctx, "", "", 0)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("retained records=%d err=%v", len(records), err)
+	}
 }
 
 func testHTTPEndpointDestination(endpoint string) map[string]any {

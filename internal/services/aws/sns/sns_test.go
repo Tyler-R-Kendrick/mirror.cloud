@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -60,6 +61,44 @@ func TestTopicSubscribePublish(t *testing.T) {
 	if len(list.Output["Subscriptions"].([]any)) != 1 {
 		t.Fatalf("%v", list.Output)
 	}
+}
+
+func TestSNSFirehoseSubscriptionPublishesNotification(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	arn := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "firehose-topic"}).Output["TopicArn"])
+	streamARN := "arn:aws:firehose:us-east-1:123456789012:deliverystream/events"
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "firehose", "Endpoint": streamARN})
+	got := make(chan []byte, 1)
+	cancel := deps.Bus.Subscribe("firehose", func(_ context.Context, payload []byte) { got <- append([]byte(nil), payload...) })
+	defer cancel()
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": arn, "Message": "hello"})
+	select {
+	case payload := <-got:
+		var event struct {
+			Account, Region, StreamARN string
+			Data                       []byte
+		}
+		if json.Unmarshal(payload, &event) != nil || event.Account != id.Account || event.Region != id.Region || event.StreamARN != streamARN {
+			t.Fatalf("firehose event %s", payload)
+		}
+		var notification map[string]any
+		if json.Unmarshal(event.Data, &notification) != nil || notification["Type"] != "Notification" || notification["Message"] != "hello" {
+			t.Fatalf("notification %#v", string(event.Data))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("firehose delivery timeout")
+	}
+}
+
+func invokeSNS(t *testing.T, p *Pack, id spi.Identity, operation string, input map[string]any) *spi.Response {
+	t.Helper()
+	resp, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	if err != nil {
+		t.Fatalf("%s: %v", operation, err)
+	}
+	return resp
 }
 
 func TestPublishFilterAndSQSDelivery(t *testing.T) {

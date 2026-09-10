@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 860 of 907 direct upstream test functions are explicitly traced (94.8%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 860 of 907 direct upstream test functions are explicitly traced (94.8%). The routed-operation denominator is 242 of 242 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
@@ -15,7 +15,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the audited SNS slice | 7 / 7 (atomic, snapshot, BDD, fuzz, chaos/race, mutation, AWS SDK contract) |
-| SNS operations routed to emulation | 43 / 43 |
+| SNS operations routed to emulation | 42 / 42 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
 | LocalStack SNS test functions explicitly traced | 124 / 180 |

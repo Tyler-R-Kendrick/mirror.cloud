@@ -195,9 +195,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		attrs["SubscriptionsPending"] = strconv.Itoa(pendingCount)
 		if extra, ok := m["attrs"].(map[string]any); ok {
 			for k, v := range extra {
-				if k == "DeliveryPolicy" {
-					continue
-				}
 				attrs[k] = v
 			}
 		}

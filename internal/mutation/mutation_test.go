@@ -18229,6 +18229,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSCrossRegionTopicAccessRejected",
 		},
 		{
+			name: "sns-retain-deleted-delivery-policy",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if attributeName == "DeliveryPolicy" && str(req.Input["AttributeValue"]) == "" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTopicDeliveryPolicyCRUD",
+		},
+		{
+			name: "sns-hide-raw-delivery-policy-attribute",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "for k, v := range extra {\n\t\t\t\tattrs[k] = v\n\t\t\t}",
+			new:  "for k, v := range extra {\n\t\t\t\tif k != \"DeliveryPolicy\" { attrs[k] = v }\n\t\t\t}",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTopicDeliveryPolicyCRUD",
+		},
+		{
 			name: "sns-ignore-cross-region-sqs-owner",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "targetReq.Identity.Region = parts[3]",

@@ -1717,6 +1717,58 @@ func TestSNSTopicFIFOAttributeIsImmutable(t *testing.T) {
 	}
 }
 
+func TestSNSTopicDeliveryPolicyCRUD(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "policy-topic.fifo", "Attributes": map[string]any{
+			"FifoTopic": "true", "DeliveryPolicy": `{"http":{"defaultRequestPolicy":{"headerContentType":"application/json"}}}`,
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := str(created.Output["TopicArn"])
+	get := func() map[string]any {
+		t.Helper()
+		response, getErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}})
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		return asMap(response.Output["Attributes"])
+	}
+	attrs := get()
+	effectiveHTTP := asMap(asMap(attrs["EffectiveDeliveryPolicy"])["http"])
+	requestPolicy := asMap(effectiveHTTP["defaultRequestPolicy"])
+	if str(requestPolicy["headerContentType"]) != "application/json" || !strings.Contains(str(attrs["DeliveryPolicy"]), "application/json") {
+		t.Fatalf("initial delivery policy %#v", get())
+	}
+	updated := `{"http":{"defaultHealthyRetryPolicy":{"minDelayTarget":5,"maxDelayTarget":6,"numRetries":1}}}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetTopicAttributes", Input: map[string]any{
+		"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": updated,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if str(get()["DeliveryPolicy"]) != updated {
+		t.Fatalf("updated delivery policy %#v", get())
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetTopicAttributes", Input: map[string]any{
+		"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": `{"http":{"defaultHealthyRetryPolicy":null}}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetTopicAttributes", Input: map[string]any{
+		"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": "",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := get()["DeliveryPolicy"]; present {
+		t.Fatalf("delivery policy was not deleted: %#v", get())
+	}
+}
+
 func TestSNSPermissionValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

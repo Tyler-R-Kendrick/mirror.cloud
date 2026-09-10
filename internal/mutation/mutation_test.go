@@ -18245,6 +18245,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSTopicDeliveryPolicyCRUD",
 		},
 		{
+			name: "sns-accept-duplicate-create-with-new-tags",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if !found || len(decodedTags) == 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTopicTagLifecycle",
+		},
+		{
 			name: "sns-ignore-cross-region-sqs-owner",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "targetReq.Identity.Region = parts[3]",

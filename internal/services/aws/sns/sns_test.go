@@ -1699,6 +1699,50 @@ func TestSNSTagValidation(t *testing.T) {
 	}
 }
 
+func TestSNSTopicTagLifecycle(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	untagged, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "untagged-topic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTagsForResource", Input: map[string]any{"ResourceArn": untagged.Output["TopicArn"]}})
+	if err != nil || len(asSlice(listed.Output["Tags"])) != 0 {
+		t.Fatalf("empty tags=%#v err=%v", listed, err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "untagged-topic", "Tags": []any{map[string]any{"Key": "new", "Value": "tag"}},
+	}}); err == nil {
+		t.Fatal("duplicate create with new tags succeeded")
+	}
+	tags := []any{map[string]any{"Key": "a", "Value": "1"}, map[string]any{"Key": "b", "Value": "2"}}
+	tagged, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "tagged-topic", "Tags": tags}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, requested := range []any{tags, []any{tags[0]}, []any{}} {
+		repeated, repeatErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "tagged-topic", "Tags": requested}})
+		if repeatErr != nil || str(repeated.Output["TopicArn"]) != str(tagged.Output["TopicArn"]) {
+			t.Fatalf("idempotent tags=%#v response=%#v err=%v", requested, repeated, repeatErr)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteTopic", Input: map[string]any{"TopicArn": tagged.Output["TopicArn"]}}); err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "tagged-topic", "Tags": []any{map[string]any{"Key": "a", "Value": "new"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTagsForResource", Input: map[string]any{"ResourceArn": recreated.Output["TopicArn"]}})
+	if err != nil || len(asSlice(listed.Output["Tags"])) != 1 || str(asMap(asSlice(listed.Output["Tags"])[0])["Value"]) != "new" {
+		t.Fatalf("recreated tags=%#v err=%v", listed, err)
+	}
+}
+
 func TestSNSTopicFIFOAttributeIsImmutable(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

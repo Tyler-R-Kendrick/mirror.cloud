@@ -812,6 +812,11 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			sqsAttrs = sqsMessageAttributes(msgAttrs)
 		}
 		switch str(sub["Protocol"]) {
+		case "firehose":
+			_ = p.deps.Bus.Publish(ctx, "firehose", mustJSON(map[string]any{
+				"Account": req.Identity.Account, "Region": req.Identity.Region,
+				"StreamARN": str(sub["Endpoint"]), "Data": []byte(payload),
+			}))
 		case "sqs":
 			if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload, sqsAttrs, dedupKey) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {

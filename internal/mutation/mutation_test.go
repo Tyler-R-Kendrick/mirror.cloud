@@ -18024,6 +18024,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPartitionARNs",
 		},
 		{
+			name: "sns-drop-platform-application-enabled-default",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `publicAttrs := map[string]any{"Enabled": "true"}`,
+			new:  `publicAttrs := map[string]any{}`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformApplicationAttributesProjection",
+		},
+		{
 			name: "sns-wrap-raw-http-subscription-body",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `body = payload`,

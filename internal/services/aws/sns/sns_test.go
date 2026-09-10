@@ -330,6 +330,22 @@ func TestSNSSMSSubscriptionAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSMissingPlatformApplicationAttributes(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	arn := "arn:aws:sns:us-east-1:1:app/ADM/missing"
+	for _, operation := range []string{"GetPlatformApplicationAttributes", "SetPlatformApplicationAttributes"} {
+		input := map[string]any{"PlatformApplicationArn": arn}
+		if operation == "SetPlatformApplicationAttributes" {
+			input["Attributes"] = map[string]any{}
+		}
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input}); err == nil {
+			t.Fatalf("%s accepted missing application", operation)
+		}
+	}
+}
+
 func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

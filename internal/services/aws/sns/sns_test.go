@@ -475,16 +475,16 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	}
 	must("SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "DisplayName", "AttributeValue": "Events"})
 	attributes := must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)
-	if attributes["DisplayName"] != "Events" || attributes["TopicArn"] != topic {
+	if attributes["DisplayName"] != "Events" || attributes["TopicArn"] != topic || attributes["Owner"] != id.Account || attributes["SubscriptionsConfirmed"] != "0" || attributes["SubscriptionsPending"] != "0" || attributes["EffectiveDeliveryPolicy"] == nil {
 		t.Fatalf("topic attributes %#v", attributes)
 	}
 	must("SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": `{"http":{"defaultHealthyRetryPolicy":{"numRetries":1}}}`})
-	if got := must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)["DeliveryPolicy"]; got == nil {
-		t.Fatal("delivery policy was not stored")
+	if got := asMap(must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)["EffectiveDeliveryPolicy"])["http"]; got == nil {
+		t.Fatal("effective delivery policy was not projected")
 	}
 	must("SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": ""})
 	if _, found := must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)["DeliveryPolicy"]; found {
-		t.Fatal("empty delivery policy was retained")
+		t.Fatal("raw delivery policy was exposed")
 	}
 	if _, err := call("GetTopicAttributes", map[string]any{"TopicArn": topic + "-missing"}); err == nil {
 		t.Fatal("found missing topic")

@@ -158,9 +158,31 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
-		attrs := map[string]any{"TopicArn": m["arn"], "DisplayName": m["name"]}
+		attrs := map[string]any{
+			"TopicArn": m["arn"], "DisplayName": m["name"], "Owner": req.Identity.Account,
+			"EffectiveDeliveryPolicy": effectiveDeliveryPolicy(str(asMap(m["attrs"])["DeliveryPolicy"])),
+			"SubscriptionsConfirmed":  "0", "SubscriptionsDeleted": "0", "SubscriptionsPending": "0",
+		}
+		confirmedCount, pendingCount := 0, 0
+		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
+		for _, kv := range kvs {
+			var sub map[string]any
+			if json.Unmarshal(kv.Value, &sub) != nil || str(sub["TopicArn"]) != str(m["arn"]) {
+				continue
+			}
+			if confirmed, ok := sub["Confirmed"].(bool); ok && !confirmed {
+				pendingCount++
+			} else {
+				confirmedCount++
+			}
+		}
+		attrs["SubscriptionsConfirmed"] = strconv.Itoa(confirmedCount)
+		attrs["SubscriptionsPending"] = strconv.Itoa(pendingCount)
 		if extra, ok := m["attrs"].(map[string]any); ok {
 			for k, v := range extra {
+				if k == "DeliveryPolicy" {
+					continue
+				}
 				attrs[k] = v
 			}
 		}

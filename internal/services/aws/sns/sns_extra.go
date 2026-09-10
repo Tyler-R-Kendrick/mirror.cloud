@@ -93,6 +93,35 @@ func defaultTopicPolicy(arn, account string) string {
 	return fmt.Sprintf(`{"Version":"2008-10-17","Id":"__default_policy_ID","Statement":[{"Sid":"__default_statement_ID","Effect":"Allow","Principal":{"AWS":"*"},"Action":["SNS:Subscribe","SNS:ListSubscriptionsByTopic","SNS:DeleteTopic","SNS:GetTopicAttributes","SNS:Publish","SNS:RemovePermission","SNS:AddPermission","SNS:SetTopicAttributes"],"Resource":"%s","Condition":{"StringEquals":{"AWS:SourceOwner":"%s"}}}]}`, arn, account)
 }
 
+func effectiveDeliveryPolicy(raw string) map[string]any {
+	policy := map[string]any{"http": map[string]any{
+		"defaultHealthyRetryPolicy": map[string]any{
+			"minDelayTarget": 20, "maxDelayTarget": 20, "numRetries": 3,
+			"numMaxDelayRetries": 0, "numNoDelayRetries": 0, "numMinDelayRetries": 0,
+			"backoffFunction": "linear",
+		},
+		"disableSubscriptionOverrides": false,
+		"defaultRequestPolicy":         map[string]any{"headerContentType": "text/plain; charset=UTF-8"},
+	}}
+	var override map[string]any
+	if json.Unmarshal([]byte(raw), &override) == nil {
+		mergeDeliveryPolicy(policy, override)
+	}
+	return policy
+}
+
+func mergeDeliveryPolicy(dst, src map[string]any) {
+	for key, value := range src {
+		if child, ok := value.(map[string]any); ok {
+			if existing, ok := dst[key].(map[string]any); ok {
+				mergeDeliveryPolicy(existing, child)
+				continue
+			}
+		}
+		dst[key] = value
+	}
+}
+
 func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["SubscriptionArn"])
 	if !validSubscriptionARN(arn) {

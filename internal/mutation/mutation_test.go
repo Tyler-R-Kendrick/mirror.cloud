@@ -18351,6 +18351,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformEndpointLifecycleValidation",
 		},
 		{
+			name: "sns-retain-subscriptions-after-app-delete",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `if json.Unmarshal(subKV.Value, &sub) == nil && str(sub["Endpoint"]) == str(endpoint["EndpointArn"]) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformApplicationDeletionCleansSubscriptions",
+		},
+		{
 			name: "sns-publish-disabled-platform-endpoint",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if strings.EqualFold(str(endpoint["Enabled"]), "false") {`,

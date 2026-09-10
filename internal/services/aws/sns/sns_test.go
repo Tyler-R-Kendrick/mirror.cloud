@@ -2659,40 +2659,18 @@ func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
 	if _, found := attrs.Output["Attributes"].(map[string]any)["FilterPolicy"]; found {
 		t.Fatal("retained cleared filter policy")
 	}
-}
-
-func TestSNSSubscriptionDeliveryPolicyClear(t *testing.T) {
-	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
-	ctx := context.Background()
-	id := spi.Identity{Account: "1", Region: "us-east-1"}
-	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delivery-policy-q"}}); err != nil {
-		t.Fatal(err)
+	if fault := set("DeliveryPolicy", `{"requestPolicy":{"headerContentType":"text/plain"}}`); fault != nil {
+		t.Fatal(fault)
 	}
-	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "delivery-policy-clear"}})
+	if fault := set("DeliveryPolicy", ""); fault != nil {
+		t.Fatal(fault)
+	}
+	attrs, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": subARN}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
-		"TopicArn": created.Output["TopicArn"], "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:delivery-policy-q",
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	subARN := str(sub.Output["SubscriptionArn"])
-	for _, value := range []string{`{"requestPolicy":{"headerContentType":"text/plain"}}`, ""} {
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{
-			"SubscriptionArn": subARN, "AttributeName": "DeliveryPolicy", "AttributeValue": value,
-		}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": subARN}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, found := asMap(attrs.Output["Attributes"])["DeliveryPolicy"]; found {
-		t.Fatalf("cleared delivery policy remained: %#v", attrs.Output)
+	if _, found := attrs.Output["Attributes"].(map[string]any)["DeliveryPolicy"]; found {
+		t.Fatal("retained cleared delivery policy")
 	}
 }
 

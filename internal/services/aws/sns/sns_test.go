@@ -809,6 +809,27 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	}
 }
 
+func TestSNSTopicDeleteIdempotency(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "delete-idempotent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := created.Output["TopicArn"]
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteTopic", Input: map[string]any{"TopicArn": topic}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}}); err == nil {
+		t.Fatal("found deleted topic")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteTopic", Input: map[string]any{"TopicArn": topic}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSNSPartitionARNs(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

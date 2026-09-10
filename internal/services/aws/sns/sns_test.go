@@ -1131,6 +1131,41 @@ func FuzzTopicNameValidation(f *testing.F) {
 	})
 }
 
+func FuzzFilterPolicyValidation(f *testing.F) {
+	for _, seed := range []string{
+		"not-json", `{"key":["ok"]}`, `{"key":[["nested-list"]]}`, `{"key_a":"value_one"}`,
+		`{"object":{"key":[{"prefix":"auto-"}]}}`, `{"key":[{"wrong-operator":true}]}`,
+		`{"key":[{"suffix":"a","prefix":"b"}]}`,
+	} {
+		f.Add(seed, "")
+		f.Add(seed, "MessageBody")
+		f.Add(seed, "MessageAttributes")
+	}
+	f.Fuzz(func(t *testing.T, policy, scope string) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "1", Region: "us-east-1"}
+		created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "fuzz-filter"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		attrs := map[string]any{"FilterPolicy": policy}
+		if scope != "" {
+			attrs["FilterPolicyScope"] = scope
+		}
+		_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+			"TopicArn": created.Output["TopicArn"], "Protocol": "sms", "Endpoint": "+15555550111", "Attributes": attrs,
+		}})
+		valid := validateFilterPolicy(policy, scope) == nil
+		if scope != "" && scope != "MessageAttributes" && scope != "MessageBody" {
+			valid = false
+		}
+		if valid != (err == nil) {
+			t.Fatalf("policy %q scope %q validation=%v error=%v", policy, scope, valid, err)
+		}
+	})
+}
+
 func TestSNSListPagination(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
@@ -2752,6 +2787,15 @@ func TestSNSConfirmSubscriptionTokenValidation(t *testing.T) {
 	if str(attrs["PendingConfirmation"]) != "false" {
 		t.Fatalf("confirmed subscription remained pending: %#v", attrs)
 	}
+	unissuedFault, ok := func() (*spi.Fault, bool) {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ConfirmSubscription", Input: map[string]any{"TopicArn": topic, "Token": unissued}})
+		fault, ok := err.(*spi.Fault)
+		return fault, ok
+	}()
+	if !ok {
+		t.Fatal("expected unissued token fault")
+	}
+	golden.AssertJSON(t, map[string]any{"unissuedToken": map[string]any{"Code": unissuedFault.Code, "Message": unissuedFault.Message, "HTTPStatus": unissuedFault.HTTPStatus}})
 }
 
 func TestSNSPendingEmailSubscription(t *testing.T) {
@@ -3443,6 +3487,48 @@ func TestSNSConcurrentPublishChaos(t *testing.T) {
 	}
 }
 
+func TestSNSConcurrentFilterSubscribeChaos(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "filter-chaos"}).Output["TopicArn"])
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			policy := `{"event":["ok"]}`
+			if i%2 == 0 {
+				policy = `{"event":"not-a-list"}`
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+				"TopicArn": topic, "Protocol": "sms", "Endpoint": fmt.Sprintf("+15555550%03d", i),
+				"Attributes": map[string]any{"FilterPolicy": policy},
+			}})
+			if i%2 == 0 {
+				if err == nil {
+					errCh <- fmt.Errorf("accepted invalid filter %d", i)
+				}
+				return
+			}
+			if err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	listed := invokeSNS(t, p, id, "ListSubscriptionsByTopic", map[string]any{"TopicArn": topic})
+	if got := len(asSlice(listed.Output["Subscriptions"])); got != 16 {
+		t.Fatalf("subscriptions=%d want 16", got)
+	}
+}
+
 func TestSNSSubscriptionAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
@@ -3535,19 +3621,27 @@ func TestSNSFilterPolicyConstraints(t *testing.T) {
 		values[i] = fmt.Sprintf("v%d", i)
 	}
 	tooMany, _ := json.Marshal(map[string]any{"key": values})
-	for _, policy := range []string{
-		`{"key":[["value"]]}`,
-		`{"key":[{"wrong-operator":true}]}`,
-		`{"key":[{"suffix":"a","prefix":"b"}]}`,
-		`{"key_a":"value_one"}`,
-		string(tooMany),
-		`{"key1":["a"],"key2":["b"],"key3":["c"],"key4":["d"],"key5":["e"],"key6":["f"]}`,
-		`{"object":{"key":[{"prefix":"auto-"}]}}`,
+	faults := map[string]any{}
+	for name, policy := range map[string]string{
+		"nestedList":         `{"key":[["value"]]}`,
+		"unknownOperator":    `{"key":[{"wrong-operator":true}]}`,
+		"dualOperator":       `{"key":[{"suffix":"a","prefix":"b"}]}`,
+		"bareString":         `{"key_a":"value_one"}`,
+		"tooManyValues":      string(tooMany),
+		"tooManyKeys":        `{"key1":["a"],"key2":["b"],"key3":["c"],"key4":["d"],"key5":["e"],"key6":["f"]}`,
+		"nestedWithoutScope": `{"object":{"key":[{"prefix":"auto-"}]}}`,
 	} {
-		if err := subscribe(policy, nil); err == nil {
+		err := subscribe(policy, nil)
+		if err == nil {
 			t.Fatalf("accepted invalid filter policy %s", policy)
 		}
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("filter policy %s err=%v", name, err)
+		}
+		faults[name] = map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus}
 	}
+	golden.AssertJSON(t, faults)
 	if err := subscribe(`{"object":{"key":[{"prefix":"auto-"}]}}`, map[string]any{"FilterPolicyScope": "MessageBody"}); err != nil {
 		t.Fatal(err)
 	}

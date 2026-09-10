@@ -1,0 +1,7 @@
+{
+  "unissuedToken": {
+    "Code": "InvalidParameter",
+    "HTTPStatus": 400,
+    "Message": "Invalid parameter: Token"
+  }
+}

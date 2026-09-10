@@ -1353,6 +1353,7 @@ func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 	for _, input := range []map[string]any{
 		{"TopicArn": topic, "Protocol": "invalid", "Endpoint": "endpoint"},
 		{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "unknown"},
+		{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "http://localhost:4566/000000000000/regular"},
 		{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:fifo.fifo"},
 	} {
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: input}); err == nil {

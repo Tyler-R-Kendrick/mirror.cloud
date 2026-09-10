@@ -8,6 +8,26 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## Hostinger baseline
+
+Authority: official Hostinger REST (`api.hostinger.com` `/api/dns/v1/...` and `/api/domains/v1/...`). There is no LocalStack Hostinger inventory; rows are operation → Mirror evidence, not a live `api.hostinger.com` differential.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated Hostinger slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Hostinger operations routed to emulation | 6 / 6 |
+| Live Hostinger probe | none (not required) |
+
+| Hostinger operation | Mirror evidence |
+|---|---|
+| `POST /api/domains/v1/portfolio` (`CreateDomain`) | Booted create returns the domain object; atomic empty domain 422 and duplicate 409; BDD create; chaos `TestHostingerConcurrentDuplicateDomains`; mutants `hostinger-accept-empty-domain` and `hostinger-accept-duplicate-domain` |
+| `GET /api/domains/v1/portfolio` (`ListDomains`) | Atomic lists one domain as a top-level JSON array; characterization `list`; BDD lists after create |
+| `GET /api/domains/v1/portfolio/{domain}` (`GetDomain`) | Atomic get by domain; missing domain HTTP 404 `{message, correlation_id}` without `x-amzn-errortype`; characterization `get`/`missing`; mutant `hostinger-get-missing-domain-as-empty` |
+| `PUT /api/dns/v1/zones/{domain}` (`UpdateDNSRecords`) | Booted PUT returns `{message:"Request accepted"}`; atomic update; characterization `update`; fuzz `FuzzDNSRecords`; chaos concurrent put/get |
+| `GET /api/dns/v1/zones/{domain}` (`GetDNSRecords`) | Booted GET returns a top-level JSON array of records; empty zone is `[]`; characterization `records`/`after_del` |
+| `DELETE /api/dns/v1/zones/{domain}` (`DeleteDNSRecords`) | Booted DELETE then GET is `[]`; atomic delete; characterization `delete`; BDD delete |
+| Hostinger faults vs AWS faults | restJson1 `Encode` writes `_list` as a JSON array; `EncodeFault` uses `{message, correlation_id}` and omits `x-amzn-errortype`; mutant `hostinger-encode-aws-fault` |
+
 ## Cloudflare baseline
 
 Authority: official Cloudflare REST v4 (`api.cloudflare.com` `/client/v4/...`) plus Workers KV namespace and value APIs. There is no LocalStack Cloudflare inventory; rows are operation → Mirror evidence, not a live `api.cloudflare.com` differential.

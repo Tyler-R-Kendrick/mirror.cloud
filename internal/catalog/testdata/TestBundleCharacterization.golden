@@ -782,6 +782,18 @@
     ]
   },
   {
+    "ID": "hostinger.dns",
+    "Protocol": "restJson1",
+    "Ops": [
+      "CreateDomain",
+      "ListDomains",
+      "GetDomain",
+      "GetDNSRecords",
+      "UpdateDNSRecords",
+      "DeleteDNSRecords"
+    ]
+  },
+  {
     "ID": "aws.kms",
     "Protocol": "awsJson1_1",
     "Ops": [

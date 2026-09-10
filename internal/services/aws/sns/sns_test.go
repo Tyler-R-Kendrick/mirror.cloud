@@ -1226,6 +1226,32 @@ func TestSNSFIFOTopicToSQSWithoutQueueDeduplication(t *testing.T) {
 	}
 }
 
+func TestSNSFIFOTopicToStandardSQS(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sns-fifo-standard"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "sns-fifo-standard.fifo", "Attributes": map[string]any{"FifoTopic": "true", "ContentBasedDeduplication": "true"}})
+	topicARN := str(topic.Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:sns-fifo-standard", "RawMessageDelivery": "true"})
+	for i := 0; i < 2; i++ {
+		invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topicARN, "Message": "deduplicated", "MessageGroupId": "group-1"})
+	}
+	first := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "sns-fifo-standard", "MaxNumberOfMessages": 10})
+	if len(asSlice(first.Output["Messages"])) != 1 {
+		t.Fatalf("first delivery=%#v", first.Output)
+	}
+	message := asMap(asSlice(first.Output["Messages"])[0])
+	invokeSNSQueue(t, qp, id, "DeleteMessage", map[string]any{"QueueName": "sns-fifo-standard", "ReceiptHandle": message["ReceiptHandle"]})
+	second := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "sns-fifo-standard", "MaxNumberOfMessages": 10})
+	if len(asSlice(second.Output["Messages"])) != 0 {
+		t.Fatalf("duplicate delivery=%#v", second.Output)
+	}
+}
+
 func TestSNSFIFOPublishBatchRedrivesToFIFODLQ(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

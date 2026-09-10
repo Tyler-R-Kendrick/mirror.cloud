@@ -23,7 +23,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ses"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -911,10 +910,12 @@ func (p *Pack) sendSES(ctx context.Context, req *spi.Request, to, subject, body 
 	if source == "" {
 		source = "admin@localstack.com"
 	}
-	_, _ = ses.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendEmail", Input: map[string]any{
-		"Source": source, "Destination": map[string]any{"ToAddresses": []any{to}},
-		"Message": map[string]any{"Subject": map[string]any{"Data": subject}, "Body": map[string]any{"Text": map[string]any{"Data": body}}},
-	}})
+	mid := "0000-" + p.deps.Rand.Hex(8)
+	_ = p.col(req, "sesmsg").Put(ctx, mid, mustJSON(map[string]any{
+		"MessageId": mid, "Source": source,
+		"Destination": map[string]any{"ToAddresses": []any{to}},
+		"Subject":     subject, "Body": body,
+	}))
 }
 
 func (p *Pack) platformEndpointMessage(ctx context.Context, req *spi.Request, endpointARN, body, structure string) (string, bool) {

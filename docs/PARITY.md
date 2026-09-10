@@ -8,6 +8,33 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## GCS baseline
+
+Authority: official GCS JSON API v1 (`storage.googleapis.com` `/storage/v1/...` and `/upload/storage/v1/...`). There is no LocalStack GCS inventory; rows are operation → Mirror evidence, not a live `storage.googleapis.com` differential. Leftover Discovery extraOps remain named control-plane records and are not in this denominator.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated GCS JSON slice | 7 / 7 (atomic, snapshot/`internal/golden`, gcprest contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Core GCS JSON operations routed to emulation | 13 / 13 |
+| Live GCS probe | none (not required) |
+
+| GCS operation | Mirror evidence |
+|---|---|
+| `POST /storage/v1/b` (`storage.buckets.insert`) | Booted create returns `name`; atomic empty 400 and duplicate 409; BDD create; chaos `TestGCSConcurrentDuplicateBuckets`; mutants `gcs-accept-empty-bucket` and `gcs-accept-duplicate-bucket` |
+| `GET /storage/v1/b/{bucket}` (`storage.buckets.get`) | Booted get after insert; characterization `get`; missing bucket HTTP 404 `{error:{code,message,errors}}` without `x-amzn-errortype` |
+| `GET /storage/v1/b` (`storage.buckets.list`) | Booted list contains the created bucket; characterization `list`; BDD lists after create |
+| `PATCH /storage/v1/b/{bucket}` (`storage.buckets.patch`) | Booted patch of `location`; atomic patch in `TestBucketCRUD` |
+| `DELETE /storage/v1/b/{bucket}` (`storage.buckets.delete`) | Atomic delete after objects are gone; non-empty bucket 409 |
+| `POST /upload/storage/v1/b/{bucket}/o` (`storage.objects.insert`) | Booted media upload then `GET ?alt=media` round-trips bytes; characterization `insert`; fuzz `FuzzObjectBytes`; chaos concurrent put/get |
+| `GET /storage/v1/b/{bucket}/o/{object}` (`storage.objects.get`) | Metadata GET and `?alt=media` bytes; missing object HTTP 404; mutant `gcs-get-missing-object-as-empty` |
+| `GET /storage/v1/b/{bucket}/o` (`storage.objects.list`) | Booted prefix/delimiter list; characterization `objects` |
+| `DELETE /storage/v1/b/{bucket}/o/{object}` (`storage.objects.delete`) | Booted delete; characterization `delete`; BDD delete |
+| `POST .../copyTo/...` (`storage.objects.copy`) | Booted copy; characterization `copy`; atomic copy in `TestCopyComposeDelete` |
+| `POST .../rewriteTo/...` (`storage.objects.rewrite`) | Booted rewrite `done: true`; atomic rewrite |
+| `POST .../compose` (`storage.objects.compose`) | Booted compose; atomic compose concatenates source bytes |
+| `PATCH .../o/{object}` (`storage.objects.patch`) | Booted contentType patch; atomic metageneration bump |
+| GCS faults vs AWS faults | gcprest `EncodeFault` uses `{error:{code,message,errors}}` and omits `x-amzn-errortype`; mutant `gcs-encode-aws-fault` |
+
 ## Hostinger baseline
 
 Authority: official Hostinger REST (`api.hostinger.com` `/api/dns/v1/...` and `/api/domains/v1/...`). There is no LocalStack Hostinger inventory; rows are operation → Mirror evidence, not a live `api.hostinger.com` differential.

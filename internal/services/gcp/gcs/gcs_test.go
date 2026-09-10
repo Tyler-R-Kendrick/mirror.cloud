@@ -16,6 +16,40 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
+func TestBucketInsertRejectsEmptyAndDuplicate(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Code != "invalid" {
+		t.Fatalf("empty %#v", err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "dup"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "dup"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 409 || f.Code != "conflict" {
+		t.Fatalf("duplicate %#v", err)
+	}
+}
+
+func TestMissingObjectAndBucket(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.get", Input: map[string]any{"bucket": "nope"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "notFound" {
+		t.Fatalf("missing bucket %#v", err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.get", Input: map[string]any{"bucket": "b", "object": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "notFound" {
+		t.Fatalf("missing object %#v", err)
+	}
+}
+
 func TestBucketCRUD(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

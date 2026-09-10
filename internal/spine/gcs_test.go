@@ -163,6 +163,19 @@ func TestBootedServerGCSSection48(t *testing.T) {
 	if code, b, _ := do(http.MethodPost, "/storage/v1/b/bk/o/batch", "", nil); code != 501 {
 		t.Fatalf("batch %d %s", code, b)
 	}
+
+	code, b, h = do(http.MethodGet, "/storage/v1/b/missing", "", nil)
+	miss := js(b)
+	errObj, _ := miss["error"].(map[string]any)
+	if code != 404 || errObj == nil || errObj["message"] == nil || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("missing bucket %d %#v %s", code, h, b)
+	}
+	code, b, h = do(http.MethodGet, "/storage/v1/b/bk/o/nope?alt=media", "", nil)
+	miss = js(b)
+	errObj, _ = miss["error"].(map[string]any)
+	if code != 404 || errObj == nil || errObj["message"] == nil || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("missing object %d %#v %s", code, h, b)
+	}
 }
 
 func TestGCSHTTPProvenOps(t *testing.T) {

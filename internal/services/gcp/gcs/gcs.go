@@ -319,6 +319,11 @@ func (p *Pack) bucketInsert(ctx context.Context, req *spi.Request) (*spi.Respons
 	if name == "" {
 		return nil, fault("invalid", "bucket name required", 400)
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, exists, _ := p.col(req, "buckets").Get(ctx, name); exists {
+		return nil, fault("conflict", "The requested bucket name is not available.", 409)
+	}
 	now := p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05Z")
 	rec := bucketRec{Name: name, Metageneration: "1", TimeCreated: now, Updated: now, Location: "US", StorageClass: "STANDARD"}
 	b, _ := json.Marshal(rec)

@@ -35,6 +35,7 @@ test-snapshot:
 	$(GO) test ./internal/services/vercel/api -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/cloudflare/api -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/hostinger/api -run 'Characterization$$' -count=1
+	$(GO) test ./internal/services/gcp/gcs -run 'Characterization$$' -count=1
 
 test-chaos:
 	$(GO) test ./internal/chaos -count=1
@@ -166,6 +167,7 @@ test-fuzz:
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCopyObjectSSECustomerKeys$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/states -run '^$$' -fuzz '^FuzzJSONPath$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/gcp/gcs -run '^$$' -fuzz '^FuzzParsePath$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./internal/services/gcp/gcs -run '^$$' -fuzz '^FuzzObjectBytes$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzVercelRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/vercel/api -run '^$$' -fuzz '^FuzzKvCommand$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzCloudflareRoute$$' -fuzztime=10000x -parallel=4

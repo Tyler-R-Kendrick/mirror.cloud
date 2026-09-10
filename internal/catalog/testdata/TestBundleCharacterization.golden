@@ -749,6 +749,27 @@
     ]
   },
   {
+    "ID": "vercel.api",
+    "Protocol": "restJson1",
+    "Ops": [
+      "GetUser",
+      "CreateProject",
+      "ListProjects",
+      "GetProject",
+      "DeleteProject",
+      "ListProjectEnv",
+      "CreateProjectEnv",
+      "DeleteProjectEnv",
+      "ListProjectDomains",
+      "AddProjectDomain",
+      "CreateDeployment",
+      "ListDeployments",
+      "GetDeployment",
+      "DeleteDeployment",
+      "KvCommand"
+    ]
+  },
+  {
     "ID": "aws.kms",
     "Protocol": "awsJson1_1",
     "Ops": [

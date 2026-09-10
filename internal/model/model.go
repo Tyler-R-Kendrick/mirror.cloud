@@ -9,9 +9,10 @@ package model
 type Provider string
 
 const (
-	ProviderAWS   Provider = "aws"
-	ProviderGCP   Provider = "gcp"
-	ProviderAzure Provider = "azure"
+	ProviderAWS    Provider = "aws"
+	ProviderGCP    Provider = "gcp"
+	ProviderAzure  Provider = "azure"
+	ProviderVercel Provider = "vercel"
 )
 
 // Protocol is the wire protocol a service speaks.

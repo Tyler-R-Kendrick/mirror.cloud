@@ -31,6 +31,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "aws.es" {
 		return opensearchOp(svc, r), nil
 	}
+	if svc.ID == "vercel.api" {
+		return vercelOp(svc, r), nil
+	}
 	// An X-Amz-Target names an operation outright, and an explicit statement
 	// beats one inferred from a path. No SDK sends it for a restJson1 service,
 	// but this project's own recordings and pack tests do, and some services
@@ -333,10 +336,65 @@ func opensearchOp(svc *model.Service, r *http.Request) *model.Operation {
 	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
 }
 
+func vercelOp(svc *model.Service, r *http.Request) *model.Operation {
+	name := vercelRoute(r)
+	if op := svc.OperationByName(name); op != nil {
+		return op
+	}
+	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+}
+
+func vercelRoute(r *http.Request) string {
+	path := r.URL.Path
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) > 0 && len(parts[0]) >= 2 && parts[0][0] == 'v' && parts[0][1] >= '0' && parts[0][1] <= '9' {
+		parts = parts[1:]
+	}
+	m := r.Method
+	join := strings.Join(parts, "/")
+	switch {
+	case len(parts) == 0:
+		return "KvCommand"
+	case parts[0] == "user":
+		return "GetUser"
+	case join == "projects" && m == http.MethodPost:
+		return "CreateProject"
+	case join == "projects" && m == http.MethodGet:
+		return "ListProjects"
+	case len(parts) == 2 && parts[0] == "projects" && m == http.MethodGet:
+		return "GetProject"
+	case len(parts) == 2 && parts[0] == "projects" && m == http.MethodDelete:
+		return "DeleteProject"
+	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodGet:
+		return "ListProjectEnv"
+	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodPost:
+		return "CreateProjectEnv"
+	case len(parts) >= 4 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodDelete:
+		return "DeleteProjectEnv"
+	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "domains" && m == http.MethodGet:
+		return "ListProjectDomains"
+	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "domains" && m == http.MethodPost:
+		return "AddProjectDomain"
+	case join == "deployments" && m == http.MethodPost:
+		return "CreateDeployment"
+	case join == "deployments" && m == http.MethodGet:
+		return "ListDeployments"
+	case len(parts) == 2 && parts[0] == "deployments" && m == http.MethodGet:
+		return "GetDeployment"
+	case len(parts) == 2 && parts[0] == "deployments" && m == http.MethodDelete:
+		return "DeleteDeployment"
+	}
+	return "KvCommand"
+}
+
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
 	body, _ := io.ReadAll(r.Body)
 	in := map[string]any{}
-	if len(body) > 0 {
+	if len(body) > 0 && body[0] == '[' {
+		var cmd []any
+		_ = json.Unmarshal(body, &cmd)
+		in["_redis"] = cmd
+	} else if len(body) > 0 {
 		_ = json.Unmarshal(body, &in)
 	}
 	for k, vs := range r.URL.Query() {
@@ -392,11 +450,15 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		status = 400
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("x-amzn-errortype", f.Code)
 	if f.Code == "MirrorNotImplemented" {
 		w.Header().Set("x-mirror-not-implemented", svc.ID+"."+op.Name)
 		status = 501
 	}
+	if svc.ID == "vercel.api" {
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
+	}
+	w.Header().Set("x-amzn-errortype", f.Code)
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(map[string]any{"message": f.Message, "__type": f.Code})
 }

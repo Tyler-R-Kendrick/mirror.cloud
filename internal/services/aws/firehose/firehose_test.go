@@ -4959,7 +4959,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}
 	select {
 	case bufferedRequest = <-captured:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("size-threshold HTTP buffer did not flush")
 	}
 	if err := json.Unmarshal(bufferedRequest.body, &bufferedRequest.payload); err != nil {

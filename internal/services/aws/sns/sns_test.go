@@ -117,6 +117,17 @@ func TestSNSCrossAccountTopicAccess(t *testing.T) {
 	}
 }
 
+func TestSNSCrossRegionTopicAccessRejected(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	owner := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	caller := spi.Identity{Account: "111111111111", Region: "us-west-2"}
+	arn := str(invokeSNS(t, p, owner, "CreateTopic", map[string]any{"Name": "regional-topic"}).Output["TopicArn"])
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: caller, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": arn}}); err == nil {
+		t.Fatal("cross-region topic access unexpectedly succeeded")
+	}
+}
+
 func TestSNSCrossAccountAndRegionSQSDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

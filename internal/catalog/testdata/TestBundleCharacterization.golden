@@ -808,6 +808,20 @@
     ]
   },
   {
+    "ID": "digitalocean.v2",
+    "Protocol": "restJson1",
+    "Ops": [
+      "CreateDroplet",
+      "ListDroplets",
+      "GetDroplet",
+      "DeleteDroplet",
+      "CreateDomain",
+      "ListDomains",
+      "GetDomain",
+      "DeleteDomain"
+    ]
+  },
+  {
     "ID": "aws.kms",
     "Protocol": "awsJson1_1",
     "Ops": [

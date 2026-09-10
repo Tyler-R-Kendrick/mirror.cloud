@@ -65,6 +65,7 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/xray"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hostinger/api"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"

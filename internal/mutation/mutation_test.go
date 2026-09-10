@@ -21692,6 +21692,38 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restxml",
 		run:  "TestRESTXML",
 	},
+	{
+		name: "digitalocean-accept-empty-domain",
+		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
+		old:  "if name == \"\" {\n\t\treturn nil, doFault(\"unprocessable_entity\", \"domain name is required\", 422)",
+		new:  "if false {\n\t\treturn nil, doFault(\"unprocessable_entity\", \"domain name is required\", 422)",
+		pkg:  "./internal/services/digitalocean/v2",
+		run:  "TestCreateDomainRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "digitalocean-accept-duplicate-domain",
+		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
+		old:  `if _, exists, _ := p.col(req, "dodom").Get(ctx, name); exists {`,
+		new:  `if _, exists, _ := p.col(req, "dodom").Get(ctx, name); false {`,
+		pkg:  "./internal/services/digitalocean/v2",
+		run:  "TestCreateDomainRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "digitalocean-get-missing-domain-as-empty",
+		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
+		old:  "b, ok, _ := p.col(req, \"dodom\").Get(ctx, name)\n\tif !ok {\n\t\treturn nil, doFault(\"not_found\", \"The resource you were accessing could not be found.\", 404)",
+		new:  "b, ok, _ := p.col(req, \"dodom\").Get(ctx, name)\n\tif false {\n\t\treturn nil, doFault(\"not_found\", \"The resource you were accessing could not be found.\", 404)",
+		pkg:  "./internal/services/digitalocean/v2",
+		run:  "TestDropletAndDomainLifecycle",
+	},
+	{
+		name: "digitalocean-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if svc.ID == \"digitalocean.v2\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"id\": f.Code, \"message\": f.Message})",
+		new:  "if false && svc.ID == \"digitalocean.v2\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"id\": f.Code, \"message\": f.Message})",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

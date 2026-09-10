@@ -8,6 +8,28 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## DigitalOcean baseline
+
+Authority: official DigitalOcean API v2 (`api.digitalocean.com` `/v2/droplets` and `/v2/domains`). There is no LocalStack DigitalOcean inventory; rows are operation → Mirror evidence, not a live `api.digitalocean.com` differential. Apps, Kubernetes, Spaces, domain records, and droplet actions are not in this denominator.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated DigitalOcean slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Core DigitalOcean v2 operations routed to emulation | 8 / 8 |
+| Live DigitalOcean probe | none (not required) |
+
+| DigitalOcean operation | Mirror evidence |
+|---|---|
+| `POST /v2/droplets` (`CreateDroplet`) | Booted create returns `{droplet}`; atomic empty name 422; BDD create |
+| `GET /v2/droplets` (`ListDroplets`) | Booted list wraps `{droplets, meta.total}`; characterization `list`; BDD lists after create |
+| `GET /v2/droplets/{id}` (`GetDroplet`) | Booted get-after-set; missing droplet HTTP 404 `{id:"not_found"}` without `x-amzn-errortype` |
+| `DELETE /v2/droplets/{id}` (`DeleteDroplet`) | Booted delete is HTTP 204 empty body; characterization `delete` |
+| `POST /v2/domains` (`CreateDomain`) | Atomic empty 422 and duplicate 409; BDD create; chaos `TestDigitalOceanConcurrentDuplicateDomains`; mutants `digitalocean-accept-empty-domain` and `digitalocean-accept-duplicate-domain` |
+| `GET /v2/domains` (`ListDomains`) | Characterization `domains`; BDD lists after create |
+| `GET /v2/domains/{name}` (`GetDomain`) | Booted POST then GET returns the stored domain; missing domain 404; mutant `digitalocean-get-missing-domain-as-empty` |
+| `DELETE /v2/domains/{name}` (`DeleteDomain`) | Atomic 204; characterization `del_domain` |
+| DigitalOcean faults vs AWS faults | restJson1 `Encode` wraps singular/plural keys plus `meta.total`; `EncodeFault` uses `{id,message}` and omits `x-amzn-errortype`; mutant `digitalocean-encode-aws-fault` |
+
 ## Azure Blob baseline
 
 Authority: official Azure Blob REST (`{account}.blob.core.windows.net`, `restype=container`, `comp=list`, `x-ms-blob-type: BlockBlob`). There is no LocalStack Azure inventory; rows are operation → Mirror evidence, not a live `*.blob.core.windows.net` differential. Queue/Table/File, page/append blobs, leases, snapshots, copy, and SAS are not in this denominator.

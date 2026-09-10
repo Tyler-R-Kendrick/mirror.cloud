@@ -451,6 +451,9 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			}
 		}
 	}
+	if digitaloceanRequest(r) {
+		return s.bundle.ServiceByID("digitalocean.v2")
+	}
 	if azureRequest(r) {
 		return s.bundle.ServiceByID("azure.blobs")
 	}
@@ -496,6 +499,18 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
+}
+
+func digitaloceanRequest(r *http.Request) bool {
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Contains(host, "digitalocean") {
+		return true
+	}
+	path := r.URL.Path
+	return strings.HasPrefix(path, "/v2/droplets") || strings.HasPrefix(path, "/v2/domains")
 }
 
 func azureRequest(r *http.Request) bool {

@@ -35,6 +35,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	azblobs "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
 	cfapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
+	doapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	hsapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hostinger/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
@@ -7845,4 +7846,62 @@ func TestAzureConcurrentBlobPutGet(t *testing.T) {
 	}
 	_, _ = io.ReadAll(got.Stream)
 	_ = got.Stream.Close()
+}
+
+func TestDigitalOceanConcurrentDuplicateDomains(t *testing.T) {
+	p := doapi.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errCh := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDomain", Input: map[string]any{"name": "race.test"}})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	winners := 0
+	for err := range errCh {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.HTTPStatus != 409 || fault.Code != "conflict" {
+			t.Fatalf("concurrent create: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful creates = %d, want 1", winners)
+	}
+}
+
+func TestDigitalOceanConcurrentDropletCreateGet(t *testing.T) {
+	p := doapi.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDroplet", Input: map[string]any{"name": "web", "region": "nyc3"}}); err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDroplets", Input: map[string]any{}})
+	if err != nil || got.Output["_list"] == nil {
+		t.Fatalf("list after concurrent create %#v %v", got, err)
+	}
 }

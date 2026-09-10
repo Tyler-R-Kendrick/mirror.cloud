@@ -1204,6 +1204,12 @@ func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
 		"TopicArn": topic,
+		"Entries":  []any{map[string]any{"Id": "same", "Message": "x"}, map[string]any{"Id": "same", "Message": "y"}},
+	}}); err == nil {
+		t.Fatal("duplicate batch entry ID succeeded")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
+		"TopicArn": topic,
 		"Entries": []any{
 			map[string]any{"Id": "one", "Message": strings.Repeat("x", 131073)},
 			map[string]any{"Id": "two", "Message": strings.Repeat("y", 131072)},

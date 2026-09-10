@@ -17808,6 +17808,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSMessageStructureAndSizeValidation",
 		},
 		{
+			name: "sns-accept-duplicate-publish-batch-entry-id",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if !validBatchEntryID(entryID) || seenIDs[entryID] {`,
+			new:  `if !validBatchEntryID(entryID) {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSMessageStructureAndSizeValidation",
+		},
+		{
 			name: "sns-accept-invalid-subscription-protocol",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if protocol == "sqs" {`,

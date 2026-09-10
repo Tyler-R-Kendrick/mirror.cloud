@@ -294,6 +294,26 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSUnicodeMessageToSQS(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invokeSNSQueue(t, qp, id, "CreateQueue", map[string]any{"QueueName": "unicode-message"})
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "unicode-message"}).Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:unicode-message"})
+	message := `ö§a1"_!?,. £$-`
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": message})
+	received := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "unicode-message", "VisibilityTimeout": 0})
+	messages := asSlice(received.Output["Messages"])
+	if len(messages) != 1 {
+		t.Fatalf("unicode messages=%#v", received.Output)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(str(asMap(messages[0])["Body"])), &envelope); err != nil || envelope["Message"] != message {
+		t.Fatalf("unicode envelope=%#v err=%v", envelope, err)
+	}
+}
+
 func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

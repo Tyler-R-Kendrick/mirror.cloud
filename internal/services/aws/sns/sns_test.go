@@ -515,6 +515,15 @@ func TestSNSLambdaSuccessFeedbackDeliveryLog(t *testing.T) {
 	if len(events) != 1 || !strings.Contains(str(asMap(events[0])["message"]), `"messageId"`) || !strings.Contains(str(asMap(events[0])["message"]), `"statusCode":200`) {
 		t.Fatalf("feedback log %#v", events)
 	}
+	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteFunction", Input: map[string]any{"FunctionName": "feedback"}}); err != nil {
+		t.Fatal(err)
+	}
+	invokeSNS(t, p, id, "SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "LambdaFailureFeedbackRoleArn", "AttributeValue": "arn:aws:iam::1:role/sns"})
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": "failed"})
+	response, err = logsPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetLogEvents", Input: map[string]any{"logGroupName": group, "logStreamName": "delivery"}})
+	if err != nil || len(asSlice(response.Output["events"])) != 2 || !strings.Contains(str(asMap(asSlice(response.Output["events"])[1])["message"]), `"statusCode":500`) {
+		t.Fatalf("failure feedback log %#v err=%v", response, err)
+	}
 }
 
 func TestSNSControlPlaneOperations(t *testing.T) {

@@ -18008,6 +18008,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformEndpointAttributesProjection",
 		},
 		{
+			name: "sns-drop-topic-attribute-owner",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `"TopicArn": m["arn"], "DisplayName": m["name"], "Owner": req.Identity.Account,`,
+			new:  `"TopicArn": m["arn"], "DisplayName": m["name"], "Owner": "",`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSControlPlaneOperations",
+		},
+		{
 			name: "sns-wrap-raw-http-subscription-body",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `body = payload`,

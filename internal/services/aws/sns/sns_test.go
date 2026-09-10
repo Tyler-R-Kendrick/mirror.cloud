@@ -1675,6 +1675,12 @@ func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 			t.Fatalf("invalid subscription succeeded: %#v", input)
 		}
 	}
+	unknownTopic := strings.TrimSuffix(topic, ":topic") + ":unknown-topic"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": unknownTopic, "Protocol": "sms", "Endpoint": "+1234567890",
+	}}); err == nil {
+		t.Fatal("accepted subscription to a missing topic")
+	}
 	for _, endpoint := range []string{"+15--551234567", "NAA+15551234567", "+15551234567.", "/+15551234567"} {
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": topic, "Protocol": "sms", "Endpoint": endpoint}}); err == nil {
 			t.Fatalf("invalid SMS endpoint accepted: %s", endpoint)

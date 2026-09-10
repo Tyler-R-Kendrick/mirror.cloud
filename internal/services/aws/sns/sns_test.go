@@ -864,6 +864,9 @@ func TestSNSTopicDeleteIdempotency(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteTopic", Input: map[string]any{"TopicArn": topic}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteTopic", Input: map[string]any{"TopicArn": "arn:aws:sns:us-east-1:1:never-created"}}); err != nil {
+		t.Fatalf("delete nonexistent topic: %v", err)
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}}); err == nil {
 		t.Fatal("found deleted topic")
 	}

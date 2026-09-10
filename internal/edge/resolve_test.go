@@ -450,3 +450,100 @@ func sharing(bundle *model.Bundle, prefix string) []string {
 	sort.Strings(ids)
 	return ids
 }
+
+// TestADottedEndpointPrefixIsNotItsLeadingLabel pins the class of bug that made
+// two AWS services unreachable.
+//
+// ECR is reached at `api.ecr.<region>.amazonaws.com` and IoT Wireless at
+// `api.iotwireless.<region>...`, so the leading label of both hosts is the
+// generic word `api`, which names no service. Any service whose short name is
+// `api` therefore answered for both, and one arrived: `vercel.api`. Nothing
+// about the two AWS services changed, and nothing in their own tests noticed,
+// because the collision is in a third service's name.
+func TestADottedEndpointPrefixIsNotItsLeadingLabel(t *testing.T) {
+	bundle := catalog.Bundle()
+	server := &Server{bundle: bundle}
+	for _, id := range []string{"aws.api.ecr", "aws.iotwireless", "aws.iot-data"} {
+		svc := bundle.ServiceByID(id)
+		if svc == nil {
+			t.Fatalf("%s is not in the bundle", id)
+		}
+		if !strings.Contains(svc.EndpointPrefix, ".") {
+			t.Fatalf("%s no longer has a dotted endpoint prefix (%q); pick another example",
+				id, svc.EndpointPrefix)
+		}
+		if got := server.demux(sdkRequest(svc)); got == nil || got.ID != id {
+			name := "nothing"
+			if got != nil {
+				name = got.ID
+			}
+			t.Errorf("%s at %s resolved to %s", id, svc.EndpointPrefix, name)
+		}
+	}
+}
+
+// TestAServiceIsReachableByItsCredentialScopeAlone covers the one thing a
+// request states about itself that does not depend on how the client was
+// configured to reach it.
+//
+// Every other test here sends an endpoint host as well, and the host resolves
+// first, so the credential scope was never the thing being exercised. That was
+// invisible while TestEveryServiceIsReachableTheWayAnSDKAddressesIt was red:
+// the mutant defending the credential-scope lookup died on that unrelated
+// failure and read as covered. Fixing the failure is what showed the gap.
+//
+// A client pointed at a local endpoint -- `mirror` itself, an IP, any host with
+// no service name in it -- has nothing else to go on.
+func TestAServiceIsReachableByItsCredentialScopeAlone(t *testing.T) {
+	bundle := catalog.Bundle()
+	server := &Server{bundle: bundle}
+	for _, id := range []string{"aws.guardduty", "aws.api.ecr", "aws.sns"} {
+		svc := bundle.ServiceByID(id)
+		if svc == nil {
+			t.Fatalf("%s is not in the bundle", id)
+		}
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		// A host that names no service, which is how every local endpoint looks.
+		r.Host = "127.0.0.1:4566"
+		r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=t/20200101/us-east-1/"+
+			svc.EndpointPrefix+"/aws4_request, SignedHeaders=host, Signature=0")
+		got := server.demux(r)
+		if got == nil {
+			t.Errorf("%s signed for %q resolved to nothing", id, svc.EndpointPrefix)
+			continue
+		}
+		if got.ID != id && len(sharing(bundle, svc.EndpointPrefix)) <= 1 {
+			t.Errorf("%s signed for %q resolved to %s", id, svc.EndpointPrefix, got.ID)
+		}
+	}
+}
+
+// TestTheLongestEndpointPrefixWins pins the tiebreak between two dotted
+// prefixes where one is a prefix of the other.
+//
+// No shipped bundle has such a pair today -- api.ecr, api.iotwireless and
+// data.iot do not overlap each other -- so this is exercised against a bundle
+// built for it. Without a case the rule is defended by nothing, and a rule
+// nothing defends is how the leading-label match came to be wrong in the first
+// place: it was right for every service that existed when it was written.
+func TestTheLongestEndpointPrefixWins(t *testing.T) {
+	server := &Server{bundle: &model.Bundle{Services: []model.Service{
+		{ID: "acme.edge", EndpointPrefix: "data.acme"},
+		{ID: "acme.inner", EndpointPrefix: "data.acme.inner"},
+	}}}
+	for host, want := range map[string]string{
+		"data.acme.inner.us-east-1.example.invalid": "acme.inner",
+		"data.acme.us-east-1.example.invalid":       "acme.edge",
+		"data.acme.inner":                           "acme.inner",
+		"unrelated.example.invalid":                 "",
+	} {
+		got := server.serviceByHostPrefix(host)
+		id := ""
+		if got != nil {
+			id = got.ID
+		}
+		if id != want {
+			t.Errorf("%s resolved to %q, want %q", host, id, want)
+		}
+	}
+}

@@ -1528,6 +1528,11 @@ func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
 		t.Fatal("empty publish batch succeeded")
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
+		"TopicArn": topic + "fake-topic", "Entries": []any{map[string]any{"Id": "one", "Message": "message"}},
+	}}); err == nil {
+		t.Fatal("publish batch to missing topic succeeded")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
 		"TopicArn": topic,
 		"Entries":  []any{map[string]any{"Id": "bad.id", "Message": "x"}},
 	}}); err == nil {

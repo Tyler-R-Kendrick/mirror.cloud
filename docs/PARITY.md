@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 812 of 907 direct upstream test functions are explicitly traced (89.5%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 818 of 907 direct upstream test functions are explicitly traced (90.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green: 2,786 tests across 221 Go packages. The 2,602-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-eight new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. Two equivalent SNS mutants are excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 76 / 180 |
+| LocalStack SNS test functions explicitly traced | 82 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -63,6 +63,12 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSMS::test_publish_sms` | `TestSNSPhoneNumberPublish` delivers a valid phone-number publish |
 | `test_sns.py::TestSNSSMS::test_publish_wrong_phone_format` | `TestSNSPhoneNumberPublish` rejects malformed phone numbers |
 | `test_sns.py::TestSNSPublishCrud::test_publish_no_confirm_subscription` | `TestSNSPendingEmailSubscription` keeps email subscriptions pending until confirmation and verifies `ReturnSubscriptionArn` |
+| `test_sns.py::TestSNSPublishCrud::test_publish_message_by_target_arn` | `TestSNSPublishTargetAndSubscriptionTimingCharacterization` verifies TopicArn and TargetArn publish aliases deliver the same subscribed message |
+| `test_sns.py::TestSNSPublishCrud::test_publish_message_before_subscribe_topic` | `TestSNSPublishTargetAndSubscriptionTimingCharacterization` verifies a publish before subscription is not replayed to a later subscriber |
+| `test_sns.py::TestSNSPublishCrud::test_publish_wrong_arn_format` | `TestSNSPublishTargetAndSubscriptionTimingCharacterization` rejects a malformed topic ARN before publishing |
+| `test_sns.py::TestSNSPublishCrud::test_unknown_topic_publish` | `TestSNSMessageStructureAndSizeValidation` rejects a well-formed ARN for a missing topic while allowing a valid topic with no subscribers |
+| `test_sns.py::TestSNSPublishCrud::test_empty_sns_message` | `TestSNSMessageStructureAndSizeValidation` rejects an empty publish message and leaves subscribed queues unchanged |
+| `test_sns.py::TestSNSPublishCrud::test_publish_too_long_message` | `TestSNSMessageStructureAndSizeValidation` rejects messages over the 256 KiB SNS limit, including attribute overhead |
 | `test_sns.py::TestSNSSubscriptionHttp::test_http_subscription_response` | `TestSNSPendingEmailSubscription` verifies pending versus returned subscription ARN semantics for HTTP subscriptions |
 | `test_sns.py::TestSNSSubscriptionHttp::test_redrive_policy_http_subscription` | `TestSNSHTTPSubscriptionRedrive` sends failed HTTP notifications to the configured SQS DLQ |
 | `test_sns.py::TestSNSSubscriptionCrud::test_redrive_policy_sqs_queue_subscription` | `TestSNSSQSSubscriptionRedrive` sends failed SQS subscription notifications to the configured DLQ |

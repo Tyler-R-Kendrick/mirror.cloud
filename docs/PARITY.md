@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 785 of 907 direct upstream test functions are explicitly traced (86.5%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,583-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the forty new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,584-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the forty-one new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -51,7 +51,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSTopicCrud::test_tags` | `TestSNSTagValidation` rejects duplicate tag keys |
 | `test_sns.py::TestSNSTopicCrud::test_topic_get_attributes_with_fifo_false` | `TestSNSTopicFIFOAttributeIsImmutable` rejects changing `FifoTopic` after creation |
 | `test_sns.py::TestSNSTopicCrud::test_add_permission_errors` | `TestSNSPermissionValidation` rejects duplicate labels and invalid actions |
-| `test_sns.py::TestSNSTopicCrud::test_create_topic_with_attributes` | `TestSNSTopicAttributesIncludeDefaultPolicy`, `TestSNSControlPlaneOperations` verify AWS's default topic policy, owner/count fields, and effective delivery-policy projection |
+| `test_sns.py::TestSNSTopicCrud::test_create_topic_with_attributes` | `TestSNSTopicAttributesIncludeDefaultPolicy`, `TestSNSControlPlaneOperations`, and `TestSNSFIFOAttributesDefault` verify AWS's default policy, owner/count fields, effective delivery policy, and FIFO deduplication default |
 | `test_sns.py::TestSNSTopicCrud::test_create_topic_in_multiple_regions` | `TestSNSPartitionARNs` verifies GovCloud topic and platform-application ARNs use the `aws-us-gov` partition |
 | `test_sns.py::TestSNSPlatformEndpoint::test_delete_platform_endpoint_with_subscription` | `TestSNSPlatformEndpointDeletionCleansSubscriptions` removes subscriptions when their endpoint is deleted |
 | `test_sns.py::TestSNSSMS::test_get_sms_attributes_from_unmodified_region` | `TestSNSDefaultSMSAttributes` returns the default monthly spend limit |

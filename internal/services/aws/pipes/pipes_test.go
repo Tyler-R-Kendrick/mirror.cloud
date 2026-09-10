@@ -1062,9 +1062,9 @@ func (c *delayedSecondWaitClock) After(d time.Duration) <-chan time.Time {
 	return c.Controllable.After(d)
 }
 
-func (c *delayedSecondWaitClock) AfterUntil(at time.Time) <-chan time.Time {
+func (c *delayedSecondWaitClock) AfterTime(at time.Time) <-chan time.Time {
 	c.blockSecondWait()
-	return c.Controllable.AfterUntil(at)
+	return c.Controllable.AfterTime(at)
 }
 
 func (c *delayedSecondWaitClock) blockSecondWait() {

@@ -21,8 +21,7 @@ func (Real) Since(t time.Time) time.Duration { return time.Since(t) }
 func (Real) Advance(time.Duration) error {
 	return errors.New("real clock cannot be advanced")
 }
-func (Real) After(d time.Duration) <-chan time.Time  { return time.After(d) }
-func (Real) AfterUntil(t time.Time) <-chan time.Time { return time.After(time.Until(t)) }
+func (Real) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 // AfterTime waits until at. A deadline already past fires immediately, which
 // is what time.After does with a non-positive duration anyway.

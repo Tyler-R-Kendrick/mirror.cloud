@@ -1233,6 +1233,31 @@ func TestSNSPublishBatchToFIFOSQS(t *testing.T) {
 	}
 }
 
+func TestSNSFIFODeduplicationAcrossSubscriptions(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{
+		"Name": "topic-dedup.fifo", "Attributes": map[string]any{"FifoTopic": "true", "ContentBasedDeduplication": "true"},
+	}).Output["TopicArn"])
+	for _, queue := range []string{"dedup-one", "dedup-two"} {
+		if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": queue}}); err != nil {
+			t.Fatal(err)
+		}
+		invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:" + queue})
+	}
+	for _, group := range []string{"one", "two"} {
+		invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": "deduplicated", "MessageGroupId": group})
+	}
+	for _, queue := range []string{"dedup-one", "dedup-two"} {
+		received := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": queue, "MaxNumberOfMessages": 10}).Output["Messages"]
+		if len(asSlice(received)) != 1 {
+			t.Fatalf("queue %s received %#v", queue, received)
+		}
+	}
+}
+
 func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

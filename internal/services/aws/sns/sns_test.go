@@ -1145,6 +1145,12 @@ func TestSNSFIFOPublishValidationAndTopicDeduplication(t *testing.T) {
 	if first == "" || first != second || seen != 1 {
 		t.Fatalf("topic deduplication first=%q second=%q deliveries=%d", first, second, seen)
 	}
+	targetResponse, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TargetArn": fifo, "MessageStructure": "json", "Message": `{"default":"{\"foo\":\"bar\"}"}`, "MessageGroupId": "target",
+	}})
+	if err != nil || str(targetResponse.Output["MessageId"]) == "" {
+		t.Fatalf("FIFO TargetArn publish response=%#v err=%v", targetResponse, err)
+	}
 	noCBD := create("without-cbd.fifo", map[string]any{"FifoTopic": "true"})
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": noCBD, "Message": "missing-dedup", "MessageGroupId": "g"}}); err == nil {
 		t.Fatal("FIFO publish without deduplication ID succeeded")

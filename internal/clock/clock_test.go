@@ -68,3 +68,69 @@ func TestRealAdvanceRefused(t *testing.T) {
 		t.Fatal("real clock must refuse Advance")
 	}
 }
+
+// TestAfterTimeSurvivesAnAdvanceDuringRegistration is the regression test for a
+// lost wakeup that took three PRs' CI red before it was understood.
+//
+// Every background loop in this emulator has the same shape: work out when the
+// next thing is due, then park until then. Expressed with After, that is three
+// steps -- read the clock, subtract, register -- and a clock advance landing
+// between the read and the register is silently absorbed: the delay was
+// measured against the old time, so the timer is set that far past the *new*
+// time. A controllable clock is only advanced by a test, and the test has
+// already advanced, so nothing ever fires and the loop sleeps forever.
+//
+// The sequence below is exactly what such a loop does, with the advance placed
+// in the window on purpose. No goroutines are needed to show it: the bug is in
+// the arithmetic, not in the scheduling.
+func TestAfterTimeSurvivesAnAdvanceDuringRegistration(t *testing.T) {
+	deadline := func(c *clock.Controllable) time.Time { return c.Now().Add(90 * time.Second) }
+
+	t.Run("After loses the wakeup", func(t *testing.T) {
+		c := clock.NewControllable()
+		due := deadline(c)
+		delay := due.Sub(c.Now())
+		// The window: a test advances past the deadline before the loop parks.
+		if err := c.Advance(2 * time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-c.After(delay):
+			t.Fatal("After fired; this test documents that it does not, so if it " +
+				"now does, the fix moved and this test should be retired")
+		default:
+		}
+	})
+
+	t.Run("AfterTime keeps it", func(t *testing.T) {
+		c := clock.NewControllable()
+		due := deadline(c)
+		if err := c.Advance(2 * time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-c.AfterTime(due):
+		default:
+			t.Fatal("AfterTime did not fire for a deadline the clock is already past")
+		}
+	})
+
+	t.Run("AfterTime still waits for a deadline ahead", func(t *testing.T) {
+		c := clock.NewControllable()
+		due := deadline(c)
+		ch := c.AfterTime(due)
+		select {
+		case <-ch:
+			t.Fatal("AfterTime fired before its instant")
+		default:
+		}
+		if err := c.Advance(2 * time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-ch:
+		default:
+			t.Fatal("AfterTime did not fire once the clock reached its instant")
+		}
+	})
+}

@@ -1,0 +1,165 @@
+schema: bir/1
+service: aws.batch
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is scheduled and nothing runs: a submitted job has already
+# SUCCEEDED before the call returns.
+provenance: authored
+
+resources:
+  computeenv:
+    collection: bce
+    id:
+      input_members: [computeEnvironmentName]
+    arn: "arn:{partition}:batch:{region}:{account}:compute-environment/{id}"
+    record:
+      computeEnvironmentName: id
+      computeEnvironmentArn: arn
+      state: "'ENABLED'"
+      status: "'VALID'"
+
+  jobqueue:
+    collection: bjq
+    id:
+      input_members: [jobQueueName]
+    arn: "arn:{partition}:batch:{region}:{account}:job-queue/{id}"
+    record:
+      jobQueueName: id
+      jobQueueArn: arn
+      state: "'ENABLED'"
+      status: "'VALID'"
+
+  # Every registration is revision 1 and overwrites the last, so a job
+  # definition has no history.
+  jobdefinition:
+    collection: bjd
+    id:
+      input_members: [jobDefinitionName]
+    arn: "arn:{partition}:batch:{region}:{account}:job-definition/{id}:1"
+    record:
+      jobDefinitionName: id
+      jobDefinitionArn: arn
+      revision: "1"
+
+  job:
+    collection: bjob
+    id:
+      generate: { kind: hex, bytes: 16 }
+    record:
+      jobId: id
+      jobName: "'jobName' in input ? string(input.jobName) : ''"
+      jobQueue: "'jobQueue' in input ? string(input.jobQueue) : ''"
+      status: "'SUCCEEDED'"
+
+operations:
+  CreateComputeEnvironment:
+    effects:
+      - put: { resource: computeenv }
+    output:
+      computeEnvironmentName: rec.computeEnvironmentName
+      computeEnvironmentArn: rec.computeEnvironmentArn
+
+  DescribeComputeEnvironments:
+    list: { resource: computeenv, member: computeEnvironments, paginate: model }
+
+  DeleteComputeEnvironment:
+    effects:
+      - delete: { resource: computeenv, key: "string(input.computeEnvironment)", missing: ignore }
+
+  CreateJobQueue:
+    effects:
+      - put: { resource: jobqueue }
+    output:
+      jobQueueName: rec.jobQueueName
+      jobQueueArn: rec.jobQueueArn
+
+  DescribeJobQueues:
+    list: { resource: jobqueue, member: jobQueues, paginate: model }
+
+  DeleteJobQueue:
+    effects:
+      - delete: { resource: jobqueue, key: "string(input.jobQueue)", missing: ignore }
+
+  RegisterJobDefinition:
+    effects:
+      - put: { resource: jobdefinition }
+    output:
+      jobDefinitionName: rec.jobDefinitionName
+      jobDefinitionArn: rec.jobDefinitionArn
+      revision: rec.revision
+
+  DescribeJobDefinitions:
+    list: { resource: jobdefinition, member: jobDefinitions, paginate: model }
+
+  DeregisterJobDefinition:
+    effects:
+      - delete: { resource: jobdefinition, key: "string(input.jobDefinition)", missing: ignore }
+
+  SubmitJob:
+    effects:
+      - create: { resource: job }
+    output:
+      jobId: rec.jobId
+      jobName: rec.jobName
+
+  # Every job is described, whatever ids were asked for.
+  DescribeJobs:
+    list: { resource: job, member: jobs }
+
+  # JobSummary declares no jobQueue, so the summarised form of a job is not the
+  # stored record.
+  ListJobs:
+    list: { resource: job, member: jobSummaryList, paginate: model }
+    output:
+      jobSummaryList: >
+        items.map(j, {
+          'jobId': j.jobId,
+          'jobName': j.jobName,
+          'status': j.status
+        })
+
+  # Terminating deletes the job rather than moving it to FAILED, so a
+  # terminated job cannot be described at all.
+  TerminateJob:
+    effects:
+      - delete: { resource: job, key: "string(input.jobId)", missing: ignore }
+
+quirks:
+  - operation: SubmitJob
+    note: >
+      A job is SUCCEEDED the moment it is submitted, so nothing ever observes
+      SUBMITTED, RUNNABLE, STARTING or RUNNING, and a caller that polls for
+      completion gets it on the first poll. jobDefinition and startedAt are
+      required on a JobDetail and neither is set, so the job that is answered
+      for names no definition and never started. jobArn is declared on the
+      submit answer and absent. Neither jobQueue nor jobDefinition is checked
+      against an existing one, so a job can be submitted to a queue that does
+      not exist.
+  - operation: ListJobs
+    note: >
+      A summarised job carries no jobQueue, because JobSummary declares none,
+      while the same job described carries one. The pack emitted the stored
+      record in both, so the summary carried a member no SDK could read, and
+      the recorded step is superseded with that reason.
+  - operation: DescribeJobs
+    note: >
+      The required jobs list is ignored: every job in the account and region is
+      described, not the ones asked about. ListJobs ignores jobQueue and
+      jobStatus for the same reason. TerminateJob's required reason is ignored
+      too -- and it deletes the job rather than recording a failure, so the
+      audit trail the real service keeps does not exist here.
+  - operation: RegisterJobDefinition
+    note: >
+      Every registration is revision 1 and overwrites the previous definition
+      of that name, so a job definition has no revision history and the ARN
+      always ends in :1. The required type, and containerProperties with it,
+      are dropped: a definition names no image and no resources. status is
+      declared and never set, so nothing is ever INACTIVE.
+  - operation: CreateComputeEnvironment
+    note: >
+      A compute environment is ENABLED and VALID with no computeResources and
+      no serviceRole, both dropped, and the required type is dropped too -- so
+      a MANAGED environment is indistinguishable from an UNMANAGED one. A job
+      queue is the same: computeEnvironmentOrder is dropped, so a queue is
+      backed by nothing, and the required priority is not stored, though
+      JobQueueDetail declares both as required.

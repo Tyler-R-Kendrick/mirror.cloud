@@ -1,0 +1,119 @@
+schema: bir/1
+service: aws.appmesh
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No traffic is meshed: a mesh and a virtual node are records that
+# are ACTIVE the moment they are created, with no spec and no backends.
+provenance: authored
+
+resources:
+  mesh:
+    collection: ammesh
+    id:
+      input_members: [meshName]
+    arn: "arn:{partition}:appmesh:{region}:{account}:mesh/{id}"
+    record:
+      meshName: id
+      arn: arn
+      meshOwner: "identity.account"
+      status: "{'status': 'ACTIVE'}"
+
+  # A virtual node belongs to a mesh and is addressed by both names together,
+  # which is how the pack keyed it.
+  virtualnode:
+    collection: amvn
+    id:
+      derive: "string(input.meshName) + '/' + string(input.virtualNodeName)"
+    record:
+      meshName: "string(input.meshName)"
+      virtualNodeName: "string(input.virtualNodeName)"
+      status: "{'status': 'ACTIVE'}"
+
+errors:
+  BadRequest:
+    code: BadRequestException
+    http: 400
+    fault: client
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  # MeshData declares meshName, metadata, spec and status. The arn and
+  # meshOwner the pack answered with belong inside metadata, so at the top of
+  # the answer they were members no SDK could read; they stay on the record,
+  # where the listing reads them.
+  CreateMesh:
+    require:
+      - { cond: "string(input.meshName) != ''", error: BadRequest }
+    effects:
+      - put: { resource: mesh }
+    output:
+      mesh: "{'meshName': rec.meshName, 'status': rec.status}"
+
+  DescribeMesh:
+    reads:
+      m: { resource: mesh }
+    require:
+      - { cond: m_found, error: NotFound }
+    output:
+      mesh: "{'meshName': m.meshName, 'status': m.status}"
+
+  # MeshRef declares no status, so the listed form is not the stored record.
+  ListMeshes:
+    list: { resource: mesh, member: meshes, paginate: model }
+    output:
+      meshes: >
+        items.map(m, {
+          'meshName': m.meshName,
+          'arn': m.arn,
+          'meshOwner': m.meshOwner,
+          'resourceOwner': m.meshOwner
+        })
+
+  DeleteMesh:
+    effects:
+      - delete: { resource: mesh, missing: ignore }
+    output: {}
+
+  CreateVirtualNode:
+    effects:
+      - put: { resource: virtualnode }
+    output:
+      virtualNode: rec
+
+  DescribeVirtualNode:
+    reads:
+      vn: { resource: virtualnode }
+    require:
+      - { cond: vn_found, error: NotFound }
+    output:
+      virtualNode: vn
+
+  DeleteVirtualNode:
+    effects:
+      - delete: { resource: virtualnode, missing: ignore }
+    output: {}
+
+quirks:
+  - operation: CreateMesh
+    note: >
+      The pack answered a mesh with arn and meshOwner at the top of the
+      structure. MeshData declares meshName, metadata, spec and status only --
+      the ARN and the owner live inside metadata -- so those were members no
+      SDK could read. The declared shape outranks the pack's authored
+      behavior, so they are dropped from the answer and the recorded steps are
+      superseded with that reason. Nothing here fills in metadata, because a
+      probe should say what its createdAt, version and uid actually contain.
+  - operation: DeleteMesh
+    note: >
+      Deleting answers with nothing where the model declares the deleted mesh
+      or virtual node as a required member, and deleting an absent one
+      succeeds. Deleting a mesh leaves its virtual nodes behind: nothing
+      cascades, so a node can name a mesh that is gone.
+  - operation: CreateVirtualNode
+    note: >
+      spec is required by the model and is not stored, so a virtual node has
+      no listeners, no backends and no service discovery -- it is a name in a
+      mesh. Nothing checks that the mesh it names exists.

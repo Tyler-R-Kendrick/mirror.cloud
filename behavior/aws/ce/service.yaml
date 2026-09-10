@@ -1,0 +1,133 @@
+schema: bir/1
+service: aws.ce
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing costs anything: every cost report is the same zero-dollar
+# day in January 2020, whatever was asked for.
+provenance: authored
+
+resources:
+  # Addressed by ARN everywhere but creation, so the ARN is the store key. The
+  # pack keyed on the name and recovered it from the ARN's last segment, which
+  # answers the same way for every ARN it built itself.
+  monitor:
+    collection: cemon
+    key: MonitorArn
+    id:
+      derive: >
+        'AnomalyMonitor' in input && 'MonitorName' in input.AnomalyMonitor
+          ? string(input.AnomalyMonitor.MonitorName)
+          : ''
+    # The Cost Explorer ARN carries no region: the service is global, and this
+    # is the pack's shape.
+    arn: "arn:{partition}:ce::{account}:anomalymonitor/{id}"
+    record:
+      MonitorName: id
+      MonitorArn: arn
+      MonitorType: "'CUSTOM'"
+
+  costcategory:
+    collection: cecc
+    key: CostCategoryArn
+    id:
+      input_members: [Name]
+    arn: "arn:{partition}:ce::{account}:costcategory/{id}"
+    record:
+      Name: id
+      CostCategoryArn: arn
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateAnomalyMonitor:
+    effects:
+      - put: { resource: monitor }
+    output:
+      MonitorArn: rec.MonitorArn
+
+  # Named or not: one monitor when MonitorArnList names one, the page when it
+  # does not.
+  GetAnomalyMonitors:
+    list:
+      resource: monitor
+      member: AnomalyMonitors
+      key: "'MonitorArn' in input ? string(input.MonitorArn) : ''"
+      paginate: model
+
+  DeleteAnomalyMonitor:
+    effects:
+      - delete: { resource: monitor, key: "string(input.MonitorArn)", missing: ignore }
+
+  CreateCostCategoryDefinition:
+    effects:
+      - put: { resource: costcategory }
+    output:
+      CostCategoryArn: rec.CostCategoryArn
+
+  DescribeCostCategoryDefinition:
+    reads:
+      c: { resource: costcategory, key: "string(input.CostCategoryArn)" }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      CostCategory: c
+
+  DeleteCostCategoryDefinition:
+    effects:
+      - delete: { resource: costcategory, key: "string(input.CostCategoryArn)", missing: ignore }
+
+  GetCostAndUsage:
+    output:
+      ResultsByTime: >
+        [{
+          'TimePeriod': {'Start': '2020-01-01', 'End': '2020-01-02'},
+          'Total': {'UnblendedCost': {'Amount': '0', 'Unit': 'USD'}}
+        }]
+
+quirks:
+  - operation: GetCostAndUsage
+    note: >
+      Every cost report is the same single day -- 1 January 2020, zero dollars
+      unblended -- whatever TimePeriod, Granularity, Metrics, GroupBy or Filter
+      was asked for. The required TimePeriod and Metrics are read by nothing.
+      This is a constant, not a report: a caller's code path runs, and its
+      assertions mean nothing. DimensionValueAttributes, GroupDefinitions and
+      NextPageToken are declared and never set, so nothing paginates.
+  - operation: CreateAnomalyMonitor
+    note: >
+      A monitor's name is read out of the nested AnomalyMonitor structure,
+      which is where the model puts it, and everything else in that structure
+      is dropped: MonitorDimension, MonitorSpecification and the frequency are
+      all gone, so the monitor watches nothing. Every monitor is CUSTOM
+      whatever type was asked for, and no anomaly is ever detected -- there is
+      no GetAnomalies here, so a monitor produces nothing to read.
+      CreationDate, LastUpdatedDate and DimensionalValueCount are declared and
+      never set.
+  - operation: CreateCostCategoryDefinition
+    note: >
+      A cost category is a name and an ARN. The required RuleVersion and Rules
+      are dropped, so the category classifies nothing, and EffectiveStart,
+      EffectiveEnd, DefaultValue and SplitChargeRules are declared and never
+      set. There is no UpdateCostCategoryDefinition here, so a category can
+      never gain rules later either. Creating one that already exists
+      overwrites it rather than faulting.
+  - operation: DeleteAnomalyMonitor
+    note: >
+      Deleting an absent monitor or cost category succeeds where describing it
+      faults, and both deletes answer with nothing where
+      DeleteCostCategoryDefinition declares a CostCategoryArn and an
+      EffectiveEnd. GetAnomalyMonitors ignores MonitorTypes entirely.
+  - operation: GetAnomalyMonitors
+    note: >
+      The Cost Explorer ARNs built here carry an empty region segment, because
+      the service is global and that is the shape the pack produced. Whether
+      the real service's ARNs match is a probe away; nothing here parses them
+      beyond using them whole as a key.

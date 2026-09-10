@@ -1,0 +1,355 @@
+schema: bir/1
+service: aws.iot
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing connects: no device can attach, no message is routed, no
+# job is delivered, and the certificate a caller is handed is the same string
+# every time and is signed by nothing.
+provenance: authored
+
+resources:
+  thing:
+    collection: iotthing
+    id:
+      input_members: [thingName]
+    arn: "arn:{partition}:iot:{region}:{account}:thing/{id}"
+    record:
+      thingName: id
+      thingArn: arn
+
+  thingtype:
+    collection: iottt
+    id:
+      input_members: [thingTypeName]
+    arn: "arn:{partition}:iot:{region}:{account}:thingtype/{id}"
+    record:
+      thingTypeName: id
+      thingTypeArn: arn
+
+  policy:
+    collection: iotpol
+    id:
+      input_members: [policyName]
+    arn: "arn:{partition}:iot:{region}:{account}:policy/{id}"
+    record:
+      policyName: id
+      policyArn: arn
+
+  rule:
+    collection: iotrule
+    id:
+      input_members: [ruleName]
+    record:
+      ruleName: id
+
+  job:
+    collection: iotjob
+    id:
+      input_members: [jobId]
+    arn: "arn:{partition}:iot:{region}:{account}:job/{id}"
+    record:
+      jobId: id
+      # The pack built this ARN inline in CreateJob's answer and stored none,
+      # so DescribeJob and ListJobs answered a job with no ARN -- which both
+      # Job and JobSummary declare. Storing it is what lets them answer it.
+      jobArn: arn
+
+  # A certificate is the only thing here with an identifier the caller does not
+  # choose, and the only record whose stored shape differs from the answer:
+  # the PEM and the key pair are handed over once and never kept, so nothing
+  # can hand them out again.
+  certificate:
+    collection: iotcert
+    id:
+      generate: { kind: hex, bytes: 16 }
+      input_members: [certificateId]
+    arn: "arn:{partition}:iot:{region}:{account}:cert/{id}"
+    record:
+      certificateId: id
+      certificateArn: arn
+      status: "'ACTIVE'"
+
+  # Principals are scoped to their thing, so detaching one from a thing leaves
+  # it attached to any other.
+  principal:
+    collection: "iotprin:{thing.id}"
+    parent: thing
+    id:
+      input_members: [principal]
+    record:
+      principal: id
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateThing:
+    effects:
+      - put:
+          resource: thing
+          record:
+            thingTypeName: "'thingTypeName' in input ? string(input.thingTypeName) : ''"
+    output:
+      thingName: rec.thingName
+      thingArn: rec.thingArn
+
+  DescribeThing:
+    reads:
+      t: { resource: thing }
+    require:
+      - { cond: t_found, error: NotFound }
+    output:
+      thingName: t.thingName
+      thingArn: t.thingArn
+      thingTypeName: t.thingTypeName
+
+  ListThings:
+    list: { resource: thing, member: things, paginate: model }
+
+  # Only the thing type can be changed, and only to a non-empty value: every
+  # other member the model accepts on an update is ignored.
+  UpdateThing:
+    reads:
+      t: { resource: thing }
+    require:
+      - { cond: t_found, error: NotFound }
+    effects:
+      - patch:
+          resource: thing
+          record:
+            thingTypeName: >
+              'thingTypeName' in input && string(input.thingTypeName) != ''
+                ? string(input.thingTypeName)
+                : ('thingTypeName' in t ? t.thingTypeName : '')
+
+  DeleteThing:
+    effects:
+      - delete: { resource: thing, missing: ignore }
+
+  CreateThingType:
+    effects:
+      - put: { resource: thingtype }
+    output:
+      thingTypeName: rec.thingTypeName
+      thingTypeArn: rec.thingTypeArn
+
+  DescribeThingType:
+    reads:
+      tt: { resource: thingtype }
+    require:
+      - { cond: tt_found, error: NotFound }
+    output:
+      thingTypeName: tt.thingTypeName
+      thingTypeArn: tt.thingTypeArn
+
+  ListThingTypes:
+    list: { resource: thingtype, member: thingTypes, paginate: model }
+
+  DeleteThingType:
+    effects:
+      - delete: { resource: thingtype, missing: ignore }
+
+  CreatePolicy:
+    effects:
+      - put:
+          resource: policy
+          record:
+            policyDocument: "'policyDocument' in input ? string(input.policyDocument) : ''"
+    output:
+      policyName: rec.policyName
+      policyArn: rec.policyArn
+      policyDocument: rec.policyDocument
+
+  GetPolicy:
+    reads:
+      p: { resource: policy }
+    require:
+      - { cond: p_found, error: NotFound }
+    output:
+      policyName: p.policyName
+      policyArn: p.policyArn
+      policyDocument: p.policyDocument
+
+  # A listed policy carries a name and an ARN. The document is stored -- the
+  # pack answered it here too -- and Policy does not declare it.
+  ListPolicies:
+    list: { resource: policy, member: policies, paginate: model }
+    output:
+      policies: "items.map(p, {'policyName': p.policyName, 'policyArn': p.policyArn})"
+
+  DeletePolicy:
+    effects:
+      - delete: { resource: policy, missing: ignore }
+
+  CreateTopicRule:
+    effects:
+      - put:
+          resource: rule
+          record:
+            topicRulePayload: "'topicRulePayload' in input ? input.topicRulePayload : {}"
+
+  # The stored payload is the rule: its members are TopicRule's members, so the
+  # answer is the payload with the name the caller addressed it by laid on top.
+  GetTopicRule:
+    reads:
+      r: { resource: rule }
+    require:
+      - { cond: r_found, error: NotFound }
+    output:
+      rule: "merge({'ruleName': r.ruleName}, 'topicRulePayload' in r ? r.topicRulePayload : {})"
+
+  ListTopicRules:
+    list: { resource: rule, member: rules, paginate: model }
+    output:
+      rules: "items.map(r, {'ruleName': r.ruleName})"
+
+  DeleteTopicRule:
+    effects:
+      - delete: { resource: rule, missing: ignore }
+
+  CreateJob:
+    effects:
+      - put:
+          resource: job
+          record:
+            status: "'IN_PROGRESS'"
+            targets: "'targets' in input ? input.targets : []"
+            document: "'document' in input ? string(input.document) : ''"
+    output:
+      jobId: rec.jobId
+      jobArn: rec.jobArn
+
+  DescribeJob:
+    reads:
+      j: { resource: job }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      job: >
+        {
+          'jobId': j.jobId,
+          'jobArn': j.jobArn,
+          'status': j.status,
+          'targets': 'targets' in j ? j.targets : [],
+        }
+
+  ListJobs:
+    list: { resource: job, member: jobs, paginate: model }
+    output:
+      jobs: >
+        items.map(j, {
+          'jobId': j.jobId,
+          'jobArn': j.jobArn,
+          'status': j.status,
+        })
+
+  DeleteJob:
+    effects:
+      - delete: { resource: job, missing: ignore }
+
+  # The PEM and the private key are minted here and stored nowhere, so this is
+  # the only call that ever sees them -- see the quirk.
+  CreateKeysAndCertificate:
+    effects:
+      - create: { resource: certificate }
+    output:
+      certificateId: rec.certificateId
+      certificateArn: rec.certificateArn
+      certificatePem: "'-----BEGIN CERTIFICATE-----\\nMIRROR\\n-----END CERTIFICATE-----'"
+      keyPair: >
+        {
+          'PublicKey': '-----BEGIN PUBLIC KEY-----\nMIRROR\n-----END PUBLIC KEY-----',
+          'PrivateKey': 'mirror-private-key-' + rec.certificateId,
+        }
+
+  DescribeCertificate:
+    reads:
+      c: { resource: certificate }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      certificateDescription: >
+        {
+          'certificateId': c.certificateId,
+          'certificateArn': c.certificateArn,
+          'status': c.status,
+        }
+
+  ListCertificates:
+    list: { resource: certificate, member: certificates, paginate: model }
+
+  DeleteCertificate:
+    effects:
+      - delete: { resource: certificate, missing: ignore }
+
+  AttachThingPrincipal:
+    reads:
+      thing: { resource: thing }
+    effects:
+      - put: { resource: principal }
+
+  ListThingPrincipals:
+    reads:
+      thing: { resource: thing }
+    list: { resource: principal, member: principals, paginate: model }
+    output:
+      principals: "items.map(p, string(p.principal))"
+
+  DetachThingPrincipal:
+    reads:
+      thing: { resource: thing }
+    effects:
+      - delete: { resource: principal, missing: ignore }
+
+quirks:
+  - operation: CreateKeysAndCertificate
+    note: >
+      Every certificate is the same PEM and the same public key, and the
+      private key is the string "mirror-private-key-" with the certificate id
+      after it. Nothing is signed and nothing verifies, so a device configured
+      with these credentials authenticates against nothing -- there is no MQTT
+      endpoint here to authenticate to. setAsActive is ignored: a certificate
+      is ACTIVE either way.
+  - operation: DescribeCertificate
+    note: >
+      A certificate answers only its id, ARN and status. The real service also
+      carries the PEM, the creation and modification dates, the owner and the
+      validity window, none of which is stored -- the PEM is handed over once
+      by CreateKeysAndCertificate and kept nowhere, so a caller that did not
+      save it cannot get it back.
+  - operation: AttachThingPrincipal
+    note: >
+      A principal is any string. Neither the certificate nor the policy it
+      names is checked to exist, so a thing can be attached to a certificate
+      that was never created. Principals are scoped to their thing, which is
+      right, but nothing reads them: no policy is ever evaluated.
+  - operation: CreateTopicRule
+    note: >
+      A rule stores its payload and routes nothing. The SQL is not parsed, the
+      actions are not checked to name anything that exists, and no message ever
+      matches -- there is no message broker here. A listed rule carries only
+      its name: TopicRuleListItem declares a ruleArn, a createdAt and a
+      ruleDisabled that are not stored.
+  - operation: CreateJob
+    note: >
+      A job is IN_PROGRESS the instant it is created and stays there for ever.
+      Nothing executes it, no target is checked to exist, and there are no job
+      executions at all -- so DescribeJobExecution, which is not served, would
+      have nothing to answer. The document is stored and never read.
+  - operation: UpdateThing
+    note: >
+      Only thingTypeName can be changed, and only to a non-empty value.
+      attributePayload is accepted and discarded, so DescribeThing never
+      answers attributes; removeThingType is ignored, so a thing type cannot be
+      taken off once set; and expectedVersion is ignored, so the optimistic
+      concurrency it exists for does not happen -- no version is stored, and
+      DescribeThing answers none.
+  - operation: CreateThing
+    note: >
+      A thing is created with whatever thingTypeName the caller sent, and the
+      type is not checked to exist. No thingId is assigned, which CreateThing
+      and DescribeThing both declare, so a caller keying off thingId gets
+      nothing.

@@ -1,0 +1,145 @@
+schema: bir/1
+service: aws.rekognition
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no computer vision here: every image is accepted without
+# being looked at, and every detection is a constant.
+provenance: authored
+
+resources:
+  collection:
+    collection: rkcol
+    id:
+      input_members: [CollectionId]
+    arn: "arn:{partition}:rekognition:{region}:{account}:collection/{id}"
+    record:
+      CollectionId: id
+      CollectionARN: arn
+      FaceCount: "0"
+
+  # The pack kept faces in a store collection named per Rekognition collection,
+  # so one collection's faces could not appear in another's search. The
+  # relationship is a member here and the search filters on it, which is the
+  # same containment expressed as data rather than as a key prefix.
+  face:
+    collection: rkface
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      FaceId: id
+      CollectionId: "string(input.CollectionId)"
+
+errors:
+  InvalidParameter:
+    code: InvalidParameterException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateCollection:
+    effects:
+      - put: { resource: collection }
+    output:
+      StatusCode: "200"
+      CollectionArn: rec.CollectionARN
+
+  DescribeCollection:
+    reads:
+      c: { resource: collection }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      CollectionARN: c.CollectionARN
+      FaceCount: c.FaceCount
+
+  ListCollections:
+    list: { resource: collection, member: CollectionIds, paginate: model }
+    output:
+      CollectionIds: "items.map(c, string(c.CollectionId))"
+
+  DeleteCollection:
+    effects:
+      - delete: { resource: collection, missing: ignore }
+    output:
+      StatusCode: "200"
+
+  # A face is indexed without the image being read, so every face in a
+  # collection is identical but for its identifier.
+  IndexFaces:
+    effects:
+      - create: { resource: face }
+    output:
+      FaceRecords: "[{'Face': {'FaceId': id}}]"
+
+  SearchFacesByImage:
+    list:
+      resource: face
+      member: FaceMatches
+      filter: "string(item.CollectionId) == string(input.CollectionId)"
+    output:
+      FaceMatches: >
+        items.map(f, {'Face': {'FaceId': f.FaceId}, 'Similarity': 99.0})
+
+  DetectLabels:
+    output:
+      Labels: "[{'Name': 'Person', 'Confidence': 99.0}]"
+
+  DetectFaces:
+    output:
+      FaceDetails: "[{'Confidence': 99.0}]"
+
+  DetectText:
+    output:
+      TextDetections: "[{'DetectedText': 'HELLO', 'Confidence': 99.0, 'Type': 'LINE'}]"
+
+  DetectModerationLabels:
+    output:
+      ModerationLabels: "[]"
+
+quirks:
+  - operation: DescribeCollection
+    note: >
+      The pack answered with the record it stored, which carries CollectionId.
+      DescribeCollectionResponse declares CollectionARN, FaceCount,
+      FaceModelVersion, CreationTimestamp and UserCount, and no CollectionId at
+      all, so the pack's answer carried a member no SDK could read. The
+      declared shape outranks the pack's authored behavior and the recorded
+      step is superseded with that reason. FaceModelVersion, CreationTimestamp
+      and UserCount are still unset: the pack never had them, and inventing a
+      model version is exactly the guess a probe should replace.
+  - operation: IndexFaces
+    note: >
+      Face declares no CollectionId, and the pack stored one on the face and
+      answered with it, inside FaceRecords and again inside FaceMatches. The
+      member is kept in the record -- the search needs it, and it is what the
+      pack got from a per-collection store -- but it is projected away on the
+      way out, and both recorded steps are superseded with that reason.
+
+      A face carries no BoundingBox, Confidence, ImageId or ExternalImageId,
+      and no FaceDetail is returned beside it, because no image is ever read.
+      UnindexedFaces is always absent, so nothing is ever rejected for quality.
+  - operation: SearchFacesByImage
+    note: >
+      Every face in the collection matches at 99% similarity, whatever image
+      was searched for and whatever FaceMatchThreshold or MaxFaces was asked
+      for. Searching a collection that does not exist answers with an empty
+      list rather than faulting; the real service faults, and that is a probe
+      away.
+  - operation: DetectLabels
+    note: >
+      Every image contains one Person at 99% confidence, every image has one
+      face at 99% confidence, every image reads HELLO, and no image is ever
+      moderated. MinConfidence, MaxLabels and Features are ignored. These are
+      constants, not detections, and the operations exist so that a caller's
+      code path runs rather than so that its assertions mean anything.
+  - operation: CreateCollection
+    note: >
+      A collection's FaceCount is zero and stays zero: indexing a face does not
+      increment it, so DescribeCollection disagrees with the faces
+      SearchFacesByImage can find. That is the pack's behavior. Tags are
+      accepted and dropped, and creating a collection that already exists
+      overwrites it rather than faulting.

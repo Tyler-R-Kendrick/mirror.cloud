@@ -1,0 +1,106 @@
+schema: bir/1
+service: aws.identitystore
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No directory is backing this: a user is a name and a group a
+# display name, and no user is ever a member of a group.
+provenance: authored
+
+resources:
+  user:
+    collection: isuser
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [UserId]
+    record:
+      UserId: id
+      IdentityStoreId: "'IdentityStoreId' in input ? string(input.IdentityStoreId) : ''"
+      UserName: "'UserName' in input ? string(input.UserName) : ''"
+
+  group:
+    collection: isgrp
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [GroupId]
+    record:
+      GroupId: id
+      IdentityStoreId: "'IdentityStoreId' in input ? string(input.IdentityStoreId) : ''"
+      DisplayName: "'DisplayName' in input ? string(input.DisplayName) : ''"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateUser:
+    effects:
+      - create: { resource: user }
+    output:
+      UserId: rec.UserId
+      IdentityStoreId: rec.IdentityStoreId
+
+  DescribeUser:
+    reads:
+      u: { resource: user }
+    require:
+      - { cond: u_found, error: NotFound }
+    output:
+      UserId: u.UserId
+      IdentityStoreId: u.IdentityStoreId
+      UserName: u.UserName
+
+  ListUsers:
+    list: { resource: user, member: Users, paginate: model }
+
+  DeleteUser:
+    effects:
+      - delete: { resource: user, missing: ignore }
+
+  CreateGroup:
+    effects:
+      - create: { resource: group }
+    output:
+      GroupId: rec.GroupId
+      IdentityStoreId: rec.IdentityStoreId
+
+  DescribeGroup:
+    reads:
+      g: { resource: group }
+    require:
+      - { cond: g_found, error: NotFound }
+    output:
+      GroupId: g.GroupId
+      IdentityStoreId: g.IdentityStoreId
+      DisplayName: g.DisplayName
+
+  ListGroups:
+    list: { resource: group, member: Groups, paginate: model }
+
+  DeleteGroup:
+    effects:
+      - delete: { resource: group, missing: ignore }
+
+quirks:
+  - operation: ListUsers
+    note: >
+      IdentityStoreId is required on every operation and is stored on the
+      record without being used to scope anything: users and groups are kept
+      per account and region, so listing with one identity store id answers
+      with the users of every store in that account. Scoping them is a
+      collection-template change, and a probe should first say whether a
+      request naming an unknown store faults.
+  - operation: CreateUser
+    note: >
+      A user is a UserId, an IdentityStoreId and a UserName. Emails, Name,
+      DisplayName and the rest of what User declares are neither read nor
+      stored, so DescribeUser answers with three members out of twenty-six.
+  - operation: CreateGroup
+    note: >
+      No user is ever a member of a group: there is no membership operation
+      here at all, so a group is a display name with nothing in it.
+  - operation: DeleteUser
+    note: >
+      Deleting an absent user or group succeeds, where describing the same one
+      faults. The real service faults on both.

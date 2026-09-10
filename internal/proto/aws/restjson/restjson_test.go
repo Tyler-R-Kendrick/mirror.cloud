@@ -130,13 +130,21 @@ func TestRESTJSONActionAndModeledRoutes(t *testing.T) {
 			}
 		}
 	}
+	// A restJson1 request is addressed by its path. An operation the model
+	// gives no URI cannot be reached by one, however its method lines up:
+	// routing on the method alone answered every GET a service served with
+	// whichever GET the model listed first.
 	svc := &model.Service{ID: "custom", Operations: []model.Operation{
 		{Name: "ByMethod", HTTP: model.HTTPBinding{Method: http.MethodGet}},
+		{Name: "ByPath", HTTP: model.HTTPBinding{Method: http.MethodGet, URI: "/anything"}},
 		{Name: "ByTarget"},
 	}}
 	op, err := codec.Route(svc, httptest.NewRequest(http.MethodGet, "/anything", nil))
-	if err != nil || op.Name != "ByMethod" {
-		t.Fatalf("method route %#v %v", op, err)
+	if err != nil || op.Name != "ByPath" {
+		t.Fatalf("path route %#v %v", op, err)
+	}
+	if op, err := codec.Route(svc, httptest.NewRequest(http.MethodGet, "/elsewhere", nil)); err == nil {
+		t.Fatalf("a path no operation claims routed to %#v", op)
 	}
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
 	request.Header.Set("X-Amz-Target", "Custom.ByTarget")
@@ -154,6 +162,22 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	decoded, err := codec.Decode(svc, op, request)
 	if err != nil || decoded.Input["body"] != "json" || decoded.Input["extra"] != "value" {
 		t.Fatalf("decode %#v %v", decoded, err)
+	}
+
+	// The path is part of the input. DeleteDetector is `DELETE
+	// /detector/{DetectorId}` and carries no body at all, so an input built
+	// from body and query alone names no detector.
+	pathOp := &model.Operation{
+		Name: "GetFilter",
+		HTTP: model.HTTPBinding{Method: http.MethodGet, URI: "/detector/{DetectorId}/filter/{FilterName}"},
+	}
+	decoded, err = codec.Decode(svc, pathOp,
+		httptest.NewRequest(http.MethodGet, "/detector/d-1/filter/f%2F1", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Input["DetectorId"] != "d-1" || decoded.Input["FilterName"] != "f/1" {
+		t.Fatalf("path members %#v", decoded.Input)
 	}
 
 	w := httptest.NewRecorder()

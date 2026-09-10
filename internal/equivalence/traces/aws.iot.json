@@ -1,0 +1,921 @@
+{
+  "schema": "trace/1",
+  "service": "aws.iot",
+  "source": "pack:internal/services/aws/iot@044d803e",
+  "note": "Things, types, policies, rules, jobs, the certificate handed over once, and the principals scoped to their thing.",
+  "steps": [
+    {
+      "operation": "ListThings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "things": null
+      }
+    },
+    {
+      "operation": "CreateThingType",
+      "input": {
+        "thingTypeName": "sensor"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingTypeArn": "arn:aws:iot:us-east-1:000000000000:thingtype/sensor",
+        "thingTypeName": "sensor"
+      }
+    },
+    {
+      "operation": "DescribeThingType",
+      "input": {
+        "thingTypeName": "sensor"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingTypeArn": "arn:aws:iot:us-east-1:000000000000:thingtype/sensor",
+        "thingTypeName": "sensor"
+      }
+    },
+    {
+      "operation": "ListThingTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingTypes": [
+          {
+            "thingTypeArn": "arn:aws:iot:us-east-1:000000000000:thingtype/sensor",
+            "thingTypeName": "sensor"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeThingType",
+      "input": {
+        "thingTypeName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateThing",
+      "input": {
+        "thingName": "probe-1",
+        "thingTypeName": "sensor"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-1",
+        "thingName": "probe-1",
+        "thingTypeName": "sensor"
+      },
+      "superseded_members": {
+        "thingTypeName": "CreateThingResponse declares thingArn, thingId and thingName. The pack answered the stored record, which also carries the thingTypeName the caller sent, so that member was one no SDK could read off a create. The bundle stores it -- DescribeThingResponse does declare it, and the recording shows DescribeThing answering it -- and answers only what the create declares. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "CreateThing",
+      "input": {
+        "thingName": "probe-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-2",
+        "thingName": "probe-2",
+        "thingTypeName": ""
+      },
+      "superseded_members": {
+        "thingTypeName": "CreateThingResponse declares thingArn, thingId and thingName. The pack answered the stored record, which also carries the thingTypeName the caller sent, so that member was one no SDK could read off a create. The bundle stores it -- DescribeThingResponse does declare it, and the recording shows DescribeThing answering it -- and answers only what the create declares. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "DescribeThing",
+      "input": {
+        "thingName": "probe-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-1",
+        "thingName": "probe-1",
+        "thingTypeName": "sensor"
+      }
+    },
+    {
+      "operation": "DescribeThing",
+      "input": {
+        "thingName": "probe-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-2",
+        "thingName": "probe-2",
+        "thingTypeName": ""
+      }
+    },
+    {
+      "operation": "ListThings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "things": [
+          {
+            "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-1",
+            "thingName": "probe-1",
+            "thingTypeName": "sensor"
+          },
+          {
+            "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-2",
+            "thingName": "probe-2",
+            "thingTypeName": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeThing",
+      "input": {
+        "thingName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateThing",
+      "input": {
+        "thingName": "probe-2",
+        "thingTypeName": "sensor"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeThing",
+      "input": {
+        "thingName": "probe-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-2",
+        "thingName": "probe-2",
+        "thingTypeName": "sensor"
+      }
+    },
+    {
+      "operation": "UpdateThing",
+      "input": {
+        "thingName": "probe-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeThing",
+      "input": {
+        "thingName": "probe-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-2",
+        "thingName": "probe-2",
+        "thingTypeName": "sensor"
+      }
+    },
+    {
+      "operation": "UpdateThing",
+      "input": {
+        "thingName": "absent",
+        "thingTypeName": "sensor"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePolicy",
+      "input": {
+        "policyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"iot:Publish\"}]}",
+        "policyName": "allow-publish"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyArn": "arn:aws:iot:us-east-1:000000000000:policy/allow-publish",
+        "policyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"iot:Publish\"}]}",
+        "policyName": "allow-publish"
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "policyName": "allow-publish"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyArn": "arn:aws:iot:us-east-1:000000000000:policy/allow-publish",
+        "policyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"iot:Publish\"}]}",
+        "policyName": "allow-publish"
+      }
+    },
+    {
+      "operation": "ListPolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policies": [
+          {
+            "policyArn": "arn:aws:iot:us-east-1:000000000000:policy/allow-publish",
+            "policyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"iot:Publish\"}]}",
+            "policyName": "allow-publish"
+          }
+        ]
+      },
+      "superseded_members": {
+        "policies[0].policyDocument": "A listed policy declares policyArn and policyName and nothing else. The pack answered the whole stored record, whose policyDocument is declared on GetPolicy and not here, so it was a member no SDK could read off a listing. GetPolicy still answers it, and the row count and order are still compared."
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "policyName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeletePolicy",
+      "input": {
+        "policyName": "allow-publish"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policies": null
+      }
+    },
+    {
+      "operation": "CreateTopicRule",
+      "input": {
+        "ruleName": "to_lambda",
+        "topicRulePayload": {
+          "actions": [
+            {
+              "lambda": {
+                "functionArn": "arn:aws:lambda:us-east-1:000000000000:function:f"
+              }
+            }
+          ],
+          "awsIotSqlVersion": "2016-03-23",
+          "sql": "SELECT * FROM 'sensors/#'"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTopicRule",
+      "input": {
+        "ruleName": "to_lambda"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ruleName": "to_lambda",
+        "topicRulePayload": {
+          "actions": [
+            {
+              "lambda": {
+                "functionArn": "arn:aws:lambda:us-east-1:000000000000:function:f"
+              }
+            }
+          ],
+          "awsIotSqlVersion": "2016-03-23",
+          "sql": "SELECT * FROM 'sensors/#'"
+        }
+      },
+      "superseded_members": {
+        "rule": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "ruleName": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "topicRulePayload": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared."
+      }
+    },
+    {
+      "operation": "ListTopicRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "rules": [
+          {
+            "ruleName": "to_lambda",
+            "topicRulePayload": {
+              "actions": [
+                {
+                  "lambda": {
+                    "functionArn": "arn:aws:lambda:us-east-1:000000000000:function:f"
+                  }
+                }
+              ],
+              "awsIotSqlVersion": "2016-03-23",
+              "sql": "SELECT * FROM 'sensors/#'"
+            }
+          }
+        ]
+      },
+      "superseded_members": {
+        "rules[0].topicRulePayload": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared."
+      }
+    },
+    {
+      "operation": "GetTopicRule",
+      "input": {
+        "ruleName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteTopicRule",
+      "input": {
+        "ruleName": "to_lambda"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateJob",
+      "input": {
+        "document": "{\"operation\":\"reboot\"}",
+        "jobId": "rollout-7",
+        "targets": [
+          {
+            "$fromPath": "thingArn",
+            "$fromStep": 5
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobArn": "arn:aws:iot:us-east-1:000000000000:job/rollout-7",
+        "jobId": "rollout-7"
+      }
+    },
+    {
+      "operation": "DescribeJob",
+      "input": {
+        "jobId": "rollout-7"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "document": "{\"operation\":\"reboot\"}",
+        "jobId": "rollout-7",
+        "status": "IN_PROGRESS",
+        "targets": [
+          "arn:aws:iot:us-east-1:000000000000:thing/probe-1"
+        ]
+      },
+      "superseded_members": {
+        "document": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "job": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "jobId": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "status": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "targets": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared."
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobs": [
+          {
+            "document": "{\"operation\":\"reboot\"}",
+            "jobId": "rollout-7",
+            "status": "IN_PROGRESS",
+            "targets": [
+              "arn:aws:iot:us-east-1:000000000000:thing/probe-1"
+            ]
+          }
+        ]
+      },
+      "superseded_members": {
+        "jobs[0].document": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "jobs[0].jobArn": "The pack built a job's ARN inline in CreateJob's answer and stored none, so DescribeJob and ListJobs answered a job with no jobArn -- which both Job and JobSummary declare. The bundle stores it, so here it carries a member the shape says belongs and the recording does not have.",
+        "jobs[0].targets": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared."
+      }
+    },
+    {
+      "operation": "DescribeJob",
+      "input": {
+        "jobId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteJob",
+      "input": {
+        "jobId": "rollout-7"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobs": null
+      }
+    },
+    {
+      "operation": "CreateKeysAndCertificate",
+      "input": {
+        "setAsActive": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificateArn": "arn:aws:iot:us-east-1:000000000000:cert/7c5891299f6489f8",
+        "certificateId": "7c5891299f6489f8",
+        "certificatePem": "-----BEGIN CERTIFICATE-----\nMIRROR\n-----END CERTIFICATE-----",
+        "keyPair": {
+          "PrivateKey": "mirror-private-key-7c5891299f6489f8",
+          "PublicKey": "-----BEGIN PUBLIC KEY-----\nMIRROR\n-----END PUBLIC KEY-----"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "certificateId": {
+          "$fromPath": "certificateId",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificateArn": "arn:aws:iot:us-east-1:000000000000:cert/7c5891299f6489f8",
+        "certificateId": "7c5891299f6489f8",
+        "status": "ACTIVE"
+      },
+      "superseded_members": {
+        "certificateArn": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "certificateDescription": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "certificateId": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared.",
+        "status": "The pack answered the stored record flat where the operation declares a wrapper: GetTopicRule declares `rule`, DescribeJob declares `job`, DescribeCertificate declares `certificateDescription`, and the two listings declare TopicRuleListItem and JobSummary. So every member of the pack's answer was one no SDK could read, and the bundle projecting them into the declared shape diverges in both directions on every member. The stored state is the pack's; only the answer is reshaped. The number of rows and their order are still compared."
+      }
+    },
+    {
+      "operation": "ListCertificates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificates": [
+          {
+            "certificateArn": "arn:aws:iot:us-east-1:000000000000:cert/7c5891299f6489f8",
+            "certificateId": "7c5891299f6489f8",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "certificateId": "deadbeef"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AttachThingPrincipal",
+      "input": {
+        "principal": {
+          "$fromPath": "certificateArn",
+          "$fromStep": 33
+        },
+        "thingName": "probe-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AttachThingPrincipal",
+      "input": {
+        "principal": "arn:aws:iot:us-east-1:000000000000:cert/other",
+        "thingName": "probe-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListThingPrincipals",
+      "input": {
+        "thingName": "probe-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "principals": [
+          "arn:aws:iot:us-east-1:000000000000:cert/7c5891299f6489f8",
+          "arn:aws:iot:us-east-1:000000000000:cert/other"
+        ]
+      }
+    },
+    {
+      "operation": "ListThingPrincipals",
+      "input": {
+        "thingName": "probe-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "principals": null
+      }
+    },
+    {
+      "operation": "DetachThingPrincipal",
+      "input": {
+        "principal": "arn:aws:iot:us-east-1:000000000000:cert/other",
+        "thingName": "probe-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListThingPrincipals",
+      "input": {
+        "thingName": "probe-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "principals": [
+          "arn:aws:iot:us-east-1:000000000000:cert/7c5891299f6489f8"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCertificate",
+      "input": {
+        "certificateId": {
+          "$fromPath": "certificateId",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListCertificates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificates": null
+      }
+    },
+    {
+      "operation": "DeleteThing",
+      "input": {
+        "thingName": "probe-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListThings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "things": [
+          {
+            "thingArn": "arn:aws:iot:us-east-1:000000000000:thing/probe-2",
+            "thingName": "probe-2",
+            "thingTypeName": "sensor"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteThingType",
+      "input": {
+        "thingTypeName": "sensor"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListThingTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "thingTypes": null
+      }
+    }
+  ]
+}

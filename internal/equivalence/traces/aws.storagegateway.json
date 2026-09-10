@@ -1,0 +1,234 @@
+{
+  "schema": "trace/1",
+  "service": "aws.storagegateway",
+  "source": "pack:internal/services/aws/storagegateway@f910980",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListGateways",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Gateways": null
+      }
+    },
+    {
+      "operation": "ActivateGateway",
+      "input": {
+        "ActivationKey": "AK-gw-one",
+        "GatewayName": "gw-one",
+        "GatewayRegion": "us-east-1",
+        "GatewayTimezone": "GMT",
+        "GatewayType": "FILE_S3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GatewayARN": "arn:aws:storagegateway:us-east-1:000000000000:gateway/sgw-7c589129"
+      }
+    },
+    {
+      "operation": "ListGateways",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Gateways": [
+          {
+            "GatewayARN": "arn:aws:storagegateway:us-east-1:000000000000:gateway/sgw-7c589129",
+            "GatewayName": "gw-one",
+            "GatewayState": "RUNNING",
+            "GatewayType": "FILE_S3"
+          }
+        ]
+      },
+      "superseded": "The pack listed a gateway with GatewayState. GatewayInfo declares GatewayOperationalState and no GatewayState, so the listed record carried a member no SDK could read while the member the SDK does read was absent. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DescribeGatewayInformation",
+      "input": {
+        "GatewayARN": {
+          "$fromPath": "GatewayARN",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GatewayARN": "arn:aws:storagegateway:us-east-1:000000000000:gateway/sgw-7c589129",
+        "GatewayName": "gw-one",
+        "GatewayState": "RUNNING",
+        "GatewayType": "FILE_S3"
+      }
+    },
+    {
+      "operation": "DescribeGatewayInformation",
+      "input": {
+        "GatewayARN": "arn:aws:storagegateway:us-east-1:000000000000:gateway/sgw-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidGatewayRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateNFSFileShare",
+      "input": {
+        "ClientToken": "tok-1",
+        "GatewayARN": {
+          "$fromPath": "GatewayARN",
+          "$fromStep": 1
+        },
+        "LocationARN": "arn:aws:s3:::bucket",
+        "Role": "arn:aws:iam::000000000000:role/sgw"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileShareARN": "arn:aws:storagegateway:us-east-1:000000000000:share/share-5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeNFSFileShares",
+      "input": {
+        "FileShareARNList": [
+          {
+            "$fromPath": "FileShareARN",
+            "$fromStep": 5
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NFSFileShareInfoList": [
+          {
+            "FileShareARN": "arn:aws:storagegateway:us-east-1:000000000000:share/share-5f59f223",
+            "FileShareStatus": "AVAILABLE",
+            "GatewayARN": "arn:aws:storagegateway:us-east-1:000000000000:gateway/sgw-7c589129",
+            "LocationARN": "arn:aws:s3:::bucket"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteFileShare",
+      "input": {
+        "FileShareARN": {
+          "$fromPath": "FileShareARN",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileShareARN": "arn:aws:storagegateway:us-east-1:000000000000:share/share-5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeNFSFileShares",
+      "input": {
+        "FileShareARNList": [
+          "arn:aws:storagegateway:us-east-1:000000000000:share/share-gone"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NFSFileShareInfoList": null
+      }
+    },
+    {
+      "operation": "DeleteGateway",
+      "input": {
+        "GatewayARN": {
+          "$fromPath": "GatewayARN",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListGateways",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Gateways": null
+      }
+    },
+    {
+      "operation": "DeleteGateway",
+      "input": {
+        "GatewayARN": "arn:aws:storagegateway:us-east-1:000000000000:gateway/sgw-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

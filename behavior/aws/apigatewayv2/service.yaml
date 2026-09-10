@@ -1,0 +1,294 @@
+schema: bir/1
+service: aws.apigatewayv2
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is routed: the ApiEndpoint an API is given ends in
+# .localhost and resolves to nothing, no route is ever matched, and no
+# integration is ever called.
+provenance: authored
+
+resources:
+  api:
+    collection: ag2
+    id:
+      input_members: [ApiId]
+    record:
+      ApiId: id
+      ApiEndpoint: "'https://' + id + '.execute-api.localhost'"
+
+  # Routes, integrations and stages are scoped to their API, so every
+  # operation on one reads its API first -- not to check it exists, which this
+  # service never does, but because the collection is named for it.
+  route:
+    collection: "ag2rt:{api.id}"
+    parent: api
+    id:
+      input_members: [RouteId]
+    record:
+      RouteId: id
+
+  integration:
+    collection: "ag2in:{api.id}"
+    parent: api
+    id:
+      input_members: [IntegrationId]
+    record:
+      IntegrationId: id
+
+  stage:
+    collection: "ag2st:{api.id}"
+    parent: api
+    id:
+      input_members: [StageName]
+    record:
+      StageName: id
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateApi:
+    effects:
+      - generate: { bind: aid, kind: hex, bytes: 8 }
+      - create:
+          resource: api
+          key: "fx.aid"
+          record:
+            Name: "string(input.Name)"
+            ProtocolType: "string(input.ProtocolType)"
+    output:
+      ApiId: rec.ApiId
+      Name: rec.Name
+      ProtocolType: rec.ProtocolType
+      ApiEndpoint: rec.ApiEndpoint
+
+  GetApi:
+    reads:
+      api: { resource: api }
+    require:
+      - { cond: api_found, error: NotFound }
+    output:
+      ApiId: api.ApiId
+      Name: api.Name
+      ProtocolType: api.ProtocolType
+      ApiEndpoint: api.ApiEndpoint
+
+  GetApis:
+    list: { resource: api, member: Items, paginate: model }
+
+  # An update can change one thing, and only when the request sends a
+  # non-empty one. It answers the record either way.
+  UpdateApi:
+    reads:
+      api: { resource: api }
+    require:
+      - { cond: api_found, error: NotFound }
+    effects:
+      - patch:
+          resource: api
+          when: "'Name' in input && string(input.Name) != ''"
+          record:
+            Name: "string(input.Name)"
+    output:
+      ApiId: api.ApiId
+      Name: "'Name' in input && string(input.Name) != '' ? string(input.Name) : api.Name"
+      ProtocolType: api.ProtocolType
+      ApiEndpoint: api.ApiEndpoint
+
+  DeleteApi:
+    effects:
+      - delete: { resource: api, missing: ignore }
+
+  CreateRoute:
+    reads:
+      api: { resource: api }
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8 }
+      - create:
+          resource: route
+          key: "fx.rid"
+          record:
+            ApiId: "string(input.ApiId)"
+            RouteKey: "string(input.RouteKey)"
+            Target: "'Target' in input ? string(input.Target) : ''"
+    output:
+      RouteId: rec.RouteId
+      RouteKey: rec.RouteKey
+      Target: rec.Target
+
+  GetRoute:
+    reads:
+      api: { resource: api }
+      route: { resource: route }
+    require:
+      - { cond: route_found, error: NotFound }
+    output:
+      RouteId: route.RouteId
+      RouteKey: route.RouteKey
+      Target: route.Target
+
+  GetRoutes:
+    reads:
+      api: { resource: api }
+    list: { resource: route, member: Items, paginate: model }
+
+  DeleteRoute:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: route, missing: ignore }
+
+  CreateIntegration:
+    reads:
+      api: { resource: api }
+    effects:
+      - generate: { bind: iid, kind: hex, bytes: 8 }
+      - create:
+          resource: integration
+          key: "fx.iid"
+          record:
+            ApiId: "string(input.ApiId)"
+            IntegrationType: "string(input.IntegrationType)"
+            IntegrationUri: "'IntegrationUri' in input ? string(input.IntegrationUri) : ''"
+    output:
+      IntegrationId: rec.IntegrationId
+      IntegrationType: rec.IntegrationType
+      IntegrationUri: rec.IntegrationUri
+
+  GetIntegration:
+    reads:
+      api: { resource: api }
+      integration: { resource: integration }
+    require:
+      - { cond: integration_found, error: NotFound }
+    output:
+      IntegrationId: integration.IntegrationId
+      IntegrationType: integration.IntegrationType
+      IntegrationUri: integration.IntegrationUri
+
+  GetIntegrations:
+    reads:
+      api: { resource: api }
+    list: { resource: integration, member: Items, paginate: model }
+
+  DeleteIntegration:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: integration, missing: ignore }
+
+  CreateStage:
+    reads:
+      api: { resource: api }
+    effects:
+      - create:
+          resource: stage
+          record:
+            ApiId: "string(input.ApiId)"
+    output:
+      StageName: rec.StageName
+
+  GetStage:
+    reads:
+      api: { resource: api }
+      stage: { resource: stage }
+    require:
+      - { cond: stage_found, error: NotFound }
+    output:
+      StageName: stage.StageName
+
+  GetStages:
+    reads:
+      api: { resource: api }
+    list: { resource: stage, member: Items, paginate: model }
+
+  DeleteStage:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: stage, missing: ignore }
+
+quirks:
+  - operation: CreateApi
+    note: >
+      An API is a name, a protocol type and an endpoint ending in .localhost
+      that resolves to nothing. Nothing is served at it: no route is matched,
+      no integration is called, and there is no path through this service by
+      which a request to an API reaches anything.
+
+      `ProtocolType` is required and stored as given, unvalidated -- HTTP,
+      WEBSOCKET and anything else are equally accepted and equally ignored.
+      The pack defaulted it to HTTP when the request omitted it, which no SDK
+      could do, so that branch was unreachable under model validation and the
+      bundle does not carry it. `DisableExecuteApiEndpoint` is dropped, so the
+      endpoint that cannot be reached also cannot be disabled, and the
+      `RouteKey` and `Target` CreateApi accepts to create a route alongside
+      the API are dropped too -- so the quick-create form of this operation
+      creates no route.
+
+      Every other member CreateApiResponse declares -- `CreatedDate`,
+      `ApiGatewayManaged`, `Version`, `Warnings`, `Tags`, `CorsConfiguration`
+      -- is never set.
+  - operation: UpdateApi
+    note: >
+      An update can change the name, and only when the request sends a
+      non-empty one. `ProtocolType`, `DisableExecuteApiEndpoint`, `RouteKey`
+      and `Target` are accepted and ignored, so an HTTP API cannot become a
+      WebSocket one. The response is the whole record either way, so an update
+      that changed nothing is indistinguishable from one that did.
+
+      The API must exist -- this is the one write here that checks. The four
+      deletes do not: deleting an API that was never created succeeds, and
+      deleting one that was leaves its routes, integrations and stages behind
+      in their own collections, all still reachable by passing the same ApiId
+      again.
+  - operation: CreateRoute
+    note: >
+      A route is a key, a target and an id, and nothing dispatches on it: the
+      `RouteKey` that would match a method and a path is stored as an opaque
+      string, and the `Target` that names an integration is stored without the
+      integration being checked to exist. `AuthorizationType`,
+      `AuthorizerId`, `OperationName` and `RequestParameters` are dropped, so
+      a route is neither authorized nor parameterised.
+
+      The pack stored the `ApiId` on every route, integration and stage and
+      answered it, which none of the three create or get responses declares --
+      they are addressed by ApiId, they do not report it. So it was a member
+      no SDK could read; the bundle stores it, because the recording shows it
+      stored, and answers the declared members only.
+  - operation: CreateIntegration
+    note: >
+      An integration is a type and a URI, and nothing is ever invoked through
+      it. `IntegrationType` is required and stored unvalidated, so
+      AWS_PROXY, HTTP_PROXY and MOCK are the same thing here, and
+      `IntegrationUri` may name a Lambda function or an HTTP endpoint that
+      does not exist -- it is never resolved, because it is never called.
+      `PayloadFormatVersion`, `IntegrationMethod`, `ConnectionType`,
+      `RequestParameters` and `TimeoutInMillis` are dropped.
+
+      There is no UpdateIntegration or UpdateRoute here, so an integration and
+      a route are created once and then only deleted.
+  - operation: CreateStage
+    note: >
+      A stage is a name. `AutoDeploy`, `DeploymentId`, `StageVariables`,
+      `AccessLogSettings`, `DefaultRouteSettings` and `RouteSettings` are all
+      dropped, so a stage carries no configuration, deploys nothing, and does
+      not appear in the endpoint -- there is only one ApiEndpoint per API and
+      it has no stage in it. Creating a stage that already exists replaces it
+      rather than faulting with ConflictException.
+
+      CreateStageResponse declares only `StageName` of what the pack stored,
+      so this is the narrowest of the four creates: everything a stage is for
+      is dropped on the way in, and the one member that survives is the name
+      the caller already had.
+  - operation: GetApis
+    note: >
+      None of the four lists paginates and none narrows: `MaxResults` and
+      `NextToken` are accepted, ignored, and never returned, so a caller
+      looping until the token is empty stops after one page whatever the store
+      holds. Each answers every record of its kind under the API -- or, for
+      GetApis, in the account and region -- in store order, which for these
+      keys is lexical rather than by creation time.

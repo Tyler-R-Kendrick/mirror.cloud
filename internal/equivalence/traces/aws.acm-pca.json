@@ -1,0 +1,289 @@
+{
+  "schema": "trace/1",
+  "service": "aws.acm-pca",
+  "source": "pack:internal/services/aws/acmpca@571d5d1",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListCertificateAuthorities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateAuthorities": null
+      }
+    },
+    {
+      "operation": "DescribeCertificateAuthority",
+      "input": {
+        "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCertificateAuthority",
+      "input": {
+        "CertificateAuthorityConfiguration": {
+          "KeyAlgorithm": "RSA_2048",
+          "SigningAlgorithm": "SHA256WITHRSA",
+          "Subject": {
+            "CommonName": "mirror"
+          }
+        },
+        "CertificateAuthorityType": "ROOT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/7c589129"
+      }
+    },
+    {
+      "operation": "DescribeCertificateAuthority",
+      "input": {
+        "CertificateAuthorityArn": {
+          "$fromPath": "CertificateAuthorityArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateAuthority": {
+          "Arn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/7c589129",
+          "Status": "ACTIVE",
+          "Type": "ROOT"
+        }
+      }
+    },
+    {
+      "operation": "CreateCertificateAuthority",
+      "input": {
+        "CertificateAuthorityConfiguration": {
+          "KeyAlgorithm": "RSA_2048",
+          "SigningAlgorithm": "SHA256WITHRSA",
+          "Subject": {
+            "CommonName": "mirror"
+          }
+        },
+        "CertificateAuthorityType": "ROOT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/5f59f223"
+      }
+    },
+    {
+      "operation": "ListCertificateAuthorities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateAuthorities": [
+          {
+            "Arn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/5f59f223",
+            "Status": "ACTIVE",
+            "Type": "ROOT"
+          },
+          {
+            "Arn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/7c589129",
+            "Status": "ACTIVE",
+            "Type": "ROOT"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "IssueCertificate",
+      "input": {
+        "CertificateAuthorityArn": {
+          "$fromPath": "CertificateAuthorityArn",
+          "$fromStep": 2
+        },
+        "Csr": "LS0tLS1CRUdJTiBDRVJU",
+        "SigningAlgorithm": "SHA256WITHRSA",
+        "Validity": {
+          "Type": "DAYS",
+          "Value": 365
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/7c589129/certificate/9c8e2cb0"
+      }
+    },
+    {
+      "operation": "GetCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 6
+        },
+        "CertificateAuthorityArn": {
+          "$fromPath": "CertificateAuthorityArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": "-----BEGIN CERTIFICATE-----\nMIRROR\n-----END CERTIFICATE-----\n",
+        "CertificateArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/7c589129/certificate/9c8e2cb0"
+      },
+      "superseded": "The pack answered with the CertificateArn it stored beside the certificate. GetCertificate declares Certificate and CertificateChain only, so the ARN was a member no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "GetCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 6
+        },
+        "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": "-----BEGIN CERTIFICATE-----\nMIRROR\n-----END CERTIFICATE-----\n",
+        "CertificateArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/7c589129/certificate/9c8e2cb0"
+      },
+      "superseded": "The pack answered with the CertificateArn it stored beside the certificate. GetCertificate declares Certificate and CertificateChain only, so the ARN was a member no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "GetCertificate",
+      "input": {
+        "CertificateArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/x/certificate/absent",
+        "CertificateAuthorityArn": {
+          "$fromPath": "CertificateAuthorityArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteCertificateAuthority",
+      "input": {
+        "CertificateAuthorityArn": {
+          "$fromPath": "CertificateAuthorityArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListCertificateAuthorities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateAuthorities": [
+          {
+            "Arn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/5f59f223",
+            "Status": "ACTIVE",
+            "Type": "ROOT"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 6
+        },
+        "CertificateAuthorityArn": {
+          "$fromPath": "CertificateAuthorityArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": "-----BEGIN CERTIFICATE-----\nMIRROR\n-----END CERTIFICATE-----\n",
+        "CertificateArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/7c589129/certificate/9c8e2cb0"
+      },
+      "superseded": "The pack answered with the CertificateArn it stored beside the certificate. GetCertificate declares Certificate and CertificateChain only, so the ARN was a member no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    }
+  ]
+}

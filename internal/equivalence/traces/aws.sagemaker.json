@@ -1,0 +1,400 @@
+{
+  "schema": "trace/1",
+  "service": "aws.sagemaker",
+  "source": "pack:internal/services/aws/sagemaker@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListNotebookInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NotebookInstances": null
+      }
+    },
+    {
+      "operation": "DescribeNotebookInstance",
+      "input": {
+        "NotebookInstanceName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateNotebookInstance",
+      "input": {
+        "InstanceType": "ml.t2.medium",
+        "NotebookInstanceName": "nb1",
+        "RoleArn": "arn:aws:iam::000000000000:role/sm"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NotebookInstanceArn": "arn:aws:sagemaker:us-east-1:000000000000:notebook-instance/nb1"
+      }
+    },
+    {
+      "operation": "DescribeNotebookInstance",
+      "input": {
+        "NotebookInstanceName": "nb1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceType": "ml.t2.medium",
+        "NotebookInstanceName": "nb1",
+        "NotebookInstanceStatus": "InService"
+      }
+    },
+    {
+      "operation": "ListNotebookInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NotebookInstances": [
+          {
+            "InstanceType": "ml.t2.medium",
+            "NotebookInstanceName": "nb1",
+            "NotebookInstanceStatus": "InService"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateModel",
+      "input": {
+        "ExecutionRoleArn": "arn:aws:iam::000000000000:role/sm",
+        "ModelName": "m1",
+        "PrimaryContainer": {
+          "Image": "123.dkr.ecr.us-east-1.amazonaws.com/x:1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ModelArn": "arn:aws:sagemaker:us-east-1:000000000000:model/m1"
+      }
+    },
+    {
+      "operation": "DescribeModel",
+      "input": {
+        "ModelName": "m1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ExecutionRoleArn": "arn:aws:iam::000000000000:role/sm",
+        "ModelName": "m1"
+      }
+    },
+    {
+      "operation": "ListModels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Models": [
+          {
+            "ExecutionRoleArn": "arn:aws:iam::000000000000:role/sm",
+            "ModelName": "m1"
+          }
+        ]
+      },
+      "superseded": "ModelSummary declares no ExecutionRoleArn and the pack listed the stored record, which has one, so the listing carried a member no SDK could read. The declared shape outranks the pack's authored behavior; the same model described still carries it, because DescribeModel declares it."
+    },
+    {
+      "operation": "CreateEndpointConfig",
+      "input": {
+        "EndpointConfigName": "ec1",
+        "ProductionVariants": [
+          {
+            "InitialInstanceCount": 1,
+            "InstanceType": "ml.m5.large",
+            "ModelName": "m1",
+            "VariantName": "v1"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointConfigArn": "arn:aws:sagemaker:us-east-1:000000000000:endpoint-config/ec1"
+      }
+    },
+    {
+      "operation": "DescribeEndpointConfig",
+      "input": {
+        "EndpointConfigName": "ec1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointConfigName": "ec1",
+        "ProductionVariants": [
+          {
+            "InitialInstanceCount": 1,
+            "InstanceType": "ml.m5.large",
+            "ModelName": "m1",
+            "VariantName": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateEndpoint",
+      "input": {
+        "EndpointConfigName": "ec1",
+        "EndpointName": "ep1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointArn": "arn:aws:sagemaker:us-east-1:000000000000:endpoint/ep1"
+      }
+    },
+    {
+      "operation": "DescribeEndpoint",
+      "input": {
+        "EndpointName": "ep1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointConfigName": "ec1",
+        "EndpointName": "ep1",
+        "EndpointStatus": "InService"
+      }
+    },
+    {
+      "operation": "ListEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": [
+          {
+            "EndpointConfigName": "ec1",
+            "EndpointName": "ep1",
+            "EndpointStatus": "InService"
+          }
+        ]
+      },
+      "superseded": "EndpointSummary declares no EndpointConfigName, and the pack listed the stored record, which has one. Same defect, same reason: the described form still carries it."
+    },
+    {
+      "operation": "DeleteEndpointConfig",
+      "input": {
+        "EndpointConfigName": "ec1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeEndpointConfig",
+      "input": {
+        "EndpointConfigName": "ec1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeEndpoint",
+      "input": {
+        "EndpointName": "ep1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointConfigName": "ec1",
+        "EndpointName": "ep1",
+        "EndpointStatus": "InService"
+      }
+    },
+    {
+      "operation": "DeleteEndpoint",
+      "input": {
+        "EndpointName": "ep1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": null
+      }
+    },
+    {
+      "operation": "DeleteModel",
+      "input": {
+        "ModelName": "m1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListModels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Models": null
+      }
+    },
+    {
+      "operation": "DeleteNotebookInstance",
+      "input": {
+        "NotebookInstanceName": "nb1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListNotebookInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NotebookInstances": null
+      }
+    },
+    {
+      "operation": "DeleteNotebookInstance",
+      "input": {
+        "NotebookInstanceName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

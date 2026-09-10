@@ -1,0 +1,220 @@
+schema: bir/1
+service: aws.mq
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no broker: no ActiveMQ or RabbitMQ process is started, no
+# endpoint is published, and nothing can connect, publish or subscribe.
+provenance: authored
+
+resources:
+  # A broker's id is minted with a "b-" prefix, so the prefix is part of the
+  # store key rather than of the record: the record's BrokerId is the key
+  # echoed back, which is what keeps a reboot from re-prefixing it.
+  broker:
+    collection: mq
+    arn: "arn:aws:mq:{region}:{account}:broker:{id}"
+    id:
+      input_members: [BrokerId]
+    record:
+      BrokerId: id
+      BrokerArn: arn
+
+  # Users are scoped to their broker, so every operation on one reads its
+  # broker first -- not to check it exists, which this service never does, but
+  # because the collection is named for it.
+  user:
+    collection: "mqu:{broker.id}"
+    parent: broker
+    id:
+      input_members: [Username]
+    record:
+      Username: id
+
+  configuration:
+    collection: mqc
+    arn: "arn:aws:mq:{region}:{account}:configuration:{id}"
+    id:
+      input_members: [ConfigurationId]
+    record:
+      Id: id
+      Arn: arn
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateBroker:
+    effects:
+      - generate: { bind: bid, kind: hex, bytes: 8 }
+      - create:
+          resource: broker
+          key: "'b-' + fx.bid"
+          record:
+            BrokerName: "'BrokerName' in input ? string(input.BrokerName) : ''"
+            BrokerState: "'RUNNING'"
+            EngineType: "string(input.EngineType)"
+            EngineVersion: "'EngineVersion' in input ? string(input.EngineVersion) : ''"
+            HostInstanceType: >
+              'HostInstanceType' in input ? string(input.HostInstanceType) : ''
+    output:
+      BrokerId: rec.BrokerId
+      BrokerArn: rec.BrokerArn
+
+  DescribeBroker:
+    reads:
+      broker: { resource: broker }
+    require:
+      - { cond: broker_found, error: NotFound }
+    output:
+      BrokerId: broker.BrokerId
+      BrokerName: broker.BrokerName
+      BrokerArn: broker.BrokerArn
+      BrokerState: broker.BrokerState
+      EngineType: broker.EngineType
+      EngineVersion: broker.EngineVersion
+      HostInstanceType: broker.HostInstanceType
+
+  ListBrokers:
+    list: { resource: broker, member: BrokerSummaries, paginate: model }
+
+  DeleteBroker:
+    effects:
+      - delete: { resource: broker, missing: ignore }
+    output:
+      BrokerId: "string(input.BrokerId)"
+
+  # A reboot reads nothing and writes nothing.
+  RebootBroker: {}
+
+  CreateUser:
+    reads:
+      broker: { resource: broker }
+    effects:
+      - create:
+          resource: user
+          record:
+            BrokerId: "'BrokerId' in input ? string(input.BrokerId) : ''"
+            ConsoleAccess: "'ConsoleAccess' in input ? input.ConsoleAccess : null"
+
+  DescribeUser:
+    reads:
+      broker: { resource: broker }
+      user: { resource: user }
+    require:
+      - { cond: user_found, error: NotFound }
+    output:
+      Username: user.Username
+      BrokerId: user.BrokerId
+      ConsoleAccess: user.ConsoleAccess
+
+  ListUsers:
+    reads:
+      broker: { resource: broker }
+    list: { resource: user, member: Users, paginate: model }
+
+  DeleteUser:
+    reads:
+      broker: { resource: broker }
+    effects:
+      - delete: { resource: user, missing: ignore }
+
+  CreateConfiguration:
+    effects:
+      - generate: { bind: cid, kind: hex, bytes: 8 }
+      - create:
+          resource: configuration
+          key: "'c-' + fx.cid"
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+            EngineType: "'EngineType' in input ? string(input.EngineType) : ''"
+    output:
+      Id: rec.Id
+      Name: rec.Name
+      Arn: rec.Arn
+
+  DescribeConfiguration:
+    reads:
+      configuration: { resource: configuration }
+    require:
+      - { cond: configuration_found, error: NotFound }
+    output:
+      Id: configuration.Id
+      Name: configuration.Name
+      EngineType: configuration.EngineType
+      Arn: configuration.Arn
+
+  ListConfigurations:
+    list: { resource: configuration, member: Configurations, paginate: model }
+
+  DeleteConfiguration:
+    effects:
+      - delete: { resource: configuration, missing: ignore }
+
+  DescribeBrokerEngineTypes:
+    output:
+      BrokerEngineTypes: >
+        [{'EngineType': 'ACTIVEMQ'}, {'EngineType': 'RABBITMQ'}]
+
+quirks:
+  - operation: CreateBroker
+    note: >
+      A broker is RUNNING before the call returns, so nothing observes
+      CREATION_IN_PROGRESS and no BrokerInstances are ever published: there is
+      no endpoint, so nothing can connect to a broker, publish to it or
+      subscribe. Of everything CreateBrokerRequest carries only BrokerName,
+      EngineType, EngineVersion and HostInstanceType are kept -- DeploymentMode,
+      SubnetIds, SecurityGroups, EncryptionOptions, Logs, LdapServerMetadata,
+      StorageType and the rest are dropped, and so are the Users the request may
+      create alongside the broker, so a broker created with users has none.
+
+      EngineType is not validated: a broker can declare an engine that does
+      not exist, and whichever it declares it behaves the same way, which is to
+      say not at all. The pack also defaulted it to ACTIVEMQ when the request
+      omitted it, which CreateBrokerRequest declares as required, so no SDK
+      could send a request that reached that branch and the bundle does not
+      carry it. Neither the engine nor the version is checked against
+      DescribeBrokerEngineTypes, which answers a fixed two-entry list with no
+      versions in it.
+  - operation: RebootBroker
+    note: >
+      A reboot reads nothing, writes nothing and answers an empty body. The
+      broker it names is not checked to exist, so rebooting a broker that was
+      never created succeeds, and rebooting one that was does not move it
+      through REBOOT_IN_PROGRESS -- it was RUNNING before and is RUNNING after,
+      with no evidence a reboot happened.
+  - operation: CreateUser
+    note: >
+      A user is a name, a broker id and a console-access flag. The Password the
+      request carries is dropped -- there is nothing to authenticate against --
+      along with Groups and ReplicationUser, and the broker is not checked to
+      exist, so a user can be created on a broker that was never created.
+      Creating a user that already exists overwrites it silently where the real
+      service faults with ConflictException, and nothing is ever Pending: the
+      real service applies user changes at the next reboot, and DescribeUser
+      declares a Pending block for exactly that, which is never set here.
+
+      Deleting a broker leaves its users behind in their own collection.
+  - operation: CreateConfiguration
+    note: >
+      The pack answered the configuration's EngineType, which
+      CreateConfigurationResponse does not declare -- DescribeConfiguration
+      does. A caller reading it off a create response reads nothing, so the
+      bundle answers the declared members only and the recording marks that
+      step. Created, LatestRevision and AuthenticationStrategy are declared and
+      never set, so a configuration has no revisions however it is described,
+      and the configuration data itself -- the XML body the operation exists to
+      carry -- is not stored at all.
+
+      A configuration is attached to nothing: CreateBroker's Configuration is
+      dropped, so a broker never references one, and UpdateConfiguration and
+      the revision operations are not served.
+  - operation: DeleteConfiguration
+    note: >
+      Deleting a configuration answers an empty body where
+      DeleteConfigurationResponse declares the ConfigurationId, and deleting an
+      absent one succeeds where describing it faults. DeleteBroker does answer
+      its BrokerId -- it echoes the request rather than reporting what was
+      removed, so it answers the same id whether or not a broker existed.

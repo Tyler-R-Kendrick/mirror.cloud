@@ -1,0 +1,93 @@
+schema: bir/1
+service: aws.apprunner
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is built or deployed: a service is RUNNING the moment it is
+# created and there is no URL to reach it on.
+provenance: authored
+
+resources:
+  service:
+    collection: arsvc
+    # A service is addressed by its ARN everywhere but creation, so the ARN is
+    # the store key.
+    key: ServiceArn
+    id:
+      input_members: [ServiceName]
+    arn: "arn:{partition}:apprunner:{region}:{account}:service/{id}"
+    record:
+      ServiceName: id
+      ServiceArn: arn
+      Status: "'RUNNING'"
+
+errors:
+  InvalidRequest:
+    code: InvalidRequestException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateService:
+    require:
+      - { cond: "string(input.ServiceName) != ''", error: InvalidRequest }
+    effects:
+      - generate: { bind: sid, kind: hex, bytes: 8 }
+      - create:
+          resource: service
+          record:
+            ServiceId: fx.sid
+    output:
+      Service: rec
+
+  DescribeService:
+    reads:
+      svc: { resource: service, key: "string(input.ServiceArn)" }
+    require:
+      - { cond: svc_found, error: NotFound }
+    output:
+      Service: svc
+
+  ListServices:
+    list: { resource: service, member: ServiceSummaryList, paginate: model }
+
+  DeleteService:
+    effects:
+      - delete: { resource: service, key: "string(input.ServiceArn)", missing: ignore }
+    output: {}
+
+  # Pausing and resuming answer with a status and change nothing: a paused
+  # service still describes as RUNNING and still lists.
+  PauseService:
+    output:
+      Service: "{'Status': 'PAUSED'}"
+
+  ResumeService:
+    output:
+      Service: "{'Status': 'RUNNING'}"
+
+quirks:
+  - operation: PauseService
+    note: >
+      Neither PauseService nor ResumeService touches the store. They answer
+      with a Service carrying only a Status, so a paused service still
+      describes and lists as RUNNING, and the answer omits the ServiceArn that
+      identifies which service was paused. Making the status stick is a small
+      change -- a patch effect on the record -- and it is not made here because
+      the recording is what the pack did; a probe says whether the real service
+      reports PAUSED immediately or PAUSE_IN_PROGRESS first, and that is the
+      shape worth building to.
+  - operation: CreateService
+    note: >
+      OperationId is a required member of the Create, Delete, Pause and Resume
+      answers and is never set: nothing here is asynchronous, so there is no
+      operation to track. DeleteService also omits the required Service.
+  - operation: CreateService
+    note: >
+      SourceConfiguration is required by the model and is neither read nor
+      stored, so a service has no repository, no image and no ServiceUrl --
+      all of which Service declares. The engine now rejects a request that
+      omits it, which the pack accepted.

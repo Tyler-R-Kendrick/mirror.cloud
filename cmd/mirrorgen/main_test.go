@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"os"
@@ -21,12 +22,18 @@ func TestEmitRoundTrip(t *testing.T) {
 	if err := emitService(dir, *svc); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "aws", "s3", "model.json"))
+	f, err := os.Open(filepath.Join(dir, "aws", "s3", "model.json.gz"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer f.Close()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
 	var got model.Service
-	if err := json.Unmarshal(raw, &got); err != nil {
+	if err := json.NewDecoder(zr).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got.ID != "aws.s3" || len(got.Operations) == 0 {
@@ -40,14 +47,21 @@ func TestEmitRoundTrip(t *testing.T) {
 		t.Fatalf("header %s", goSrc[:40])
 	}
 
-	if err := emitService(dir, *svc); err != nil {
-		t.Fatal(err)
-	}
-	raw2, err := os.ReadFile(filepath.Join(dir, "aws", "s3", "model.json"))
+	// Regenerating must produce identical bytes, including the gzip container:
+	// the committed models are only trustworthy if they follow deterministically
+	// from the pinned specs.
+	first, err := os.ReadFile(filepath.Join(dir, "aws", "s3", "model.json.gz"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != string(raw2) {
+	if err := emitService(dir, *svc); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(filepath.Join(dir, "aws", "s3", "model.json.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
 		t.Fatal("generation is not byte-idempotent")
 	}
 }

@@ -1,0 +1,142 @@
+schema: bir/1
+service: aws.translate
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is translated: TranslateText echoes the text it was given
+# back as the translation, whatever languages were asked for.
+provenance: authored
+
+resources:
+  terminology:
+    collection: trterm
+    id:
+      input_members: [Name]
+    record:
+      Name: id
+      SourceLanguageCode: "'SourceLanguageCode' in input ? string(input.SourceLanguageCode) : ''"
+      TargetLanguageCodes: "'TargetLanguageCodes' in input ? input.TargetLanguageCodes : []"
+
+  # Deliberately empty: resource-level members are re-evaluated on every write,
+  # and StopTextTranslationJob is a write that carries no JobName. Anything
+  # here would be recomputed from a request that does not have it, blanking
+  # what the start stored.
+  job:
+    collection: trjob
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record: {}
+
+errors:
+  InvalidRequest:
+    code: InvalidRequestException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  TranslateText:
+    output:
+      TranslatedText: "string(input.Text)"
+      SourceLanguageCode: "string(input.SourceLanguageCode)"
+      TargetLanguageCode: "string(input.TargetLanguageCode)"
+
+  GetTerminology:
+    reads:
+      t: { resource: terminology }
+    require:
+      - { cond: t_found, error: NotFound }
+    output:
+      TerminologyProperties: t
+
+  ListTerminologies:
+    list: { resource: terminology, member: TerminologyPropertiesList, paginate: model }
+
+  DeleteTerminology:
+    effects:
+      - delete: { resource: terminology, missing: ignore }
+
+  StartTextTranslationJob:
+    effects:
+      - create:
+          resource: job
+          record:
+            JobId: id
+            JobName: "'JobName' in input ? string(input.JobName) : ''"
+            JobStatus: "'COMPLETED'"
+    output:
+      JobId: rec.JobId
+      JobStatus: rec.JobStatus
+
+  DescribeTextTranslationJob:
+    reads:
+      j: { resource: job, key: "string(input.JobId)" }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      TextTranslationJobProperties: j
+
+  ListTextTranslationJobs:
+    list: { resource: job, member: TextTranslationJobPropertiesList, paginate: model }
+
+  # Stopping answers STOPPED whether or not there was a job to stop, and only
+  # writes when there was one.
+  StopTextTranslationJob:
+    reads:
+      j: { resource: job, key: "string(input.JobId)" }
+    effects:
+      - patch:
+          resource: job
+          key: "string(input.JobId)"
+          when: j_found
+          record:
+            JobStatus: "'STOPPED'"
+    output:
+      JobId: "string(input.JobId)"
+      JobStatus: "'STOPPED'"
+
+quirks:
+  - operation: TranslateText
+    note: >
+      The translation is the source text, unchanged, whatever SourceLanguageCode
+      and TargetLanguageCode were given -- and those are echoed back rather than
+      detected, so asking to translate from auto answers with auto as the source
+      language. TerminologyNames is accepted and ignored, so a terminology can
+      never affect a translation and AppliedTerminologies is always absent.
+  - operation: StartTextTranslationJob
+    note: >
+      A job is COMPLETED before it returns, so nothing ever observes SUBMITTED
+      or IN_PROGRESS. InputDataConfig, OutputDataConfig and DataAccessRoleArn
+      are required and dropped: no input is read and nothing is written to the
+      output bucket, so a caller that waits for the job and then reads its
+      output finds nothing. SourceLanguageCode, TargetLanguageCodes, JobDetails
+      and the timestamps are all declared on the job and never set.
+  - operation: StopTextTranslationJob
+    note: >
+      Stopping answers STOPPED whether or not a job of that id exists, so the
+      answer does not distinguish a stopped job from one that was never
+      started -- but a job that does exist really is moved to STOPPED, and
+      stays there. Since every job is COMPLETED the moment it starts, stopping
+      moves a finished job backwards into STOPPED, which the real service does
+      not do.
+  - operation: GetTerminology
+    note: >
+      The pack served a CreateTerminology operation. There is no such operation
+      in the AWS model -- terminologies are created by ImportTerminology, which
+      takes the terms as a blob -- so no SDK could ever have called it, and the
+      bundle cannot express it. It is the one operation this extraction removes
+      from the emulated tier; the catalog still carries it, so it falls to the
+      mock tier and answers a synthesized body with an x-mirror-fidelity: mock
+      header.
+
+      Expressing it as ImportTerminology instead would be adding behavior the
+      pack never had, on no evidence: the pack's version read a Name and two
+      language codes from the top of the request, where ImportTerminology takes
+      a TerminologyData blob and a MergeStrategy.
+
+      The consequence is worth stating plainly rather than hiding in a count:
+      nothing now creates a terminology, so GetTerminology always faults and
+      ListTerminologies is always empty. Those two operations remain expressed,
+      and answer honestly about a store that only ImportTerminology could fill.

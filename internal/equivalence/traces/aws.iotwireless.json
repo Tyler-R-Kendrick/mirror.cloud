@@ -1,0 +1,260 @@
+{
+  "schema": "trace/1",
+  "service": "aws.iotwireless",
+  "source": "pack:internal/services/aws/iotwireless@44c2b1d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListDestinations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DestinationList": null
+      }
+    },
+    {
+      "operation": "GetDestination",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDestination",
+      "input": {
+        "Expression": "rule-one",
+        "ExpressionType": "RuleName",
+        "Name": "",
+        "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDestination",
+      "input": {
+        "Expression": "rule-one",
+        "ExpressionType": "RuleName",
+        "Name": "dst-one",
+        "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iotwireless:us-east-1:000000000000:Destination/dst-one",
+        "Expression": "rule-one",
+        "Name": "dst-one",
+        "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+      },
+      "superseded": "The pack answered CreateDestination with the whole stored record. The operation declares only Arn and Name -- Expression and RoleArn are declared on GetDestination, not here -- so those were members no SDK could read on this answer. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "GetDestination",
+      "input": {
+        "Name": "dst-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iotwireless:us-east-1:000000000000:Destination/dst-one",
+        "Expression": "rule-one",
+        "Name": "dst-one",
+        "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+      }
+    },
+    {
+      "operation": "CreateDestination",
+      "input": {
+        "Expression": "rule-one",
+        "ExpressionType": "RuleName",
+        "Name": "dst-two",
+        "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iotwireless:us-east-1:000000000000:Destination/dst-two",
+        "Expression": "rule-one",
+        "Name": "dst-two",
+        "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+      },
+      "superseded": "The pack answered CreateDestination with the whole stored record. The operation declares only Arn and Name -- Expression and RoleArn are declared on GetDestination, not here -- so those were members no SDK could read on this answer. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "ListDestinations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DestinationList": [
+          {
+            "Arn": "arn:aws:iotwireless:us-east-1:000000000000:Destination/dst-one",
+            "Expression": "rule-one",
+            "Name": "dst-one",
+            "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+          },
+          {
+            "Arn": "arn:aws:iotwireless:us-east-1:000000000000:Destination/dst-two",
+            "Expression": "rule-one",
+            "Name": "dst-two",
+            "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateWirelessDevice",
+      "input": {
+        "DestinationName": "dst-one",
+        "Name": "dev-one",
+        "Type": "LoRaWAN"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "7c589129"
+      }
+    },
+    {
+      "operation": "GetWirelessDevice",
+      "input": {
+        "Identifier": {
+          "$fromPath": "Id",
+          "$fromStep": 7
+        },
+        "IdentifierType": "WirelessDeviceId"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DestinationName": "dst-one",
+        "Id": "7c589129",
+        "Name": "dev-one",
+        "Type": "LoRaWAN"
+      }
+    },
+    {
+      "operation": "GetWirelessDevice",
+      "input": {
+        "Identifier": "absent",
+        "IdentifierType": "WirelessDeviceId"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDestination",
+      "input": {
+        "Name": "dst-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDestinations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DestinationList": [
+          {
+            "Arn": "arn:aws:iotwireless:us-east-1:000000000000:Destination/dst-two",
+            "Expression": "rule-one",
+            "Name": "dst-two",
+            "RoleArn": "arn:aws:iam::000000000000:role/iotw"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDestination",
+      "input": {
+        "Name": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

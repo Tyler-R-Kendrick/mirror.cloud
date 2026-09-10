@@ -1,0 +1,165 @@
+{
+  "schema": "trace/1",
+  "service": "aws.shield",
+  "source": "pack:internal/services/aws/shield@69da8ba",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetSubscriptionState",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SubscriptionState": "INACTIVE"
+      }
+    },
+    {
+      "operation": "CreateSubscription",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetSubscriptionState",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SubscriptionState": "ACTIVE"
+      }
+    },
+    {
+      "operation": "CreateProtection",
+      "input": {
+        "Name": "web",
+        "ResourceArn": "arn:aws:cloudfront::000000000000:distribution/d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProtectionId": "7c589129"
+      }
+    },
+    {
+      "operation": "CreateProtection",
+      "input": {
+        "Name": "api",
+        "ResourceArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/a/1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProtectionId": "5f59f223"
+      }
+    },
+    {
+      "operation": "ListProtections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Protections": [
+          {
+            "Id": "5f59f223",
+            "Name": "api",
+            "ResourceArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/a/1"
+          },
+          {
+            "Id": "7c589129",
+            "Name": "web",
+            "ResourceArn": "arn:aws:cloudfront::000000000000:distribution/d1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeProtection",
+      "input": {
+        "ProtectionId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListProtections",
+      "input": {},
+      "identity": {
+        "Account": "111111111111",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Protections": null
+      }
+    },
+    {
+      "operation": "GetSubscriptionState",
+      "input": {},
+      "identity": {
+        "Account": "111111111111",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SubscriptionState": "INACTIVE"
+      }
+    },
+    {
+      "operation": "DeleteProtection",
+      "input": {
+        "ProtectionId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

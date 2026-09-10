@@ -1,0 +1,251 @@
+{
+  "schema": "trace/1",
+  "service": "aws.directconnect",
+  "source": "pack:internal/services/aws/directconnect@55959ff",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeConnections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "connections": null
+      }
+    },
+    {
+      "operation": "CreateConnection",
+      "input": {
+        "bandwidth": "1Gbps",
+        "connectionName": "conn-one",
+        "location": "EqDC2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "bandwidth": "1Gbps",
+        "connectionId": "dxcon-7c589129",
+        "connectionName": "conn-one",
+        "connectionState": "available",
+        "location": "EqDC2"
+      }
+    },
+    {
+      "operation": "DescribeConnections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "connections": [
+          {
+            "bandwidth": "1Gbps",
+            "connectionId": "dxcon-7c589129",
+            "connectionName": "conn-one",
+            "connectionState": "available",
+            "location": "EqDC2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeConnections",
+      "input": {
+        "connectionId": {
+          "$fromPath": "connectionId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "connections": [
+          {
+            "bandwidth": "1Gbps",
+            "connectionId": "dxcon-7c589129",
+            "connectionName": "conn-one",
+            "connectionState": "available",
+            "location": "EqDC2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeConnections",
+      "input": {
+        "connectionId": "dxcon-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "connections": []
+      }
+    },
+    {
+      "operation": "CreateLag",
+      "input": {
+        "connectionsBandwidth": "1Gbps",
+        "lagName": "lag-one",
+        "location": "EqDC2",
+        "numberOfConnections": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "connectionsBandwidth": "1Gbps",
+        "lagId": "dxlag-5f59f223",
+        "lagName": "lag-one",
+        "lagState": "available"
+      }
+    },
+    {
+      "operation": "DescribeLags",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lags": [
+          {
+            "connectionsBandwidth": "1Gbps",
+            "lagId": "dxlag-5f59f223",
+            "lagName": "lag-one",
+            "lagState": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLags",
+      "input": {
+        "lagId": {
+          "$fromPath": "lagId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lags": [
+          {
+            "connectionsBandwidth": "1Gbps",
+            "lagId": "dxlag-5f59f223",
+            "lagName": "lag-one",
+            "lagState": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteLag",
+      "input": {
+        "lagId": {
+          "$fromPath": "lagId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeLags",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lags": null
+      }
+    },
+    {
+      "operation": "DeleteConnection",
+      "input": {
+        "connectionId": {
+          "$fromPath": "connectionId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeConnections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "connections": null
+      }
+    },
+    {
+      "operation": "DeleteConnection",
+      "input": {
+        "connectionId": "dxcon-gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+schema: bir/1
+service: aws.iot-data
+
+# Transcribed from the hand-written pack. The shadow is stored verbatim: none
+# of the desired/reported/delta merge semantics a real device shadow has is
+# implemented, which the quirks record.
+provenance: authored
+
+resources:
+  shadow:
+    collection: iotsh
+    id:
+      input_members: [thingName]
+    record:
+      thingName: id
+      payload: input.payload
+      timestamp: "1"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    # 404 here, where most services in this tree render the same code 400.
+    # Transcribed from the pack; the inconsistency across services is real and
+    # is one of the things a probe corpus is meant to settle.
+    http: 404
+    fault: client
+  InvalidRequest:
+    code: InvalidRequestException
+    http: 400
+    fault: client
+
+operations:
+  UpdateThingShadow:
+    require:
+      - { cond: "string(input.thingName) != ''", error: InvalidRequest }
+    effects:
+      - put: { resource: shadow }
+    output:
+      payload: rec.payload
+
+  GetThingShadow:
+    reads:
+      rec: { resource: shadow }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output:
+      payload: rec.payload
+
+  DeleteThingShadow:
+    effects:
+      - delete: { resource: shadow }
+
+  ListNamedShadowsForThing:
+    output:
+      results: "[]"
+
+  Publish: {}
+
+  GetRetainedMessage:
+    output:
+      payload: "''"
+
+quirks:
+  - operation: UpdateThingShadow
+    note: >
+      The payload is stored verbatim and returned unchanged. A real device
+      shadow merges the update into the existing document, computes a delta
+      between desired and reported state, and increments a version -- none of
+      which happens here, so a caller that reads back a merged document gets
+      only what it last wrote.
+    provenance: authored
+
+  - operation: GetThingShadow
+    note: >
+      The pack also returned thingName and timestamp, neither of which is a
+      member of the operation's output shape, so no SDK could read them. The
+      bundle returns only payload and the recording's step is superseded
+      citing the shape.
+    provenance: declared
+
+  - operation: Publish
+    note: >
+      Publishing accepts the message and discards it: there is no subscription
+      delivery. GetRetainedMessage always answers with an empty payload for
+      the same reason.
+    provenance: authored

@@ -1,0 +1,311 @@
+{
+  "schema": "trace/1",
+  "service": "aws.verifiedpermissions",
+  "source": "pack:internal/services/aws/verifiedpermissions@c5468c6",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListPolicyStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyStores": null
+      }
+    },
+    {
+      "operation": "GetPolicyStore",
+      "input": {
+        "policyStoreId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePolicyStore",
+      "input": {
+        "description": "a store",
+        "validationSettings": {
+          "mode": "OFF"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:verifiedpermissions:us-east-1:000000000000:policy-store/7c589129",
+        "policyStoreId": "7c589129"
+      }
+    },
+    {
+      "operation": "GetPolicyStore",
+      "input": {
+        "policyStoreId": {
+          "$fromPath": "policyStoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:verifiedpermissions:us-east-1:000000000000:policy-store/7c589129",
+        "description": "a store",
+        "policyStoreId": "7c589129"
+      }
+    },
+    {
+      "operation": "CreatePolicyStore",
+      "input": {
+        "validationSettings": {
+          "mode": "OFF"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:verifiedpermissions:us-east-1:000000000000:policy-store/5f59f223",
+        "policyStoreId": "5f59f223"
+      }
+    },
+    {
+      "operation": "ListPolicyStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyStores": [
+          {
+            "arn": "arn:aws:verifiedpermissions:us-east-1:000000000000:policy-store/5f59f223",
+            "description": "",
+            "policyStoreId": "5f59f223"
+          },
+          {
+            "arn": "arn:aws:verifiedpermissions:us-east-1:000000000000:policy-store/7c589129",
+            "description": "a store",
+            "policyStoreId": "7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreatePolicy",
+      "input": {
+        "definition": {
+          "static": {
+            "statement": "permit(principal, action, resource);"
+          }
+        },
+        "policyStoreId": {
+          "$fromPath": "policyStoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyId": "9c8e2cb0",
+        "policyStoreId": "7c589129"
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "policyId": {
+          "$fromPath": "policyId",
+          "$fromStep": 6
+        },
+        "policyStoreId": {
+          "$fromPath": "policyStoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyId": "9c8e2cb0",
+        "policyStoreId": "7c589129"
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "policyId": "absent",
+        "policyStoreId": {
+          "$fromPath": "policyStoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePolicy",
+      "input": {
+        "definition": {
+          "static": {
+            "statement": "permit(principal, action, resource);"
+          }
+        },
+        "policyStoreId": "no-such-store"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyId": "33f6fc5d",
+        "policyStoreId": "no-such-store"
+      }
+    },
+    {
+      "operation": "DeletePolicyStore",
+      "input": {
+        "policyStoreId": {
+          "$fromPath": "policyStoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPolicyStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyStores": [
+          {
+            "arn": "arn:aws:verifiedpermissions:us-east-1:000000000000:policy-store/5f59f223",
+            "description": "",
+            "policyStoreId": "5f59f223"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "policyId": {
+          "$fromPath": "policyId",
+          "$fromStep": 6
+        },
+        "policyStoreId": {
+          "$fromPath": "policyStoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyId": "9c8e2cb0",
+        "policyStoreId": "7c589129"
+      }
+    },
+    {
+      "operation": "DeletePolicy",
+      "input": {
+        "policyId": {
+          "$fromPath": "policyId",
+          "$fromStep": 6
+        },
+        "policyStoreId": {
+          "$fromPath": "policyStoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeletePolicyStore",
+      "input": {
+        "policyStoreId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,189 @@
+schema: bir/1
+service: aws.inspector
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is assessed: no agent runs, no rules package is evaluated,
+# and an assessment run is COMPLETED before the call that started it returns.
+provenance: authored
+
+resources:
+  # Each of these is keyed by its own ARN, which the create builds and every
+  # later request supplies. The ARN is therefore the key rather than something
+  # derived from it: deriving it at the resource level would rebuild it from
+  # the key on every write, prefixing the ARN with itself.
+  target:
+    collection: insp-t
+    id:
+      input_members: [assessmentTargetArn]
+    record:
+      arn: id
+
+  template:
+    collection: insp-p
+    id:
+      input_members: [assessmentTemplateArn]
+    record:
+      arn: id
+
+  run:
+    collection: insp-r
+    id:
+      input_members: [assessmentRunArn]
+    record:
+      arn: id
+
+operations:
+  CreateAssessmentTarget:
+    effects:
+      - generate: { bind: tid, kind: hex, bytes: 8 }
+      - create:
+          resource: target
+          key: >
+            'arn:aws:inspector:' + identity.region + ':' + identity.account
+              + ':target/' + fx.tid
+          record:
+            name: >
+              'assessmentTargetName' in input
+                ? string(input.assessmentTargetName) : ''
+    output:
+      assessmentTargetArn: rec.arn
+
+  # A describe names the ARNs it wants and answers everything when it names
+  # none, which is what the pack's describe helper did for all three shapes.
+  DescribeAssessmentTargets:
+    list:
+      resource: target
+      member: assessmentTargets
+      paginate: model
+      filter: >
+        size(input.assessmentTargetArns) == 0
+          || item.arn in input.assessmentTargetArns
+
+  DeleteAssessmentTarget:
+    effects:
+      - delete: { resource: target, missing: ignore }
+
+  CreateAssessmentTemplate:
+    effects:
+      - generate: { bind: pid, kind: hex, bytes: 8 }
+      - create:
+          resource: template
+          key: >
+            'arn:aws:inspector:' + identity.region + ':' + identity.account
+              + ':template/' + fx.pid
+          record:
+            name: >
+              'assessmentTemplateName' in input
+                ? string(input.assessmentTemplateName) : ''
+            assessmentTargetArn: >
+              'assessmentTargetArn' in input
+                ? string(input.assessmentTargetArn) : ''
+    output:
+      assessmentTemplateArn: rec.arn
+
+  DescribeAssessmentTemplates:
+    list:
+      resource: template
+      member: assessmentTemplates
+      paginate: model
+      filter: >
+        size(input.assessmentTemplateArns) == 0
+          || item.arn in input.assessmentTemplateArns
+
+  DeleteAssessmentTemplate:
+    effects:
+      - delete: { resource: template, missing: ignore }
+
+  StartAssessmentRun:
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8 }
+      - create:
+          resource: run
+          key: >
+            'arn:aws:inspector:' + identity.region + ':' + identity.account
+              + ':run/' + fx.rid
+          record:
+            state: "'COMPLETED'"
+            assessmentTemplateArn: >
+              'assessmentTemplateArn' in input
+                ? string(input.assessmentTemplateArn) : ''
+    output:
+      assessmentRunArn: rec.arn
+
+  DescribeAssessmentRuns:
+    list:
+      resource: run
+      member: assessmentRuns
+      paginate: model
+      filter: >
+        size(input.assessmentRunArns) == 0
+          || item.arn in input.assessmentRunArns
+
+  ListAssessmentRuns:
+    list: { resource: run, member: assessmentRunArns, paginate: model }
+    output:
+      assessmentRunArns: "items.map(r, string(r.arn))"
+
+  # Stopping only writes when there is a run to stop, and answers nothing
+  # either way.
+  StopAssessmentRun:
+    reads:
+      run: { resource: run }
+    effects:
+      - patch:
+          resource: run
+          when: run_found
+          record:
+            state: "'COMPLETED'"
+
+quirks:
+  - operation: StartAssessmentRun
+    note: >
+      A run is COMPLETED before the call returns, so nothing observes CREATED,
+      START_DATA_COLLECTION_PENDING, COLLECTING_DATA or EVALUATING_RULES. No
+      agent runs and no rules package is evaluated, so a completed run has no
+      findings: ListFindings and DescribeFindings are not served at all, which
+      means the only thing this service can be asked -- what did the assessment
+      find -- cannot be asked.
+
+      The template the run names is not checked to exist, and neither is the
+      target a template names, so the whole chain can be built out of order or
+      not at all. The assessmentRunName the request carries is dropped, and
+      startedAt, completedAt, durationInSeconds, rulesPackageArns and
+      stateChanges are declared and never set.
+  - operation: StopAssessmentRun
+    note: >
+      Stopping a run sets its state to COMPLETED, which is the state every run
+      is already in, so a stop is observably a no-op. It answers an empty body
+      whether or not the run existed, and only writes when it did -- so unlike
+      the state operations elsewhere in this emulator it does not leave a
+      phantom record behind. The required stopAction is ignored, so
+      START_EVALUATION and SKIP_EVALUATION are the same thing here.
+  - operation: DescribeAssessmentTargets
+    note: >
+      All three describe operations answer every record when the request names
+      no ARNs, and the ones it names otherwise. An ARN that does not exist is
+      dropped silently rather than reported: failedItems is declared on all
+      three responses and never set, so a caller describing five targets and
+      getting three back has no way to learn which two were missing or why.
+
+      The pack answered the named records in request order; a filtered list
+      answers them in store order, which for these ARNs is lexical. No SDK
+      contract orders a describe response, and the recording marks the step
+      where the two differ rather than quietly matching it.
+  - operation: CreateAssessmentTarget
+    note: >
+      A target is an ARN and a name. The resourceGroupArn that decides which
+      instances the target covers is dropped, so every target covers nothing,
+      and no name collision is checked -- two targets may share a name. A
+      template stores its assessmentTargetArn and a run its
+      assessmentTemplateArn, but neither reference is resolved or validated,
+      and deleting a target leaves its templates behind still naming it, as
+      deleting a template leaves its runs.
+  - operation: ListAssessmentRuns
+    note: >
+      ListAssessmentRuns answers every run in the account and region: the
+      assessmentTemplateArns it accepts to narrow by template are ignored, as
+      is the filter that would narrow by state, duration or start time. Since
+      every run is COMPLETED and belongs to a template nobody checked, neither
+      of those filters would have had anything to distinguish.

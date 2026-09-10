@@ -1,0 +1,281 @@
+{
+  "schema": "trace/1",
+  "service": "aws.s3control",
+  "source": "pack:internal/services/aws/s3control@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListAccessPoints",
+      "input": {
+        "AccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPointList": null
+      }
+    },
+    {
+      "operation": "GetAccessPoint",
+      "input": {
+        "AccountId": "000000000000",
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchAccessPoint",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateAccessPoint",
+      "input": {
+        "AccountId": "000000000000",
+        "Bucket": "b1",
+        "Name": "ap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPointArn": "arn:aws:s3:us-east-1:000000000000:accesspoint/ap1"
+      }
+    },
+    {
+      "operation": "GetAccessPoint",
+      "input": {
+        "AccountId": "000000000000",
+        "Name": "ap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPointArn": "arn:aws:s3:us-east-1:000000000000:accesspoint/ap1",
+        "Bucket": "b1",
+        "Name": "ap1",
+        "NetworkOrigin": "Internet"
+      }
+    },
+    {
+      "operation": "CreateAccessPoint",
+      "input": {
+        "AccountId": "000000000000",
+        "Bucket": "b2",
+        "Name": "ap2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPointArn": "arn:aws:s3:us-east-1:000000000000:accesspoint/ap2"
+      }
+    },
+    {
+      "operation": "ListAccessPoints",
+      "input": {
+        "AccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPointList": [
+          {
+            "AccessPointArn": "arn:aws:s3:us-east-1:000000000000:accesspoint/ap1",
+            "Bucket": "b1",
+            "Name": "ap1",
+            "NetworkOrigin": "Internet"
+          },
+          {
+            "AccessPointArn": "arn:aws:s3:us-east-1:000000000000:accesspoint/ap2",
+            "Bucket": "b2",
+            "Name": "ap2",
+            "NetworkOrigin": "Internet"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetPublicAccessBlock",
+      "input": {
+        "AccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchPublicAccessBlockConfiguration",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutPublicAccessBlock",
+      "input": {
+        "AccountId": "000000000000",
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": false,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": false
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetPublicAccessBlock",
+      "input": {
+        "AccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": false,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": false
+        }
+      }
+    },
+    {
+      "operation": "DeletePublicAccessBlock",
+      "input": {
+        "AccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetPublicAccessBlock",
+      "input": {
+        "AccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchPublicAccessBlockConfiguration",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeletePublicAccessBlock",
+      "input": {
+        "AccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAccessPoint",
+      "input": {
+        "AccountId": "000000000000",
+        "Name": "ap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccessPoints",
+      "input": {
+        "AccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPointList": [
+          {
+            "AccessPointArn": "arn:aws:s3:us-east-1:000000000000:accesspoint/ap2",
+            "Bucket": "b2",
+            "Name": "ap2",
+            "NetworkOrigin": "Internet"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAccessPoint",
+      "input": {
+        "AccountId": "000000000000",
+        "Name": "ap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

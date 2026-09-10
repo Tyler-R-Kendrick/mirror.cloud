@@ -1,0 +1,260 @@
+{
+  "schema": "trace/1",
+  "service": "aws.personalize",
+  "source": "pack:internal/services/aws/personalize@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListDatasetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "datasetGroups": null
+      }
+    },
+    {
+      "operation": "DescribeDatasetGroup",
+      "input": {
+        "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDatasetGroup",
+      "input": {
+        "domain": "ECOMMERCE",
+        "name": "dg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1"
+      }
+    },
+    {
+      "operation": "DescribeDatasetGroup",
+      "input": {
+        "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "datasetGroup": {
+          "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1",
+          "name": "dg1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "CreateDatasetGroup",
+      "input": {
+        "name": "dg2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg2"
+      }
+    },
+    {
+      "operation": "ListDatasetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "datasetGroups": [
+          {
+            "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1",
+            "name": "dg1",
+            "status": "ACTIVE"
+          },
+          {
+            "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg2",
+            "name": "dg2",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateSolution",
+      "input": {
+        "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1",
+        "name": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "solutionArn": "arn:aws:personalize:us-east-1:000000000000:solution/s1"
+      }
+    },
+    {
+      "operation": "DescribeSolution",
+      "input": {
+        "solutionArn": {
+          "$fromPath": "solutionArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "solution": {
+          "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1",
+          "name": "s1",
+          "solutionArn": "arn:aws:personalize:us-east-1:000000000000:solution/s1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeSolution",
+      "input": {
+        "solutionArn": "arn:aws:personalize:us-east-1:000000000000:solution/s1-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteSolution",
+      "input": {
+        "solutionArn": {
+          "$fromPath": "solutionArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeSolution",
+      "input": {
+        "solutionArn": {
+          "$fromPath": "solutionArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDatasetGroup",
+      "input": {
+        "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDatasetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "datasetGroups": [
+          {
+            "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg2",
+            "name": "dg2",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDatasetGroup",
+      "input": {
+        "datasetGroupArn": "arn:aws:personalize:us-east-1:000000000000:dataset-group/dg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

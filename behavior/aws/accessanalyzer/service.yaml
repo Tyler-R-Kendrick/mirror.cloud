@@ -1,0 +1,92 @@
+schema: bir/1
+service: aws.access-analyzer
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is analyzed: an analyzer is a name that is ACTIVE at once,
+# an archive rule is stored and never applied, and there are never findings.
+provenance: authored
+
+resources:
+  analyzer:
+    collection: aa
+    id:
+      input_members: [analyzerName]
+    arn: "arn:{partition}:access-analyzer:{region}:{account}:analyzer/{id}"
+    record:
+      arn: arn
+      name: id
+      type: "'type' in input && string(input.type) != '' ? string(input.type) : 'ACCOUNT'"
+      status: "'ACTIVE'"
+
+  # An archive rule belongs to an analyzer and is addressed by both names
+  # together, which is how the pack keyed it. Nothing reads one back.
+  rule:
+    collection: aarule
+    id:
+      derive: "string(input.analyzerName) + '/' + string(input.ruleName)"
+    record:
+      ruleName: "string(input.ruleName)"
+      analyzerName: "string(input.analyzerName)"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateAnalyzer:
+    require:
+      - { cond: "string(input.analyzerName) != ''", error: Validation }
+    effects:
+      - put: { resource: analyzer }
+    output:
+      arn: rec.arn
+
+  GetAnalyzer:
+    reads:
+      a: { resource: analyzer }
+    require:
+      - { cond: a_found, error: NotFound }
+    output:
+      analyzer: a
+
+  ListAnalyzers:
+    list: { resource: analyzer, member: analyzers, paginate: model }
+
+  DeleteAnalyzer:
+    effects:
+      - delete: { resource: analyzer, missing: ignore }
+
+  ListFindings:
+    output:
+      findings: "[]"
+
+  CreateArchiveRule:
+    effects:
+      - put: { resource: rule }
+
+  DeleteArchiveRule:
+    effects:
+      - delete: { resource: rule, missing: ignore }
+
+quirks:
+  - operation: ListFindings
+    note: >
+      There are never findings, because nothing analyzes anything. The
+      operation is served rather than absent so a client that lists findings
+      gets an empty list instead of a not-implemented fault.
+  - operation: CreateArchiveRule
+    note: >
+      An archive rule is stored and never read: no operation lists or gets one,
+      and the required filter is not kept, so nothing is ever archived by it.
+      Deleting an analyzer leaves its rules behind.
+  - operation: CreateAnalyzer
+    note: >
+      An analyzer is ACTIVE the moment it is created, so nothing can observe
+      CREATING or a failure, and createdAt, lastResourceAnalyzed and its
+      configuration are never set. A probe puts real values there.

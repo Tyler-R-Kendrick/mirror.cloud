@@ -1,0 +1,91 @@
+schema: bir/1
+service: aws.resiliencehub
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is assessed: an app is Active the moment it is created
+# and a resiliency policy is a name with no targets behind it.
+provenance: authored
+
+resources:
+  app:
+    collection: rhapp
+    # An app is created by name and addressed afterwards by ARN, so the
+    # identifier is derived to cover both without taking an ARN apart.
+    id:
+      derive: >
+        'appArn' in input
+          ? string(input.appArn)
+          : 'arn:aws:resiliencehub:' + identity.region + ':' + identity.account
+            + ':app/' + string(input.name)
+    record: {}
+
+  policy:
+    collection: rhpol
+    id:
+      input_members: [policyName]
+    arn: "arn:{partition}:resiliencehub:{region}:{account}:resiliency-policy/{id}"
+    record:
+      policyName: id
+      policyArn: arn
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateApp:
+    effects:
+      - put:
+          resource: app
+          record:
+            name: "string(input.name)"
+            appArn: id
+            status: "'Active'"
+    output:
+      app: rec
+
+  DescribeApp:
+    reads:
+      a: { resource: app }
+    require:
+      - { cond: a_found, error: NotFound }
+    output:
+      app: a
+
+  ListApps:
+    list: { resource: app, member: appSummaries, paginate: model }
+
+  DeleteApp:
+    effects:
+      - delete: { resource: app, missing: ignore }
+    output: {}
+
+  CreateResiliencyPolicy:
+    effects:
+      - put: { resource: policy }
+    output:
+      policy: rec
+
+  ListResiliencyPolicies:
+    list: { resource: policy, member: resiliencyPolicies, paginate: model }
+
+quirks:
+  - operation: DeleteApp
+    note: >
+      Deleting answers with nothing where the model declares appArn as a
+      required member, and deleting an absent app succeeds where describing it
+      faults.
+  - operation: CreateApp
+    note: >
+      An app is Active at once and carries no resiliencyScore, complianceStatus,
+      driftStatus, policyArn or creationTime -- all declared -- because the
+      pack stored none of them. No resource is ever added to an app and no
+      assessment is ever run, so there is nothing to score.
+  - operation: CreateResiliencyPolicy
+    note: >
+      policy and tier are required by the model and neither is stored, so a
+      policy has no RTO or RPO targets at all: it is a name and an ARN.
+      Nothing attaches a policy to an app, so policyArn on an app is never
+      set.

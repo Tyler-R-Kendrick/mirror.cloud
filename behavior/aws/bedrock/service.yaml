@@ -1,0 +1,121 @@
+schema: bir/1
+service: aws.bedrock
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is inferred and nothing is trained: a guardrail is a record
+# that is born READY, a customization job one that is born Completed, and the
+# foundation model list is a single fixed entry.
+provenance: authored
+
+resources:
+  guardrail:
+    collection: bdgr
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [guardrailIdentifier, guardrailId]
+    arn: "arn:{partition}:bedrock:{region}:{account}:guardrail/{id}"
+    record:
+      guardrailId: id
+      guardrailArn: arn
+      name: "'name' in input ? string(input.name) : ''"
+      status: "'READY'"
+      version: "'DRAFT'"
+
+  job:
+    collection: bdjob
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:bedrock:{region}:{account}:model-customization-job/{id}"
+    record:
+      jobArn: arn
+      jobName: "'jobName' in input ? string(input.jobName) : ''"
+      status: "'Completed'"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateGuardrail:
+    effects:
+      - create: { resource: guardrail }
+    output:
+      guardrailId: rec.guardrailId
+      guardrailArn: rec.guardrailArn
+      version: rec.version
+
+  GetGuardrail:
+    reads:
+      gr: { resource: guardrail }
+    require:
+      - { cond: gr_found, error: NotFound }
+    output:
+      guardrailId: gr.guardrailId
+      guardrailArn: gr.guardrailArn
+      name: gr.name
+      status: gr.status
+      version: gr.version
+
+  # GuardrailSummary names a guardrail id and arn, not guardrailId and
+  # guardrailArn, so the listed form is not the stored record.
+  ListGuardrails:
+    list: { resource: guardrail, member: guardrails, paginate: model }
+    output:
+      guardrails: >
+        items.map(g, {
+          'id': g.guardrailId,
+          'arn': g.guardrailArn,
+          'name': g.name,
+          'status': g.status,
+          'version': g.version
+        })
+
+  DeleteGuardrail:
+    effects:
+      - delete: { resource: guardrail, missing: ignore }
+    output: {}
+
+  ListFoundationModels:
+    output:
+      modelSummaries: >
+        [{
+          'modelId': 'amazon.titan-text-lite-v1',
+          'modelName': 'Titan Text Lite',
+          'providerName': 'Amazon'
+        }]
+
+  CreateModelCustomizationJob:
+    effects:
+      - create: { resource: job }
+    output:
+      jobArn: rec.jobArn
+
+quirks:
+  - operation: ListGuardrails
+    note: >
+      A listed guardrail reports id and arn, because that is what
+      GuardrailSummary declares; the same guardrail reports guardrailId and
+      guardrailArn when fetched, because that is what GetGuardrail declares.
+      The pack emitted the fetch spelling in both, so the listing carried two
+      members no SDK could read and left the two it does read absent. The
+      recorded step is superseded with that reason.
+  - operation: CreateGuardrail
+    note: >
+      createdAt is a required member of the answer and is not set, as it was
+      not in the pack; GetGuardrail likewise omits the required createdAt,
+      updatedAt, blockedInputMessaging and blockedOutputsMessaging. Those are
+      values a probe observes, not values this should invent -- the messaging
+      strings in particular are the caller's own input echoed back, and
+      inventing them would put a guess where the request has the answer.
+  - operation: ListFoundationModels
+    note: >
+      One fixed model is listed whatever the account or region, and the
+      catalogue does not change. Nothing filters by provider or modality even
+      though the operation declares those inputs.
+  - operation: CreateModelCustomizationJob
+    note: >
+      The job is Completed before it is answered for, because nothing runs it,
+      and no operation reads one back: the record is written and never
+      observed.

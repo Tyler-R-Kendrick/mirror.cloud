@@ -1,0 +1,91 @@
+schema: bir/1
+service: aws.dax
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No node is started: a cluster is available the moment it is created
+# and has no endpoint to reach it on.
+provenance: authored
+
+resources:
+  cluster:
+    collection: daxcl
+    id:
+      input_members: [ClusterName]
+    arn: "arn:{partition}:dax:{region}:{account}:cache/{id}"
+    record:
+      ClusterName: id
+      ClusterArn: arn
+      Status: "'available'"
+      NodeType: "'NodeType' in input ? string(input.NodeType) : ''"
+
+  parametergroup:
+    collection: daxpg
+    id:
+      input_members: [ParameterGroupName]
+    record:
+      ParameterGroupName: id
+      Description: "'Description' in input ? string(input.Description) : ''"
+
+errors:
+  InvalidParameterValue:
+    code: InvalidParameterValueException
+    http: 400
+    fault: client
+
+operations:
+  CreateCluster:
+    require:
+      - { cond: "string(input.ClusterName) != ''", error: InvalidParameterValue }
+    effects:
+      - put: { resource: cluster }
+    output:
+      Cluster: rec
+
+  DescribeClusters:
+    list:
+      resource: cluster
+      member: Clusters
+      paginate: model
+      key: "'ClusterName' in input ? string(input.ClusterName) : ''"
+
+  DeleteCluster:
+    effects:
+      - delete: { resource: cluster, missing: ignore }
+    output: {}
+
+  CreateParameterGroup:
+    effects:
+      - put: { resource: parametergroup }
+    output:
+      ParameterGroup: rec
+
+  DescribeParameterGroups:
+    list:
+      resource: parametergroup
+      member: ParameterGroups
+      paginate: model
+      key: "'ParameterGroupName' in input ? string(input.ParameterGroupName) : ''"
+
+  DeleteParameterGroup:
+    effects:
+      - delete: { resource: parametergroup, missing: ignore }
+    output: {}
+
+quirks:
+  - operation: DescribeClusters
+    note: >
+      The real operation takes ClusterNames, a list; the pack read a singular
+      ClusterName and this transcribes that, so a client sending the list the
+      model declares gets every cluster rather than the ones it asked for.
+  - operation: CreateCluster
+    note: >
+      IamRoleArn, NodeType and ReplicationFactor are required by the model and
+      only NodeType is stored, so a cluster has no nodes, no discovery
+      endpoint, no subnet group and no security groups -- all of which Cluster
+      declares. The engine now rejects a request that omits them, which the
+      pack accepted.
+  - operation: DeleteCluster
+    note: >
+      Deleting answers with nothing where the model declares the deleted
+      Cluster, and DeleteParameterGroup likewise omits its DeletionMessage.
+      Deleting either when it is absent succeeds.

@@ -1,0 +1,286 @@
+{
+  "schema": "trace/1",
+  "service": "aws.medialive",
+  "source": "pack:internal/services/aws/medialive@c575425",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListChannels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channels": null
+      }
+    },
+    {
+      "operation": "DescribeChannel",
+      "input": {
+        "ChannelId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateChannel",
+      "input": {
+        "Name": "chan-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channel": {
+          "Arn": "arn:aws:medialive:us-east-1:000000000000:channel:7c589129",
+          "Id": "7c589129",
+          "Name": "chan-one",
+          "State": "IDLE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeChannel",
+      "input": {
+        "ChannelId": {
+          "$fromPath": "Channel.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channel": {
+          "Arn": "arn:aws:medialive:us-east-1:000000000000:channel:7c589129",
+          "Id": "7c589129",
+          "Name": "chan-one",
+          "State": "IDLE"
+        }
+      },
+      "superseded": "The pack wrapped the answer in a Channel or an Input, as the Create operations declare. Describe answers with those members at the top of the response and declares no wrapper at all, so the whole answer was unreadable to an SDK. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "CreateChannel",
+      "input": {
+        "Name": "chan-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channel": {
+          "Arn": "arn:aws:medialive:us-east-1:000000000000:channel:5f59f223",
+          "Id": "5f59f223",
+          "Name": "chan-two",
+          "State": "IDLE"
+        }
+      }
+    },
+    {
+      "operation": "ListChannels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channels": [
+          {
+            "Arn": "arn:aws:medialive:us-east-1:000000000000:channel:5f59f223",
+            "Id": "5f59f223",
+            "Name": "chan-two",
+            "State": "IDLE"
+          },
+          {
+            "Arn": "arn:aws:medialive:us-east-1:000000000000:channel:7c589129",
+            "Id": "7c589129",
+            "Name": "chan-one",
+            "State": "IDLE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateInput",
+      "input": {
+        "Name": "in-one",
+        "Type": "RTMP_PUSH"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Input": {
+          "Id": "9c8e2cb0",
+          "Name": "in-one",
+          "State": "DETACHED",
+          "Type": "RTMP_PUSH"
+        }
+      }
+    },
+    {
+      "operation": "DescribeInput",
+      "input": {
+        "InputId": {
+          "$fromPath": "Input.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Input": {
+          "Id": "9c8e2cb0",
+          "Name": "in-one",
+          "State": "DETACHED",
+          "Type": "RTMP_PUSH"
+        }
+      },
+      "superseded": "The pack wrapped the answer in a Channel or an Input, as the Create operations declare. Describe answers with those members at the top of the response and declares no wrapper at all, so the whole answer was unreadable to an SDK. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DescribeInput",
+      "input": {
+        "InputId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteInput",
+      "input": {
+        "InputId": {
+          "$fromPath": "Input.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeInput",
+      "input": {
+        "InputId": {
+          "$fromPath": "Input.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteChannel",
+      "input": {
+        "ChannelId": {
+          "$fromPath": "Channel.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListChannels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channels": [
+          {
+            "Arn": "arn:aws:medialive:us-east-1:000000000000:channel:5f59f223",
+            "Id": "5f59f223",
+            "Name": "chan-two",
+            "State": "IDLE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteChannel",
+      "input": {
+        "ChannelId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

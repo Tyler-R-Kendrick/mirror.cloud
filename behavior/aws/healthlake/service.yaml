@@ -1,0 +1,101 @@
+schema: bir/1
+service: aws.healthlake
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No FHIR resource is ever stored: a datastore is ACTIVE the moment
+# it is created and an import job is completed before it is answered for.
+provenance: authored
+
+resources:
+  datastore:
+    collection: hlds
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [DatastoreId]
+    arn: "arn:{partition}:healthlake:{region}:{account}:datastore/fhir/{id}"
+    record:
+      DatastoreId: id
+      DatastoreArn: arn
+      DatastoreName: "'DatastoreName' in input ? string(input.DatastoreName) : ''"
+      DatastoreStatus: "'ACTIVE'"
+      DatastoreTypeVersion: >
+        'DatastoreTypeVersion' in input && string(input.DatastoreTypeVersion) != ''
+          ? string(input.DatastoreTypeVersion) : 'R4'
+
+  job:
+    collection: hljob
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [JobId]
+    record:
+      JobId: id
+      JobName: "'JobName' in input ? string(input.JobName) : ''"
+      JobStatus: "'COMPLETED'"
+      DatastoreId: "'DatastoreId' in input ? string(input.DatastoreId) : ''"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateFHIRDatastore:
+    effects:
+      - create: { resource: datastore }
+    output:
+      DatastoreId: rec.DatastoreId
+      DatastoreArn: rec.DatastoreArn
+      DatastoreStatus: rec.DatastoreStatus
+
+  DescribeFHIRDatastore:
+    reads:
+      ds: { resource: datastore }
+    require:
+      - { cond: ds_found, error: NotFound }
+    output:
+      DatastoreProperties: ds
+
+  ListFHIRDatastores:
+    list: { resource: datastore, member: DatastorePropertiesList, paginate: model }
+
+  DeleteFHIRDatastore:
+    effects:
+      - delete: { resource: datastore, missing: ignore }
+    output: {}
+
+  StartFHIRImportJob:
+    effects:
+      - create: { resource: job }
+    output:
+      JobId: rec.JobId
+      JobStatus: rec.JobStatus
+
+  DescribeFHIRImportJob:
+    reads:
+      j: { resource: job }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      ImportJobProperties: j
+
+quirks:
+  - operation: CreateFHIRDatastore
+    note: >
+      DatastoreEndpoint is a required member of the create and delete answers
+      and is never set, so there is no URL to speak FHIR to -- which is
+      consistent, because nothing here speaks FHIR. DeleteFHIRDatastore also
+      answers with nothing at all where the model declares four required
+      members.
+  - operation: StartFHIRImportJob
+    note: >
+      DataAccessRoleArn, InputDataConfig and JobOutputDataConfig are required
+      by the model and none is stored, so a job knows nothing about what it
+      was meant to import. It is COMPLETED before it is answered for, because
+      nothing runs it, and DescribeFHIRImportJob ignores the DatastoreId it
+      requires and finds the job by its own id alone.
+  - operation: CreateFHIRDatastore
+    note: >
+      A datastore is ACTIVE at once, so nothing observes CREATING or a
+      failure, and deleting one leaves its import jobs behind. No patient
+      record is ever stored or read: the whole point of the service is absent.

@@ -1,0 +1,66 @@
+schema: bir/1
+service: aws.kinesisanalyticsv2
+
+# Transcribed from the hand-written pack, not established against the real
+# service. An application here is a record; nothing runs it.
+provenance: authored
+
+resources:
+  application:
+    collection: kav2
+    id:
+      input_members: [ApplicationName]
+    # The ARN keeps the v1 service name, which is what the real service does.
+    arn: "arn:{partition}:kinesisanalytics:{region}:{account}:application/{id}"
+    record:
+      ApplicationName: id
+      ApplicationARN: arn
+      ApplicationStatus: "'READY'"
+      RuntimeEnvironment: "'RuntimeEnvironment' in input ? string(input.RuntimeEnvironment) : ''"
+
+errors:
+  InvalidArgument:
+    code: InvalidArgumentException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateApplication:
+    require:
+      - { cond: "string(input.ApplicationName) != ''", error: InvalidArgument }
+    effects:
+      - put: { resource: application }
+    output:
+      ApplicationDetail: rec
+
+  DescribeApplication:
+    reads:
+      app: { resource: application }
+    require:
+      - { cond: app_found, error: NotFound }
+    output:
+      ApplicationDetail: app
+
+  ListApplications:
+    list: { resource: application, member: ApplicationSummaries, paginate: model }
+
+  DeleteApplication:
+    effects:
+      - delete: { resource: application, missing: ignore }
+
+  # Accepted and ignored: there is no runtime to start or stop, so the status
+  # stays READY either way.
+  StartApplication: {}
+  StopApplication: {}
+
+quirks:
+  - operation: StartApplication
+    note: >
+      Start and stop change nothing and an application's ApplicationStatus
+      never leaves READY. Real Kinesis Data Analytics moves through STARTING to
+      RUNNING and back through STOPPING, which DescribeApplication would show.
+      Transcribed from the pack; a probe should record the sequence.

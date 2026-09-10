@@ -1,0 +1,271 @@
+{
+  "schema": "trace/1",
+  "service": "aws.frauddetector",
+  "source": "pack:internal/services/aws/frauddetector@f910980",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "detectors": null
+      }
+    },
+    {
+      "operation": "PutDetector",
+      "input": {
+        "detectorId": "",
+        "eventTypeName": "et"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutDetector",
+      "input": {
+        "detectorId": "d1",
+        "eventTypeName": "et"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDetectors",
+      "input": {
+        "detectorId": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "detectors": [
+          {
+            "detectorId": "d1",
+            "eventTypeName": "et",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored a status of ACTIVE on every detector. The model declares Detector as description, detectorId, eventTypeName, lastUpdatedTime, arn and createdTime -- there is no status member, so it was a field no SDK could read. The declared shape outranks the pack's authored behavior, so the bundle drops it and this step is compared without its body."
+    },
+    {
+      "operation": "GetDetectors",
+      "input": {
+        "detectorId": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "detectors": []
+      }
+    },
+    {
+      "operation": "PutDetector",
+      "input": {
+        "detectorId": "d2",
+        "eventTypeName": "et2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "detectors": [
+          {
+            "detectorId": "d1",
+            "eventTypeName": "et",
+            "status": "ACTIVE"
+          },
+          {
+            "detectorId": "d2",
+            "eventTypeName": "et2",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored a status of ACTIVE on every detector. The model declares Detector as description, detectorId, eventTypeName, lastUpdatedTime, arn and createdTime -- there is no status member, so it was a field no SDK could read. The declared shape outranks the pack's authored behavior, so the bundle drops it and this step is compared without its body."
+    },
+    {
+      "operation": "PutEventType",
+      "input": {
+        "entityTypes": [
+          "customer"
+        ],
+        "eventVariables": [
+          "amount"
+        ],
+        "name": "et"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetEventTypes",
+      "input": {
+        "name": "et"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "eventTypes": [
+          {
+            "eventVariables": [
+              "amount"
+            ],
+            "name": "et"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetEventTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "eventTypes": [
+          {
+            "eventVariables": [
+              "amount"
+            ],
+            "name": "et"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDetector",
+      "input": {
+        "detectorId": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "detectors": [
+          {
+            "detectorId": "d2",
+            "eventTypeName": "et2",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored a status of ACTIVE on every detector. The model declares Detector as description, detectorId, eventTypeName, lastUpdatedTime, arn and createdTime -- there is no status member, so it was a field no SDK could read. The declared shape outranks the pack's authored behavior, so the bundle drops it and this step is compared without its body."
+    },
+    {
+      "operation": "DeleteDetector",
+      "input": {
+        "detectorId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteEventType",
+      "input": {
+        "name": "et"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetEventTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "eventTypes": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,222 @@
+{
+  "schema": "trace/1",
+  "service": "aws.resiliencehub",
+  "source": "pack:internal/services/aws/resiliencehub@4dea611",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "appSummaries": null
+      }
+    },
+    {
+      "operation": "DescribeApp",
+      "input": {
+        "appArn": "arn:aws:resiliencehub:us-east-1:000000000000:app/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateApp",
+      "input": {
+        "name": "app-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appArn": "arn:aws:resiliencehub:us-east-1:000000000000:app/app-one",
+          "name": "app-one",
+          "status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "DescribeApp",
+      "input": {
+        "appArn": {
+          "$fromPath": "app.appArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appArn": "arn:aws:resiliencehub:us-east-1:000000000000:app/app-one",
+          "name": "app-one",
+          "status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "CreateApp",
+      "input": {
+        "name": "app-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appArn": "arn:aws:resiliencehub:us-east-1:000000000000:app/app-two",
+          "name": "app-two",
+          "status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "ListApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "appSummaries": [
+          {
+            "appArn": "arn:aws:resiliencehub:us-east-1:000000000000:app/app-one",
+            "name": "app-one",
+            "status": "Active"
+          },
+          {
+            "appArn": "arn:aws:resiliencehub:us-east-1:000000000000:app/app-two",
+            "name": "app-two",
+            "status": "Active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateResiliencyPolicy",
+      "input": {
+        "policy": {
+          "AZ": {
+            "rpoInSecs": 3600,
+            "rtoInSecs": 3600
+          }
+        },
+        "policyName": "pol-one",
+        "tier": "Standard"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policy": {
+          "policyArn": "arn:aws:resiliencehub:us-east-1:000000000000:resiliency-policy/pol-one",
+          "policyName": "pol-one"
+        }
+      }
+    },
+    {
+      "operation": "ListResiliencyPolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resiliencyPolicies": [
+          {
+            "policyArn": "arn:aws:resiliencehub:us-east-1:000000000000:resiliency-policy/pol-one",
+            "policyName": "pol-one"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApp",
+      "input": {
+        "appArn": {
+          "$fromPath": "app.appArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "appSummaries": [
+          {
+            "appArn": "arn:aws:resiliencehub:us-east-1:000000000000:app/app-two",
+            "name": "app-two",
+            "status": "Active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApp",
+      "input": {
+        "appArn": "arn:aws:resiliencehub:us-east-1:000000000000:app/gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

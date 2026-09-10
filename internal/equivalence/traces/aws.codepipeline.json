@@ -1,0 +1,516 @@
+{
+  "schema": "trace/1",
+  "service": "aws.codepipeline",
+  "source": "pack:internal/services/aws/codepipeline@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListPipelines",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelines": null
+      }
+    },
+    {
+      "operation": "GetPipeline",
+      "input": {
+        "name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "PipelineNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePipeline",
+      "input": {
+        "pipeline": {
+          "artifactStore": {
+            "location": "artifacts",
+            "type": "S3"
+          },
+          "name": "p1",
+          "roleArn": "arn:aws:iam::000000000000:role/cp",
+          "stages": [
+            {
+              "actions": [
+                {
+                  "name": "src"
+                }
+              ],
+              "name": "Source"
+            },
+            {
+              "actions": [
+                {
+                  "name": "build"
+                }
+              ],
+              "name": "Build"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipeline": {
+          "artifactStore": {
+            "location": "artifacts",
+            "type": "S3"
+          },
+          "name": "p1",
+          "roleArn": "arn:aws:iam::000000000000:role/cp",
+          "stages": [
+            {
+              "actions": [
+                {
+                  "name": "src"
+                }
+              ],
+              "name": "Source"
+            },
+            {
+              "actions": [
+                {
+                  "name": "build"
+                }
+              ],
+              "name": "Build"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "GetPipeline",
+      "input": {
+        "name": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipeline": {
+          "artifactStore": {
+            "location": "artifacts",
+            "type": "S3"
+          },
+          "name": "p1",
+          "roleArn": "arn:aws:iam::000000000000:role/cp",
+          "stages": [
+            {
+              "actions": [
+                {
+                  "name": "src"
+                }
+              ],
+              "name": "Source"
+            },
+            {
+              "actions": [
+                {
+                  "name": "build"
+                }
+              ],
+              "name": "Build"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "GetPipelineState",
+      "input": {
+        "name": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelineName": "p1",
+        "stageStates": []
+      }
+    },
+    {
+      "operation": "CreatePipeline",
+      "input": {
+        "pipeline": {
+          "artifactStore": {
+            "location": "artifacts",
+            "type": "S3"
+          },
+          "name": "p2",
+          "roleArn": "arn:aws:iam::000000000000:role/cp",
+          "stages": [
+            {
+              "actions": [
+                {
+                  "name": "src"
+                }
+              ],
+              "name": "Source"
+            },
+            {
+              "actions": [
+                {
+                  "name": "build"
+                }
+              ],
+              "name": "Build"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipeline": {
+          "artifactStore": {
+            "location": "artifacts",
+            "type": "S3"
+          },
+          "name": "p2",
+          "roleArn": "arn:aws:iam::000000000000:role/cp",
+          "stages": [
+            {
+              "actions": [
+                {
+                  "name": "src"
+                }
+              ],
+              "name": "Source"
+            },
+            {
+              "actions": [
+                {
+                  "name": "build"
+                }
+              ],
+              "name": "Build"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "ListPipelines",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelines": [
+          {
+            "name": "p1"
+          },
+          {
+            "name": "p2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdatePipeline",
+      "input": {
+        "pipeline": {
+          "artifactStore": {
+            "location": "artifacts",
+            "type": "S3"
+          },
+          "name": "p1",
+          "roleArn": "arn:aws:iam::000000000000:role/cp"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipeline": {
+          "artifactStore": {
+            "location": "artifacts",
+            "type": "S3"
+          },
+          "name": "p1",
+          "roleArn": "arn:aws:iam::000000000000:role/cp"
+        }
+      }
+    },
+    {
+      "operation": "GetPipeline",
+      "input": {
+        "name": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipeline": {
+          "artifactStore": {
+            "location": "artifacts",
+            "type": "S3"
+          },
+          "name": "p1",
+          "roleArn": "arn:aws:iam::000000000000:role/cp"
+        }
+      }
+    },
+    {
+      "operation": "StartPipelineExecution",
+      "input": {
+        "name": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelineExecutionId": "p1-7c589129"
+      }
+    },
+    {
+      "operation": "GetPipelineExecution",
+      "input": {
+        "pipelineExecutionId": {
+          "$fromPath": "pipelineExecutionId",
+          "$fromStep": 9
+        },
+        "pipelineName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelineExecution": {
+          "pipelineExecutionId": "p1-7c589129",
+          "pipelineName": "p1",
+          "status": "Succeeded"
+        }
+      }
+    },
+    {
+      "operation": "ListPipelineExecutions",
+      "input": {
+        "pipelineName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelineExecutionSummaries": [
+          {
+            "pipelineExecutionId": "p1-7c589129",
+            "pipelineName": "p1",
+            "status": "Succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StopPipelineExecution",
+      "input": {
+        "abandon": false,
+        "pipelineExecutionId": {
+          "$fromPath": "pipelineExecutionId",
+          "$fromStep": 9
+        },
+        "pipelineName": "p1",
+        "reason": "no"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelineExecutionId": "p1-7c589129"
+      }
+    },
+    {
+      "operation": "GetPipelineExecution",
+      "input": {
+        "pipelineExecutionId": {
+          "$fromPath": "pipelineExecutionId",
+          "$fromStep": 9
+        },
+        "pipelineName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelineExecution": {
+          "pipelineExecutionId": "p1-7c589129",
+          "pipelineName": "p1",
+          "status": "Stopped"
+        }
+      }
+    },
+    {
+      "operation": "StopPipelineExecution",
+      "input": {
+        "abandon": false,
+        "pipelineExecutionId": "absent",
+        "pipelineName": "p1",
+        "reason": "no"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelineExecutionId": "absent"
+      }
+    },
+    {
+      "operation": "GetPipelineExecution",
+      "input": {
+        "pipelineExecutionId": "absent",
+        "pipelineName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "PipelineExecutionNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeletePipeline",
+      "input": {
+        "name": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPipelines",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelines": [
+          {
+            "name": "p2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListPipelineExecutions",
+      "input": {
+        "pipelineName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pipelineExecutionSummaries": [
+          {
+            "pipelineExecutionId": "p1-7c589129",
+            "pipelineName": "p1",
+            "status": "Stopped"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeletePipeline",
+      "input": {
+        "name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

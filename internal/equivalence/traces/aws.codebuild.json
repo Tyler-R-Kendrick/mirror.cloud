@@ -1,0 +1,513 @@
+{
+  "schema": "trace/1",
+  "service": "aws.codebuild",
+  "source": "internal/services/aws/codebuild",
+  "note": "Projects and builds; the update that empties what it does not resend.",
+  "steps": [
+    {
+      "operation": "ListProjects",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "projects": null
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "artifacts": {
+          "type": "NO_ARTIFACTS"
+        },
+        "description": "dropped",
+        "environment": {
+          "computeType": "BUILD_GENERAL1_SMALL",
+          "image": "aws/codebuild/standard:7.0",
+          "type": "LINUX_CONTAINER"
+        },
+        "name": "alpha",
+        "serviceRole": "arn:aws:iam::000000000000:role/cb",
+        "source": {
+          "type": "NO_SOURCE"
+        },
+        "timeoutInMinutes": 30
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "project": {
+          "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
+          "environment": {
+            "computeType": "BUILD_GENERAL1_SMALL",
+            "image": "aws/codebuild/standard:7.0",
+            "type": "LINUX_CONTAINER"
+          },
+          "name": "alpha",
+          "source": {
+            "type": "NO_SOURCE"
+          }
+        }
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "artifacts": {
+          "type": "NO_ARTIFACTS"
+        },
+        "environment": {
+          "computeType": "BUILD_GENERAL1_SMALL",
+          "image": "aws/codebuild/standard:7.0",
+          "type": "LINUX_CONTAINER"
+        },
+        "name": "beta",
+        "serviceRole": "arn:aws:iam::000000000000:role/cb",
+        "source": {
+          "type": "NO_SOURCE"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "project": {
+          "arn": "arn:aws:codebuild:us-east-1:000000000000:project/beta",
+          "environment": {
+            "computeType": "BUILD_GENERAL1_SMALL",
+            "image": "aws/codebuild/standard:7.0",
+            "type": "LINUX_CONTAINER"
+          },
+          "name": "beta",
+          "source": {
+            "type": "NO_SOURCE"
+          }
+        }
+      }
+    },
+    {
+      "operation": "ListProjects",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "projects": [
+          "alpha",
+          "beta"
+        ]
+      }
+    },
+    {
+      "operation": "BatchGetProjects",
+      "input": {
+        "names": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "projects": [
+          {
+            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
+            "environment": {
+              "computeType": "BUILD_GENERAL1_SMALL",
+              "image": "aws/codebuild/standard:7.0",
+              "type": "LINUX_CONTAINER"
+            },
+            "name": "alpha",
+            "source": {
+              "type": "NO_SOURCE"
+            }
+          },
+          {
+            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/beta",
+            "environment": {
+              "computeType": "BUILD_GENERAL1_SMALL",
+              "image": "aws/codebuild/standard:7.0",
+              "type": "LINUX_CONTAINER"
+            },
+            "name": "beta",
+            "source": {
+              "type": "NO_SOURCE"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchGetProjects",
+      "input": {
+        "names": [
+          "beta",
+          "absent",
+          "alpha"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "projects": [
+          {
+            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/beta",
+            "environment": {
+              "computeType": "BUILD_GENERAL1_SMALL",
+              "image": "aws/codebuild/standard:7.0",
+              "type": "LINUX_CONTAINER"
+            },
+            "name": "beta",
+            "source": {
+              "type": "NO_SOURCE"
+            }
+          },
+          {
+            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
+            "environment": {
+              "computeType": "BUILD_GENERAL1_SMALL",
+              "image": "aws/codebuild/standard:7.0",
+              "type": "LINUX_CONTAINER"
+            },
+            "name": "alpha",
+            "source": {
+              "type": "NO_SOURCE"
+            }
+          }
+        ]
+      },
+      "superseded": "The pack answered the named projects in request order; a filtered list answers them in store order, which for these names is lexical. BatchGetProjectsOutput orders nothing, so neither order is the declared one and the store's is the one the engine has."
+    },
+    {
+      "operation": "BatchGetProjects",
+      "input": {
+        "names": [
+          "absent"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "projects": null
+      }
+    },
+    {
+      "operation": "UpdateProject",
+      "input": {
+        "description": "still dropped",
+        "name": "alpha"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "project": {
+          "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
+          "environment": null,
+          "name": "alpha",
+          "source": null
+        }
+      }
+    },
+    {
+      "operation": "BatchGetProjects",
+      "input": {
+        "names": [
+          "alpha"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "projects": [
+          {
+            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
+            "environment": null,
+            "name": "alpha",
+            "source": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateProject",
+      "input": {
+        "name": "ghost",
+        "source": {
+          "type": "NO_SOURCE"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "project": {
+          "arn": "arn:aws:codebuild:us-east-1:000000000000:project/ghost",
+          "environment": null,
+          "name": "ghost",
+          "source": {
+            "type": "NO_SOURCE"
+          }
+        }
+      }
+    },
+    {
+      "operation": "BatchGetProjects",
+      "input": {
+        "names": [
+          "ghost"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "projects": [
+          {
+            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/ghost",
+            "environment": null,
+            "name": "ghost",
+            "source": {
+              "type": "NO_SOURCE"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListBuilds",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ids": null
+      }
+    },
+    {
+      "operation": "StartBuild",
+      "input": {
+        "idempotencyToken": "tok",
+        "projectName": "alpha"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "build": {
+          "buildStatus": "SUCCEEDED",
+          "id": "alpha:7c589129",
+          "projectName": "alpha"
+        }
+      }
+    },
+    {
+      "operation": "StartBuild",
+      "input": {
+        "idempotencyToken": "tok",
+        "projectName": "alpha"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "build": {
+          "buildStatus": "SUCCEEDED",
+          "id": "alpha:5f59f223",
+          "projectName": "alpha"
+        }
+      }
+    },
+    {
+      "operation": "StartBuild",
+      "input": {
+        "projectName": "nosuch"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "build": {
+          "buildStatus": "SUCCEEDED",
+          "id": "nosuch:9c8e2cb0",
+          "projectName": "nosuch"
+        }
+      }
+    },
+    {
+      "operation": "ListBuilds",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ids": [
+          "alpha:5f59f223",
+          "alpha:7c589129",
+          "nosuch:9c8e2cb0"
+        ]
+      }
+    },
+    {
+      "operation": "StopBuild",
+      "input": {
+        "id": "absent:00000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "BatchGetBuilds",
+      "input": {
+        "ids": [
+          "absent:00000000"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "builds": null
+      }
+    },
+    {
+      "operation": "DeleteProject",
+      "input": {
+        "name": "beta"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteProject",
+      "input": {
+        "name": "beta"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListProjects",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "projects": [
+          "alpha",
+          "ghost"
+        ]
+      }
+    },
+    {
+      "operation": "ListBuilds",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ids": [
+          "alpha:5f59f223",
+          "alpha:7c589129",
+          "nosuch:9c8e2cb0"
+        ]
+      }
+    }
+  ]
+}

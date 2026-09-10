@@ -1,0 +1,728 @@
+{
+  "schema": "trace/1",
+  "service": "aws.docdb",
+  "source": "internal/services/aws/docdb",
+  "note": "Clusters, instances, subnet groups and snapshots; the modify that modifies nothing.",
+  "steps": [
+    {
+      "operation": "DescribeDBClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusters": null
+      }
+    },
+    {
+      "operation": "CreateDBCluster",
+      "input": {
+        "DBClusterIdentifier": "primary",
+        "DBSubnetGroupName": "sg",
+        "Engine": "docdb",
+        "MasterUserPassword": "hunter2hunter2",
+        "MasterUsername": "root",
+        "StorageEncrypted": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "DBClusterIdentifier": "primary",
+          "Endpoint": "primary.us-east-1.docdb.amazonaws.com",
+          "Engine": "docdb",
+          "EngineVersion": "5.0.0",
+          "MasterUsername": "root",
+          "Port": 27017,
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "CreateDBCluster",
+      "input": {
+        "DBClusterIdentifier": "second",
+        "Engine": "docdb",
+        "EngineVersion": "9.9.9",
+        "MasterUserPassword": "hunter2hunter2",
+        "MasterUsername": "admin"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "DBClusterIdentifier": "second",
+          "Endpoint": "second.us-east-1.docdb.amazonaws.com",
+          "Engine": "docdb",
+          "EngineVersion": "9.9.9",
+          "MasterUsername": "admin",
+          "Port": 27017,
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBClusters",
+      "input": {
+        "DBClusterIdentifier": "primary"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusters": [
+          {
+            "DBClusterIdentifier": "primary",
+            "Endpoint": "primary.us-east-1.docdb.amazonaws.com",
+            "Engine": "docdb",
+            "EngineVersion": "5.0.0",
+            "MasterUsername": "root",
+            "Port": 27017,
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDBClusters",
+      "input": {
+        "DBClusterIdentifier": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusters": []
+      }
+    },
+    {
+      "operation": "DescribeDBClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusters": [
+          {
+            "DBClusterIdentifier": "primary",
+            "Endpoint": "primary.us-east-1.docdb.amazonaws.com",
+            "Engine": "docdb",
+            "EngineVersion": "5.0.0",
+            "MasterUsername": "root",
+            "Port": 27017,
+            "Status": "available"
+          },
+          {
+            "DBClusterIdentifier": "second",
+            "Endpoint": "second.us-east-1.docdb.amazonaws.com",
+            "Engine": "docdb",
+            "EngineVersion": "9.9.9",
+            "MasterUsername": "admin",
+            "Port": 27017,
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyDBCluster",
+      "input": {
+        "BackupRetentionPeriod": 7,
+        "DBClusterIdentifier": "primary",
+        "DeletionProtection": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "DBClusterIdentifier": "primary",
+          "Endpoint": "primary.us-east-1.docdb.amazonaws.com",
+          "Engine": "docdb",
+          "EngineVersion": "5.0.0",
+          "MasterUsername": "root",
+          "Port": 27017,
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBClusters",
+      "input": {
+        "DBClusterIdentifier": "primary"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusters": [
+          {
+            "DBClusterIdentifier": "primary",
+            "Endpoint": "primary.us-east-1.docdb.amazonaws.com",
+            "Engine": "docdb",
+            "EngineVersion": "5.0.0",
+            "MasterUsername": "root",
+            "Port": 27017,
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyDBCluster",
+      "input": {
+        "DBClusterIdentifier": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DBClusterNotFoundFault",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "FailoverDBCluster",
+      "input": {
+        "DBClusterIdentifier": "primary"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "DBClusterIdentifier": "primary",
+          "Endpoint": "primary.us-east-1.docdb.amazonaws.com",
+          "Engine": "docdb",
+          "EngineVersion": "5.0.0",
+          "MasterUsername": "root",
+          "Port": 27017,
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "FailoverDBCluster",
+      "input": {
+        "DBClusterIdentifier": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DBClusterNotFoundFault",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDBInstance",
+      "input": {
+        "DBClusterIdentifier": "primary",
+        "DBInstanceClass": "db.r5.large",
+        "DBInstanceIdentifier": "inst-1",
+        "Engine": "docdb"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBClusterIdentifier": "primary",
+          "DBInstanceClass": "db.r5.large",
+          "DBInstanceIdentifier": "inst-1",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "inst-1.us-east-1.docdb.amazonaws.com",
+            "Port": 27017
+          },
+          "Engine": "docdb"
+        }
+      }
+    },
+    {
+      "operation": "CreateDBInstance",
+      "input": {
+        "DBClusterIdentifier": "ghost",
+        "DBInstanceClass": "db.r5.large",
+        "DBInstanceIdentifier": "orphan",
+        "Engine": "docdb"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBClusterIdentifier": "ghost",
+          "DBInstanceClass": "db.r5.large",
+          "DBInstanceIdentifier": "orphan",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "orphan.us-east-1.docdb.amazonaws.com",
+            "Port": 27017
+          },
+          "Engine": "docdb"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {
+        "DBInstanceIdentifier": "inst-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": [
+          {
+            "DBClusterIdentifier": "primary",
+            "DBInstanceClass": "db.r5.large",
+            "DBInstanceIdentifier": "inst-1",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "inst-1.us-east-1.docdb.amazonaws.com",
+              "Port": 27017
+            },
+            "Engine": "docdb"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": [
+          {
+            "DBClusterIdentifier": "primary",
+            "DBInstanceClass": "db.r5.large",
+            "DBInstanceIdentifier": "inst-1",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "inst-1.us-east-1.docdb.amazonaws.com",
+              "Port": 27017
+            },
+            "Engine": "docdb"
+          },
+          {
+            "DBClusterIdentifier": "ghost",
+            "DBInstanceClass": "db.r5.large",
+            "DBInstanceIdentifier": "orphan",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "orphan.us-east-1.docdb.amazonaws.com",
+              "Port": 27017
+            },
+            "Engine": "docdb"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {
+        "DBInstanceIdentifier": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": []
+      }
+    },
+    {
+      "operation": "CreateDBSubnetGroup",
+      "input": {
+        "DBSubnetGroupDescription": "the subnets",
+        "DBSubnetGroupName": "sg",
+        "SubnetIds": [
+          "subnet-1",
+          "subnet-2"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSubnetGroup": {
+          "DBSubnetGroupDescription": "the subnets",
+          "DBSubnetGroupName": "sg"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBSubnetGroups",
+      "input": {
+        "DBSubnetGroupName": "sg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSubnetGroups": [
+          {
+            "DBSubnetGroupDescription": "the subnets",
+            "DBSubnetGroupName": "sg"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDBSubnetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSubnetGroups": [
+          {
+            "DBSubnetGroupDescription": "the subnets",
+            "DBSubnetGroupName": "sg"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateDBClusterSnapshot",
+      "input": {
+        "DBClusterIdentifier": "primary",
+        "DBClusterSnapshotIdentifier": "snap-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusterSnapshot": {
+          "DBClusterIdentifier": "primary",
+          "DBClusterSnapshotIdentifier": "snap-1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBClusterSnapshots",
+      "input": {
+        "DBClusterSnapshotIdentifier": "snap-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusterSnapshots": [
+          {
+            "DBClusterIdentifier": "primary",
+            "DBClusterSnapshotIdentifier": "snap-1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDBClusterSnapshots",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusterSnapshots": [
+          {
+            "DBClusterIdentifier": "primary",
+            "DBClusterSnapshotIdentifier": "snap-1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "inst-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceIdentifier": "inst-1",
+          "DBInstanceStatus": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DeleteDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "inst-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceIdentifier": "inst-1",
+          "DBInstanceStatus": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": [
+          {
+            "DBClusterIdentifier": "ghost",
+            "DBInstanceClass": "db.r5.large",
+            "DBInstanceIdentifier": "orphan",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "orphan.us-east-1.docdb.amazonaws.com",
+              "Port": 27017
+            },
+            "Engine": "docdb"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDBClusterSnapshot",
+      "input": {
+        "DBClusterSnapshotIdentifier": "snap-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDBSubnetGroup",
+      "input": {
+        "DBSubnetGroupName": "sg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDBSubnetGroup",
+      "input": {
+        "DBSubnetGroupName": "sg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDBCluster",
+      "input": {
+        "DBClusterIdentifier": "primary"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "DBClusterIdentifier": "primary",
+          "Endpoint": "primary.us-east-1.docdb.amazonaws.com",
+          "Engine": "docdb",
+          "EngineVersion": "5.0.0",
+          "MasterUsername": "root",
+          "Port": 27017,
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DeleteDBCluster",
+      "input": {
+        "DBClusterIdentifier": "primary"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "DBClusterIdentifier": "primary",
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusters": [
+          {
+            "DBClusterIdentifier": "second",
+            "Endpoint": "second.us-east-1.docdb.amazonaws.com",
+            "Engine": "docdb",
+            "EngineVersion": "9.9.9",
+            "MasterUsername": "admin",
+            "Port": 27017,
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": [
+          {
+            "DBClusterIdentifier": "ghost",
+            "DBInstanceClass": "db.r5.large",
+            "DBInstanceIdentifier": "orphan",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "orphan.us-east-1.docdb.amazonaws.com",
+              "Port": 27017
+            },
+            "Engine": "docdb"
+          }
+        ]
+      }
+    }
+  ]
+}

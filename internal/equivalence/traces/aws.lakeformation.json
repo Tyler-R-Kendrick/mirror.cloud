@@ -1,0 +1,469 @@
+{
+  "schema": "trace/1",
+  "service": "aws.lakeformation",
+  "source": "pack:internal/services/aws/lakeformation@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetDataLakeSettings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DataLakeSettings": {
+          "DataLakeAdmins": []
+        }
+      }
+    },
+    {
+      "operation": "PutDataLakeSettings",
+      "input": {
+        "DataLakeSettings": {
+          "DataLakeAdmins": [
+            {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDataLakeSettings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DataLakeSettings": {
+          "DataLakeAdmins": [
+            {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "ListPermissions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PrincipalResourcePermissions": null
+      }
+    },
+    {
+      "operation": "GrantPermissions",
+      "input": {
+        "Permissions": [
+          "SELECT"
+        ],
+        "Principal": {
+          "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+        },
+        "Resource": {
+          "Table": {
+            "DatabaseName": "db",
+            "Name": "sales"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GrantPermissions",
+      "input": {
+        "Permissions": [
+          "ALL"
+        ],
+        "Principal": {
+          "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+        },
+        "Resource": {
+          "Table": {
+            "DatabaseName": "db",
+            "Name": "orders"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GrantPermissions",
+      "input": {
+        "Permissions": [
+          "SELECT"
+        ],
+        "Principal": {
+          "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/bob"
+        },
+        "Resource": {
+          "Table": {
+            "DatabaseName": "db",
+            "Name": "sales"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GrantPermissions",
+      "input": {
+        "Permissions": [
+          "SELECT"
+        ],
+        "Principal": {
+          "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/bob"
+        },
+        "Resource": {
+          "Table": {
+            "DatabaseName": "db",
+            "Name": "sales"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPermissions",
+      "input": {
+        "Principal": {
+          "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PrincipalResourcePermissions": [
+          {
+            "Permissions": [
+              "SELECT"
+            ],
+            "Principal": {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/bob"
+            },
+            "Resource": {
+              "Table": {
+                "DatabaseName": "db",
+                "Name": "sales"
+              }
+            }
+          },
+          {
+            "Permissions": [
+              "ALL"
+            ],
+            "Principal": {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+            },
+            "Resource": {
+              "Table": {
+                "DatabaseName": "db",
+                "Name": "orders"
+              }
+            }
+          },
+          {
+            "Permissions": [
+              "SELECT"
+            ],
+            "Principal": {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+            },
+            "Resource": {
+              "Table": {
+                "DatabaseName": "db",
+                "Name": "sales"
+              }
+            }
+          },
+          {
+            "Permissions": [
+              "SELECT"
+            ],
+            "Principal": {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/bob"
+            },
+            "Resource": {
+              "Table": {
+                "DatabaseName": "db",
+                "Name": "sales"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RevokePermissions",
+      "input": {
+        "Permissions": [
+          "SELECT"
+        ],
+        "Principal": {
+          "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+        },
+        "Resource": {
+          "Table": {
+            "DatabaseName": "db",
+            "Name": "sales"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPermissions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PrincipalResourcePermissions": [
+          {
+            "Permissions": [
+              "SELECT"
+            ],
+            "Principal": {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/bob"
+            },
+            "Resource": {
+              "Table": {
+                "DatabaseName": "db",
+                "Name": "sales"
+              }
+            }
+          },
+          {
+            "Permissions": [
+              "SELECT"
+            ],
+            "Principal": {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/bob"
+            },
+            "Resource": {
+              "Table": {
+                "DatabaseName": "db",
+                "Name": "sales"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RevokePermissions",
+      "input": {
+        "Permissions": [
+          "SELECT"
+        ],
+        "Principal": {
+          "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/alice"
+        },
+        "Resource": {
+          "Table": {
+            "DatabaseName": "db",
+            "Name": "sales"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPermissions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PrincipalResourcePermissions": [
+          {
+            "Permissions": [
+              "SELECT"
+            ],
+            "Principal": {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/bob"
+            },
+            "Resource": {
+              "Table": {
+                "DatabaseName": "db",
+                "Name": "sales"
+              }
+            }
+          },
+          {
+            "Permissions": [
+              "SELECT"
+            ],
+            "Principal": {
+              "DataLakePrincipalIdentifier": "arn:aws:iam::000000000000:user/bob"
+            },
+            "Resource": {
+              "Table": {
+                "DatabaseName": "db",
+                "Name": "sales"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListResources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceInfoList": null
+      }
+    },
+    {
+      "operation": "RegisterResource",
+      "input": {
+        "ResourceArn": "arn:aws:s3:::lake",
+        "RoleArn": "arn:aws:iam::000000000000:role/lf"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListResources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceInfoList": [
+          {
+            "ResourceArn": "arn:aws:s3:::lake",
+            "RoleArn": "arn:aws:iam::000000000000:role/lf"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeregisterResource",
+      "input": {
+        "ResourceArn": "arn:aws:s3:::lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListResources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceInfoList": null
+      }
+    },
+    {
+      "operation": "DeregisterResource",
+      "input": {
+        "ResourceArn": "arn:aws:s3:::absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

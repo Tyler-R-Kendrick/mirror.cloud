@@ -299,7 +299,7 @@ func (p *Pack) loop() {
 			continue
 		}
 		select {
-		case <-p.deps.Clock.AfterUntil(next):
+		case <-p.deps.Clock.AfterTime(next):
 		case <-p.wake:
 		case <-p.stop:
 			return

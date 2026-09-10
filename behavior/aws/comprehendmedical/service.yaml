@@ -1,0 +1,74 @@
+schema: bir/1
+service: aws.comprehendmedical
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Detection is a fixed answer rather than a model: the same entity
+# comes back for any text, which is stated in quirks rather than implied.
+provenance: authored
+
+resources:
+  job:
+    collection: cmjob
+    id: { generate: { kind: hex, bytes: 8 } }
+    record:
+      JobId: id
+      JobName: "'JobName' in input ? string(input.JobName) : ''"
+      # The job is complete before it is answered for, because nothing runs it.
+      JobStatus: "'COMPLETED'"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  DetectEntitiesV2:
+    output:
+      Entities: >
+        [{'Category': 'MEDICAL_CONDITION', 'Text': 'cough',
+          'Score': 0.99, 'Type': 'DX_NAME'}]
+
+  InferICD10CM:
+    output:
+      Entities: >
+        [{'Category': 'MEDICAL_CONDITION', 'Text': 'cough',
+          'Score': 0.99, 'Type': 'DX_NAME'}]
+
+  # Protected health information is the one detection that answers empty, which
+  # is the safer default for a fixture: a caller testing a redaction path sees
+  # nothing to redact rather than a fabricated patient.
+  DetectPHI:
+    output:
+      Entities: "[]"
+
+  StartEntitiesDetectionV2Job:
+    effects:
+      - create: { resource: job }
+    output:
+      JobId: rec.JobId
+
+  DescribeEntitiesDetectionV2Job:
+    reads:
+      job: { resource: job, key: "string(input.JobId)" }
+    require:
+      - { cond: job_found, error: NotFound }
+    output:
+      ComprehendMedicalAsyncJobProperties: job
+
+  ListEntitiesDetectionV2Jobs:
+    list: { resource: job, member: ComprehendMedicalAsyncJobPropertiesList }
+
+quirks:
+  - operation: DetectEntitiesV2
+    note: >
+      One canned entity is returned for any input text, and the same one for
+      InferICD10CM. The model marks ModelVersion required in both outputs and
+      the pack answers with neither, so a strict client sees a response missing
+      a member it was promised. Transcribed rather than invented; a probe
+      should record a real ModelVersion.
+  - operation: StartEntitiesDetectionV2Job
+    note: >
+      A job is COMPLETED the moment it is started and never produces output to
+      the configured S3 location. Real Comprehend Medical runs it, so a caller
+      polling for SUBMITTED then IN_PROGRESS never sees either state here.

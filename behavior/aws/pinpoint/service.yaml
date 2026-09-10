@@ -1,0 +1,133 @@
+schema: bir/1
+service: aws.pinpoint
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is sent: an app holds campaigns, a campaign is SCHEDULED
+# forever, and SendMessages reports on no endpoint at all.
+provenance: authored
+
+resources:
+  app:
+    collection: ppapp
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:mobiletargeting:{region}:{account}:apps/{id}"
+    record:
+      Id: id
+      # The pack looked for Name at the top of the request first and inside
+      # CreateApplicationRequest second. The model declares no top-level Name,
+      # so only the nested one is reachable.
+      Name: >
+        'CreateApplicationRequest' in input && 'Name' in input.CreateApplicationRequest
+          ? string(input.CreateApplicationRequest.Name)
+          : ''
+      Arn: arn
+
+  # A campaign is filed under its app and its own id together, which is how
+  # the pack keyed it: asking the wrong app for a campaign does not find it.
+  # The generated half is bound by the create effect, because an identifier
+  # must come from the deterministic source rather than an expression.
+  campaign:
+    collection: ppcamp
+    id:
+      derive: "string(input.ApplicationId) + '/' + string(input.CampaignId)"
+    record: {}
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateApp:
+    effects:
+      - create: { resource: app }
+    output:
+      ApplicationResponse: rec
+
+  GetApp:
+    reads:
+      a: { resource: app, key: "string(input.ApplicationId)" }
+    require:
+      - { cond: a_found, error: NotFound }
+    output:
+      ApplicationResponse: a
+
+  GetApps:
+    list: { resource: app, member: ApplicationsResponse, paginate: model }
+    output:
+      ApplicationsResponse: "{'Item': items}"
+
+  DeleteApp:
+    effects:
+      - delete: { resource: app, key: "string(input.ApplicationId)", missing: ignore }
+
+  CreateCampaign:
+    effects:
+      - generate: { bind: cid, kind: hex, bytes: 8 }
+      - put:
+          resource: campaign
+          key: "string(input.ApplicationId) + '/' + fx.cid"
+          record:
+            Id: fx.cid
+            ApplicationId: "string(input.ApplicationId)"
+            # Read from the top of the request, where the model puts it inside
+            # WriteCampaignRequest, so a campaign's name is always empty.
+            Name: "''"
+            State: "{'CampaignStatus': 'SCHEDULED'}"
+    output:
+      CampaignResponse: rec
+
+  GetCampaign:
+    reads:
+      c: { resource: campaign }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      CampaignResponse: c
+
+  DeleteCampaign:
+    effects:
+      - delete: { resource: campaign, missing: ignore }
+
+  SendMessages:
+    output:
+      MessageResponse: "{'ApplicationId': string(input.ApplicationId), 'Result': {}}"
+
+quirks:
+  - operation: CreateCampaign
+    note: >
+      The pack stored State as the string SCHEDULED, where CampaignResponse
+      declares State as a CampaignState structure carrying a CampaignStatus.
+      No SDK could deserialize the string, so the same value is written in the
+      declared shape and the recorded steps are superseded with that reason.
+      The declared shape outranks the pack's authored behavior; the value
+      itself is unchanged.
+
+      A campaign's Name is always empty, because the pack read Name from the
+      top of the request while the model puts it inside WriteCampaignRequest.
+      Arn, CreationDate, LastModifiedDate, SegmentId and SegmentVersion are all
+      required on a campaign and none is set, so a campaign belongs to no
+      segment and has no schedule -- and being SCHEDULED, it will never run.
+  - operation: DeleteApp
+    note: >
+      Deleting an app or a campaign answers with nothing, where the model
+      declares a required ApplicationResponse and CampaignResponse
+      respectively: the deleted record is what the real service answers with,
+      and the pack answered with an empty body. Deleting an absent one
+      succeeds, where getting it faults. Deleting an app leaves its campaigns
+      behind, still naming it, and they remain reachable by their own ids.
+  - operation: SendMessages
+    note: >
+      Nothing is sent and nothing is recorded: the answer echoes the
+      ApplicationId with an empty Result map, whatever addresses the
+      MessageRequest carried, and the ApplicationId is not checked against an
+      existing app. RequestId and EndpointResult are declared and never set, so
+      a caller cannot tell a delivered message from one that was never
+      attempted.
+  - operation: CreateApp
+    note: >
+      An app has no CreationDate and no tags, both declared. Creating two apps
+      with the same name succeeds and yields two apps, since an app is keyed by
+      a generated identifier rather than by its name.

@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
-# Fetch pinned provider specs into specs/ and rewrite specs/mirror.lock.
-# Network failure prints a clear error and leaves the bootstrap catalog in place.
+# Fetch the pinned provider specs into specs/ and rewrite specs/mirror.lock.
+#
+# The lock is a pin, not a receipt. By default this script fetches exactly what
+# specs/mirror.lock names -- the AWS models at the commit it records, and the
+# committed Google Discovery document -- so the generated models follow from
+# the lock byte-for-byte on any machine, at any time. That property is what
+# makes the committed models trustworthy as a build input, and CI asserts it.
+#
+# SPECS_REFRESH=1 (or `make specs-refresh`) moves the pins forward instead:
+# AWS is taken from AWS_REF, Discovery is refetched, and whatever changed
+# upstream shows up as a reviewable diff in the lock, in specs/gcp/ and in the
+# regenerated models. Discovering an unannounced vendor change is the point of
+# that diff, so it must never happen silently as a side effect of a build.
+#
+# Service IDs are resolved by asking `mirrorgen -index` what each upstream
+# model declares, not by guessing directory names: the receivers that derive
+# IDs are the same ones that generate the models, so the mapping cannot drift.
+# specs/aws-dirs.json carries the reviewed exceptions (our ID differs from the
+# model's endpointPrefix, or the prefix is not unique upstream).
+#
+# Unresolved services are fatal. A previous version warned and continued,
+# which is how most of the declared set ended up with no spec at all.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,45 +28,14 @@ cd "$ROOT"
 
 AWS_REPO="${AWS_REPO:-https://github.com/aws/api-models-aws}"
 AWS_REF="${AWS_REF:-main}"
+REFRESH="${SPECS_REFRESH:-}"
 GCS_URL='https://storage.googleapis.com/$discovery/rest?version=v1'
 LOCK="$ROOT/specs/mirror.lock"
 SET="$ROOT/specs/mirror.set"
-
-# sdk-id directory names in api-models-aws (verified: models/<sdk-id>/service/<version>/*.json)
-declare -A AWS_DIR=(
-  [s3]=s3
-  [dynamodb]=dynamodb
-  [sqs]=sqs
-  [sns]=sns
-  [sts]=sts
-  [iam]=iam
-  [ssm]=ssm
-  [secretsmanager]=secrets-manager
-  [cloudwatch]=cloudwatch
-  [logs]=cloudwatch-logs
-  [kms]=kms
-  [kinesis]=kinesis
-  [events]=eventbridge
-  [ecr]=ecr
-  [ecs]=ecs
-  [eks]=eks
-  [elasticache]=elasticache
-  [rds]=rds
-  [redshift]=redshift
-  [cloudformation]=cloudformation
-  [apigateway]=api-gateway
-  [lambda]=lambda
-  [route53]=route-53
-  [acm]=acm
-  [elbv2]=elastic-load-balancing-v2
-  [autoscaling]=auto-scaling
-  [applicationautoscaling]=application-auto-scaling
-  [resourcegroupstaggingapi]=resource-groups-tagging-api
-)
+DIRS="$ROOT/specs/aws-dirs.json"
 
 die() {
   echo "specs-sync: $*" >&2
-  echo "specs-sync: leaving bootstrap catalog as fallback (specs/mirror.lock files=[])." >&2
   exit 1
 }
 
@@ -56,6 +45,8 @@ need_cmd() {
 
 need_cmd git
 need_cmd sha256sum
+need_cmd python3
+need_cmd go
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
@@ -67,91 +58,134 @@ fetch() {
   fi
 }
 
-sha256_of() {
-  sha256sum "$1" | awk '{print $1}'
-}
-
 mkdir -p specs/aws specs/gcp
 
-aws_ids=()
 want_gcp=0
+want_aws=0
 if [[ -f "$SET" ]]; then
   while read -r id _rest; do
     [[ -z "$id" || "$id" == \#* ]] && continue
     case "$id" in
       gcp.storage) want_gcp=1 ;;
-      aws.*) aws_ids+=("${id#aws.}") ;;
+      aws.*) want_aws=1 ;;
     esac
   done < "$SET"
 fi
-
-sparse=()
-for id in "${aws_ids[@]+"${aws_ids[@]}"}"; do
-  dir="${AWS_DIR[$id]:-}"
-  if [[ -z "$dir" ]]; then
-    dir="$id"
-  fi
-  sparse+=("models/$dir")
-done
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/mirror-specs.XXXXXX")"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
-echo "specs-sync: cloning $AWS_REPO@$AWS_REF (shallow)…" >&2
-if ! git clone --depth 1 --filter=blob:none --sparse --branch "$AWS_REF" "$AWS_REPO" "$TMP/aws" >/dev/null 2>"$TMP/git.err"; then
-  # Some git builds reject --filter; retry a plain shallow clone.
-  if ! git clone --depth 1 --branch "$AWS_REF" "$AWS_REPO" "$TMP/aws" >/dev/null 2>>"$TMP/git.err"; then
-    die "git clone failed: $(tr '\n' ' ' < "$TMP/git.err")"
-  fi
-else
-  if ((${#sparse[@]} > 0)); then
-    git -C "$TMP/aws" sparse-checkout set --no-cone "${sparse[@]}" >/dev/null 2>>"$TMP/git.err" \
-      || echo "specs-sync: sparse-checkout failed; using full tree" >&2
-  fi
-fi
-
-AWS_SHA="$(git -C "$TMP/aws" rev-parse HEAD)"
-echo "specs-sync: aws pin $AWS_SHA" >&2
-
-# Copy each requested service JSON, preserving upstream relative path under specs/aws/.
+AWS_SHA=""
 copied=()
-for id in "${aws_ids[@]+"${aws_ids[@]}"}"; do
-  dir="${AWS_DIR[$id]:-$id}"
-  src_dir="$TMP/aws/models/$dir"
-  if [[ ! -d "$src_dir" ]]; then
-    echo "specs-sync: warning: no models/$dir in pin (skip $id)" >&2
-    continue
+
+# pinned_aws_ref reads the AWS commit the lock records, so a plain sync
+# reproduces that exact tree. Empty when there is no lock yet.
+pinned_aws_ref() {
+  [[ -f "$LOCK" ]] || return 0
+  python3 - "$LOCK" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        print(json.load(fh).get("pin", {}).get("aws", {}).get("ref", ""))
+except (OSError, ValueError):
+    pass
+PY
+}
+
+if ((want_aws)); then
+  pin=""
+  if [[ -z "$REFRESH" ]]; then
+    pin="$(pinned_aws_ref)"
   fi
-  while IFS= read -r -d '' f; do
-    rel="${f#"$TMP/aws/"}"
+
+  if [[ -n "$pin" ]]; then
+    # Fetch the pinned commit itself. `clone --branch` only takes a name, so
+    # this is init + fetch of the one object, which is also cheaper.
+    echo "specs-sync: fetching $AWS_REPO at pinned $pin…" >&2
+    mkdir -p "$TMP/aws"
+    git -C "$TMP/aws" init -q 2>"$TMP/git.err" || die "git init failed"
+    git -C "$TMP/aws" remote add origin "$AWS_REPO" 2>>"$TMP/git.err" || die "git remote failed"
+    if ! git -C "$TMP/aws" fetch -q --depth 1 origin "$pin" 2>>"$TMP/git.err"; then
+      die "could not fetch pinned commit $pin: $(tr '\n' ' ' < "$TMP/git.err"); \
+if the pin is gone upstream, re-pin with SPECS_REFRESH=1 make specs-sync"
+    fi
+    git -C "$TMP/aws" checkout -q FETCH_HEAD 2>>"$TMP/git.err" || die "git checkout failed"
+  else
+    echo "specs-sync: cloning $AWS_REPO@$AWS_REF (shallow)…" >&2
+    if ! git clone --depth 1 --filter=blob:none --sparse --branch "$AWS_REF" "$AWS_REPO" "$TMP/aws" >/dev/null 2>"$TMP/git.err"; then
+      # Some git builds reject --filter; retry a plain shallow clone.
+      if ! git clone --depth 1 --branch "$AWS_REF" "$AWS_REPO" "$TMP/aws" >/dev/null 2>>"$TMP/git.err"; then
+        die "git clone failed: $(tr '\n' ' ' < "$TMP/git.err")"
+      fi
+    else
+      # Every model is needed: the index asks each one which service it is.
+      git -C "$TMP/aws" sparse-checkout set --no-cone 'models/**' >/dev/null 2>>"$TMP/git.err" \
+        || echo "specs-sync: sparse-checkout failed; using full tree" >&2
+    fi
+  fi
+
+  AWS_SHA="$(git -C "$TMP/aws" rev-parse HEAD)"
+  echo "specs-sync: aws pin $AWS_SHA" >&2
+
+  echo "specs-sync: indexing upstream models…" >&2
+  go run ./cmd/mirrorgen -index "$TMP/aws/models" > "$TMP/index.tsv" 2>"$TMP/index.err" \
+    || die "mirrorgen -index failed: $(tr '\n' ' ' < "$TMP/index.err")"
+  echo "specs-sync: indexed $(wc -l < "$TMP/index.tsv") upstream model(s)" >&2
+
+  python3 "$ROOT/scripts/resolve_specs.py" \
+    --index "$TMP/index.tsv" --dirs "$DIRS" --set "$SET" --models "$TMP/aws/models" \
+    > "$TMP/resolved.tsv" || die "could not resolve every service in $SET"
+
+  : > "$TMP/copied.tsv"
+  while IFS=$'\t' read -r sid rel; do
+    [[ -z "$rel" ]] && continue
+    src="$TMP/aws/models/$rel"
     dest="$ROOT/specs/aws/$rel"
     mkdir -p "$(dirname "$dest")"
-    cp -f "$f" "$dest"
-    copied+=("$rel")
-  done < <(find "$src_dir" -name '*.json' -print0 | sort -z)
-done
+    cp -f "$src" "$dest"
+    printf '%s\t%s\n' "$sid" "aws/$rel" >> "$TMP/copied.tsv"
+    copied+=("aws/$rel")
+  done < "$TMP/resolved.tsv"
+  echo "specs-sync: copied ${#copied[@]} aws model(s)" >&2
+fi
 
 gcs_etag=""
 if ((want_gcp)); then
-  echo "specs-sync: fetching GCS discovery JSON…" >&2
-  if ! fetch "$GCS_URL" > "$TMP/storage.json"; then
-    die "failed to fetch $GCS_URL"
-  fi
+  gcs_dest="$ROOT/specs/gcp/storage.json"
   mkdir -p "$ROOT/specs/gcp"
-  cp -f "$TMP/storage.json" "$ROOT/specs/gcp/storage.json"
-  # ETag is optional; hash is the lock.
+  # Discovery is served live from a URL with no revision to pin, so the
+  # document itself is the pin: it is committed, and a plain sync uses the
+  # committed copy. Refetching by default would make every build depend on
+  # what Google happened to be serving that minute -- which is exactly the
+  # failure this replaces, where CI went red because the document changed
+  # between two runs an hour apart.
+  if [[ -z "$REFRESH" && -s "$gcs_dest" ]]; then
+    echo "specs-sync: using the committed GCS discovery document (SPECS_REFRESH=1 to refetch)" >&2
+  else
+    echo "specs-sync: fetching GCS discovery JSON…" >&2
+    if ! fetch "$GCS_URL" > "$TMP/storage.json"; then
+      die "failed to fetch $GCS_URL"
+    fi
+    if [[ -s "$gcs_dest" ]] && ! cmp -s "$TMP/storage.json" "$gcs_dest"; then
+      echo "specs-sync: the GCS discovery document changed upstream; review the diff in specs/gcp/" >&2
+    fi
+    cp -f "$TMP/storage.json" "$gcs_dest"
+  fi
+  # The hash is the lock; this is the timestamp of the fetch that produced the
+  # content, held steady below while the content is.
   gcs_etag="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
 
 ingested="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-python3 - "$LOCK" "$AWS_REPO" "$AWS_SHA" "$GCS_URL" "$ingested" "$gcs_etag" "${copied[@]+"${copied[@]}"}" <<'PY'
+touch "$TMP/copied.tsv"
+python3 - "$LOCK" "$AWS_REPO" "$AWS_SHA" "$GCS_URL" "$ingested" "$gcs_etag" "$TMP/copied.tsv" <<'PY'
 import json, os, sys, hashlib
 
 lock_path = sys.argv[1]
 aws_repo, aws_sha, gcs_url, ingested, gcs_etag = sys.argv[2:7]
-copied = sys.argv[7:]
+pairs_path = sys.argv[7]
 root = os.path.dirname(os.path.dirname(lock_path))
 
 def sha256(path):
@@ -161,24 +195,66 @@ def sha256(path):
             h.update(chunk)
     return h.hexdigest()
 
+# Previous lock, keyed by path. `ingested` means "when this exact content was
+# first seen", not "when specs-sync last ran": stamping the current time on
+# every entry makes the lock differ on every sync, and CI's regeneration gate
+# — which asserts the lock and the models follow byte-for-byte from their
+# inputs — could then never pass. Carrying the timestamp forward while the
+# hash is unchanged keeps the field meaningful and the file reproducible.
+previous = {}
+try:
+    with open(lock_path, encoding="utf-8") as fh:
+        for entry in json.load(fh).get("files", []):
+            previous[entry.get("path")] = entry
+except (OSError, ValueError):
+    pass
+
+def first_seen(rel, digest):
+    prior = previous.get(rel)
+    if prior and prior.get("sha256") == digest and prior.get("ingested"):
+        return prior["ingested"]
+    return ingested
+
 files = []
-for rel in copied:
-    path = os.path.join(root, "specs", "aws", rel)
-    files.append({
-        "source": aws_repo,
-        "ref": aws_sha,
-        "path": rel,
-        "sha256": sha256(path),
-        "ingested": ingested,
-    })
+with open(pairs_path, encoding="utf-8") as fh:
+    for line in fh:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        service_id, _, rel = line.partition("\t")
+        path = os.path.join(root, "specs", rel)
+        digest = sha256(path)
+        files.append({
+            # serviceId is the canonical mirror.cloud ID for this model. It is
+            # recorded here because the ID a model declares (its endpointPrefix)
+            # is neither always ours nor always unique upstream; mirrorgen reads
+            # it back so generation and serving agree on one identity.
+            "serviceId": service_id,
+            "source": aws_repo,
+            "ref": aws_sha,
+            "path": rel,
+            "sha256": digest,
+            "ingested": first_seen(rel, digest),
+        })
 gcs = os.path.join(root, "specs", "gcp", "storage.json")
 if os.path.isfile(gcs):
+    digest = sha256(gcs)
+    prior = previous.get("gcp/storage.json")
+    # Discovery is served live and has no upstream revision to pin, so the ref
+    # is the timestamp of the fetch that produced this content. Hold it steady
+    # while the content is: a ref that moves on identical bytes is noise, and
+    # noise is where an unannounced upstream change hides.
+    ref = gcs_etag
+    if prior and prior.get("sha256") == digest and prior.get("ref"):
+        ref = prior["ref"]
+    gcs_etag = ref
     files.append({
+        "serviceId": "gcp.storage",
         "source": gcs_url,
-        "ref": gcs_etag,
+        "ref": ref,
         "path": "gcp/storage.json",
-        "sha256": sha256(gcs),
-        "ingested": ingested,
+        "sha256": digest,
+        "ingested": first_seen("gcp/storage.json", digest),
     })
 files.sort(key=lambda x: x["path"])
 doc = {

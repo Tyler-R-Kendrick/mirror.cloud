@@ -1,0 +1,117 @@
+schema: bir/1
+service: aws.lightsail
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is provisioned: an instance is `running` the moment it is
+# created, every static IP is the same address, and no blueprint or bundle is
+# checked to exist.
+provenance: authored
+
+resources:
+  instance:
+    collection: lsinst
+    id:
+      input_members: [instanceName]
+    record:
+      name: id
+      state: "{'name': 'running'}"
+      blueprintId: "'blueprintId' in input ? string(input.blueprintId) : ''"
+      bundleId: "'bundleId' in input ? string(input.bundleId) : ''"
+
+  staticip:
+    collection: lsip
+    id:
+      input_members: [staticIpName]
+    record:
+      name: id
+      # Every static IP in every account is 192.0.2.10 -- see the quirk.
+      ipAddress: "'192.0.2.10'"
+      isAttached: "false"
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # CreateInstances takes a list and creates one instance per entry, each
+  # addressed by its own name.
+  CreateInstances:
+    effects:
+      - create:
+          resource: instance
+          for_each: input.instanceNames
+          key: item
+    output:
+      operations: >
+        input.instanceNames.map(n, {
+          'operationType': 'CreateInstance',
+          'status': 'Succeeded',
+          'resourceName': n,
+        })
+
+  GetInstance:
+    reads:
+      inst: { resource: instance }
+    require:
+      - { cond: inst_found, error: NotFound }
+    output:
+      instance: inst
+
+  GetInstances:
+    list: { resource: instance, member: instances, paginate: model }
+
+  DeleteInstance:
+    effects:
+      - delete: { resource: instance, missing: ignore }
+    output:
+      operations: "[{'status': 'Succeeded'}]"
+
+  AllocateStaticIp:
+    effects:
+      - put: { resource: staticip }
+    output:
+      operations: "[{'status': 'Succeeded'}]"
+
+  GetStaticIp:
+    reads:
+      ip: { resource: staticip }
+    require:
+      - { cond: ip_found, error: NotFound }
+    output:
+      staticIp: ip
+
+  ReleaseStaticIp:
+    effects:
+      - delete: { resource: staticip, missing: ignore }
+    output:
+      operations: "[{'status': 'Succeeded'}]"
+
+quirks:
+  - operation: AllocateStaticIp
+    note: >
+      Every static IP is 192.0.2.10, in every account and every region, and
+      isAttached is always false. Two allocations are indistinguishable by
+      address, and AttachStaticIp is not served at all, so nothing can ever
+      make one attached.
+  - operation: CreateInstances
+    note: >
+      An instance is `running` the instant it is created. The real service
+      moves through `pending` and the instance is not reachable until it
+      leaves it, so a caller that polls GetInstance until the state is running
+      never waits here. availabilityZone, keyPairName, userData, addOns and
+      tags are accepted and discarded, and neither the blueprint nor the
+      bundle is checked to exist.
+  - operation: GetInstance
+    note: >
+      An instance carries only its name, its state and the two ids it was
+      created from. It has no arn, no createdAt, no location, no hardware and
+      no addresses, all of which the real service always answers -- so a
+      caller that reads publicIpAddress to reach the instance gets nothing.
+  - operation: DeleteInstance
+    note: >
+      The operations a mutating call answers carry a status and nothing else:
+      no id, no createdAt, no resourceName and no isTerminal. A caller cannot
+      poll GetOperation for one, since it has no id to poll with and
+      GetOperation is not served.

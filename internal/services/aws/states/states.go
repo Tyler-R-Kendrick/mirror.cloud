@@ -127,7 +127,7 @@ func (p *Pack) waitLoop() {
 			continue
 		}
 		select {
-		case <-p.deps.Clock.AfterUntil(next):
+		case <-p.deps.Clock.AfterTime(next):
 		case <-p.wake:
 		case <-p.stop:
 			return
@@ -2827,9 +2827,9 @@ walkLoop:
 		}
 		if waitUntil.After(p.deps.Clock.Now()) {
 			if first(req.Input, "_executionType") == "EXPRESS" {
-				delay, timeout := p.executionDelay(req, waitUntil.Sub(p.deps.Clock.Now()))
+				wake, timeout := p.executionWake(req, waitUntil)
 				select {
-				case <-p.deps.Clock.After(delay):
+				case <-p.deps.Clock.AfterTime(wake):
 					if timeout {
 						return walkResult{out: data, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
 					}
@@ -2931,16 +2931,19 @@ func executionDeadline(definition, executionType string, start time.Time) string
 	return start.Add(limit).UTC().Format(time.RFC3339Nano)
 }
 
-func (p *Pack) executionDelay(req *spi.Request, delay time.Duration) (time.Duration, bool) {
+// executionWake answers with the instant an express execution should wake at:
+// the one asked for, or the execution's own deadline when that comes first, in
+// which case the second result says the execution has timed out. An instant
+// rather than a delay, because the caller parks on it -- see spi.Clock.AfterTime.
+func (p *Pack) executionWake(req *spi.Request, wake time.Time) (time.Time, bool) {
 	deadline, err := time.Parse(time.RFC3339Nano, first(req.Input, "_executionDeadline"))
 	if err != nil {
-		return delay, false
+		return wake, false
 	}
-	remaining := deadline.Sub(p.deps.Clock.Now())
-	if remaining <= delay {
-		return max(time.Duration(0), remaining), true
+	if !deadline.After(wake) {
+		return deadline, true
 	}
-	return delay, false
+	return wake, false
 }
 
 func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string, input any, attempts map[int]int, variables map[string]any, delay time.Duration, hist []any) *walkResult {
@@ -2949,9 +2952,9 @@ func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string
 	}
 	switch first(req.Input, "_executionType") {
 	case "EXPRESS":
-		delay, timeout := p.executionDelay(req, delay)
+		wake, timeout := p.executionWake(req, p.deps.Clock.Now().Add(delay))
 		select {
-		case <-p.deps.Clock.After(delay):
+		case <-p.deps.Clock.AfterTime(wake):
 			if timeout {
 				return &walkResult{out: input, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
 			}
@@ -4925,6 +4928,22 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 		input = maps.Clone(input)
 		input["cluster"], input["taskDefinition"] = first(input, "cluster", "Cluster"), first(input, "taskDefinition", "TaskDefinition")
 	}
+	// An optimized integration names its parameters in PascalCase while the
+	// target API declares them camelCase, so the request has to be translated
+	// on the way through. The hand-written packs hid this by reading both
+	// spellings of every member they cared about; a service served from its
+	// own model cannot, because the model declares one name. The translation
+	// belongs here, at the one integration that introduces the discrepancy,
+	// rather than in every service that integration can reach.
+	if renames, ok := integrationMemberNames[resource]; ok {
+		input = maps.Clone(input)
+		for from, to := range renames {
+			if v, present := input[from]; present {
+				delete(input, from)
+				input[to] = v
+			}
+		}
+	}
 	for _, factory := range registry.Factories() {
 		if !matchesTaskService(factory.ServiceID, service) {
 			continue
@@ -5015,6 +5034,20 @@ func nestedExecutionOutput(execution map[string]any, jsonOutput bool) map[string
 		output["Output"] = parseJSON(first(execution, "output"))
 	}
 	return output
+}
+
+// integrationMemberNames maps an optimized integration's parameter names onto
+// the member names the target service's model declares. Only the integrations
+// whose two spellings actually differ appear here.
+var integrationMemberNames = map[string]map[string]string{
+	"arn:aws:states:::batch:submitJob": {
+		"JobName":       "jobName",
+		"JobQueue":      "jobQueue",
+		"JobDefinition": "jobDefinition",
+	},
+	"arn:aws:states:::codebuild:startBuild": {
+		"ProjectName": "projectName",
+	},
 }
 
 func taskIntegration(resource string) (service, operation, prefix string, sdk, ok bool) {

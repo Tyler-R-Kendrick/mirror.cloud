@@ -1,0 +1,361 @@
+schema: bir/1
+service: aws.guardduty
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is detected: no log source is read, no threat intelligence
+# is applied, and the only findings that exist are the sample ones a caller
+# asked for by name.
+provenance: authored
+
+resources:
+  detector:
+    collection: gd
+    id:
+      input_members: [DetectorId]
+    record:
+      DetectorId: id
+
+  # Everything else is scoped to its detector, so every operation on one reads
+  # its detector first -- not to check it exists, which this service never
+  # does, but because the collection is named for it.
+  ipset:
+    collection: "gdip:{detector.id}"
+    parent: detector
+    id:
+      input_members: [IpSetId]
+    record:
+      IpSetId: id
+
+  # A filter is created under `Name` and fetched under `FilterName`: the two
+  # operations spell the same member differently, and both spellings are
+  # declared on the operation that uses them.
+  filter:
+    collection: "gdflt:{detector.id}"
+    parent: detector
+    id:
+      input_members: [FilterName, Name]
+    record:
+      Name: id
+
+  # A finding is never named by a request except as one of a list, so it has no
+  # addressing member: the create mints its key and the two reads work off the
+  # whole collection.
+  finding:
+    collection: "gdfind:{detector.id}"
+    parent: detector
+    record:
+      Id: id
+
+  member:
+    collection: "gdmem:{detector.id}"
+    parent: detector
+    id:
+      input_members: [AccountId]
+    record:
+      AccountId: id
+
+errors:
+  BadRequest:
+    code: BadRequestException
+    http: 400
+    fault: client
+
+operations:
+  CreateDetector:
+    effects:
+      - generate: { bind: did, kind: hex, bytes: 16 }
+      - create:
+          resource: detector
+          key: "fx.did"
+          record:
+            # ENABLED unless the request said Enable: false, which stores the
+            # string "false" -- see the quirk.
+            Status: "'Enable' in input && !input.Enable ? 'false' : 'ENABLED'"
+            FindingPublishingFrequency: >
+              'FindingPublishingFrequency' in input
+                ? string(input.FindingPublishingFrequency) : ''
+    output:
+      DetectorId: rec.DetectorId
+
+  GetDetector:
+    reads:
+      detector: { resource: detector }
+    require:
+      - { cond: detector_found, error: BadRequest }
+    output:
+      Status: detector.Status
+      FindingPublishingFrequency: detector.FindingPublishingFrequency
+
+  ListDetectors:
+    list: { resource: detector, member: DetectorIds, paginate: model }
+    output:
+      DetectorIds: "items.map(d, string(d.DetectorId))"
+
+  UpdateDetector:
+    reads:
+      detector: { resource: detector }
+    require:
+      - { cond: detector_found, error: BadRequest }
+    effects:
+      - patch:
+          resource: detector
+          when: >
+            'FindingPublishingFrequency' in input
+              && string(input.FindingPublishingFrequency) != ''
+          record:
+            FindingPublishingFrequency: "string(input.FindingPublishingFrequency)"
+
+  DeleteDetector:
+    effects:
+      - delete: { resource: detector, missing: ignore }
+
+  CreateIPSet:
+    reads:
+      detector: { resource: detector }
+    effects:
+      - generate: { bind: sid, kind: hex, bytes: 8 }
+      - create:
+          resource: ipset
+          key: "'ipset-' + fx.sid"
+          record:
+            Name: "string(input.Name)"
+            Location: "string(input.Location)"
+            Format: "string(input.Format)"
+    output:
+      IpSetId: rec.IpSetId
+
+  GetIPSet:
+    reads:
+      detector: { resource: detector }
+      ipset: { resource: ipset }
+    require:
+      - { cond: ipset_found, error: BadRequest }
+    output:
+      Name: ipset.Name
+      Location: ipset.Location
+      Format: ipset.Format
+
+  ListIPSets:
+    reads:
+      detector: { resource: detector }
+    list: { resource: ipset, member: IpSetIds, paginate: model }
+    output:
+      IpSetIds: "items.map(s, string(s.IpSetId))"
+
+  DeleteIPSet:
+    reads:
+      detector: { resource: detector }
+    effects:
+      - delete: { resource: ipset, missing: ignore }
+
+  CreateFilter:
+    reads:
+      detector: { resource: detector }
+    effects:
+      - create:
+          resource: filter
+          record:
+            Action: "'Action' in input ? string(input.Action) : ''"
+            FindingCriteria: "input.FindingCriteria"
+    output:
+      Name: rec.Name
+
+  GetFilter:
+    reads:
+      detector: { resource: detector }
+      filter: { resource: filter }
+    require:
+      - { cond: filter_found, error: BadRequest }
+    output:
+      Name: filter.Name
+      Action: filter.Action
+      FindingCriteria: filter.FindingCriteria
+
+  ListFilters:
+    reads:
+      detector: { resource: detector }
+    list: { resource: filter, member: FilterNames, paginate: model }
+    output:
+      FilterNames: "items.map(f, string(f.Name))"
+
+  DeleteFilter:
+    reads:
+      detector: { resource: detector }
+    effects:
+      - delete: { resource: filter, missing: ignore }
+
+  CreateSampleFindings:
+    reads:
+      detector: { resource: detector }
+    effects:
+      - generate: { bind: fid, kind: hex, bytes: 8 }
+      - create:
+          resource: finding
+          key: "'finding-' + fx.fid"
+          record:
+            Type: "'Recon:EC2/PortProbeUnprotectedPort'"
+            Severity: "5"
+            DetectorId: "string(input.DetectorId)"
+            Title: "'sample'"
+
+  GetFindings:
+    reads:
+      detector: { resource: detector }
+    list:
+      resource: finding
+      member: Findings
+      paginate: model
+      filter: >
+        size(input.FindingIds) == 0 || item.Id in input.FindingIds
+
+  ListFindings:
+    reads:
+      detector: { resource: detector }
+    list: { resource: finding, member: FindingIds, paginate: model }
+    output:
+      FindingIds: "items.map(f, string(f.Id))"
+
+  # One member per entry of the request's list. This is the operation the
+  # for_each write exists for: six services have a batch of this shape and
+  # none of them could be expressed before it.
+  CreateMembers:
+    reads:
+      detector: { resource: detector }
+    effects:
+      - create:
+          resource: member
+          for_each: "input.AccountDetails"
+          key: "string(item.AccountId)"
+          record:
+            AccountId: "string(item.AccountId)"
+            Email: "'Email' in item ? string(item.Email) : ''"
+            RelationshipStatus: "'Enabled'"
+    output:
+      UnprocessedAccounts: "[]"
+
+  GetMembers:
+    reads:
+      detector: { resource: detector }
+    list: { resource: member, member: Members, paginate: model }
+    output:
+      UnprocessedAccounts: "[]"
+
+  ListMembers:
+    reads:
+      detector: { resource: detector }
+    list: { resource: member, member: Members, paginate: model }
+
+  DeleteMembers:
+    reads:
+      detector: { resource: detector }
+    effects:
+      - delete:
+          resource: member
+          where: "item.AccountId in input.AccountIds"
+    output:
+      UnprocessedAccounts: "[]"
+
+quirks:
+  - operation: CreateDetector
+    note: >
+      A detector created with `Enable: false` has a Status of "false".
+      DetectorStatus is an enumeration of ENABLED and DISABLED, and the pack
+      stringified the boolean and stored it: `true` and an absent flag were
+      both rewritten to ENABLED, and `false` was left as it fell out of the
+      conversion. So the one request that says "do not enable this" produces
+      the one status no SDK can interpret -- a caller comparing against
+      DISABLED never matches, and a caller switching on the enum falls
+      through. It is not that the flag is ignored; it is that honouring it
+      yields a value outside the type.
+
+      Nothing is detected whatever the status says. No CloudTrail, VPC flow
+      log or DNS log is read, no threat list is consulted, and no finding is
+      ever generated -- the only findings that exist are the sample ones
+      CreateSampleFindings makes. `DataSources`, `Features`, `Tags` and
+      `ClientToken` are dropped, so two identical creates with the same token
+      produce two detectors.
+  - operation: GetDetector
+    note: >
+      GetDetectorResponse declares `ServiceRole` and `Status` as required and
+      does not declare `DetectorId` at all. The pack answered the whole stored
+      record, which is the reverse of both: `DetectorId` travelled in a
+      response with no place for it, and `ServiceRole` -- the role GuardDuty
+      would assume to read the account's logs -- was never set. So a caller
+      reading the role gets an empty string, and the id it echoes is one no
+      SDK can read.
+
+      `CreatedAt`, `UpdatedAt`, `DataSources`, `Features` and `Tags` are
+      declared and never set. GetIPSet has the same shape of problem in
+      miniature: it answers the `IpSetId` its response does not declare, and
+      never sets the `Status` its response requires.
+  - operation: UpdateDetector
+    note: >
+      An update can change one thing: FindingPublishingFrequency, and only
+      when the request sends a non-empty one. `Enable` is accepted and
+      ignored here -- unlike on create, where it is honoured into a status
+      outside the enum -- so a detector cannot be disabled after the fact at
+      all, and `DataSources` and `Features` are dropped. The call
+      answers an empty body, which UpdateDetectorResponse also declares, so
+      the response is correct and says nothing.
+
+      The detector must exist -- this is one of the three operations here that
+      checks. Delete does not: deleting a detector that was never created
+      succeeds, and leaves any IP sets, filters, findings and members created
+      under that id behind in their own collections, still reachable by
+      passing the same id again.
+  - operation: CreateMembers
+    note: >
+      One member record per entry of `AccountDetails`, keyed by AccountId,
+      each Enabled immediately. Nothing is invited and nothing accepts: the
+      real service creates members in a Created state and moves them to
+      Invited and then Enabled through InviteMembers and AcceptInvitation,
+      none of which is served here. `UnprocessedAccounts` is answered as an
+      empty list whatever happened, so an entry with no AccountId writes a
+      record under the empty key and is reported as processed.
+
+      Deleting members removes exactly the accounts named, and also answers an
+      empty `UnprocessedAccounts`, so deleting an account that was never a
+      member succeeds silently. Nothing in either response distinguishes a
+      batch that did everything from one that did nothing.
+  - operation: GetMembers
+    note: >
+      GetMembers ignores the `AccountIds` its input requires and answers every
+      member under the detector -- so it is ListMembers with a required
+      argument, and the two operations are served identically. A caller asking
+      about one account gets the whole organisation, and the
+      `UnprocessedAccounts` that would name the accounts it could not find is
+      always empty, so an account that is not a member is indistinguishable
+      from one that is until the caller filters the list itself.
+
+      ListMembers ignores `OnlyAssociated` as well, so the filter that
+      excludes accounts which have not accepted an invitation has nothing to
+      exclude -- every member here is Enabled from the moment it is created.
+  - operation: CreateSampleFindings
+    note: >
+      Every sample finding is the same finding: type
+      Recon:EC2/PortProbeUnprotectedPort, severity 5, title "sample". The
+      `FindingTypes` the request may name to choose which samples to generate
+      is dropped, so asking for a specific type gives the one that always
+      comes back, and asking for five gives one.
+
+      A finding has none of what a finding is: no `Resource`, no `Service`
+      block with the action and the evidence, no `AccountId`, no `Region`, no
+      `CreatedAt` or `UpdatedAt`. Neither finding read applies a filter, so
+      the Filters created by CreateFilter narrow nothing and the
+      `FindingCriteria` stored on them is never evaluated against anything --
+      which is the whole of what a filter is for.
+  - operation: ListFindings
+    note: >
+      Neither of the two finding reads paginates and neither sorts:
+      ListFindings ignores `FindingCriteria`, `SortCriteria`, `MaxResults` and
+      `NextToken`, and answers every finding id under the detector. The same
+      is true of ListIPSets, ListFilters, ListMembers and ListDetectors -- all
+      five accept a `NextToken`, ignore it, and never return one, so a caller
+      looping until the token is empty stops after one page whatever the store
+      holds.
+
+      GetFindings answers the findings named by `FindingIds`, or all of them
+      when the list is empty. The pack answered the named ones in request
+      order; a filtered list answers them in store order, which for these keys
+      is lexical. No SDK contract orders the response, and the recording marks
+      the step where the two differ rather than quietly matching it.

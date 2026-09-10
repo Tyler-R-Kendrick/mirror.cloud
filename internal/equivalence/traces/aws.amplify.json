@@ -1,0 +1,687 @@
+{
+  "schema": "trace/1",
+  "service": "aws.amplify",
+  "source": "internal/services/aws/amplify",
+  "note": "Apps, branches and jobs; the update that rebuilds the app from the request.",
+  "steps": [
+    {
+      "operation": "ListApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apps": null
+      }
+    },
+    {
+      "operation": "CreateApp",
+      "input": {
+        "description": "kept",
+        "name": "site",
+        "platform": "WEB",
+        "repository": "https://example.invalid/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appId": "7c589129",
+          "defaultDomain": "7c589129.amplifyapp.localhost",
+          "description": "kept",
+          "name": "site",
+          "platform": "WEB",
+          "repository": "https://example.invalid/r"
+        }
+      }
+    },
+    {
+      "operation": "CreateApp",
+      "input": {
+        "name": "second"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appId": "5f59f223",
+          "defaultDomain": "5f59f223.amplifyapp.localhost",
+          "name": "second"
+        }
+      }
+    },
+    {
+      "operation": "ListApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apps": [
+          {
+            "appId": "5f59f223",
+            "defaultDomain": "5f59f223.amplifyapp.localhost",
+            "name": "second"
+          },
+          {
+            "appId": "7c589129",
+            "defaultDomain": "7c589129.amplifyapp.localhost",
+            "description": "kept",
+            "name": "site",
+            "platform": "WEB",
+            "repository": "https://example.invalid/r"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetApp",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appId": "7c589129",
+          "defaultDomain": "7c589129.amplifyapp.localhost",
+          "description": "kept",
+          "name": "site",
+          "platform": "WEB",
+          "repository": "https://example.invalid/r"
+        }
+      }
+    },
+    {
+      "operation": "GetApp",
+      "input": {
+        "appId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateApp",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "platform": "WEB_COMPUTE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appId": "7c589129",
+          "defaultDomain": "7c589129.amplifyapp.localhost",
+          "name": "",
+          "platform": "WEB_COMPUTE"
+        }
+      }
+    },
+    {
+      "operation": "GetApp",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appId": "7c589129",
+          "defaultDomain": "7c589129.amplifyapp.localhost",
+          "name": "",
+          "platform": "WEB_COMPUTE"
+        }
+      }
+    },
+    {
+      "operation": "UpdateApp",
+      "input": {
+        "appId": "ghost",
+        "name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appId": "ghost",
+          "defaultDomain": "ghost.amplifyapp.localhost",
+          "name": "ghost"
+        }
+      }
+    },
+    {
+      "operation": "GetApp",
+      "input": {
+        "appId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "app": {
+          "appId": "ghost",
+          "defaultDomain": "ghost.amplifyapp.localhost",
+          "name": "ghost"
+        }
+      }
+    },
+    {
+      "operation": "CreateBranch",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "main",
+        "stage": "PRODUCTION"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branch": {
+          "activeJobId": "",
+          "appId": "7c589129",
+          "branchName": "main"
+        }
+      }
+    },
+    {
+      "operation": "CreateBranch",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "dev"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branch": {
+          "activeJobId": "",
+          "appId": "7c589129",
+          "branchName": "dev"
+        }
+      }
+    },
+    {
+      "operation": "CreateBranch",
+      "input": {
+        "appId": "ghost",
+        "branchName": "main"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branch": {
+          "activeJobId": "",
+          "appId": "ghost",
+          "branchName": "main"
+        }
+      }
+    },
+    {
+      "operation": "GetBranch",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "main"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branch": {
+          "activeJobId": "",
+          "appId": "7c589129",
+          "branchName": "main"
+        }
+      }
+    },
+    {
+      "operation": "GetBranch",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": [
+          {
+            "activeJobId": "",
+            "appId": "7c589129",
+            "branchName": "dev"
+          },
+          {
+            "activeJobId": "",
+            "appId": "7c589129",
+            "branchName": "main"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "appId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": [
+          {
+            "activeJobId": "",
+            "appId": "ghost",
+            "branchName": "main"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartJob",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "main",
+        "jobType": "RELEASE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobSummary": {
+          "appId": "7c589129",
+          "branchName": "main",
+          "jobId": "9c8e2cb0",
+          "status": "SUCCEED"
+        }
+      }
+    },
+    {
+      "operation": "GetJob",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "main",
+        "jobId": {
+          "$fromPath": "jobSummary.jobId",
+          "$fromStep": 17
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "job": {
+          "appId": "7c589129",
+          "branchName": "main",
+          "jobId": "9c8e2cb0",
+          "status": "SUCCEED"
+        }
+      }
+    },
+    {
+      "operation": "GetJob",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "main",
+        "jobId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "main"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobSummaries": [
+          {
+            "appId": "7c589129",
+            "branchName": "main",
+            "jobId": "9c8e2cb0",
+            "status": "SUCCEED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartJob",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "absent",
+        "jobType": "RELEASE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobSummary": {
+          "appId": "7c589129",
+          "branchName": "absent",
+          "jobId": "33f6fc5d",
+          "status": "SUCCEED"
+        }
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "main"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobSummaries": [
+          {
+            "appId": "7c589129",
+            "branchName": "absent",
+            "jobId": "33f6fc5d",
+            "status": "SUCCEED"
+          },
+          {
+            "appId": "7c589129",
+            "branchName": "main",
+            "jobId": "9c8e2cb0",
+            "status": "SUCCEED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteBranch",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "dev"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteBranch",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        },
+        "branchName": "dev"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": [
+          {
+            "activeJobId": "",
+            "appId": "7c589129",
+            "branchName": "main"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApp",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apps": [
+          {
+            "appId": "5f59f223",
+            "defaultDomain": "5f59f223.amplifyapp.localhost",
+            "name": "second"
+          },
+          {
+            "appId": "ghost",
+            "defaultDomain": "ghost.amplifyapp.localhost",
+            "name": "ghost"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "appId": {
+          "$fromPath": "app.appId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": [
+          {
+            "activeJobId": "",
+            "appId": "7c589129",
+            "branchName": "main"
+          }
+        ]
+      }
+    }
+  ]
+}

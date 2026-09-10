@@ -1,0 +1,121 @@
+schema: bir/1
+service: aws.transcribe
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No audio is read: a job is COMPLETED before it returns and its
+# transcript URI points at an object nothing ever wrote.
+provenance: authored
+
+resources:
+  job:
+    collection: trjob
+    id:
+      input_members: [TranscriptionJobName]
+    record:
+      TranscriptionJobName: id
+      TranscriptionJobStatus: "'COMPLETED'"
+      LanguageCode: "'LanguageCode' in input ? string(input.LanguageCode) : ''"
+      Media: "'Media' in input ? input.Media : {}"
+      Transcript: "{'TranscriptFileUri': 's3://mirror-transcribe/' + id + '.json'}"
+
+  vocabulary:
+    collection: trvocab
+    id:
+      input_members: [VocabularyName]
+    record:
+      VocabularyName: id
+      LanguageCode: "'LanguageCode' in input ? string(input.LanguageCode) : ''"
+      VocabularyState: "'READY'"
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  StartTranscriptionJob:
+    effects:
+      - put: { resource: job }
+    output:
+      TranscriptionJob: rec
+
+  GetTranscriptionJob:
+    reads:
+      j: { resource: job }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      TranscriptionJob: j
+
+  # TranscriptionJobSummary declares neither Media nor Transcript, so the
+  # summarised form of a job is not the stored record.
+  ListTranscriptionJobs:
+    list: { resource: job, member: TranscriptionJobSummaries, paginate: model }
+    output:
+      TranscriptionJobSummaries: >
+        items.map(j, {
+          'TranscriptionJobName': j.TranscriptionJobName,
+          'TranscriptionJobStatus': j.TranscriptionJobStatus,
+          'LanguageCode': j.LanguageCode
+        })
+
+  DeleteTranscriptionJob:
+    effects:
+      - delete: { resource: job, missing: ignore }
+
+  CreateVocabulary:
+    effects:
+      - put: { resource: vocabulary }
+    output:
+      VocabularyName: rec.VocabularyName
+      LanguageCode: rec.LanguageCode
+      VocabularyState: rec.VocabularyState
+
+  GetVocabulary:
+    reads:
+      v: { resource: vocabulary }
+    require:
+      - { cond: v_found, error: NotFound }
+    output:
+      VocabularyName: v.VocabularyName
+      LanguageCode: v.LanguageCode
+      VocabularyState: v.VocabularyState
+
+  ListVocabularies:
+    list: { resource: vocabulary, member: Vocabularies, paginate: model }
+
+  DeleteVocabulary:
+    effects:
+      - delete: { resource: vocabulary, missing: ignore }
+
+quirks:
+  - operation: StartTranscriptionJob
+    note: >
+      A job is COMPLETED before the call returns, so nothing ever observes
+      QUEUED or IN_PROGRESS and a caller that polls for completion gets it on
+      the first poll. The Media it was given is echoed back untouched and never
+      read -- the media file need not exist, and its format and sample rate are
+      dropped. The transcript URI names an object under a bucket this emulator
+      never writes to, so fetching the transcript fails however the job reads.
+      CreationTime, StartTime and CompletionTime are declared and never set.
+  - operation: ListTranscriptionJobs
+    note: >
+      A summarised job carries neither Media nor Transcript, because
+      TranscriptionJobSummary declares neither, while the same job fetched
+      carries both. The pack emitted the stored record in both, so the summary
+      carried two members no SDK could read, and the recorded step is
+      superseded with that reason. The Status filter is ignored: every job is
+      listed whatever status was asked for, which is harmless only because
+      every job has the same one.
+  - operation: CreateVocabulary
+    note: >
+      A vocabulary is READY immediately with its Phrases and VocabularyFileUri
+      dropped, so it contains no terms and can influence no transcription --
+      and nothing consults it in any case. Creating one that already exists
+      overwrites it rather than faulting. DownloadUri is declared on the get
+      answer and never set, so a vocabulary cannot be read back.
+  - operation: DeleteTranscriptionJob
+    note: >
+      Deleting an absent job or vocabulary succeeds, where getting the same
+      name faults. The real service faults on both.

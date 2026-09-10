@@ -1,0 +1,102 @@
+schema: bir/1
+service: aws.proton
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is provisioned: an environment and a service are records
+# that are born deployed and never change.
+provenance: authored
+
+missing_input_error: Validation
+
+resources:
+  environment:
+    collection: prenv
+    id:
+      input_members: [name]
+    arn: "arn:{partition}:proton:{region}:{account}:environment/{id}"
+    record:
+      name: id
+      arn: arn
+      deploymentStatus: "'SUCCEEDED'"
+
+  service:
+    collection: prsvc
+    id:
+      input_members: [name]
+    arn: "arn:{partition}:proton:{region}:{account}:service/{id}"
+    record:
+      name: id
+      arn: arn
+      status: "'ACTIVE'"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateEnvironment:
+    require:
+      - { cond: "string(input.name) != ''", error: Validation }
+    effects:
+      - put: { resource: environment }
+    output:
+      environment: rec
+
+  GetEnvironment:
+    reads:
+      env: { resource: environment }
+    require:
+      - { cond: env_found, error: NotFound }
+    output:
+      environment: env
+
+  ListEnvironments:
+    list: { resource: environment, member: environments, paginate: model }
+
+  # Answers with nothing where the model declares an optional environment.
+  DeleteEnvironment:
+    effects:
+      - delete: { resource: environment, missing: ignore }
+    output: {}
+
+  CreateService:
+    effects:
+      - put: { resource: service }
+    output:
+      service: rec
+
+  GetService:
+    reads:
+      svc: { resource: service }
+    require:
+      - { cond: svc_found, error: NotFound }
+    output:
+      service: svc
+
+quirks:
+  - operation: CreateEnvironment
+    note: >
+      spec, templateName and templateMajorVersion are required by the model
+      and were neither read nor stored by the pack. The engine now rejects a
+      request that omits them, which the pack accepted; they are still not
+      stored, because keeping a member nothing answers with would be inventing
+      behavior rather than transcribing it.
+  - operation: CreateEnvironment
+    note: >
+      An environment is SUCCEEDED the moment it is created and a service is
+      ACTIVE: there is no deployment to observe, so nothing can ever see
+      IN_PROGRESS or a failure. Environment and Service both declare createdAt
+      and the deployment timestamps, and none of them is set -- a probe puts
+      real values there rather than this putting invented ones.
+  - operation: CreateService
+    note: >
+      CreateService did not check its name while CreateEnvironment rejected an
+      empty one. That asymmetry is the pack's; the model requires the member on
+      both, so a missing name is now rejected either way and only the
+      empty-string case still differs.

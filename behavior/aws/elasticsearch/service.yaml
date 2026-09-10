@@ -1,0 +1,147 @@
+schema: bir/1
+service: aws.elasticsearch
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is searchable: a domain is Created the moment it is asked
+# for, with no endpoint, so no index can be written to it or read from it.
+provenance: authored
+
+resources:
+  domain:
+    collection: esdom
+    id:
+      input_members: [DomainName]
+    arn: "arn:{partition}:es:{region}:{account}:domain/{id}"
+    record:
+      DomainName: id
+      ARN: arn
+      ElasticsearchVersion: >
+        'ElasticsearchVersion' in input && string(input.ElasticsearchVersion) != ''
+          ? string(input.ElasticsearchVersion)
+          : '7.10'
+      # The stored status is a nested structure the pack built once and
+      # answered from three operations.
+      DomainStatus: >
+        {
+          'DomainName': string(input.DomainName),
+          'Created': true,
+          'Deleted': false,
+          'Processing': false,
+          'Engine': 'Elasticsearch'
+        }
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # Create and update are one write, so an update replaces the whole record and
+  # resets the version to the default when it does not carry one.
+  CreateElasticsearchDomain:
+    effects:
+      - put: { resource: domain }
+    output:
+      DomainStatus: rec.DomainStatus
+
+  # UpdateElasticsearchDomainConfigResponse declares a DomainConfig and a
+  # DryRunResults, and the pack answered a DomainStatus, a DomainName and a
+  # version -- none of them declared. The write still happens; the answer is
+  # empty rather than unreadable.
+  UpdateElasticsearchDomainConfig:
+    effects:
+      - put: { resource: domain }
+
+  DescribeElasticsearchDomain:
+    reads:
+      d: { resource: domain }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      DomainStatus: d.DomainStatus
+
+  # Named or not: the domains DomainNames asks for when it names any, every
+  # domain when it does not. A name that matches nothing is skipped rather than
+  # faulting, which the filter gives for free.
+  DescribeElasticsearchDomains:
+    list:
+      resource: domain
+      member: DomainStatusList
+      filter: >
+        !('DomainNames' in input) || size(input.DomainNames) == 0
+          || input.DomainNames.exists(n, string(n) == string(item.DomainName))
+    output:
+      DomainStatusList: "items.map(d, d.DomainStatus)"
+
+  ListDomainNames:
+    list: { resource: domain, member: DomainNames, paginate: model }
+    output:
+      DomainNames: >
+        items.map(d, {'DomainName': d.DomainName, 'EngineType': 'Elasticsearch'})
+
+  # Deleting answers the status it stored with Deleted flipped, so the answer
+  # describes a state no later describe can observe.
+  DeleteElasticsearchDomain:
+    reads:
+      d: { resource: domain }
+    effects:
+      - delete: { resource: domain, missing: ignore }
+    output:
+      DomainStatus: >
+        d_found
+          ? {
+              'DomainName': d.DomainStatus.DomainName,
+              'Created': d.DomainStatus.Created,
+              'Deleted': true,
+              'Processing': d.DomainStatus.Processing,
+              'Engine': d.DomainStatus.Engine
+            }
+          : {'DomainName': string(input.DomainName), 'Deleted': true}
+
+quirks:
+  - operation: CreateElasticsearchDomain
+    note: >
+      A domain is Created and not Processing the moment it is asked for, so
+      nothing observes the twenty minutes the real service takes, and it has no
+      Endpoint -- the member a client needs to send a single query. So nothing
+      can be indexed and nothing can be searched. ElasticsearchClusterConfig,
+      EBSOptions, AccessPolicies, EncryptionAtRestOptions and the VPC options
+      are all dropped, so a domain has no nodes, no storage and no policy.
+      DomainId, AccessPolicies and the service software options are declared
+      and never set.
+  - operation: CreateElasticsearchDomain
+    note: >
+      CreateElasticsearchDomainResponse declares a DomainStatus and nothing
+      else, and the pack answered a DomainName and an ElasticsearchVersion
+      beside it. The update answer is worse: it declares a DomainConfig and a
+      DryRunResults, and the pack answered none of those, so the whole update
+      answer was unreadable. Both recorded steps are superseded, and the update
+      now answers nothing rather than answering members no SDK can read.
+  - operation: UpdateElasticsearchDomainConfig
+    note: >
+      Create and update are one write, and it replaces the whole record: an
+      update that does not carry an ElasticsearchVersion resets the domain to
+      7.10 rather than leaving it alone. Nothing is ever Processing, so an
+      update appears to complete instantly.
+  - operation: DeleteElasticsearchDomain
+    note: >
+      Deleting answers the stored status with Deleted flipped to true, so the
+      answer describes a state no later describe can observe -- the record is
+      gone. Deleting a domain that does not exist succeeds and answers a
+      two-member status naming it, where describing the same name faults.
+  - operation: DescribeElasticsearchDomains
+    note: >
+      A name in DomainNames that matches no domain is skipped rather than
+      faulting, so asking about three domains when one exists answers with one
+      and no indication that two were missing. The pack looked each name up and
+      continued past a miss; the filter here does the same thing.
+  - operation: ListDomainNames
+    note: >
+      Every domain reports EngineType Elasticsearch, whatever it was created
+      as -- there is no OpenSearch here, and the EngineType filter the model
+      accepts is ignored.

@@ -1,0 +1,303 @@
+{
+  "schema": "trace/1",
+  "service": "aws.fis",
+  "source": "pack:internal/services/aws/fis@c575425",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListExperimentTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experimentTemplates": null
+      }
+    },
+    {
+      "operation": "GetExperimentTemplate",
+      "input": {
+        "id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateExperimentTemplate",
+      "input": {
+        "actions": {
+          "stop": {
+            "actionId": "aws:ec2:stop-instances"
+          }
+        },
+        "clientToken": "tok-1",
+        "description": "stop an instance",
+        "roleArn": "arn:aws:iam::000000000000:role/fis",
+        "stopConditions": [
+          {
+            "source": "none"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experimentTemplate": {
+          "arn": "arn:aws:fis:us-east-1:000000000000:experiment-template/7c589129",
+          "description": "stop an instance",
+          "id": "7c589129",
+          "roleArn": "arn:aws:iam::000000000000:role/fis"
+        }
+      }
+    },
+    {
+      "operation": "GetExperimentTemplate",
+      "input": {
+        "id": {
+          "$fromPath": "experimentTemplate.id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experimentTemplate": {
+          "arn": "arn:aws:fis:us-east-1:000000000000:experiment-template/7c589129",
+          "description": "stop an instance",
+          "id": "7c589129",
+          "roleArn": "arn:aws:iam::000000000000:role/fis"
+        }
+      }
+    },
+    {
+      "operation": "CreateExperimentTemplate",
+      "input": {
+        "actions": {
+          "stop": {
+            "actionId": "aws:ec2:stop-instances"
+          }
+        },
+        "clientToken": "tok-2",
+        "description": "stop another",
+        "roleArn": "arn:aws:iam::000000000000:role/fis",
+        "stopConditions": [
+          {
+            "source": "none"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experimentTemplate": {
+          "arn": "arn:aws:fis:us-east-1:000000000000:experiment-template/5f59f223",
+          "description": "stop another",
+          "id": "5f59f223",
+          "roleArn": "arn:aws:iam::000000000000:role/fis"
+        }
+      }
+    },
+    {
+      "operation": "ListExperimentTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experimentTemplates": [
+          {
+            "arn": "arn:aws:fis:us-east-1:000000000000:experiment-template/5f59f223",
+            "description": "stop another",
+            "id": "5f59f223",
+            "roleArn": "arn:aws:iam::000000000000:role/fis"
+          },
+          {
+            "arn": "arn:aws:fis:us-east-1:000000000000:experiment-template/7c589129",
+            "description": "stop an instance",
+            "id": "7c589129",
+            "roleArn": "arn:aws:iam::000000000000:role/fis"
+          }
+        ]
+      },
+      "superseded": "The pack listed a template with the roleArn it stored. ExperimentTemplateSummary declares id, arn, description, creationTime, lastUpdateTime and tags -- no roleArn -- so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; GetExperimentTemplate still answers with the role."
+    },
+    {
+      "operation": "StartExperiment",
+      "input": {
+        "clientToken": "tok-3",
+        "experimentTemplateId": {
+          "$fromPath": "experimentTemplate.id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experiment": {
+          "experimentTemplateId": "7c589129",
+          "id": "9c8e2cb0",
+          "state": {
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "operation": "GetExperiment",
+      "input": {
+        "id": {
+          "$fromPath": "experiment.id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experiment": {
+          "experimentTemplateId": "7c589129",
+          "id": "9c8e2cb0",
+          "state": {
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "operation": "GetExperiment",
+      "input": {
+        "id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteExperimentTemplate",
+      "input": {
+        "id": {
+          "$fromPath": "experimentTemplate.id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListExperimentTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experimentTemplates": [
+          {
+            "arn": "arn:aws:fis:us-east-1:000000000000:experiment-template/5f59f223",
+            "description": "stop another",
+            "id": "5f59f223",
+            "roleArn": "arn:aws:iam::000000000000:role/fis"
+          }
+        ]
+      },
+      "superseded": "The pack listed a template with the roleArn it stored. ExperimentTemplateSummary declares id, arn, description, creationTime, lastUpdateTime and tags -- no roleArn -- so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; GetExperimentTemplate still answers with the role."
+    },
+    {
+      "operation": "GetExperiment",
+      "input": {
+        "id": {
+          "$fromPath": "experiment.id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "experiment": {
+          "experimentTemplateId": "7c589129",
+          "id": "9c8e2cb0",
+          "state": {
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DeleteExperimentTemplate",
+      "input": {
+        "id": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

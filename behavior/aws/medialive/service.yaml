@@ -1,0 +1,117 @@
+schema: bir/1
+service: aws.medialive
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing encodes: a channel is IDLE the moment it is created and
+# cannot be started, and an input is DETACHED and never attached to anything.
+provenance: authored
+
+resources:
+  channel:
+    collection: mlch
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [ChannelId, Id]
+    arn: "arn:{partition}:medialive:{region}:{account}:channel:{id}"
+    record:
+      Id: id
+      Arn: arn
+      Name: "'Name' in input ? string(input.Name) : ''"
+      State: "'IDLE'"
+
+  # Not `input`: that is the request binding every expression sees.
+  mediainput:
+    collection: mlin
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [InputId, Id]
+    record:
+      Id: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+      Type: "'Type' in input ? string(input.Type) : ''"
+      State: "'DETACHED'"
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateChannel:
+    effects:
+      - create: { resource: channel }
+    output:
+      Channel: rec
+
+  # DescribeChannel answers with the channel's members at the top of the
+  # response, not wrapped in a Channel: the wrapper the pack used is a member
+  # this operation does not declare.
+  DescribeChannel:
+    reads:
+      ch: { resource: channel }
+    require:
+      - { cond: ch_found, error: NotFound }
+    output:
+      Id: ch.Id
+      Arn: ch.Arn
+      Name: ch.Name
+      State: ch.State
+
+  ListChannels:
+    list: { resource: channel, member: Channels, paginate: model }
+
+  DeleteChannel:
+    effects:
+      - delete: { resource: channel, missing: ignore }
+    output: {}
+
+  CreateInput:
+    effects:
+      - create: { resource: mediainput }
+    output:
+      Input: rec
+
+  DescribeInput:
+    reads:
+      # `in` is a CEL operator, so the binding cannot be called that.
+      inp: { resource: mediainput }
+    require:
+      - { cond: inp_found, error: NotFound }
+    output:
+      Id: inp.Id
+      Name: inp.Name
+      Type: inp.Type
+      State: inp.State
+
+  DeleteInput:
+    effects:
+      - delete: { resource: mediainput, missing: ignore }
+    output: {}
+
+quirks:
+  - operation: DescribeChannel
+    note: >
+      The pack wrapped the answer in a Channel, as CreateChannel declares.
+      DescribeChannel and DeleteChannel declare the channel's members at the
+      top of the response instead, with no Channel member at all, so the
+      wrapper made the whole answer unreadable to an SDK. The same applies to
+      DescribeInput. The declared shapes outrank the pack's authored behavior,
+      so the wrappers are dropped and the recorded steps are superseded with
+      that reason.
+  - operation: CreateChannel
+    note: >
+      A channel is IDLE and stays IDLE: there is no StartChannel or
+      StopChannel here, so nothing observes STARTING or RUNNING. It carries no
+      EncoderSettings, Destinations, InputAttachments or PipelineDetails --
+      all of which the model declares -- because none was stored.
+  - operation: CreateInput
+    note: >
+      An input is DETACHED and never attaches: nothing associates an input
+      with a channel, so a channel has no inputs and an input no
+      AttachedChannels. Its Arn and Sources are declared and never set.
+  - operation: DeleteChannel
+    note: >
+      Deleting answers with nothing where the model declares the deleted
+      channel's members, and deleting an absent channel or input succeeds
+      where describing the same one faults.

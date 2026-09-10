@@ -1,0 +1,206 @@
+schema: bir/1
+service: aws.cloudtrail
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is audited: no event is ever recorded, so a trail that is
+# logging logs nothing and LookupEvents is always empty.
+provenance: authored
+
+resources:
+  trail:
+    collection: ct
+    id:
+      input_members: [Name]
+    arn: "arn:{partition}:cloudtrail:{region}:{account}:trail/{id}"
+    # Only the identity members live here. Resource-level members are
+    # re-evaluated on every write, and StartLogging, StopLogging and
+    # UpdateTrail all carry a Name and nothing else -- anything else here would
+    # be recomputed from a request that does not have it.
+    record:
+      Name: id
+      TrailARN: arn
+
+  # Event selectors are kept per trail and replaced wholesale.
+  selectors:
+    collection: ctsel
+    id:
+      input_members: [TrailName]
+    record:
+      EventSelectors: "'EventSelectors' in input ? input.EventSelectors : []"
+
+  # Nothing ever writes an event, so this collection exists only to be listed
+  # empty. It is declared because LookupEvents reads it.
+  event:
+    collection: ctev
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record: {}
+
+errors:
+  InvalidTrailName:
+    code: InvalidTrailNameException
+    http: 400
+    fault: client
+  TrailNotFound:
+    code: TrailNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateTrail:
+    effects:
+      - put:
+          resource: trail
+          record:
+            S3BucketName: "'S3BucketName' in input ? string(input.S3BucketName) : ''"
+            IsMultiRegionTrail: >
+              'IsMultiRegionTrail' in input ? input.IsMultiRegionTrail : null
+            IsLogging: "true"
+    output:
+      Name: rec.Name
+      TrailARN: rec.TrailARN
+      S3BucketName: rec.S3BucketName
+      IsMultiRegionTrail: rec.IsMultiRegionTrail
+
+  GetTrail:
+    reads:
+      t: { resource: trail }
+    require:
+      - { cond: t_found, error: TrailNotFound }
+    output:
+      Trail: >
+        {
+          'Name': t.Name,
+          'TrailARN': t.TrailARN,
+          'S3BucketName': t.S3BucketName,
+          'IsMultiRegionTrail': t.IsMultiRegionTrail
+        }
+
+  DescribeTrails:
+    list: { resource: trail, member: trailList }
+    output:
+      trailList: >
+        items.map(t, {
+          'Name': t.Name,
+          'TrailARN': t.TrailARN,
+          'S3BucketName': t.S3BucketName,
+          'IsMultiRegionTrail': t.IsMultiRegionTrail
+        })
+
+  # Only the bucket can be changed, and only to a non-empty value.
+  UpdateTrail:
+    reads:
+      t: { resource: trail }
+    require:
+      - { cond: t_found, error: TrailNotFound }
+    effects:
+      - patch:
+          resource: trail
+          record:
+            S3BucketName: >
+              'S3BucketName' in input && string(input.S3BucketName) != ''
+                ? string(input.S3BucketName)
+                : string(t.S3BucketName)
+    output:
+      Name: rec.Name
+      TrailARN: rec.TrailARN
+      S3BucketName: rec.S3BucketName
+      IsMultiRegionTrail: rec.IsMultiRegionTrail
+
+  DeleteTrail:
+    effects:
+      - delete: { resource: trail, missing: ignore }
+
+  # Starting and stopping write only when the trail exists, and answer nothing
+  # either way -- so a caller cannot tell that it started a trail that is not
+  # there.
+  StartLogging:
+    reads:
+      t: { resource: trail }
+    effects:
+      - patch:
+          resource: trail
+          when: t_found
+          record:
+            IsLogging: "true"
+
+  StopLogging:
+    reads:
+      t: { resource: trail }
+    effects:
+      - patch:
+          resource: trail
+          when: t_found
+          record:
+            IsLogging: "false"
+
+  GetTrailStatus:
+    reads:
+      t: { resource: trail }
+    output:
+      IsLogging: "t_found ? t.IsLogging : false"
+
+  PutEventSelectors:
+    effects:
+      - put: { resource: selectors }
+    output:
+      TrailARN: "'TrailARN' in input ? string(input.TrailARN) : ''"
+      EventSelectors: "'EventSelectors' in input ? input.EventSelectors : []"
+
+  GetEventSelectors:
+    reads:
+      s: { resource: selectors }
+    output:
+      EventSelectors: "s_found ? s.EventSelectors : []"
+
+  LookupEvents:
+    list: { resource: event, member: Events, paginate: model }
+
+quirks:
+  - operation: LookupEvents
+    note: >
+      No operation here records an event, so LookupEvents is always empty
+      whatever LookupAttributes or time range is asked for. That is the whole
+      point of CloudTrail and none of it exists: a trail that is logging logs
+      nothing, so no API call made against this emulator is auditable through
+      it. The collection is declared because the operation reads one, and it
+      will stay empty until something writes to it.
+  - operation: CreateTrail
+    note: >
+      The S3 bucket a trail names is stored without being checked, so a trail
+      can write to a bucket that does not exist -- which is moot, because it
+      writes nothing. A trail is logging from the moment it is created, where
+      the real service requires an explicit StartLogging. HomeRegion,
+      LogFileValidationEnabled, KmsKeyId and the CloudWatch members are all
+      declared and never set, and CreateTrail answers four members where the
+      model declares a dozen.
+  - operation: StartLogging
+    note: >
+      Starting or stopping a trail that does not exist succeeds and does
+      nothing, and both answer with an empty body -- so a caller cannot
+      distinguish a trail it started from one that is not there.
+      GetTrailStatus answers false for an absent trail rather than faulting,
+      for the same reason, and answers only IsLogging where the model declares
+      LatestDeliveryTime, StartLoggingTime and a dozen more.
+  - operation: PutEventSelectors
+    note: >
+      Selectors are stored per trail, replaced wholesale, and consulted by
+      nothing -- there are no events to select. The TrailARN answered with is
+      echoed from the request rather than resolved from the trail, so it is
+      whatever string the caller sent, and PutEventSelectors does not check the
+      trail exists. AdvancedEventSelectors are dropped entirely.
+  - operation: DescribeTrails
+    note: >
+      A trail created without IsMultiRegionTrail stores a null for it, and a
+      null inside a constructed map survives into the answer where a null at
+      the top of a projection is omitted. The two are not the same, and only a
+      listing shows the difference. It is invisible on the wire -- a null
+      member and an absent one serialize alike for every codec here -- so it is
+      recorded rather than worked around, and the steps it appears in are
+      superseded for a different reason anyway.
+  - operation: UpdateTrail
+    note: >
+      Only S3BucketName can be changed, and only to a non-empty value: every
+      other member the model accepts on an update is ignored, so a trail cannot
+      be made multi-region, cannot gain log-file validation and cannot change
+      its KMS key. Deleting a trail leaves its event selectors behind.

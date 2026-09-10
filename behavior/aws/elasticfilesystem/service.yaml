@@ -1,0 +1,144 @@
+schema: bir/1
+service: aws.elasticfilesystem
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is mounted and nothing is stored: a file system, a mount
+# target and an access point are records that are available at once.
+provenance: authored
+
+resources:
+  filesystem:
+    collection: efsfs
+    # The identifier answered with carries an fs- prefix, so the record member
+    # rather than the raw generated id is the store key.
+    key: FileSystemId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:elasticfilesystem:{region}:{account}:file-system/fs-{id}"
+    record:
+      FileSystemId: "'fs-' + id"
+      LifeCycleState: "'available'"
+      OwnerId: identity.account
+      FileSystemArn: arn
+      CreationToken: "'CreationToken' in input ? string(input.CreationToken) : ''"
+
+  mounttarget:
+    collection: efsmt
+    key: MountTargetId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      MountTargetId: "'fsmt-' + id"
+      FileSystemId: "'FileSystemId' in input ? string(input.FileSystemId) : ''"
+      LifeCycleState: "'available'"
+      SubnetId: "'SubnetId' in input ? string(input.SubnetId) : ''"
+
+  accesspoint:
+    collection: efsap
+    key: AccessPointId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      AccessPointId: "'fsap-' + id"
+      FileSystemId: "'FileSystemId' in input ? string(input.FileSystemId) : ''"
+      LifeCycleState: "'available'"
+
+errors:
+  NotFound:
+    code: FileSystemNotFound
+    http: 404
+    fault: client
+
+operations:
+  CreateFileSystem:
+    effects:
+      - create: { resource: filesystem }
+    output:
+      FileSystemId: rec.FileSystemId
+      LifeCycleState: rec.LifeCycleState
+      OwnerId: rec.OwnerId
+      FileSystemArn: rec.FileSystemArn
+      CreationToken: rec.CreationToken
+
+  # Named or not: one file system when FileSystemId is given, the page when it
+  # is not, which is the shape almost every AWS Describe* has.
+  DescribeFileSystems:
+    list:
+      resource: filesystem
+      member: FileSystems
+      key: "'FileSystemId' in input ? string(input.FileSystemId) : ''"
+      paginate: model
+
+  DeleteFileSystem:
+    effects:
+      - delete: { resource: filesystem, key: "string(input.FileSystemId)", missing: ignore }
+
+  CreateMountTarget:
+    effects:
+      - create: { resource: mounttarget }
+    output:
+      MountTargetId: rec.MountTargetId
+      FileSystemId: rec.FileSystemId
+      LifeCycleState: rec.LifeCycleState
+      SubnetId: rec.SubnetId
+
+  DescribeMountTargets:
+    list:
+      resource: mounttarget
+      member: MountTargets
+      key: "'MountTargetId' in input ? string(input.MountTargetId) : ''"
+      paginate: model
+
+  DeleteMountTarget:
+    effects:
+      - delete: { resource: mounttarget, key: "string(input.MountTargetId)", missing: ignore }
+
+  CreateAccessPoint:
+    effects:
+      - create: { resource: accesspoint }
+    output:
+      AccessPointId: rec.AccessPointId
+      FileSystemId: rec.FileSystemId
+      LifeCycleState: rec.LifeCycleState
+
+  DescribeAccessPoints:
+    list:
+      resource: accesspoint
+      member: AccessPoints
+      key: "'AccessPointId' in input ? string(input.AccessPointId) : ''"
+      paginate: model
+
+  DeleteAccessPoint:
+    effects:
+      - delete: { resource: accesspoint, key: "string(input.AccessPointId)", missing: ignore }
+
+quirks:
+  - operation: CreateFileSystem
+    note: >
+      CreationTime, PerformanceMode, NumberOfMountTargets, SizeInBytes and Tags
+      are all required on the answer and none is set, so the response is
+      missing five required members however the request is written. The pack
+      set none of them; supplying a size or a mount-target count here would be
+      inventing values a probe should observe. Encrypted, KmsKeyId and
+      ThroughputMode are accepted and dropped, so an encrypted file system is
+      indistinguishable from an unencrypted one.
+  - operation: CreateMountTarget
+    note: >
+      A mount target is available immediately with no NetworkInterfaceId, no
+      IpAddress, no VpcId and no availability zone, and the FileSystemId it
+      names is stored without being checked -- a mount target can name a file
+      system that was never created. Nothing prevents two mount targets in the
+      same subnet, which the real service refuses.
+  - operation: DescribeMountTargets
+    note: >
+      FileSystemId and AccessPointId are accepted and ignored when listing
+      mount targets: only MountTargetId narrows the answer, so asking for one
+      file system's mount targets answers with every mount target in the
+      account and region. DescribeAccessPoints has the same shape -- FileSystemId
+      is ignored there too.
+  - operation: DeleteFileSystem
+    note: >
+      Deleting an absent file system, mount target or access point succeeds,
+      where the real service faults. Deleting a file system leaves its mount
+      targets and access points behind, still naming it, where the real service
+      refuses to delete a file system that still has mount targets.

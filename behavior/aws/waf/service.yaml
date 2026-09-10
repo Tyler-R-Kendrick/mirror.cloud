@@ -1,0 +1,102 @@
+schema: bir/1
+service: aws.waf
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is filtered: a web ACL and an IP set are records, no rule
+# is ever attached to an ACL and no descriptor to an IP set.
+provenance: authored
+
+resources:
+  webacl:
+    collection: wafacl
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [WebACLId]
+    record:
+      WebACLId: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+      DefaultAction: "'DefaultAction' in input ? input.DefaultAction : {}"
+
+  ipset:
+    collection: wafip
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [IPSetId]
+    record:
+      IPSetId: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+
+errors:
+  NonexistentItem:
+    code: WAFNonexistentItemException
+    http: 400
+    fault: client
+
+operations:
+  CreateWebACL:
+    effects:
+      - create: { resource: webacl }
+    output:
+      WebACL: rec
+
+  GetWebACL:
+    reads:
+      acl: { resource: webacl }
+    require:
+      - { cond: acl_found, error: NonexistentItem }
+    output:
+      WebACL: acl
+
+  # WebACLSummary declares Name and WebACLId only, so the listed form is not
+  # the stored record: an ACL's DefaultAction is answered by GetWebACL.
+  ListWebACLs:
+    list: { resource: webacl, member: WebACLs }
+    output:
+      WebACLs: "items.map(a, {'Name': a.Name, 'WebACLId': a.WebACLId})"
+
+  DeleteWebACL:
+    effects:
+      - delete: { resource: webacl, missing: ignore }
+    output: {}
+
+  CreateIPSet:
+    effects:
+      - create: { resource: ipset }
+    output:
+      IPSet: rec
+
+  GetIPSet:
+    reads:
+      ips: { resource: ipset }
+    require:
+      - { cond: ips_found, error: NonexistentItem }
+    output:
+      IPSet: ips
+
+  ListIPSets:
+    list: { resource: ipset, member: IPSets }
+
+  DeleteIPSet:
+    effects:
+      - delete: { resource: ipset, missing: ignore }
+    output: {}
+
+quirks:
+  - operation: CreateWebACL
+    note: >
+      ChangeToken is required on every create and delete and is neither
+      checked nor answered with, so the change-token protocol the real service
+      is built around does not exist here: a token is never issued, never
+      consumed, and reusing one is not an error. MetricName is required and
+      not stored.
+  - operation: CreateWebACL
+    note: >
+      An ACL carries no Rules and no WebACLArn, and an IP set no
+      IPSetDescriptors, because the pack stored none: an ACL matches nothing
+      and an IP set contains no addresses. Nothing associates a rule with
+      either.
+  - operation: DeleteWebACL
+    note: >
+      Deleting answers with nothing where the model declares a ChangeToken,
+      and deleting an absent ACL or IP set succeeds where getting the same one
+      faults.

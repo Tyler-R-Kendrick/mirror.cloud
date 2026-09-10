@@ -1,0 +1,381 @@
+{
+  "schema": "trace/1",
+  "service": "aws.batch",
+  "source": "pack:internal/services/aws/batch@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeComputeEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "computeEnvironments": null
+      }
+    },
+    {
+      "operation": "CreateComputeEnvironment",
+      "input": {
+        "computeEnvironmentName": "ce1",
+        "type": "MANAGED"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "computeEnvironmentArn": "arn:aws:batch:us-east-1:000000000000:compute-environment/ce1",
+        "computeEnvironmentName": "ce1"
+      }
+    },
+    {
+      "operation": "DescribeComputeEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "computeEnvironments": [
+          {
+            "computeEnvironmentArn": "arn:aws:batch:us-east-1:000000000000:compute-environment/ce1",
+            "computeEnvironmentName": "ce1",
+            "state": "ENABLED",
+            "status": "VALID"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateJobQueue",
+      "input": {
+        "jobQueueName": "jq1",
+        "priority": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobQueueArn": "arn:aws:batch:us-east-1:000000000000:job-queue/jq1",
+        "jobQueueName": "jq1"
+      }
+    },
+    {
+      "operation": "DescribeJobQueues",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobQueues": [
+          {
+            "jobQueueArn": "arn:aws:batch:us-east-1:000000000000:job-queue/jq1",
+            "jobQueueName": "jq1",
+            "state": "ENABLED",
+            "status": "VALID"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RegisterJobDefinition",
+      "input": {
+        "jobDefinitionName": "jd1",
+        "type": "container"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobDefinitionArn": "arn:aws:batch:us-east-1:000000000000:job-definition/jd1:1",
+        "jobDefinitionName": "jd1",
+        "revision": 1
+      }
+    },
+    {
+      "operation": "RegisterJobDefinition",
+      "input": {
+        "jobDefinitionName": "jd1",
+        "type": "container"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobDefinitionArn": "arn:aws:batch:us-east-1:000000000000:job-definition/jd1:1",
+        "jobDefinitionName": "jd1",
+        "revision": 1
+      }
+    },
+    {
+      "operation": "DescribeJobDefinitions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobDefinitions": [
+          {
+            "jobDefinitionArn": "arn:aws:batch:us-east-1:000000000000:job-definition/jd1:1",
+            "jobDefinitionName": "jd1",
+            "revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SubmitJob",
+      "input": {
+        "jobDefinition": "jd1",
+        "jobName": "j1",
+        "jobQueue": "jq1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobId": "7c5891299f6489f8",
+        "jobName": "j1"
+      }
+    },
+    {
+      "operation": "SubmitJob",
+      "input": {
+        "jobDefinition": "jd1",
+        "jobName": "j2",
+        "jobQueue": "jq1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobId": "5f59f223d7974d14",
+        "jobName": "j2"
+      }
+    },
+    {
+      "operation": "DescribeJobs",
+      "input": {
+        "jobs": [
+          {
+            "$fromPath": "jobId",
+            "$fromStep": 8
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobs": [
+          {
+            "jobId": "5f59f223d7974d14",
+            "jobName": "j2",
+            "jobQueue": "jq1",
+            "status": "SUCCEEDED"
+          },
+          {
+            "jobId": "7c5891299f6489f8",
+            "jobName": "j1",
+            "jobQueue": "jq1",
+            "status": "SUCCEEDED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {
+        "jobQueue": "jq1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobSummaryList": [
+          {
+            "jobId": "5f59f223d7974d14",
+            "jobName": "j2",
+            "jobQueue": "jq1",
+            "status": "SUCCEEDED"
+          },
+          {
+            "jobId": "7c5891299f6489f8",
+            "jobName": "j1",
+            "jobQueue": "jq1",
+            "status": "SUCCEEDED"
+          }
+        ]
+      },
+      "superseded": "JobSummary declares no jobQueue, and the pack emitted the stored record, so the summarised job carried a member no SDK could read. The declared shape outranks the pack's authored behavior; the same job described still carries it, because JobDetail declares it."
+    },
+    {
+      "operation": "TerminateJob",
+      "input": {
+        "jobId": {
+          "$fromPath": "jobId",
+          "$fromStep": 8
+        },
+        "reason": "done"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {
+        "jobQueue": "jq1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobSummaryList": [
+          {
+            "jobId": "5f59f223d7974d14",
+            "jobName": "j2",
+            "jobQueue": "jq1",
+            "status": "SUCCEEDED"
+          }
+        ]
+      },
+      "superseded": "JobSummary declares no jobQueue, and the pack emitted the stored record, so the summarised job carried a member no SDK could read. The declared shape outranks the pack's authored behavior; the same job described still carries it, because JobDetail declares it."
+    },
+    {
+      "operation": "DeleteJobQueue",
+      "input": {
+        "jobQueue": "jq1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeJobQueues",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobQueues": null
+      }
+    },
+    {
+      "operation": "DeregisterJobDefinition",
+      "input": {
+        "jobDefinition": "jd1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteComputeEnvironment",
+      "input": {
+        "computeEnvironment": "ce1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeComputeEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "computeEnvironments": null
+      }
+    },
+    {
+      "operation": "DeleteComputeEnvironment",
+      "input": {
+        "computeEnvironment": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

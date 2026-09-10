@@ -1,0 +1,98 @@
+schema: bir/1
+service: aws.mediastore
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No object store is behind this: a container is ACTIVE the moment
+# it is created and its endpoint resolves to nothing.
+provenance: authored
+
+resources:
+  container:
+    collection: msct
+    id:
+      input_members: [ContainerName]
+    arn: "arn:{partition}:mediastore:{region}:{account}:container/{id}"
+    record:
+      Name: id
+      ARN: arn
+      Status: "'ACTIVE'"
+      Endpoint: "'https://' + id + '.mediastore.' + identity.region + '.amazonaws.com'"
+
+  # The policy is stored beside its container rather than on it, as the pack
+  # did: putting a policy does not touch the container, and deleting a
+  # container does not remove its policy.
+  policy:
+    collection: mspol
+    id:
+      input_members: [ContainerName]
+    record:
+      Policy: "'Policy' in input ? string(input.Policy) : ''"
+
+errors:
+  InvalidParameter:
+    code: InvalidParameter
+    http: 400
+    fault: client
+  ContainerNotFound:
+    code: ContainerNotFoundException
+    http: 400
+    fault: client
+  PolicyNotFound:
+    code: PolicyNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateContainer:
+    require:
+      - { cond: "string(input.ContainerName) != ''", error: InvalidParameter }
+    effects:
+      - put: { resource: container }
+    output:
+      Container: rec
+
+  DescribeContainer:
+    reads:
+      c: { resource: container }
+    require:
+      - { cond: c_found, error: ContainerNotFound }
+    output:
+      Container: c
+
+  ListContainers:
+    list: { resource: container, member: Containers, paginate: model }
+
+  DeleteContainer:
+    effects:
+      - delete: { resource: container, missing: ignore }
+
+  PutContainerPolicy:
+    effects:
+      - put: { resource: policy }
+
+  GetContainerPolicy:
+    reads:
+      p: { resource: policy }
+    require:
+      - { cond: p_found, error: PolicyNotFound }
+    output:
+      Policy: p.Policy
+
+quirks:
+  - operation: DescribeContainer
+    note: >
+      ContainerName is optional on the model, where the real service answers
+      about the caller's only container when it is omitted. Here an omitted
+      name reads a container keyed by the empty string, which never exists, so
+      it faults with ContainerNotFound. That is what the pack did.
+  - operation: PutContainerPolicy
+    note: >
+      A policy is stored beside its container and nothing enforces it: a
+      policy can be put for a container that does not exist, and deleting a
+      container leaves its policy behind, so GetContainerPolicy still answers
+      for a container that is gone.
+  - operation: CreateContainer
+    note: >
+      A container is ACTIVE at once, so nothing observes CREATING or DELETING,
+      and its Endpoint is a hostname that resolves to nothing. CreationTime
+      and AccessLoggingEnabled are declared and never set.

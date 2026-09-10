@@ -1,0 +1,290 @@
+schema: bir/1
+service: aws.appconfig
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is deployed: a deployment is COMPLETE before the call
+# returns, and no agent ever polls for the configuration it deployed.
+provenance: authored
+
+resources:
+  application:
+    collection: acapp
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [ApplicationId]
+    record:
+      Id: id
+
+  # Environments, profiles and versions are each scoped to what owns them
+  # rather than filtered out of one shared collection, which is what the pack's
+  # "acenv:"+app and "acver:"+app+":"+profile did. Reads of the owner are
+  # declared so the engine can expand the collection name, and they run in
+  # dependency order rather than in the order they are written.
+  environment:
+    collection: "acenv:{application.id}"
+    parent: application
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [EnvironmentId]
+    record:
+      Id: id
+
+  profile:
+    collection: "acprof:{application.id}"
+    parent: application
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [ConfigurationProfileId]
+    record:
+      Id: id
+
+  # A version is keyed by its number, which is a per-profile sequence rather
+  # than a generated id: the pack took the length of the collection plus one,
+  # and since no version is ever deleted a monotonic counter is the same thing
+  # said in a way that does not depend on nothing ever being deleted.
+  version:
+    collection: "acver:{application.id}:{profile.id}"
+    parent: profile
+    id:
+      derive: >
+        'VersionNumber' in input ? string(int(input.VersionNumber)) : ''
+
+  deployment:
+    collection: acdep
+    singleton: "1"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateApplication:
+    effects:
+      - create:
+          resource: application
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+    output:
+      Id: rec.Id
+      Name: rec.Name
+
+  GetApplication:
+    reads:
+      application: { resource: application }
+    require:
+      - { cond: application_found, error: NotFound }
+    output:
+      Id: application.Id
+      Name: application.Name
+
+  ListApplications:
+    list: { resource: application, member: Items, paginate: model }
+
+  DeleteApplication:
+    effects:
+      - delete: { resource: application, missing: ignore }
+
+  CreateEnvironment:
+    reads:
+      application: { resource: application }
+    effects:
+      - create:
+          resource: environment
+          record:
+            ApplicationId: "'ApplicationId' in input ? string(input.ApplicationId) : ''"
+            Name: "'Name' in input ? string(input.Name) : ''"
+            State: "'ReadyForDeployment'"
+    output:
+      Id: rec.Id
+      ApplicationId: rec.ApplicationId
+      Name: rec.Name
+      State: rec.State
+
+  GetEnvironment:
+    reads:
+      application: { resource: application }
+      environment: { resource: environment }
+    require:
+      - { cond: environment_found, error: NotFound }
+    output:
+      Id: environment.Id
+      ApplicationId: environment.ApplicationId
+      Name: environment.Name
+      State: environment.State
+
+  ListEnvironments:
+    reads:
+      application: { resource: application }
+    list: { resource: environment, member: Items, paginate: model }
+
+  DeleteEnvironment:
+    reads:
+      application: { resource: application }
+    effects:
+      - delete: { resource: environment, missing: ignore }
+
+  CreateConfigurationProfile:
+    reads:
+      application: { resource: application }
+    effects:
+      - create:
+          resource: profile
+          record:
+            ApplicationId: "'ApplicationId' in input ? string(input.ApplicationId) : ''"
+            Name: "'Name' in input ? string(input.Name) : ''"
+            LocationUri: "'LocationUri' in input ? string(input.LocationUri) : ''"
+    output:
+      Id: rec.Id
+      ApplicationId: rec.ApplicationId
+      Name: rec.Name
+      LocationUri: rec.LocationUri
+
+  GetConfigurationProfile:
+    reads:
+      application: { resource: application }
+      profile: { resource: profile }
+    require:
+      - { cond: profile_found, error: NotFound }
+    output:
+      Id: profile.Id
+      ApplicationId: profile.ApplicationId
+      Name: profile.Name
+      LocationUri: profile.LocationUri
+
+  ListConfigurationProfiles:
+    reads:
+      application: { resource: application }
+    list: { resource: profile, member: Items, paginate: model }
+
+  DeleteConfigurationProfile:
+    reads:
+      application: { resource: application }
+    effects:
+      - delete: { resource: profile, missing: ignore }
+
+  CreateHostedConfigurationVersion:
+    reads:
+      application: { resource: application }
+      profile: { resource: profile }
+    effects:
+      - counter: { name: "acver:{application.id}:{profile.id}" }
+      - create:
+          resource: version
+          key: "string(fx.counter)"
+          record:
+            VersionNumber: fx.counter
+            Content: "'Content' in input ? string(input.Content) : ''"
+            ContentType: "'ContentType' in input ? string(input.ContentType) : ''"
+    output:
+      VersionNumber: rec.VersionNumber
+      Content: rec.Content
+      ContentType: rec.ContentType
+
+  GetHostedConfigurationVersion:
+    reads:
+      application: { resource: application }
+      profile: { resource: profile }
+      version: { resource: version }
+    require:
+      - { cond: version_found, error: NotFound }
+    output:
+      VersionNumber: version.VersionNumber
+      Content: version.Content
+      ContentType: version.ContentType
+
+  ListHostedConfigurationVersions:
+    reads:
+      application: { resource: application }
+      profile: { resource: profile }
+    list: { resource: version, member: Items, paginate: model }
+
+  # Every deployment is deployment number 1, in one collection shared by the
+  # whole account and region.
+  StartDeployment:
+    effects:
+      - put:
+          resource: deployment
+          record:
+            DeploymentNumber: "1"
+            State: "'COMPLETE'"
+            ApplicationId: "'ApplicationId' in input ? string(input.ApplicationId) : ''"
+            EnvironmentId: "'EnvironmentId' in input ? string(input.EnvironmentId) : ''"
+    output:
+      DeploymentNumber: rec.DeploymentNumber
+      State: rec.State
+      ApplicationId: rec.ApplicationId
+      EnvironmentId: rec.EnvironmentId
+
+  GetDeployment:
+    reads:
+      deployment: { resource: deployment }
+    require:
+      - { cond: deployment_found, error: NotFound }
+    output:
+      DeploymentNumber: deployment.DeploymentNumber
+      State: deployment.State
+      ApplicationId: deployment.ApplicationId
+      EnvironmentId: deployment.EnvironmentId
+
+quirks:
+  - operation: StartDeployment
+    note: >
+      A deployment is COMPLETE before the call returns, so nothing observes
+      DEPLOYING, BAKING or ROLLING_BACK, and the DeploymentStrategyId that
+      would have decided the growth rate and bake time is dropped along with
+      the ConfigurationVersion the deployment is supposed to be of. Nothing is
+      checked to exist: the application, environment and profile are all stored
+      as given.
+
+      Every deployment is deployment number 1, and they share one collection
+      for the whole account and region rather than one per environment. So
+      starting a deployment in one environment overwrites the record of a
+      deployment in another, and GetDeployment ignores the ApplicationId,
+      EnvironmentId and DeploymentNumber it requires and answers that single
+      record whatever was asked for. A caller cannot have two deployments.
+  - operation: CreateHostedConfigurationVersion
+    note: >
+      Version numbers count from one per application-and-profile pair, and the
+      pack derived the next one by counting the versions already stored. The
+      bundle uses a monotonic counter, which is the same thing here because no
+      operation deletes a version -- there is no
+      DeleteHostedConfigurationVersion -- but would not be if one were added.
+
+      The required LatestVersionNumber is ignored, so the optimistic-concurrency
+      check it exists for does not happen and two concurrent writers both
+      succeed. Content is stored as the string it arrived as and never
+      validated against the profile's Validators, which are dropped at profile
+      creation, so an invalid configuration deploys cleanly. VersionLabel,
+      Description and KmsKeyArn are declared and never set.
+  - operation: GetLatestConfiguration
+    note: >
+      The pack served an operation called GetLatestConfiguration and maintained
+      a per-profile pointer to feed it. AppConfig has no such operation --
+      retrieval lives in a separate service, AppConfig Data, with its own
+      endpoint and its own StartConfigurationSession handshake -- so no SDK
+      could reach it, and the answer it gave (the latest version's record, or a
+      bare empty Content when there was none) was unreachable.
+
+      The bundle does not serve it, and does not maintain the pointer either,
+      since nothing in this emulator reads it. A caller wanting the latest
+      configuration lists the versions and gets the highest number.
+  - operation: CreateApplication
+    note: >
+      Applications, environments and profiles are all keyed by a generated
+      identifier and never checked for name collisions, so two applications may
+      share a name. Descriptions and Tags are dropped everywhere, and
+      CreateApplication answers a Description the caller sent as absent.
+
+      Nothing is checked to exist on the way down: an environment or profile
+      can be created under an application id that was never created, and it is
+      listed under that id afterwards. Deleting an application leaves its
+      environments, profiles and versions behind in their own collections.
+  - operation: GetEnvironment
+    note: >
+      An environment is created ReadyForDeployment and stays there: no
+      deployment moves it, since deployments do not consult environments, so
+      DEPLOYING and ROLLED_BACK are never observed. The Monitors an environment
+      declares are dropped at creation, so nothing alarms and nothing rolls
+      back.

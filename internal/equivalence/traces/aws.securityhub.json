@@ -1,0 +1,707 @@
+{
+  "schema": "trace/1",
+  "service": "aws.securityhub",
+  "source": "pack:internal/services/aws/securityhub@c5a98dd7",
+  "note": "Findings imported one per entry, the two members an update actually applies, and the insight that is a query nothing runs.",
+  "steps": [
+    {
+      "operation": "DescribeHub",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidAccessException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "EnableSecurityHub",
+      "input": {
+        "EnableDefaultStandards": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HubArn": "arn:aws:securityhub:us-east-1:000000000000:hub/default",
+        "SubscribedAt": "2020-01-01T00:00:00Z"
+      },
+      "superseded_members": {
+        "HubArn": "The pack answered a HubArn and a SubscribedAt from EnableSecurityHub. EnableSecurityHubResponse declares no members at all, so neither was readable by any SDK; both are declared on DescribeHubResponse, which is where the bundle answers them and where the recording still compares them.",
+        "SubscribedAt": "The pack answered a HubArn and a SubscribedAt from EnableSecurityHub. EnableSecurityHubResponse declares no members at all, so neither was readable by any SDK; both are declared on DescribeHubResponse, which is where the bundle answers them and where the recording still compares them."
+      }
+    },
+    {
+      "operation": "DescribeHub",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HubArn": "arn:aws:securityhub:us-east-1:000000000000:hub/default",
+        "SubscribedAt": "2020-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "GetFindings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Findings": null
+      }
+    },
+    {
+      "operation": "BatchImportFindings",
+      "input": {
+        "Findings": [
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-1",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open bucket",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          },
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-2",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open port",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedCount": 0,
+        "SuccessCount": 2
+      }
+    },
+    {
+      "operation": "GetFindings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Findings": [
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-1",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open bucket",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          },
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-2",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open port",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchUpdateFindings",
+      "input": {
+        "FindingIdentifiers": [
+          {
+            "Id": "f-1",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+          },
+          {
+            "Id": "absent",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+          }
+        ],
+        "Note": {
+          "Text": "triaged",
+          "UpdatedBy": "me"
+        },
+        "Workflow": {
+          "Status": "NOTIFIED"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProcessedFindings": [
+          {
+            "Id": "f-1",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+          },
+          {
+            "Id": "absent",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+          }
+        ],
+        "UnprocessedFindings": []
+      }
+    },
+    {
+      "operation": "GetFindings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Findings": [
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-1",
+            "Note": {
+              "Text": "triaged",
+              "UpdatedBy": "me"
+            },
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open bucket",
+            "UpdatedAt": "2021-06-02T11:45:00Z",
+            "Workflow": {
+              "Status": "NOTIFIED"
+            }
+          },
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-2",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open port",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchUpdateFindings",
+      "input": {
+        "Confidence": 90,
+        "FindingIdentifiers": [
+          {
+            "Id": "f-1",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProcessedFindings": [
+          {
+            "Id": "f-1",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+          }
+        ],
+        "UnprocessedFindings": []
+      }
+    },
+    {
+      "operation": "GetFindings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Findings": [
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-1",
+            "Note": {
+              "Text": "triaged",
+              "UpdatedBy": "me"
+            },
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open bucket",
+            "UpdatedAt": "2021-06-02T11:45:00Z",
+            "Workflow": {
+              "Status": "NOTIFIED"
+            }
+          },
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-2",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open port",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchImportFindings",
+      "input": {
+        "Findings": [
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-1",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "still open",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedCount": 0,
+        "SuccessCount": 1
+      }
+    },
+    {
+      "operation": "GetFindings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Findings": [
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-1",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "still open",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          },
+          {
+            "AwsAccountId": "000000000000",
+            "CreatedAt": "2021-06-01T09:30:00Z",
+            "Description": "a finding",
+            "GeneratorId": "gen-1",
+            "Id": "f-2",
+            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+            "Resources": [
+              {
+                "Id": "arn:aws:s3:::b",
+                "Type": "AwsS3Bucket"
+              }
+            ],
+            "SchemaVersion": "2018-10-08",
+            "Severity": {
+              "Label": "HIGH"
+            },
+            "Title": "open port",
+            "UpdatedAt": "2021-06-02T11:45:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetInsights",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Insights": null
+      }
+    },
+    {
+      "operation": "CreateInsight",
+      "input": {
+        "Filters": {
+          "RecordState": [
+            {
+              "Comparison": "EQUALS",
+              "Value": "ACTIVE"
+            }
+          ]
+        },
+        "GroupByAttribute": "ResourceId",
+        "Name": "buckets"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InsightArn": "arn:aws:securityhub:us-east-1:000000000000:insight/7c589129"
+      }
+    },
+    {
+      "operation": "CreateInsight",
+      "input": {
+        "Filters": {
+          "RecordState": [
+            {
+              "Comparison": "EQUALS",
+              "Value": "ACTIVE"
+            }
+          ]
+        },
+        "GroupByAttribute": "ResourceType",
+        "Name": "ports"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InsightArn": "arn:aws:securityhub:us-east-1:000000000000:insight/5f59f223"
+      }
+    },
+    {
+      "operation": "GetInsights",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Insights": [
+          {
+            "Filters": {
+              "RecordState": [
+                {
+                  "Comparison": "EQUALS",
+                  "Value": "ACTIVE"
+                }
+              ]
+            },
+            "GroupByAttribute": "ResourceType",
+            "InsightArn": "arn:aws:securityhub:us-east-1:000000000000:insight/5f59f223",
+            "Name": "ports"
+          },
+          {
+            "Filters": {
+              "RecordState": [
+                {
+                  "Comparison": "EQUALS",
+                  "Value": "ACTIVE"
+                }
+              ]
+            },
+            "GroupByAttribute": "ResourceId",
+            "InsightArn": "arn:aws:securityhub:us-east-1:000000000000:insight/7c589129",
+            "Name": "buckets"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetInsights",
+      "input": {
+        "InsightArns": [
+          {
+            "$fromPath": "InsightArn",
+            "$fromStep": 13
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Insights": [
+          {
+            "Filters": {
+              "RecordState": [
+                {
+                  "Comparison": "EQUALS",
+                  "Value": "ACTIVE"
+                }
+              ]
+            },
+            "GroupByAttribute": "ResourceId",
+            "InsightArn": "arn:aws:securityhub:us-east-1:000000000000:insight/7c589129",
+            "Name": "buckets"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteInsight",
+      "input": {
+        "InsightArn": {
+          "$fromPath": "InsightArn",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "superseded_members": {
+        "InsightArn": "The pack answered an empty body from DeleteInsight. DeleteInsightResponse declares InsightArn, and declares it required, so the bundle answers the ARN it was given -- the divergence is the bundle carrying a member the response shape says must be there."
+      }
+    },
+    {
+      "operation": "GetInsights",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Insights": [
+          {
+            "Filters": {
+              "RecordState": [
+                {
+                  "Comparison": "EQUALS",
+                  "Value": "ACTIVE"
+                }
+              ]
+            },
+            "GroupByAttribute": "ResourceType",
+            "InsightArn": "arn:aws:securityhub:us-east-1:000000000000:insight/5f59f223",
+            "Name": "ports"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteInsight",
+      "input": {
+        "InsightArn": {
+          "$fromPath": "InsightArn",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "superseded_members": {
+        "InsightArn": "The pack answered an empty body from DeleteInsight. DeleteInsightResponse declares InsightArn, and declares it required, so the bundle answers the ARN it was given -- the divergence is the bundle carrying a member the response shape says must be there."
+      }
+    },
+    {
+      "operation": "DisableSecurityHub",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeHub",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidAccessException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

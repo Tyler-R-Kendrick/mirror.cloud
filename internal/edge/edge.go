@@ -3,13 +3,11 @@ package edge
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +25,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/restxml"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -78,25 +75,17 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if strings.HasSuffix(r.URL.Path, "/_aws/sns/SimpleNotificationService.pem") {
-		w.Header().Set("Content-Type", "application/x-pem-file")
-		_, _ = w.Write(cert.Certificate())
-		return
-	}
 	var awsChunks [][]byte
 	var awsChunkSignatures []string
 	var awsTrailers http.Header
 	var awsDecodedLength int64
 	awsChunkedDecoded := false
-	awsChunkedInvalid := false
 	if r.Method == http.MethodOptions {
-		if svc := s.demux(r); svc == nil || svc.ID != "aws.s3" {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Headers", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "*")
-			w.WriteHeader(204)
-			return
-		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "*")
+		w.WriteHeader(204)
+		return
 	}
 	if r.Header.Get("Expect") == "100-continue" {
 		w.WriteHeader(http.StatusContinue)
@@ -113,42 +102,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if enc := r.Header.Get("Content-Encoding"); strings.Contains(strings.ToLower(enc), "aws-chunked") || r.Header.Get("X-Amz-Decoded-Content-Length") != "" {
 		raw, err := io.ReadAll(r.Body)
 		_ = r.Body.Close()
-		decodedLength, lengthErr := strconv.ParseInt(r.Header.Get("X-Amz-Decoded-Content-Length"), 10, 64)
-		if err == nil && lengthErr == nil && decodedLength >= 0 {
+		if err == nil {
 			body := raw
 			if deframed, chunks, signatures, trailers, err2 := parseAWSChunked(bytes.NewReader(raw)); err2 == nil {
-				if int64(len(deframed)) == decodedLength {
-					body = deframed
-					awsChunks = chunks
-					awsChunkSignatures = signatures
-					awsTrailers = trailers
-					awsDecodedLength = int64(len(body))
-					awsChunkedDecoded = true
-				} else {
-					awsChunkedInvalid = true
-				}
-			} else {
-				awsChunkedInvalid = true
+				body = deframed
+				awsChunks = chunks
+				awsChunkSignatures = signatures
+				awsTrailers = trailers
+				awsDecodedLength = int64(len(body))
+				awsChunkedDecoded = true
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
-		} else {
-			awsChunkedInvalid = true
-			r.Body = io.NopCloser(bytes.NewReader(raw))
 		}
 	}
 
 	svc := s.demux(r)
 	w.Header().Set("x-mirror-request-id", rid)
-	if svc != nil && svc.ID == "aws.s3" && awsChunkedInvalid {
-		operation := "unknown"
-		fault := &spi.Fault{Code: "SignatureDoesNotMatch", Message: "The request signature we calculated does not match the signature you provided.", HTTPStatus: http.StatusForbidden, Fault: "client"}
-		if r.Method == http.MethodPut && r.URL.Query().Get("partNumber") != "" && r.URL.Query().Get("uploadId") != "" {
-			operation = "UploadPart"
-			fault = &spi.Fault{Code: "InternalError", Message: "We encountered an internal error. Please try again.", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
-		}
-		s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: operation}, fault, rid)
-		return
-	}
 	if svc != nil && svc.ID == "aws.s3" {
 		w.Header().Set("x-amz-request-id", rid)
 		w.Header().Set("x-amz-id-2", "mirror-"+rid)
@@ -158,10 +127,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
-	if r.Method == http.MethodDelete && r.URL.Path == "/_aws/dynamodb/expired" {
-		s.expireDynamoDBItems(ctx, w, r, id, rid, start)
-		return
-	}
 	if identity.Expired(id) {
 		if svc != nil && svc.ID == "aws.s3" {
 			fields := map[string]any{"ServerTime": s.deps.Clock.Now().UTC().Format(time.RFC3339)}
@@ -177,7 +142,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Request has expired", http.StatusForbidden)
 		return
 	}
-	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures && r.Method != http.MethodOptions {
+	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures {
 		secret := "test"
 		if id.AccessKeyID != "test" {
 			secret = s.deps.Rand.Derive(id.AccessKeyID).Hex(40)
@@ -198,7 +163,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fault = identity.S3AuthorizationTimeFault(r, s.deps.Clock.Now())
 		}
 		if fault == nil {
-			fault = identity.VerifyS3StreamingSignature(r, id.AccessKeyID, secret, awsChunks, awsChunkSignatures, awsTrailers)
+			fault = identity.VerifyS3StreamingV4(r, secret, awsChunks, awsChunkSignatures, awsTrailers)
 		}
 		if fault != nil {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
@@ -207,17 +172,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if awsChunkedDecoded {
 		r.ContentLength = awsDecodedLength
-		var encodings []string
-		for _, encoding := range strings.Split(r.Header.Get("Content-Encoding"), ",") {
-			if encoding = strings.TrimSpace(encoding); encoding != "" && !strings.EqualFold(encoding, "aws-chunked") {
-				encodings = append(encodings, encoding)
-			}
-		}
-		if len(encodings) == 0 {
-			r.Header.Del("Content-Encoding")
-		} else {
-			r.Header.Set("Content-Encoding", strings.Join(encodings, ","))
-		}
 		for name, values := range awsTrailers {
 			if strings.EqualFold(name, "X-Amz-Trailer-Signature") {
 				continue
@@ -243,9 +197,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			codec = s.codecs[model.ProtoAWSJSON10]
 		} else {
 			codec = s.codecs[model.ProtoAWSQuery]
-			if strings.Contains(strings.ToLower(r.Header.Get("Accept")), "application/json") {
-				codec = awsquery.NewJSON()
-			}
 		}
 	}
 
@@ -262,7 +213,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req.Identity = id
 	req.HTTP = r
 	req.S3ValidateSignatures = svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures
-	req.AdvertiseURL = s.advertise
 
 	if !s.serviceEnabled(svc.ID) {
 		s.fault(w, codec, svc, op, spi.NotImplemented(svc.ID, op.Name, "emulate"), rid)
@@ -281,7 +231,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.deps.Authorizer != nil && svc.ID != "aws.sts" && svc.ID != "aws.iam" && r.Method != http.MethodOptions {
+	if s.deps.Authorizer != nil && svc.ID != "aws.sts" && svc.ID != "aws.iam" {
 		for _, check := range authorizationChecks(req) {
 			var authErr error
 			if authorizer, ok := s.deps.Authorizer.(spi.RequestAuthorizer); ok {
@@ -329,28 +279,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp.Headers.Set("x-mirror-fidelity", string(tier))
 	resp.Headers.Set("x-mirror-request-id", rid)
 	_ = codec.Encode(svc, op, w, resp)
-}
-
-func (s *Server) expireDynamoDBItems(ctx context.Context, w http.ResponseWriter, r *http.Request, id spi.Identity, requestID string, start time.Time) {
-	const serviceID = "aws.dynamodb"
-	pack, ok := s.reg.Resolve(serviceID)
-	if !ok || pack == nil || !s.serviceEnabled(serviceID) {
-		http.Error(w, "MirrorNotImplemented: aws.dynamodb", http.StatusNotImplemented)
-		return
-	}
-	response, err := pack.Invoke(ctx, &spi.Request{Identity: id, ServiceID: serviceID, Operation: "ExpireItems", HTTP: r})
-	status, errorCode := http.StatusOK, ""
-	if err != nil {
-		status, errorCode = http.StatusInternalServerError, "InternalError"
-	}
-	s.deps.Journal.Record(spi.Entry{At: start, RequestID: requestID, ServiceID: serviceID, Operation: "ExpireItems", Tier: pack.Tier(), Account: id.Account, Region: id.Region, Status: status, ErrorCode: errorCode, Duration: s.deps.Clock.Since(start)})
-	if err != nil {
-		http.Error(w, err.Error(), status)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("x-mirror-fidelity", string(pack.Tier()))
-	_ = json.NewEncoder(w).Encode(response.Output)
 }
 
 func signedGatewayHost(host, bind string) string {
@@ -421,6 +349,23 @@ func (s *Server) fault(w http.ResponseWriter, codec proto.Codec, svc *model.Serv
 }
 
 func (s *Server) demux(r *http.Request) *model.Service {
+	// Parsing the form is a side effect the packs depend on: S3's
+	// SelectObjectContent and Route 53's health-check writes read `r.Form`,
+	// which only exists because the demux populated it on the way past. It
+	// happens before any answer is chosen so that no route can skip it.
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	chunked := strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "aws-chunked") || r.Header.Get("X-Amz-Decoded-Content-Length") != ""
+	// Path-style S3 PUTs (incl. curl --data-binary, which defaults to form Content-Type)
+	// must not ParseForm — that consumes the object body.
+	s3PUT := r.Method == http.MethodPut && r.Header.Get("X-Amz-Target") == ""
+	gcsBody := strings.Contains(r.URL.Path, "/storage/") || strings.Contains(r.URL.Path, "/upload/")
+	if !s3PUT && !gcsBody && !chunked && strings.Contains(ct, "application/x-www-form-urlencoded") {
+		_ = r.ParseForm()
+	}
+	action := r.URL.Query().Get("Action")
+	if action == "" && r.Form != nil {
+		action = r.Form.Get("Action")
+	}
 	host := r.Host
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
@@ -447,424 +392,13 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			}
 		}
 	}
-	ct := strings.ToLower(r.Header.Get("Content-Type"))
-	chunked := strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "aws-chunked") || r.Header.Get("X-Amz-Decoded-Content-Length") != ""
-	// Path-style S3 PUTs (incl. curl --data-binary, which defaults to form Content-Type)
-	// must not ParseForm — that consumes the object body.
-	s3PUT := r.Method == http.MethodPut && r.Header.Get("X-Amz-Target") == ""
-	gcsBody := strings.Contains(r.URL.Path, "/storage/") || strings.Contains(r.URL.Path, "/upload/")
-	if !s3PUT && !gcsBody && !chunked && strings.Contains(ct, "application/x-www-form-urlencoded") {
-		_ = r.ParseForm()
-	}
-	action := r.URL.Query().Get("Action")
-	if action == "" && r.Form != nil {
-		action = r.Form.Get("Action")
-	}
-	if action != "" {
-		if sqsQueuePath(r.URL.Path) || sqsQueueDomainHost(host) {
-			return s.bundle.ServiceByID("aws.sqs")
-		}
-		if action == "ConfirmSubscription" || action == "Unsubscribe" {
-			arn := r.URL.Query().Get("TopicArn")
-			if action == "Unsubscribe" {
-				arn = r.URL.Query().Get("SubscriptionArn")
-			}
-			parts := strings.Split(arn, ":")
-			if len(parts) >= 6 && parts[0] == "arn" && parts[2] == "sns" {
-				return s.bundle.ServiceByID("aws.sns")
-			}
-		}
-		if s.looksLike(r, "s3-control") || s.looksLike(r, "s3control") {
-			return s.bundle.ServiceByID("aws.s3control")
-		}
-		if s.looksLike(r, "s3tables") {
-			return s.bundle.ServiceByID("aws.s3tables")
-		}
-		if s.looksLike(r, "s3") {
-			return s.bundle.ServiceByID("aws.s3")
-		}
-		// STS/SNS/IAM/SQS query
-		if s.looksLike(r, "sts") {
-			return s.bundle.ServiceByID("aws.sts")
-		}
-		if s.looksLike(r, "sns") {
-			return s.bundle.ServiceByID("aws.sns")
-		}
-		if s.looksLike(r, "iam") {
-			return s.bundle.ServiceByID("aws.iam")
-		}
-		if s.looksLike(r, "sqs") {
-			return s.bundle.ServiceByID("aws.sqs")
-		}
-		if s.looksLike(r, "cloudformation") {
-			return s.bundle.ServiceByID("aws.cloudformation")
-		}
-		if s.looksLike(r, "monitoring") {
-			return s.bundle.ServiceByID("aws.monitoring")
-		}
-		if s.looksLike(r, "rds") {
-			return s.bundle.ServiceByID("aws.rds")
-		}
-		if s.looksLike(r, "docdb") {
-			return s.bundle.ServiceByID("aws.docdb")
-		}
-		if s.looksLike(r, "neptune") {
-			return s.bundle.ServiceByID("aws.neptune")
-		}
-		if s.looksLike(r, "elasticloadbalancing") {
-			return s.bundle.ServiceByID("aws.elasticloadbalancing")
-		}
-		if s.looksLike(r, "elasticache") {
-			return s.bundle.ServiceByID("aws.elasticache")
-		}
-		if s.looksLike(r, "autoscaling") {
-			return s.bundle.ServiceByID("aws.autoscaling")
-		}
-		if s.looksLike(r, "redshift") {
-			return s.bundle.ServiceByID("aws.redshift")
-		}
-		if s.looksLike(r, "lambda") {
-			return s.bundle.ServiceByID("aws.lambda")
-		}
-		if s.looksLike(r, "apigateway") {
-			return s.bundle.ServiceByID("aws.apigateway")
-		}
-		if s.looksLike(r, "route53resolver") {
-			return s.bundle.ServiceByID("aws.route53resolver")
-		}
-		if s.looksLike(r, "route53") {
-			return s.bundle.ServiceByID("aws.route53")
-		}
-		if s.looksLike(r, "ec2") {
-			return s.bundle.ServiceByID("aws.ec2")
-		}
-		if s.looksLike(r, "ses") || s.looksLike(r, "email") {
-			return s.bundle.ServiceByID("aws.ses")
-		}
-		if s.looksLike(r, "cognito-idp") {
-			return s.bundle.ServiceByID("aws.cognito-idp")
-		}
-		if s.looksLike(r, "cloudfront") {
-			return s.bundle.ServiceByID("aws.cloudfront")
-		}
-		if s.looksLike(r, "elasticsearch") {
-			return s.bundle.ServiceByID("aws.elasticsearch")
-		}
-		if s.looksLike(r, "es") || s.looksLike(r, "opensearch") {
-			return s.bundle.ServiceByID("aws.es")
-		}
-		if s.looksLike(r, "glue") {
-			return s.bundle.ServiceByID("aws.glue")
-		}
-		if s.looksLike(r, "athena") {
-			return s.bundle.ServiceByID("aws.athena")
-		}
-		if s.looksLike(r, "cloudtrail") {
-			return s.bundle.ServiceByID("aws.cloudtrail")
-		}
-		if s.looksLike(r, "organizations") {
-			return s.bundle.ServiceByID("aws.organizations")
-		}
-		if s.looksLike(r, "config") {
-			return s.bundle.ServiceByID("aws.config")
-		}
-		if s.looksLike(r, "xray") {
-			return s.bundle.ServiceByID("aws.xray")
-		}
-		if s.looksLike(r, "guardduty") {
-			return s.bundle.ServiceByID("aws.guardduty")
-		}
-		if s.looksLike(r, "mq") {
-			return s.bundle.ServiceByID("aws.mq")
-		}
-		if s.looksLike(r, "iotwireless") {
-			return s.bundle.ServiceByID("aws.iotwireless")
-		}
-		if s.looksLike(r, "iotdata") || s.looksLike(r, "iot-data") || s.looksLike(r, "data.iot") {
-			return s.bundle.ServiceByID("aws.iot-data")
-		}
-		if s.looksLike(r, "iot") {
-			return s.bundle.ServiceByID("aws.iot")
-		}
-		if s.looksLike(r, "pipes") {
-			return s.bundle.ServiceByID("aws.pipes")
-		}
-		if s.looksLike(r, "codepipeline") {
-			return s.bundle.ServiceByID("aws.codepipeline")
-		}
-		if s.looksLike(r, "appsync") {
-			return s.bundle.ServiceByID("aws.appsync")
-		}
-		if s.looksLike(r, "apigatewayv2") {
-			return s.bundle.ServiceByID("aws.apigatewayv2")
-		}
-		if s.looksLike(r, "codecommit") {
-			return s.bundle.ServiceByID("aws.codecommit")
-		}
-		if s.looksLike(r, "codedeploy") {
-			return s.bundle.ServiceByID("aws.codedeploy")
-		}
-		if s.looksLike(r, "amplify") {
-			return s.bundle.ServiceByID("aws.amplify")
-		}
-		if s.looksLike(r, "inspector") {
-			return s.bundle.ServiceByID("aws.inspector")
-		}
-		if s.looksLike(r, "securityhub") {
-			return s.bundle.ServiceByID("aws.securityhub")
-		}
-		if s.looksLike(r, "timestream") {
-			return s.bundle.ServiceByID("aws.timestream")
-		}
-		if s.looksLike(r, "qldb") {
-			return s.bundle.ServiceByID("aws.qldb")
-		}
-		if s.looksLike(r, "dms") {
-			return s.bundle.ServiceByID("aws.dms")
-		}
-		if s.looksLike(r, "mediaconvert") {
-			return s.bundle.ServiceByID("aws.mediaconvert")
-		}
-		if s.looksLike(r, "elasticbeanstalk") {
-			return s.bundle.ServiceByID("aws.elasticbeanstalk")
-		}
-		if s.looksLike(r, "swf") {
-			return s.bundle.ServiceByID("aws.swf")
-		}
-		if s.looksLike(r, "elasticfilesystem") || s.looksLike(r, "efs") {
-			return s.bundle.ServiceByID("aws.elasticfilesystem")
-		}
-		if s.looksLike(r, "glacier") {
-			return s.bundle.ServiceByID("aws.glacier")
-		}
-		if s.looksLike(r, "servicediscovery") {
-			return s.bundle.ServiceByID("aws.servicediscovery")
-		}
-		if s.looksLike(r, "ram") {
-			return s.bundle.ServiceByID("aws.ram")
-		}
-		if s.looksLike(r, "sagemaker") {
-			return s.bundle.ServiceByID("aws.sagemaker")
-		}
-		if s.looksLike(r, "workspaces") {
-			return s.bundle.ServiceByID("aws.workspaces")
-		}
-		if s.looksLike(r, "transcribe") {
-			return s.bundle.ServiceByID("aws.transcribe")
-		}
-		if s.looksLike(r, "rekognition") {
-			return s.bundle.ServiceByID("aws.rekognition")
-		}
-		if s.looksLike(r, "comprehendmedical") {
-			return s.bundle.ServiceByID("aws.comprehendmedical")
-		}
-		if s.looksLike(r, "comprehend") {
-			return s.bundle.ServiceByID("aws.comprehend")
-		}
-		if s.looksLike(r, "mediastore") {
-			return s.bundle.ServiceByID("aws.mediastore")
-		}
-		if s.looksLike(r, "kinesisanalyticsv2") {
-			return s.bundle.ServiceByID("aws.kinesisanalyticsv2")
-		}
-		if s.looksLike(r, "kinesisanalytics") {
-			return s.bundle.ServiceByID("aws.kinesisanalytics")
-		}
-		if s.looksLike(r, "translate") {
-			return s.bundle.ServiceByID("aws.translate")
-		}
-		if s.looksLike(r, "textract") {
-			return s.bundle.ServiceByID("aws.textract")
-		}
-		if s.looksLike(r, "polly") {
-			return s.bundle.ServiceByID("aws.polly")
-		}
-		if s.looksLike(r, "fsx") {
-			return s.bundle.ServiceByID("aws.fsx")
-		}
-		if s.looksLike(r, "servicecatalog") {
-			return s.bundle.ServiceByID("aws.servicecatalog")
-		}
-		if s.looksLike(r, "shield") {
-			return s.bundle.ServiceByID("aws.shield")
-		}
-		if s.looksLike(r, "wafv2") {
-			return s.bundle.ServiceByID("aws.wafv2")
-		}
-		if s.looksLike(r, "waf") {
-			return s.bundle.ServiceByID("aws.waf")
-		}
-		if s.looksLike(r, "storagegateway") {
-			return s.bundle.ServiceByID("aws.storagegateway")
-		}
-		if s.looksLike(r, "lakeformation") {
-			return s.bundle.ServiceByID("aws.lakeformation")
-		}
-		if s.looksLike(r, "connect") {
-			return s.bundle.ServiceByID("aws.connect")
-		}
-		if s.looksLike(r, "pinpoint") || s.looksLike(r, "mobiletargeting") {
-			return s.bundle.ServiceByID("aws.pinpoint")
-		}
-		if s.looksLike(r, "dax") {
-			return s.bundle.ServiceByID("aws.dax")
-		}
-		if s.looksLike(r, "memorydb") {
-			return s.bundle.ServiceByID("aws.memorydb")
-		}
-		if s.looksLike(r, "keyspaces") || s.looksLike(r, "cassandra") {
-			return s.bundle.ServiceByID("aws.keyspaces")
-		}
-		if s.looksLike(r, "mwaa") || s.looksLike(r, "airflow") {
-			return s.bundle.ServiceByID("aws.mwaa")
-		}
-		if s.looksLike(r, "sso-admin") || s.looksLike(r, "ssoadmin") || s.looksLike(r, "sso") {
-			return s.bundle.ServiceByID("aws.sso-admin")
-		}
-		if s.looksLike(r, "acm-pca") || s.looksLike(r, "acmpca") {
-			return s.bundle.ServiceByID("aws.acm-pca")
-		}
-		if s.looksLike(r, "lightsail") {
-			return s.bundle.ServiceByID("aws.lightsail")
-		}
-		if s.looksLike(r, "location") || s.looksLike(r, "geo") {
-			return s.bundle.ServiceByID("aws.location")
-		}
-		if s.looksLike(r, "kendra") {
-			return s.bundle.ServiceByID("aws.kendra")
-		}
-		if s.looksLike(r, "quicksight") {
-			return s.bundle.ServiceByID("aws.quicksight")
-		}
-		if s.looksLike(r, "identitystore") {
-			return s.bundle.ServiceByID("aws.identitystore")
-		}
-		if s.looksLike(r, "workmail") {
-			return s.bundle.ServiceByID("aws.workmail")
-		}
-		if s.looksLike(r, "directconnect") {
-			return s.bundle.ServiceByID("aws.directconnect")
-		}
-		if s.looksLike(r, "directoryservice") {
-			return s.bundle.ServiceByID("aws.ds")
-		}
-		if s.looksLike(r, "gamelift") {
-			return s.bundle.ServiceByID("aws.gamelift")
-		}
-		if s.looksLike(r, "forecast") {
-			return s.bundle.ServiceByID("aws.forecast")
-		}
-		if s.looksLike(r, "personalize") {
-			return s.bundle.ServiceByID("aws.personalize")
-		}
-		if s.looksLike(r, "lex-models") || s.looksLike(r, "lex") {
-			return s.bundle.ServiceByID("aws.lex-models")
-		}
-		if s.looksLike(r, "medialive") {
-			return s.bundle.ServiceByID("aws.medialive")
-		}
-		if s.looksLike(r, "mediapackage") {
-			return s.bundle.ServiceByID("aws.mediapackage")
-		}
-		if s.looksLike(r, "mediaconnect") {
-			return s.bundle.ServiceByID("aws.mediaconnect")
-		}
-		if s.looksLike(r, "elastictranscoder") {
-			return s.bundle.ServiceByID("aws.elastictranscoder")
-		}
-		if s.looksLike(r, "cloudhsmv2") || s.looksLike(r, "cloudhsm") {
-			return s.bundle.ServiceByID("aws.cloudhsmv2")
-		}
-		if s.looksLike(r, "macie2") || s.looksLike(r, "macie") {
-			return s.bundle.ServiceByID("aws.macie2")
-		}
-		if s.looksLike(r, "access-analyzer") || s.looksLike(r, "accessanalyzer") {
-			return s.bundle.ServiceByID("aws.access-analyzer")
-		}
-		if s.looksLike(r, "frauddetector") {
-			return s.bundle.ServiceByID("aws.frauddetector")
-		}
-		if s.looksLike(r, "appmesh") {
-			return s.bundle.ServiceByID("aws.appmesh")
-		}
-		if s.looksLike(r, "healthlake") {
-			return s.bundle.ServiceByID("aws.healthlake")
-		}
-		if s.looksLike(r, "lookoutmetrics") {
-			return s.bundle.ServiceByID("aws.lookoutmetrics")
-		}
-		if s.looksLike(r, "bedrock") {
-			return s.bundle.ServiceByID("aws.bedrock")
-		}
-		if s.looksLike(r, "fis") {
-			return s.bundle.ServiceByID("aws.fis")
-		}
-		if strings.Contains(strings.ToLower(r.Host), "ce.") || strings.Contains(strings.ToLower(r.Header.Get("Authorization")), "/ce/") {
-			return s.bundle.ServiceByID("aws.ce")
-		}
-		if s.looksLike(r, "resource-groups") || s.looksLike(r, "resourcegroups") {
-			return s.bundle.ServiceByID("aws.resource-groups")
-		}
-		if s.looksLike(r, "verifiedpermissions") {
-			return s.bundle.ServiceByID("aws.verifiedpermissions")
-		}
-		if s.looksLike(r, "support") {
-			return s.bundle.ServiceByID("aws.support")
-		}
-		if s.looksLike(r, "codeartifact") {
-			return s.bundle.ServiceByID("aws.codeartifact")
-		}
-		if s.looksLike(r, "cloudcontrol") || s.looksLike(r, "cloudcontrolapi") {
-			return s.bundle.ServiceByID("aws.cloudcontrol")
-		}
-		if s.looksLike(r, "serverlessrepo") {
-			return s.bundle.ServiceByID("aws.serverlessrepo")
-		}
-		if s.looksLike(r, "account") {
-			return s.bundle.ServiceByID("aws.account")
-		}
-		if s.looksLike(r, "iotwireless") {
-			return s.bundle.ServiceByID("aws.iotwireless")
-		}
-		if s.looksLike(r, "s3tables") {
-			return s.bundle.ServiceByID("aws.s3tables")
-		}
-		if s.looksLike(r, "synthetics") {
-			return s.bundle.ServiceByID("aws.synthetics")
-		}
-		if s.looksLike(r, "apprunner") {
-			return s.bundle.ServiceByID("aws.apprunner")
-		}
-		if s.looksLike(r, "proton") {
-			return s.bundle.ServiceByID("aws.proton")
-		}
-		if s.looksLike(r, "resiliencehub") {
-			return s.bundle.ServiceByID("aws.resiliencehub")
-		}
-		if s.looksLike(r, "resource-explorer-2") || s.looksLike(r, "resource-explorer") {
-			return s.bundle.ServiceByID("aws.resource-explorer-2")
-		}
-		if s.looksLike(r, "rum") {
-			return s.bundle.ServiceByID("aws.rum")
-		}
-		if s.looksLike(r, "schemas") {
-			return s.bundle.ServiceByID("aws.schemas")
-		}
-		if s.looksLike(r, "dsql") {
-			return s.bundle.ServiceByID("aws.dsql")
-		}
-		if s.looksLike(r, "codeconnections") {
-			return s.bundle.ServiceByID("aws.codeconnections")
-		}
-		if s.looksLike(r, "iotdata") || s.looksLike(r, "iot-data") || s.looksLike(r, "data.iot") {
-			return s.bundle.ServiceByID("aws.iot-data")
-		}
-		if s.looksLike(r, "managedblockchain") {
-			return s.bundle.ServiceByID("aws.managedblockchain")
-		}
-		if s.looksLike(r, "kinesisanalyticsv2") {
-			return s.bundle.ServiceByID("aws.kinesisanalyticsv2")
-		}
+	// The host and the credential scope say which service this is for, and
+	// the model already knows both, so this answers for every service in the
+	// bundle. What it replaced was a chain of about a hundred and thirty
+	// hand-written substring guesses, every one of them inside `if action !=
+	// ""` -- a condition only a query-protocol request satisfies.
+	if svc := s.resolveByModel(r); svc != nil {
+		return svc
 	}
 	path := r.URL.Path
 	if strings.Contains(path, "/storage/v1") || strings.Contains(path, "/upload/storage") {
@@ -888,41 +422,11 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	if strings.Contains(path, "/_doc") || strings.Contains(path, "/_search") || strings.Contains(path, "/_aws/opensearch") || strings.Contains(path, "/2021-01-01/opensearch") {
 		return s.bundle.ServiceByID("aws.es")
 	}
-	if action == "" && r.Method == http.MethodGet && sqsQueuePath(r.URL.Path) {
-		return s.bundle.ServiceByID("aws.sqs")
-	}
 	// default S3 path-style
 	if r.Header.Get("X-Amz-Target") == "" && action == "" {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
-}
-
-func sqsQueuePath(path string) bool {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	account := ""
-	name := ""
-	switch {
-	case len(parts) == 2:
-		account, name = parts[0], parts[1]
-	case len(parts) == 4 && parts[0] == "queue":
-		account, name = parts[2], parts[3]
-	default:
-		return false
-	}
-	if len(account) != 12 || name == "" {
-		return false
-	}
-	for _, r := range account {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func sqsQueueDomainHost(host string) bool {
-	return strings.HasPrefix(host, "queue.") || strings.Contains(host, ".queue.")
 }
 
 func (s *Server) looksLike(r *http.Request, prefix string) bool {

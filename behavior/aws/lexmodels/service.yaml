@@ -1,0 +1,123 @@
+schema: bir/1
+service: aws.lex-models
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Lex Model Building here is a record store: a bot is accepted and
+# immediately READY, no NLU model is built, and nothing can be spoken to.
+provenance: authored
+
+resources:
+  # A bot is addressed by name alone, so $LATEST and every published version
+  # are one record -- see the quirk.
+  bot:
+    collection: lexbot
+    id:
+      input_members: [name]
+    record:
+      name: id
+      status: "'READY'"
+      locale: "'locale' in input ? string(input.locale) : ''"
+      # The checksum is the optimistic-concurrency token a caller echoes back
+      # on the next PutBot. Nothing checks it here, so a fresh one is drawn on
+      # every write and a stale one is accepted.
+      checksum: { generate: { kind: hex, bytes: 8 } }
+
+  intent:
+    collection: lexint
+    id:
+      input_members: [name]
+    record:
+      name: id
+      checksum: { generate: { kind: hex, bytes: 8 } }
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  PutBot:
+    effects:
+      - put: { resource: bot }
+    output:
+      name: rec.name
+      status: rec.status
+      locale: rec.locale
+      checksum: rec.checksum
+
+  GetBot:
+    reads:
+      bot: { resource: bot }
+    require:
+      - { cond: bot_found, error: NotFound }
+    output:
+      name: bot.name
+      status: bot.status
+      locale: bot.locale
+      checksum: bot.checksum
+
+  # The stored record carries locale and checksum, which BotMetadata does not
+  # declare, so the listed item is projected down to what the shape carries.
+  GetBots:
+    list: { resource: bot, member: bots, paginate: model }
+    output:
+      bots: "items.map(b, {'name': b.name, 'status': b.status})"
+
+  DeleteBot:
+    effects:
+      - delete: { resource: bot, missing: ignore }
+
+  PutIntent:
+    effects:
+      - put: { resource: intent }
+    output:
+      name: rec.name
+      checksum: rec.checksum
+
+  GetIntent:
+    reads:
+      intent: { resource: intent }
+    require:
+      - { cond: intent_found, error: NotFound }
+    output:
+      name: intent.name
+      checksum: intent.checksum
+
+  DeleteIntent:
+    effects:
+      - delete: { resource: intent, missing: ignore }
+
+quirks:
+  - operation: GetBot
+    note: >
+      A bot is keyed by name alone and GetBot's versionOrAlias is ignored, so
+      $LATEST, a published version and an alias all answer with the same
+      record. The real service versions a bot on PutBot with createVersion and
+      GetBot with a numbered version answers the snapshot, which this cannot
+      do at all. GetIntent ignores its version for the same reason.
+      Transcribed from the pack; a probe should record a published version.
+  - operation: PutBot
+    note: >
+      status is READY the instant PutBot returns. The real service builds the
+      bot asynchronously: BUILDING first, then READY or FAILED with a
+      failureReason, and processBehavior SAVE leaves it NOT_BUILT. A caller
+      that polls GetBot until status leaves BUILDING never sees BUILDING here.
+  - operation: PutBot
+    note: >
+      The checksum is redrawn on every write and never verified, so the
+      optimistic concurrency it exists for does not happen: the real service
+      answers PreconditionFailedException when a PutBot for an existing bot
+      carries a stale checksum or none at all.
+  - operation: GetBots
+    note: >
+      A listed bot carries only name and status. The pack answered the whole
+      stored record, including locale and a checksum, and BotMetadata declares
+      neither -- so an SDK could not read them and they are dropped here. What
+      BotMetadata does declare and this does not store is createdDate,
+      lastUpdatedDate, description and version.
+  - operation: DeleteBot
+    note: >
+      Deleting a bot leaves its intents, and deleting an intent a bot
+      references is accepted. The real service answers
+      ResourceInUseException with the referencing resource named.

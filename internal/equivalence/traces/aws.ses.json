@@ -1,0 +1,246 @@
+{
+  "schema": "trace/1",
+  "service": "aws.ses",
+  "source": "pack:internal/services/aws/ses@6f6068e",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListIdentities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Identities": null
+      }
+    },
+    {
+      "operation": "GetIdentityVerificationAttributes",
+      "input": {
+        "Identities": [
+          "absent@example.com"
+        ],
+        "Identities.member.1": "absent@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "VerificationAttributes": {}
+      }
+    },
+    {
+      "operation": "VerifyEmailIdentity",
+      "input": {
+        "EmailAddress": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListIdentities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Identities": [
+          "a@example.com"
+        ]
+      }
+    },
+    {
+      "operation": "GetIdentityVerificationAttributes",
+      "input": {
+        "Identities": [
+          "a@example.com"
+        ],
+        "Identities.member.1": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "VerificationAttributes": {
+          "a@example.com": {
+            "EmailAddress": "a@example.com",
+            "VerificationStatus": "Success"
+          }
+        }
+      },
+      "superseded": "The pack answers each identity with a record carrying EmailAddress beside VerificationStatus. The model declares IdentityVerificationAttributes as VerificationStatus and VerificationToken only, so EmailAddress is a member no SDK can read. The output shape is declared and outranks the pack's authored behavior, so the bundle omits it and this step's success is compared without its body."
+    },
+    {
+      "operation": "VerifyEmailIdentity",
+      "input": {
+        "EmailAddress": "b@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListIdentities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Identities": [
+          "a@example.com",
+          "b@example.com"
+        ]
+      }
+    },
+    {
+      "operation": "SendEmail",
+      "input": {
+        "Destination": {
+          "ToAddresses": [
+            "to@example.com"
+          ]
+        },
+        "Message": {
+          "Body": {
+            "Text": {
+              "Data": "body"
+            }
+          },
+          "Subject": {
+            "Data": "hello"
+          }
+        },
+        "Source": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MessageId": "0000-7c589129"
+      }
+    },
+    {
+      "operation": "SendRawEmail",
+      "input": {
+        "RawMessage": {
+          "Data": "RnJvbTogYUBleGFtcGxlLmNvbQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MessageId": "0000-5f59f223"
+      }
+    },
+    {
+      "operation": "GetSendQuota",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Max24HourSend": 200,
+        "MaxSendRate": 1,
+        "SentLast24Hours": 0
+      }
+    },
+    {
+      "operation": "GetSendStatistics",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SendDataPoints": []
+      }
+    },
+    {
+      "operation": "DeleteIdentity",
+      "input": {
+        "Identity": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListIdentities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Identities": [
+          "b@example.com"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteIdentity",
+      "input": {
+        "Identity": "absent@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

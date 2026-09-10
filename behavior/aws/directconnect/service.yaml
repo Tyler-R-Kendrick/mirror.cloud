@@ -1,0 +1,100 @@
+schema: bir/1
+service: aws.directconnect
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No circuit is provisioned: a connection and a link aggregation
+# group are records that are available the moment they are created.
+provenance: authored
+
+resources:
+  connection:
+    collection: dxcon
+    # The identifier the service issues carries a dxcon- prefix, so the record
+    # member rather than the raw generated id is the store key.
+    key: connectionId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      connectionId: "'dxcon-' + id"
+      connectionName: "'connectionName' in input ? string(input.connectionName) : ''"
+      bandwidth: "'bandwidth' in input ? string(input.bandwidth) : ''"
+      location: "'location' in input ? string(input.location) : ''"
+      connectionState: "'available'"
+
+  lag:
+    collection: dxlag
+    key: lagId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      lagId: "'dxlag-' + id"
+      lagName: "'lagName' in input ? string(input.lagName) : ''"
+      lagState: "'available'"
+      connectionsBandwidth: "'connectionsBandwidth' in input ? string(input.connectionsBandwidth) : ''"
+
+operations:
+  CreateConnection:
+    effects:
+      - create: { resource: connection }
+    output:
+      connectionId: rec.connectionId
+      connectionName: rec.connectionName
+      bandwidth: rec.bandwidth
+      location: rec.location
+      connectionState: rec.connectionState
+
+  # Describe-one-or-describe-all: a connectionId narrows to that connection,
+  # and an absent one answers with an empty list rather than a fault.
+  DescribeConnections:
+    list:
+      resource: connection
+      member: connections
+      paginate: model
+      key: "'connectionId' in input ? string(input.connectionId) : ''"
+
+  DeleteConnection:
+    effects:
+      - delete: { resource: connection, key: "string(input.connectionId)", missing: ignore }
+    output: {}
+
+  CreateLag:
+    effects:
+      - create: { resource: lag }
+    output:
+      lagId: rec.lagId
+      lagName: rec.lagName
+      lagState: rec.lagState
+      connectionsBandwidth: rec.connectionsBandwidth
+
+  DescribeLags:
+    list:
+      resource: lag
+      member: lags
+      paginate: model
+      key: "'lagId' in input ? string(input.lagId) : ''"
+
+  DeleteLag:
+    effects:
+      - delete: { resource: lag, key: "string(input.lagId)", missing: ignore }
+    output: {}
+
+quirks:
+  - operation: DeleteConnection
+    note: >
+      Deleting answers with nothing where the model declares the deleted
+      connection's own members, and deleting an absent connection succeeds.
+      The real service answers with the connection in its deleting state and
+      faults on one that is not there.
+  - operation: CreateLag
+    note: >
+      numberOfConnections is required by the model and is neither read nor
+      stored, so a LAG has no connections, no minimumLinks and no
+      allowsHostedConnections -- all of which Lag declares -- and CreateLag
+      does not create the member connections the real service does. Nothing
+      associates a connection with a LAG either: lagId is never set on a
+      connection.
+  - operation: CreateConnection
+    note: >
+      A connection is available at once, so nothing observes requested,
+      pending or down, and no ownerAccount, region, vlan or awsDevice is set.
+      A probe settles what a freshly requested connection actually reports.

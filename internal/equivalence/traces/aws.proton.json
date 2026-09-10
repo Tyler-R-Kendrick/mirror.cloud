@@ -1,0 +1,259 @@
+{
+  "schema": "trace/1",
+  "service": "aws.proton",
+  "source": "pack:internal/services/aws/proton@4a3a0b9",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "environments": null
+      }
+    },
+    {
+      "operation": "GetEnvironment",
+      "input": {
+        "name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "name": "",
+        "spec": "spec-yaml",
+        "templateMajorVersion": "1",
+        "templateName": "tmpl"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "name": "prod",
+        "spec": "spec-yaml",
+        "templateMajorVersion": "1",
+        "templateName": "tmpl"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "environment": {
+          "arn": "arn:aws:proton:us-east-1:000000000000:environment/prod",
+          "deploymentStatus": "SUCCEEDED",
+          "name": "prod"
+        }
+      }
+    },
+    {
+      "operation": "GetEnvironment",
+      "input": {
+        "name": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "environment": {
+          "arn": "arn:aws:proton:us-east-1:000000000000:environment/prod",
+          "deploymentStatus": "SUCCEEDED",
+          "name": "prod"
+        }
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "name": "staging",
+        "spec": "spec-yaml",
+        "templateMajorVersion": "1",
+        "templateName": "tmpl"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "environment": {
+          "arn": "arn:aws:proton:us-east-1:000000000000:environment/staging",
+          "deploymentStatus": "SUCCEEDED",
+          "name": "staging"
+        }
+      }
+    },
+    {
+      "operation": "ListEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "environments": [
+          {
+            "arn": "arn:aws:proton:us-east-1:000000000000:environment/prod",
+            "deploymentStatus": "SUCCEEDED",
+            "name": "prod"
+          },
+          {
+            "arn": "arn:aws:proton:us-east-1:000000000000:environment/staging",
+            "deploymentStatus": "SUCCEEDED",
+            "name": "staging"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateService",
+      "input": {
+        "name": "api",
+        "spec": "spec-yaml",
+        "templateMajorVersion": "1",
+        "templateName": "tmpl"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "service": {
+          "arn": "arn:aws:proton:us-east-1:000000000000:service/api",
+          "name": "api",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "GetService",
+      "input": {
+        "name": "api"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "service": {
+          "arn": "arn:aws:proton:us-east-1:000000000000:service/api",
+          "name": "api",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "GetService",
+      "input": {
+        "name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteEnvironment",
+      "input": {
+        "name": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "environments": [
+          {
+            "arn": "arn:aws:proton:us-east-1:000000000000:environment/staging",
+            "deploymentStatus": "SUCCEEDED",
+            "name": "staging"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteEnvironment",
+      "input": {
+        "name": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

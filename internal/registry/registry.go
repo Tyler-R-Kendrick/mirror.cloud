@@ -5,6 +5,7 @@ package registry
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -70,6 +71,15 @@ func New(deps spi.Deps, enabled []string, tiers map[string]model.Tier) (Registry
 	for _, f := range Factories() {
 		if !want[f.ServiceID] {
 			continue
+		}
+		// Two factories for one ID means two descriptions of one service —
+		// during extraction, typically a hand-written pack that outlived its
+		// bundle. Silently keeping the last one would decide that by import
+		// order, so refuse instead.
+		if _, dup := r.enabled[f.ServiceID]; dup {
+			return nil, fmt.Errorf("registry: %s is registered twice; "+
+				"a service is served either by a pack or by its behavior bundle, not both",
+				f.ServiceID)
 		}
 		if t, ok := tiers[f.ServiceID]; ok && t != f.Tier && t != model.TierProxy {
 			// Factory still used; mock pack is attached separately by the edge.

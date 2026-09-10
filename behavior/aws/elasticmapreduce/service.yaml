@@ -1,0 +1,133 @@
+schema: bir/1
+service: aws.elasticmapreduce
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No cluster is provisioned and no step runs: a cluster is WAITING as
+# soon as RunJobFlow returns and a step is COMPLETED before its configuration
+# is read.
+provenance: authored
+
+resources:
+  # The record carries only its id, because a cluster's name is set where it
+  # is created and a terminate must not put it back to what the request it is
+  # part of does not carry.
+  cluster:
+    collection: emr
+    id:
+      input_members: [ClusterId, JobFlowId]
+    record:
+      Id: id
+
+  # Steps live in a collection named for their cluster, so two clusters may
+  # each have a step and they are different records.
+  step:
+    collection: "emrstep:{cluster.id}"
+    parent: cluster
+    id:
+      input_members: [StepId]
+    record:
+      Id: id
+
+errors:
+  InvalidRequest:
+    code: InvalidRequestException
+    http: 400
+    fault: client
+
+operations:
+  RunJobFlow:
+    effects:
+      - generate: { bind: cid, kind: hex, bytes: 8 }
+      - create:
+          resource: cluster
+          key: "'j-' + fx.cid"
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Status: "{'State': 'WAITING'}"
+    output:
+      JobFlowId: id
+
+  DescribeCluster:
+    reads:
+      c: { resource: cluster }
+    require:
+      - { cond: c_found, error: InvalidRequest }
+    output:
+      Cluster: c
+
+  ListClusters:
+    list: { resource: cluster, member: Clusters, paginate: model }
+
+  # One patch per id in the request, and an id that names nothing is skipped
+  # rather than conjuring a cluster with a status and no name.
+  TerminateJobFlows:
+    effects:
+      - patch:
+          resource: cluster
+          for_each: input.JobFlowIds
+          key: item
+          missing: ignore
+          record:
+            Status: "{'State': 'TERMINATED'}"
+
+  # Each of these reads its cluster first, not to check it exists -- this
+  # service never did -- but because the steps collection is named for it.
+  AddJobFlowSteps:
+    reads:
+      cluster: { resource: cluster }
+    effects:
+      - generate: { bind: sid, kind: hex, bytes: 8 }
+      - create:
+          resource: step
+          key: "'s-' + fx.sid"
+          record:
+            Status: "{'State': 'COMPLETED'}"
+    output:
+      StepIds: "[id]"
+
+  ListSteps:
+    reads:
+      cluster: { resource: cluster }
+    list: { resource: step, member: Steps, paginate: model }
+
+  DescribeStep:
+    reads:
+      cluster: { resource: cluster }
+      st: { resource: step }
+    require:
+      - { cond: st_found, error: InvalidRequest }
+    output:
+      Step: st
+
+  # Accepted and ignored: nothing is protected because nothing terminates on
+  # its own.
+  SetTerminationProtection: {}
+
+quirks:
+  - operation: RunJobFlow
+    note: >
+      A cluster is WAITING the instant RunJobFlow returns and never passes
+      through STARTING or BOOTSTRAPPING, so a caller that waits for the
+      cluster-running waiter is never made to wait. Instances, Applications,
+      ReleaseLabel, ServiceRole and the rest of the request are accepted and
+      discarded; the cluster answers no ClusterArn, no MasterPublicDnsName, no
+      Ec2InstanceAttributes and no timeline.
+  - operation: AddJobFlowSteps
+    note: >
+      A step is COMPLETED before its StepConfig is looked at, so nothing runs
+      and nothing can fail. AddJobFlowSteps takes a list of Steps and creates
+      exactly one step whatever the length of that list -- transcribed from
+      the pack, which drew one id and stored one record. The step answers no
+      Name, no Config and no ActionOnFailure, which the real service always
+      carries.
+  - operation: TerminateJobFlows
+    note: >
+      Terminating moves the status and leaves the cluster listed for ever;
+      the real service keeps a terminated cluster describable but stops
+      returning it from ListClusters once it ages out. A step in a terminated
+      cluster stays COMPLETED and is still listed.
+  - operation: SetTerminationProtection
+    note: >
+      Accepted and discarded. TerminationProtected is never stored, so
+      DescribeCluster does not answer it and TerminateJobFlows terminates a
+      protected cluster without complaint.

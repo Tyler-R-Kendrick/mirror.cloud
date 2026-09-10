@@ -1,0 +1,164 @@
+schema: bir/1
+service: aws.glacier
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is archived: an upload stores an identifier and discards
+# the body, and a retrieval job succeeds without retrieving anything.
+provenance: authored
+
+resources:
+  vault:
+    collection: glvault
+    id:
+      input_members: [vaultName]
+    arn: "arn:{partition}:glacier:{region}:{account}:vaults/{id}"
+    record:
+      VaultName: id
+      VaultARN: arn
+      NumberOfArchives: "0"
+      SizeInBytes: "0"
+
+  # The pack kept archives and jobs in store collections named per vault. The
+  # relationship is a member here and the listing filters on it, which is the
+  # same containment expressed as data rather than as a key prefix. No
+  # operation reads an archive back, so the record is write-only.
+  archive:
+    collection: glarch
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      ArchiveId: id
+      VaultName: "string(input.vaultName)"
+      Checksum: "'checksum' in input ? string(input.checksum) : ''"
+
+  job:
+    collection: gljob
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      JobId: id
+      VaultName: "string(input.vaultName)"
+      StatusCode: "'Succeeded'"
+      # The pack read the job's type from the top of the request, where the
+      # model puts it inside jobParameters, so the read always produced nothing
+      # and the action was always empty. Transcribed rather than corrected:
+      # reaching into jobParameters here would be a behavior change dressed up
+      # as a fix.
+      Action: "''"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateVault:
+    effects:
+      - put: { resource: vault }
+    output:
+      location: "'/vaults/' + string(input.vaultName)"
+
+  DescribeVault:
+    reads:
+      v: { resource: vault }
+    require:
+      - { cond: v_found, error: NotFound }
+    output:
+      VaultName: v.VaultName
+      VaultARN: v.VaultARN
+      NumberOfArchives: v.NumberOfArchives
+      SizeInBytes: v.SizeInBytes
+
+  ListVaults:
+    list: { resource: vault, member: VaultList, paginate: model }
+
+  DeleteVault:
+    effects:
+      - delete: { resource: vault, missing: ignore }
+
+  UploadArchive:
+    effects:
+      - create: { resource: archive }
+    output:
+      archiveId: rec.ArchiveId
+      location: "'/vaults/' + string(input.vaultName) + '/archives/' + id"
+
+  DeleteArchive:
+    effects:
+      - delete: { resource: archive, key: "string(input.archiveId)", missing: ignore }
+
+  InitiateJob:
+    effects:
+      - create: { resource: job }
+    output:
+      jobId: rec.JobId
+      location: "'/vaults/' + string(input.vaultName) + '/jobs/' + id"
+
+  # GlacierJobDescription declares no VaultName, so the answered form of a job
+  # is not the stored record.
+  DescribeJob:
+    reads:
+      j: { resource: job, key: "string(input.jobId)" }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      JobId: j.JobId
+      StatusCode: j.StatusCode
+      Action: j.Action
+
+  ListJobs:
+    list:
+      resource: job
+      member: JobList
+      filter: "string(item.VaultName) == string(input.vaultName)"
+    output:
+      JobList: >
+        items.map(j, {
+          'JobId': j.JobId,
+          'StatusCode': j.StatusCode,
+          'Action': j.Action
+        })
+
+quirks:
+  - operation: UploadArchive
+    note: >
+      The archive body is discarded: an upload stores an identifier, the vault
+      it named and the checksum it was given, and nothing verifies that
+      checksum against anything. No operation reads an archive back -- there is
+      no GetJobOutput here -- so an uploaded archive can only ever be deleted.
+      The vault it names is not checked to exist, so an archive can be uploaded
+      to a vault that was never created.
+  - operation: DescribeVault
+    note: >
+      NumberOfArchives and SizeInBytes are zero and stay zero however many
+      archives are uploaded, so a vault always describes as empty. CreationDate
+      and LastInventoryDate are declared and never set, and deleting a vault
+      leaves its archives and jobs behind -- where the real service refuses to
+      delete a vault that is not empty.
+  - operation: DescribeJob
+    note: >
+      A retrieval job is Succeeded the moment it is initiated and retrieves
+      nothing: there is no output to fetch, ArchiveId and the retrieval
+      parameters are dropped, and Completed, CompletionDate, VaultARN and
+      SHA256TreeHash are all declared and never set. A job's Action is always
+      empty, because the pack looked for the type at the top of the request
+      while the model puts it inside jobParameters -- so an inventory retrieval
+      and an archive retrieval are indistinguishable once initiated.
+      GlacierJobDescription
+      declares no VaultName while the record carries one -- the listing needs
+      it to keep one vault's jobs out of another's -- so it is projected away
+      and the recorded steps are superseded with that reason.
+  - operation: DeleteArchive
+    note: >
+      An archive is deleted by its id alone: the vault named in the request is
+      not consulted, so deleting through the wrong vault still removes it. The
+      job listing does filter by vault, which the archives cannot, because
+      nothing lists archives at all.
+  - operation: CreateVault
+    note: >
+      accountId is required on every operation and ignored -- the account
+      already scopes the store -- and the documented '-' shorthand for the
+      caller's own account therefore behaves the same as any other value.
+      Creating a vault that already exists overwrites it, resetting nothing
+      because a vault holds no counters that ever move.

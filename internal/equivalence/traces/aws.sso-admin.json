@@ -1,0 +1,457 @@
+{
+  "schema": "trace/1",
+  "service": "aws.sso-admin",
+  "source": "pack:internal/services/aws/ssoadmin@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListPermissionSets",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PermissionSets": null
+      }
+    },
+    {
+      "operation": "CreatePermissionSet",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "Name": "ReadOnly"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PermissionSet": {
+          "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+          "Name": "ReadOnly",
+          "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129"
+        }
+      },
+      "superseded": "PermissionSet declares no InstanceArn, and the pack stored it and answered with it. It stays in the record -- the pack stored it -- and is projected away on the way out. The declared shape outranks the pack's authored behavior."
+    },
+    {
+      "operation": "DescribePermissionSet",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PermissionSet": {
+          "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+          "Name": "ReadOnly",
+          "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129"
+        }
+      },
+      "superseded": "PermissionSet declares no InstanceArn, and the pack stored it and answered with it. It stays in the record -- the pack stored it -- and is projected away on the way out. The declared shape outranks the pack's authored behavior."
+    },
+    {
+      "operation": "DescribePermissionSet",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePermissionSet",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "Name": "Admin"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PermissionSet": {
+          "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+          "Name": "Admin",
+          "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-5f59f223"
+        }
+      },
+      "superseded": "PermissionSet declares no InstanceArn, and the pack stored it and answered with it. It stays in the record -- the pack stored it -- and is projected away on the way out. The declared shape outranks the pack's authored behavior."
+    },
+    {
+      "operation": "ListPermissionSets",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PermissionSets": [
+          "arn:aws:sso:::permissionSet/ssoins-local/ps-5f59f223",
+          "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129"
+        ]
+      }
+    },
+    {
+      "operation": "ListAccountAssignments",
+      "input": {
+        "AccountId": "111111111111",
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAssignments": null
+      }
+    },
+    {
+      "operation": "CreateAccountAssignment",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        },
+        "PrincipalId": "alice",
+        "PrincipalType": "USER",
+        "TargetId": "111111111111",
+        "TargetType": "AWS_ACCOUNT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAssignment": {
+          "AccountId": "111111111111",
+          "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+          "PrincipalId": "alice",
+          "PrincipalType": "USER"
+        }
+      },
+      "superseded": "CreateAccountAssignmentResponse declares an AccountAssignmentCreationStatus and nothing else, and the pack answered with the assignment it had just stored. The assignment is still made and the next listing sees it; only the answer is gone, because there is no creation status to report."
+    },
+    {
+      "operation": "CreateAccountAssignment",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        },
+        "PrincipalId": "alice",
+        "PrincipalType": "USER",
+        "TargetId": "222222222222",
+        "TargetType": "AWS_ACCOUNT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAssignment": {
+          "AccountId": "222222222222",
+          "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+          "PrincipalId": "alice",
+          "PrincipalType": "USER"
+        }
+      },
+      "superseded": "CreateAccountAssignmentResponse declares an AccountAssignmentCreationStatus and nothing else, and the pack answered with the assignment it had just stored. The assignment is still made and the next listing sees it; only the answer is gone, because there is no creation status to report."
+    },
+    {
+      "operation": "CreateAccountAssignment",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        },
+        "PrincipalId": "bob",
+        "PrincipalType": "USER",
+        "TargetId": "111111111111",
+        "TargetType": "AWS_ACCOUNT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAssignment": {
+          "AccountId": "111111111111",
+          "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+          "PrincipalId": "bob",
+          "PrincipalType": "USER"
+        }
+      },
+      "superseded": "CreateAccountAssignmentResponse declares an AccountAssignmentCreationStatus and nothing else, and the pack answered with the assignment it had just stored. The assignment is still made and the next listing sees it; only the answer is gone, because there is no creation status to report."
+    },
+    {
+      "operation": "ListAccountAssignments",
+      "input": {
+        "AccountId": "111111111111",
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAssignments": [
+          {
+            "AccountId": "222222222222",
+            "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+            "PrincipalId": "alice",
+            "PrincipalType": "USER"
+          },
+          {
+            "AccountId": "111111111111",
+            "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+            "PrincipalId": "bob",
+            "PrincipalType": "USER"
+          },
+          {
+            "AccountId": "111111111111",
+            "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+            "PrincipalId": "alice",
+            "PrincipalType": "USER"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAccountAssignment",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        },
+        "PrincipalId": "alice",
+        "PrincipalType": "USER",
+        "TargetId": "111111111111",
+        "TargetType": "AWS_ACCOUNT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccountAssignments",
+      "input": {
+        "AccountId": "111111111111",
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAssignments": [
+          {
+            "AccountId": "111111111111",
+            "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+            "PrincipalId": "bob",
+            "PrincipalType": "USER"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAccountAssignment",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        },
+        "PrincipalId": "nobody",
+        "PrincipalType": "USER",
+        "TargetId": "111111111111",
+        "TargetType": "AWS_ACCOUNT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccountAssignments",
+      "input": {
+        "AccountId": "111111111111",
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAssignments": [
+          {
+            "AccountId": "111111111111",
+            "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+            "PrincipalId": "bob",
+            "PrincipalType": "USER"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeletePermissionSet",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPermissionSets",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PermissionSets": [
+          "arn:aws:sso:::permissionSet/ssoins-local/ps-5f59f223"
+        ]
+      }
+    },
+    {
+      "operation": "ListAccountAssignments",
+      "input": {
+        "AccountId": "111111111111",
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": {
+          "$fromPath": "PermissionSet.PermissionSetArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAssignments": [
+          {
+            "AccountId": "111111111111",
+            "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-7c589129",
+            "PrincipalId": "bob",
+            "PrincipalType": "USER"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeletePermissionSet",
+      "input": {
+        "InstanceArn": "arn:aws:sso:::instance/ssoins-local",
+        "PermissionSetArn": "arn:aws:sso:::permissionSet/ssoins-local/ps-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

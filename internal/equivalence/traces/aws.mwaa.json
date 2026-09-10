@@ -1,0 +1,283 @@
+{
+  "schema": "trace/1",
+  "service": "aws.mwaa",
+  "source": "pack:internal/services/aws/mwaa@44547e0",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Environments": null
+      }
+    },
+    {
+      "operation": "GetEnvironment",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "AirflowVersion": "2.8.1",
+        "DagS3Path": "dags",
+        "ExecutionRoleArn": "arn:aws:iam::000000000000:role/mwaa",
+        "Name": "analytics",
+        "NetworkConfiguration": {
+          "SubnetIds": [
+            "subnet-1",
+            "subnet-2"
+          ]
+        },
+        "SourceBucketArn": "arn:aws:s3:::mwaa-bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:airflow:us-east-1:000000000000:environment/analytics"
+      }
+    },
+    {
+      "operation": "GetEnvironment",
+      "input": {
+        "Name": "analytics"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Environment": {
+          "AirflowVersion": "2.8.1",
+          "Arn": "arn:aws:airflow:us-east-1:000000000000:environment/analytics",
+          "Name": "analytics",
+          "Status": "AVAILABLE"
+        }
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "AirflowVersion": "2.9.2",
+        "DagS3Path": "dags",
+        "ExecutionRoleArn": "arn:aws:iam::000000000000:role/mwaa",
+        "Name": "reporting",
+        "NetworkConfiguration": {
+          "SubnetIds": [
+            "subnet-1",
+            "subnet-2"
+          ]
+        },
+        "SourceBucketArn": "arn:aws:s3:::mwaa-bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:airflow:us-east-1:000000000000:environment/reporting"
+      }
+    },
+    {
+      "operation": "ListEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Environments": [
+          "analytics",
+          "reporting"
+        ]
+      }
+    },
+    {
+      "operation": "UpdateEnvironment",
+      "input": {
+        "AirflowVersion": "2.10.1",
+        "Name": {
+          "$fromPath": "Environment.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:airflow:us-east-1:000000000000:environment/analytics"
+      }
+    },
+    {
+      "operation": "GetEnvironment",
+      "input": {
+        "Name": {
+          "$fromPath": "Environment.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Environment": {
+          "AirflowVersion": "2.10.1",
+          "Arn": "arn:aws:airflow:us-east-1:000000000000:environment/analytics",
+          "Name": "analytics",
+          "Status": "AVAILABLE"
+        }
+      }
+    },
+    {
+      "operation": "CreateCliToken",
+      "input": {
+        "Name": {
+          "$fromPath": "Environment.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CliToken": "7c5891299f6489f8",
+        "WebServerHostname": "analytics.airflow.local"
+      }
+    },
+    {
+      "operation": "CreateCliToken",
+      "input": {
+        "Name": {
+          "$fromPath": "Environment.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CliToken": "5f59f223d7974d14",
+        "WebServerHostname": "analytics.airflow.local"
+      }
+    },
+    {
+      "operation": "DeleteEnvironment",
+      "input": {
+        "Name": {
+          "$fromPath": "Environment.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetEnvironment",
+      "input": {
+        "Name": {
+          "$fromPath": "Environment.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteEnvironment",
+      "input": {
+        "Name": {
+          "$fromPath": "Environment.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Environments": [
+          "reporting"
+        ]
+      }
+    }
+  ]
+}

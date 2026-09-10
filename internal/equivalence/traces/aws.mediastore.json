@@ -1,0 +1,289 @@
+{
+  "schema": "trace/1",
+  "service": "aws.mediastore",
+  "source": "pack:internal/services/aws/mediastore@c2b6df2",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListContainers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Containers": null
+      }
+    },
+    {
+      "operation": "DescribeContainer",
+      "input": {
+        "ContainerName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ContainerNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateContainer",
+      "input": {
+        "ContainerName": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateContainer",
+      "input": {
+        "ContainerName": "vod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Container": {
+          "ARN": "arn:aws:mediastore:us-east-1:000000000000:container/vod",
+          "Endpoint": "https://vod.mediastore.us-east-1.amazonaws.com",
+          "Name": "vod",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeContainer",
+      "input": {
+        "ContainerName": "vod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Container": {
+          "ARN": "arn:aws:mediastore:us-east-1:000000000000:container/vod",
+          "Endpoint": "https://vod.mediastore.us-east-1.amazonaws.com",
+          "Name": "vod",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "CreateContainer",
+      "input": {
+        "ContainerName": "live"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Container": {
+          "ARN": "arn:aws:mediastore:us-east-1:000000000000:container/live",
+          "Endpoint": "https://live.mediastore.us-east-1.amazonaws.com",
+          "Name": "live",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListContainers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Containers": [
+          {
+            "ARN": "arn:aws:mediastore:us-east-1:000000000000:container/live",
+            "Endpoint": "https://live.mediastore.us-east-1.amazonaws.com",
+            "Name": "live",
+            "Status": "ACTIVE"
+          },
+          {
+            "ARN": "arn:aws:mediastore:us-east-1:000000000000:container/vod",
+            "Endpoint": "https://vod.mediastore.us-east-1.amazonaws.com",
+            "Name": "vod",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetContainerPolicy",
+      "input": {
+        "ContainerName": "vod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "PolicyNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutContainerPolicy",
+      "input": {
+        "ContainerName": "vod",
+        "Policy": "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetContainerPolicy",
+      "input": {
+        "ContainerName": "vod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+      }
+    },
+    {
+      "operation": "PutContainerPolicy",
+      "input": {
+        "ContainerName": "nope",
+        "Policy": "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetContainerPolicy",
+      "input": {
+        "ContainerName": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+      }
+    },
+    {
+      "operation": "DeleteContainer",
+      "input": {
+        "ContainerName": "vod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListContainers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Containers": [
+          {
+            "ARN": "arn:aws:mediastore:us-east-1:000000000000:container/live",
+            "Endpoint": "https://live.mediastore.us-east-1.amazonaws.com",
+            "Name": "live",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetContainerPolicy",
+      "input": {
+        "ContainerName": "vod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+      }
+    },
+    {
+      "operation": "DeleteContainer",
+      "input": {
+        "ContainerName": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,809 @@
+{
+  "schema": "trace/1",
+  "service": "aws.apigatewayv2",
+  "source": "internal/services/aws/apigatewayv2",
+  "note": "APIs, routes, integrations and stages; the update that changes only a name.",
+  "steps": [
+    {
+      "operation": "GetApis",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": null
+      }
+    },
+    {
+      "operation": "CreateApi",
+      "input": {
+        "Description": "dropped",
+        "Name": "http-api",
+        "ProtocolType": "HTTP"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiEndpoint": "https://7c589129.execute-api.localhost",
+        "ApiId": "7c589129",
+        "Name": "http-api",
+        "ProtocolType": "HTTP"
+      }
+    },
+    {
+      "operation": "CreateApi",
+      "input": {
+        "Name": "ws-api",
+        "ProtocolType": "WEBSOCKET"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiEndpoint": "https://5f59f223.execute-api.localhost",
+        "ApiId": "5f59f223",
+        "Name": "ws-api",
+        "ProtocolType": "WEBSOCKET"
+      }
+    },
+    {
+      "operation": "GetApis",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApiEndpoint": "https://5f59f223.execute-api.localhost",
+            "ApiId": "5f59f223",
+            "Name": "ws-api",
+            "ProtocolType": "WEBSOCKET"
+          },
+          {
+            "ApiEndpoint": "https://7c589129.execute-api.localhost",
+            "ApiId": "7c589129",
+            "Name": "http-api",
+            "ProtocolType": "HTTP"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetApi",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiEndpoint": "https://7c589129.execute-api.localhost",
+        "ApiId": "7c589129",
+        "Name": "http-api",
+        "ProtocolType": "HTTP"
+      }
+    },
+    {
+      "operation": "GetApi",
+      "input": {
+        "ApiId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateApi",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "Description": "still dropped",
+        "Name": "renamed"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiEndpoint": "https://7c589129.execute-api.localhost",
+        "ApiId": "7c589129",
+        "Name": "renamed",
+        "ProtocolType": "HTTP"
+      }
+    },
+    {
+      "operation": "GetApi",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiEndpoint": "https://7c589129.execute-api.localhost",
+        "ApiId": "7c589129",
+        "Name": "renamed",
+        "ProtocolType": "HTTP"
+      }
+    },
+    {
+      "operation": "UpdateApi",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "ProtocolType": "WEBSOCKET"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiEndpoint": "https://7c589129.execute-api.localhost",
+        "ApiId": "7c589129",
+        "Name": "renamed",
+        "ProtocolType": "HTTP"
+      }
+    },
+    {
+      "operation": "GetApi",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiEndpoint": "https://7c589129.execute-api.localhost",
+        "ApiId": "7c589129",
+        "Name": "renamed",
+        "ProtocolType": "HTTP"
+      }
+    },
+    {
+      "operation": "UpdateApi",
+      "input": {
+        "ApiId": "absent",
+        "Name": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetRoutes",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": null
+      }
+    },
+    {
+      "operation": "CreateRoute",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "RouteKey": "GET /things",
+        "Target": "integrations/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiId": "7c589129",
+        "RouteId": "9c8e2cb0",
+        "RouteKey": "GET /things",
+        "Target": "integrations/x"
+      },
+      "superseded_members": {
+        "ApiId": "The pack stored an ApiId on every route, integration and stage and answered it. None of the create or get responses declares one -- these resources are addressed by ApiId, they do not report it -- so it was a member no SDK could read. The bundle stores it, because the recording shows it stored, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "CreateRoute",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "RouteKey": "POST /things"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiId": "7c589129",
+        "RouteId": "33f6fc5d",
+        "RouteKey": "POST /things",
+        "Target": ""
+      },
+      "superseded_members": {
+        "ApiId": "The pack stored an ApiId on every route, integration and stage and answered it. None of the create or get responses declares one -- these resources are addressed by ApiId, they do not report it -- so it was a member no SDK could read. The bundle stores it, because the recording shows it stored, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "GetRoute",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "RouteId": {
+          "$fromPath": "RouteId",
+          "$fromStep": 12
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiId": "7c589129",
+        "RouteId": "9c8e2cb0",
+        "RouteKey": "GET /things",
+        "Target": "integrations/x"
+      },
+      "superseded_members": {
+        "ApiId": "The pack stored an ApiId on every route, integration and stage and answered it. None of the create or get responses declares one -- these resources are addressed by ApiId, they do not report it -- so it was a member no SDK could read. The bundle stores it, because the recording shows it stored, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "GetRoute",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "RouteId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetRoutes",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApiId": "7c589129",
+            "RouteId": "33f6fc5d",
+            "RouteKey": "POST /things",
+            "Target": ""
+          },
+          {
+            "ApiId": "7c589129",
+            "RouteId": "9c8e2cb0",
+            "RouteKey": "GET /things",
+            "Target": "integrations/x"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetRoutes",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": null
+      }
+    },
+    {
+      "operation": "CreateIntegration",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "IntegrationType": "HTTP_PROXY",
+        "IntegrationUri": "https://example.invalid/",
+        "PayloadFormatVersion": "1.0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiId": "7c589129",
+        "IntegrationId": "83d4958a",
+        "IntegrationType": "HTTP_PROXY",
+        "IntegrationUri": "https://example.invalid/"
+      },
+      "superseded_members": {
+        "ApiId": "The pack stored an ApiId on every route, integration and stage and answered it. None of the create or get responses declares one -- these resources are addressed by ApiId, they do not report it -- so it was a member no SDK could read. The bundle stores it, because the recording shows it stored, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "GetIntegration",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "IntegrationId": {
+          "$fromPath": "IntegrationId",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiId": "7c589129",
+        "IntegrationId": "83d4958a",
+        "IntegrationType": "HTTP_PROXY",
+        "IntegrationUri": "https://example.invalid/"
+      },
+      "superseded_members": {
+        "ApiId": "The pack stored an ApiId on every route, integration and stage and answered it. None of the create or get responses declares one -- these resources are addressed by ApiId, they do not report it -- so it was a member no SDK could read. The bundle stores it, because the recording shows it stored, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "GetIntegrations",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApiId": "7c589129",
+            "IntegrationId": "83d4958a",
+            "IntegrationType": "HTTP_PROXY",
+            "IntegrationUri": "https://example.invalid/"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateStage",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "AutoDeploy": true,
+        "StageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiId": "7c589129",
+        "StageName": "prod"
+      },
+      "superseded_members": {
+        "ApiId": "The pack stored an ApiId on every route, integration and stage and answered it. None of the create or get responses declares one -- these resources are addressed by ApiId, they do not report it -- so it was a member no SDK could read. The bundle stores it, because the recording shows it stored, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "GetStage",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "StageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApiId": "7c589129",
+        "StageName": "prod"
+      },
+      "superseded_members": {
+        "ApiId": "The pack stored an ApiId on every route, integration and stage and answered it. None of the create or get responses declares one -- these resources are addressed by ApiId, they do not report it -- so it was a member no SDK could read. The bundle stores it, because the recording shows it stored, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "GetStage",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "StageName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetStages",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApiId": "7c589129",
+            "StageName": "prod"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteStage",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "StageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteStage",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "StageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetStages",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": null
+      }
+    },
+    {
+      "operation": "DeleteRoute",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "RouteId": {
+          "$fromPath": "RouteId",
+          "$fromStep": 12
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetRoutes",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApiId": "7c589129",
+            "RouteId": "33f6fc5d",
+            "RouteKey": "POST /things",
+            "Target": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteIntegration",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        },
+        "IntegrationId": {
+          "$fromPath": "IntegrationId",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetIntegrations",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": null
+      }
+    },
+    {
+      "operation": "DeleteApi",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteApi",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetApis",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApiEndpoint": "https://5f59f223.execute-api.localhost",
+            "ApiId": "5f59f223",
+            "Name": "ws-api",
+            "ProtocolType": "WEBSOCKET"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetRoutes",
+      "input": {
+        "ApiId": {
+          "$fromPath": "ApiId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApiId": "7c589129",
+            "RouteId": "33f6fc5d",
+            "RouteKey": "POST /things",
+            "Target": ""
+          }
+        ]
+      }
+    }
+  ]
+}

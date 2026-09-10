@@ -1,0 +1,227 @@
+{
+  "schema": "trace/1",
+  "service": "aws.kinesisanalyticsv2",
+  "source": "pack:internal/services/aws/kinesisanalyticsv2@4802ff3",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationSummaries": null
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "ApplicationName": "streams",
+        "RuntimeEnvironment": "FLINK-1_20",
+        "ServiceExecutionRole": "arn:aws:iam::000000000000:role/kda"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/streams",
+          "ApplicationName": "streams",
+          "ApplicationStatus": "READY",
+          "RuntimeEnvironment": "FLINK-1_20"
+        }
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "streams"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/streams",
+          "ApplicationName": "streams",
+          "ApplicationStatus": "READY",
+          "RuntimeEnvironment": "FLINK-1_20"
+        }
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "ApplicationName": "reports",
+        "RuntimeEnvironment": "SQL-1_0",
+        "ServiceExecutionRole": "arn:aws:iam::000000000000:role/kda"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/reports",
+          "ApplicationName": "reports",
+          "ApplicationStatus": "READY",
+          "RuntimeEnvironment": "SQL-1_0"
+        }
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationSummaries": [
+          {
+            "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/reports",
+            "ApplicationName": "reports",
+            "ApplicationStatus": "READY",
+            "RuntimeEnvironment": "SQL-1_0"
+          },
+          {
+            "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/streams",
+            "ApplicationName": "streams",
+            "ApplicationStatus": "READY",
+            "RuntimeEnvironment": "FLINK-1_20"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartApplication",
+      "input": {
+        "ApplicationName": "streams"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "streams"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/streams",
+          "ApplicationName": "streams",
+          "ApplicationStatus": "READY",
+          "RuntimeEnvironment": "FLINK-1_20"
+        }
+      }
+    },
+    {
+      "operation": "StopApplication",
+      "input": {
+        "ApplicationName": "streams"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationName": "streams",
+        "CreateTimestamp": "1970-01-01T00:00:00Z"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "streams"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationName": "streams",
+        "CreateTimestamp": "1970-01-01T00:00:00Z"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

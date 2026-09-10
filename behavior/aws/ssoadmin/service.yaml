@@ -1,0 +1,142 @@
+schema: bir/1
+service: aws.sso-admin
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is granted: an assignment is a row, no policy is evaluated,
+# and no credential this emulator issues consults one.
+provenance: authored
+
+resources:
+  permissionset:
+    collection: ssops
+    key: PermissionSetArn
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      PermissionSetArn: "'arn:aws:sso:::permissionSet/ssoins-local/ps-' + id"
+      Name: "'Name' in input ? string(input.Name) : ''"
+      # Stored because the pack stored it, and projected away on the way out:
+      # PermissionSet declares no InstanceArn.
+      InstanceArn: "'InstanceArn' in input ? string(input.InstanceArn) : ''"
+
+  # An assignment is a row keyed by a generated identifier: nothing addresses
+  # one, so nothing needs to name it. It is revoked by describing which rows to
+  # drop, which is why this service needed a filtered delete.
+  assignment:
+    collection: ssoasg
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      AccountId: "'TargetId' in input ? string(input.TargetId) : ''"
+      PermissionSetArn: "'PermissionSetArn' in input ? string(input.PermissionSetArn) : ''"
+      PrincipalId: "'PrincipalId' in input ? string(input.PrincipalId) : ''"
+      PrincipalType: "'PrincipalType' in input ? string(input.PrincipalType) : ''"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreatePermissionSet:
+    effects:
+      - create: { resource: permissionset }
+    output:
+      PermissionSet: >
+        {
+          'PermissionSetArn': rec.PermissionSetArn,
+          'Name': rec.Name
+        }
+
+  DescribePermissionSet:
+    reads:
+      p: { resource: permissionset, key: "string(input.PermissionSetArn)" }
+    require:
+      - { cond: p_found, error: NotFound }
+    output:
+      PermissionSet: >
+        {
+          'PermissionSetArn': p.PermissionSetArn,
+          'Name': p.Name
+        }
+
+  ListPermissionSets:
+    list: { resource: permissionset, member: PermissionSets, paginate: model }
+    output:
+      PermissionSets: "items.map(p, string(p.PermissionSetArn))"
+
+  DeletePermissionSet:
+    effects:
+      - delete: { resource: permissionset, key: "string(input.PermissionSetArn)", missing: ignore }
+
+  CreateAccountAssignment:
+    effects:
+      - create: { resource: assignment }
+
+  # Every assignment in the account and region, not the account and permission
+  # set the request names.
+  ListAccountAssignments:
+    list: { resource: assignment, member: AccountAssignments, paginate: model }
+
+  # The reason this service could not be extracted until now: a revoke names no
+  # row, it describes which rows to drop. The pack listed every assignment and
+  # deleted the ones whose principal matched, and matched on the principal
+  # alone -- so revoking a principal's access to one account revokes it
+  # everywhere.
+  DeleteAccountAssignment:
+    effects:
+      - delete:
+          resource: assignment
+          where: "string(item.PrincipalId) == string(input.PrincipalId)"
+
+quirks:
+  - operation: DeleteAccountAssignment
+    note: >
+      A revoke matches on PrincipalId alone. The request also names a
+      PermissionSetArn, a TargetId and a PrincipalType, all required, and none
+      of them narrows anything -- so revoking one principal's access to one
+      account through one permission set removes that principal's every
+      assignment, in every account, through every permission set. That is the
+      pack's behavior and it is the most consequential quirk in this service:
+      an over-broad revoke is the failure mode a permissions system must not
+      have, and a test written against this emulator would not catch it.
+
+      This is also the operation that needed the filtered delete the schema did
+      not have. Nothing addresses an assignment by name, so it cannot be
+      expressed as a keyed delete without inventing an identifier the service
+      does not issue.
+  - operation: CreateAccountAssignment
+    note: >
+      CreateAccountAssignmentResponse declares an AccountAssignmentCreationStatus
+      and nothing else, and the pack answered with the assignment it had just
+      stored -- a member no SDK could read. The bundle answers nothing rather
+      than a status it does not track: there is no
+      DescribeAccountAssignmentCreationStatus here, so a caller has no request
+      id to poll and no way to learn the assignment was made except by listing.
+
+      Nothing is checked to exist: the permission set, the target account and
+      the principal are all stored as given, so an assignment can name a
+      permission set that was never created, and it survives that permission
+      set being deleted.
+  - operation: ListAccountAssignments
+    note: >
+      The required AccountId and PermissionSetArn narrow nothing: every
+      assignment in the account and region is listed, so a caller asking which
+      principals have one permission set on one account is answered with all of
+      them. Combined with the revoke above, both halves of the assignment API
+      ignore the scoping the model requires.
+  - operation: CreatePermissionSet
+    note: >
+      A permission set is an ARN and a name. The InstanceArn is stored and
+      projected away, because PermissionSet declares none; Description,
+      SessionDuration, RelayState and CreatedDate are declared and never set.
+      No policy is attached and none can be -- PutInlinePolicyToPermissionSet
+      and the managed-policy operations are not served -- so a permission set
+      grants nothing, and neither does an assignment of it.
+  - operation: DeletePermissionSet
+    note: >
+      Deleting an absent permission set succeeds where describing it faults,
+      and deleting one leaves its assignments behind, still naming it. Every
+      permission set ARN names the instance ssoins-local whatever InstanceArn
+      was given, so two SSO instances are indistinguishable.

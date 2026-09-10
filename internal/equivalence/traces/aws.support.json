@@ -1,0 +1,219 @@
+{
+  "schema": "trace/1",
+  "service": "aws.support",
+  "source": "pack:internal/services/aws/awssupport@44c2b1d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeCases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cases": null
+      }
+    },
+    {
+      "operation": "CreateCase",
+      "input": {
+        "communicationBody": "it 403s",
+        "serviceCode": "amazon-s3",
+        "severityCode": "low",
+        "subject": "cannot reach bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "caseId": "7c589129"
+      }
+    },
+    {
+      "operation": "DescribeCases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cases": [
+          {
+            "caseId": "7c589129",
+            "serviceCode": "amazon-s3",
+            "severityCode": "low",
+            "status": "opened",
+            "subject": "cannot reach bucket"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCases",
+      "input": {
+        "caseIdList": [
+          {
+            "$fromPath": "caseId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cases": [
+          {
+            "caseId": "7c589129",
+            "serviceCode": "amazon-s3",
+            "severityCode": "low",
+            "status": "opened",
+            "subject": "cannot reach bucket"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCases",
+      "input": {
+        "caseIdList": [
+          "absent"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cases": []
+      }
+    },
+    {
+      "operation": "DescribeServices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "services": [
+          {
+            "code": "amazon-s3",
+            "name": "Amazon Simple Storage Service"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeSeverityLevels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "severityLevels": [
+          {
+            "code": "low",
+            "name": "Low"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AddCommunicationToCase",
+      "input": {
+        "caseId": {
+          "$fromPath": "caseId",
+          "$fromStep": 1
+        },
+        "communicationBody": "any news?"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": true
+      }
+    },
+    {
+      "operation": "ResolveCase",
+      "input": {
+        "caseId": {
+          "$fromPath": "caseId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "finalCaseStatus": "resolved",
+        "initialCaseStatus": "opened"
+      }
+    },
+    {
+      "operation": "DescribeCases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cases": null
+      }
+    },
+    {
+      "operation": "ResolveCase",
+      "input": {
+        "caseId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "finalCaseStatus": "resolved",
+        "initialCaseStatus": "opened"
+      }
+    }
+  ]
+}

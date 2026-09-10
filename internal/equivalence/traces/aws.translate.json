@@ -1,0 +1,258 @@
+{
+  "schema": "trace/1",
+  "service": "aws.translate",
+  "source": "pack:internal/services/aws/translate@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "TranslateText",
+      "input": {
+        "SourceLanguageCode": "en",
+        "TargetLanguageCode": "fr",
+        "Text": "hello"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SourceLanguageCode": "en",
+        "TargetLanguageCode": "fr",
+        "TranslatedText": "hello"
+      }
+    },
+    {
+      "operation": "TranslateText",
+      "input": {
+        "SourceLanguageCode": "auto",
+        "TargetLanguageCode": "en",
+        "Text": "bonjour"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SourceLanguageCode": "auto",
+        "TargetLanguageCode": "en",
+        "TranslatedText": "bonjour"
+      }
+    },
+    {
+      "operation": "ListTerminologies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TerminologyPropertiesList": null
+      }
+    },
+    {
+      "operation": "GetTerminology",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteTerminology",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTextTranslationJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TextTranslationJobPropertiesList": null
+      }
+    },
+    {
+      "operation": "StartTextTranslationJob",
+      "input": {
+        "ClientToken": "ct-1",
+        "DataAccessRoleArn": "arn:aws:iam::000000000000:role/t",
+        "InputDataConfig": {
+          "ContentType": "text/plain",
+          "S3Uri": "s3://in/"
+        },
+        "JobName": "j1",
+        "OutputDataConfig": {
+          "S3Uri": "s3://out/"
+        },
+        "SourceLanguageCode": "en",
+        "TargetLanguageCodes": [
+          "fr"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "7c589129",
+        "JobStatus": "COMPLETED"
+      }
+    },
+    {
+      "operation": "DescribeTextTranslationJob",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TextTranslationJobProperties": {
+          "JobId": "7c589129",
+          "JobName": "j1",
+          "JobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "ListTextTranslationJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TextTranslationJobPropertiesList": [
+          {
+            "JobId": "7c589129",
+            "JobName": "j1",
+            "JobStatus": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StopTextTranslationJob",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "7c589129",
+        "JobStatus": "STOPPED"
+      }
+    },
+    {
+      "operation": "DescribeTextTranslationJob",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TextTranslationJobProperties": {
+          "JobId": "7c589129",
+          "JobName": "j1",
+          "JobStatus": "STOPPED"
+        }
+      }
+    },
+    {
+      "operation": "StopTextTranslationJob",
+      "input": {
+        "JobId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "absent",
+        "JobStatus": "STOPPED"
+      }
+    },
+    {
+      "operation": "DescribeTextTranslationJob",
+      "input": {
+        "JobId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

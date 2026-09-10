@@ -11,6 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history: the ratchet's baseline guard compares ratchet.json
+          # against the merge-base with main, and skips without it.
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version: "1.24"
@@ -19,6 +23,13 @@ jobs:
         run: go vet ./...
       - name: gofmt
         run: test -z "$(gofmt -l . | grep -v node_modules || true)"
+      - name: anti-drift ratchet
+        run: make ratchet
+      - name: extraction equivalence
+        # Named separately so it can be a required check: no pack may be
+        # deleted without its recording replaying green against the bundle
+        # that replaced it.
+        run: make equivalence
       - name: unit and coverage floor
         run: make test-coverage
       - name: protocol contracts
@@ -38,17 +49,63 @@ jobs:
         run: make test-fuzz
       - name: race detector
         run: make test-race
+
+  # Separate matrix job: the mutation suite had grown to fifty-eight minutes
+  # against a sixty-minute timeout, which meant the next mutant anyone added
+  # would have turned CI red for time rather than for a defect -- a failure
+  # that looks nothing like a surviving mutant and costs an hour to diagnose.
+  #
+  # The per-mutant cost cannot come down much: a mutant is a distinct build of
+  # the mutated package, so it pays a full compile plus the test it runs. What
+  # can come down is how many one job runs. Four shards, and the suite stops
+  # being the critical path for everything else in `test` as well.
+  #
+  # TestShardingIsAPartition proves the split loses no mutant, and the harness
+  # fails a shard that selects none -- because a shard that runs nothing still
+  # reports success.
   mutation:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/4", "1/4", "2/4", "3/4"]
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v7
         with:
           go-version: "1.24"
           cache-dependency-path: test/sdk/go/go.sum
-      - name: mutation shard ${{ matrix.shard }}
-        run: MUTATION_SHARD=${{ matrix.shard }} make test-mutation
+      - name: mutation shard ${{ matrix.shard }} of 4
+        run: make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=4
+
+  # Separate job: syncing specs leaves ~92 MB under specs/, and a populated
+  # specs/ changes what the runtime boots from, so it must not share a
+  # workspace with the unit tests.
+  generated-models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.24"
+          cache-dependency-path: go.sum
+      - name: regenerate from the pinned specs
+        run: |
+          make specs-sync
+          make generate
+      - name: models reproduce byte-for-byte
+        # `make specs-sync` fetches exactly what the lock pins -- the AWS
+        # models at the recorded commit, the committed Discovery document --
+        # so this is deterministic. A diff means the committed models no
+        # longer follow from the lock, which is the only thing that makes
+        # them trustworthy as a build input.
+        #
+        # Moving the pins is `make specs-refresh`, deliberately, in its own
+        # commit: an upstream change should be reviewed, not absorbed by a
+        # build. That review is where an unannounced vendor change gets
+        # noticed until the behavioral changelog exists to record it.
+        run: |
+          git diff --exit-code -- internal/generated specs/mirror.lock || {
+            echo "::error::internal/generated is stale; run 'make specs-sync && make generate' and commit the result"
+            exit 1
+          }

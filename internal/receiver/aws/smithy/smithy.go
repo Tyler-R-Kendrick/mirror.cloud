@@ -39,13 +39,16 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 			Traits json.RawMessage `json:"traits"`
 		} `json:"members"`
 		Member *struct {
-			Target string `json:"target"`
+			Target string          `json:"target"`
+			Traits json.RawMessage `json:"traits"`
 		} `json:"member"`
 		Key *struct {
-			Target string `json:"target"`
+			Target string          `json:"target"`
+			Traits json.RawMessage `json:"traits"`
 		} `json:"key"`
 		Value *struct {
-			Target string `json:"target"`
+			Target string          `json:"target"`
+			Traits json.RawMessage `json:"traits"`
 		} `json:"value"`
 		Input *struct {
 			Target string `json:"target"`
@@ -124,6 +127,12 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		if prefix == "" {
 			prefix = awsSvc.EndpointPrefix
 		}
+		// The SigV4 signing name is what a client puts in the credential
+		// scope, and for seventy-seven upstream models it is not the endpoint
+		// prefix: Lex Model Building signs as `lex` and is reached at
+		// `models.lex`, ECR signs as `ecr` and is reached at `api.ecr`. A
+		// server that knows only the prefix cannot recognise the request.
+		aliases := signingAliases(s.Traits, prefix)
 		target := localName(id)
 		ver := s.Version
 		svcID := awsServiceID(prefix, awsSvc.SdkID, id)
@@ -135,6 +144,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 			TargetPrefix:   target,
 			QueryVersion:   ver,
 			XMLNamespace:   xmlns,
+			Aliases:        aliases,
 			Shapes:         map[string]model.Shape{},
 			Source:         src,
 		}
@@ -236,16 +246,20 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 			}
 			ms := model.Shape{ID: sid, Kind: kindOf(sh.Type), Members: map[string]model.Member{}}
 			for n, m := range sh.Members {
-				ms.Members[n] = model.Member{Shape: m.Target, Required: hasTrait(m.Traits, "smithy.api#required")}
+				ms.Members[n] = model.Member{
+					Shape:    m.Target,
+					Required: hasTrait(m.Traits, "smithy.api#required"),
+					Binding:  binding(m.Traits),
+				}
 			}
 			if sh.Member != nil {
-				ms.Member = sh.Member.Target
+				ms.Member, ms.MemberBinding = sh.Member.Target, binding(sh.Member.Traits)
 			}
 			if sh.Value != nil && ms.Member == "" {
-				ms.Member = sh.Value.Target
+				ms.Member, ms.MemberBinding = sh.Value.Target, binding(sh.Value.Traits)
 			}
 			if sh.Key != nil {
-				ms.Key = sh.Key.Target
+				ms.Key, ms.KeyBinding = sh.Key.Target, binding(sh.Key.Traits)
 			}
 			svc.Shapes[sid] = ms
 		}
@@ -392,6 +406,90 @@ func httpBind(traits json.RawMessage, op *model.Operation) {
 	}
 }
 
+// binding reads where a member sits on the wire.
+//
+// `model.MemberBinding` has carried these fields since the model was defined
+// and nothing ever filled them: of the hundred and fifty-two services served,
+// exactly one -- gcp.storage, whose receiver is elsewhere -- carried any of
+// it. The consumer was already written. `awsquery.unflatten` reads
+// `Binding.Name` to find a member's form field and `Binding.XMLFlattened` to
+// decide whether a list is `Ids.member.1` or `Ids.1`, and with both always
+// empty it read every awsQuery and ec2Query request as though no member were
+// renamed and no list were flattened. EC2's request lists are flattened, so
+// that was wrong for the one protocol that depends on it most.
+//
+// The names are read in the order a protocol would prefer them, and the last
+// write wins because a member carrying both an xmlName and a jsonName is
+// describing two protocols, only one of which a given service speaks. The
+// service's protocol is not visible here -- shapes are parsed once, and a
+// shape can be shared -- so both are recorded and the codec picks.
+func binding(traits json.RawMessage) model.MemberBinding {
+	var t map[string]json.RawMessage
+	if len(traits) == 0 || json.Unmarshal(traits, &t) != nil {
+		return model.MemberBinding{}
+	}
+	var b model.MemberBinding
+	str := func(name string) (string, bool) {
+		raw, ok := t[name]
+		if !ok {
+			return "", false
+		}
+		var v string
+		if json.Unmarshal(raw, &v) != nil {
+			return "", false
+		}
+		return v, true
+	}
+	if v, ok := str("smithy.api#jsonName"); ok {
+		b.Name = v
+	}
+	if v, ok := str("smithy.api#xmlName"); ok {
+		b.Name = v
+	}
+	// ec2Query names a member twice: xmlName is what the response carries and
+	// ec2QueryName is what the request form field is called. They are not the
+	// same string -- DryRun answers to `dryRun` and is asked for as `DryRun` --
+	// so one field cannot serve both directions.
+	if v, ok := str("aws.protocols#ec2QueryName"); ok {
+		b.QueryName = v
+	}
+	if v, ok := str("smithy.api#timestampFormat"); ok {
+		b.TimestampFormat = v
+	}
+	// Placement. A member carries at most one of these.
+	switch {
+	case hasTrait(traits, "smithy.api#httpLabel"):
+		b.Location = "label"
+	case hasTrait(traits, "smithy.api#httpPayload"):
+		b.Location = "payload"
+	case hasTrait(traits, "smithy.api#httpResponseCode"):
+		b.Location = "statusCode"
+	case hasTrait(traits, "smithy.api#httpQueryParams"):
+		b.Location = "queryParams"
+	default:
+		if v, ok := str("smithy.api#httpQuery"); ok {
+			b.Location, b.Name = "query", v
+		}
+		if v, ok := str("smithy.api#httpHeader"); ok {
+			b.Location, b.Name = "header", v
+		}
+		if v, ok := str("smithy.api#httpPrefixHeaders"); ok {
+			b.Location, b.Name = "prefixHeaders", v
+		}
+	}
+	b.XMLAttribute = hasTrait(traits, "smithy.api#xmlAttribute")
+	b.XMLFlattened = hasTrait(traits, "smithy.api#xmlFlattened")
+	if raw, ok := t["smithy.api#xmlNamespace"]; ok {
+		var ns struct {
+			URI string `json:"uri"`
+		}
+		if json.Unmarshal(raw, &ns) == nil {
+			b.XMLNamespace = ns.URI
+		}
+	}
+	return b
+}
+
 func hasTrait(traits json.RawMessage, name string) bool {
 	var t map[string]json.RawMessage
 	if json.Unmarshal(traits, &t) != nil {
@@ -420,3 +518,28 @@ func namespace(id string) string {
 }
 
 var _ receiver.Receiver = Receiver{}
+
+// signingAliases reports the other names a client may address this service by.
+// Today that is the SigV4 signing name when it differs from the endpoint
+// prefix; the field is a list because a service can carry more than one name
+// and because the same question will be asked of other providers.
+func signingAliases(traits json.RawMessage, prefix string) []string {
+	var t map[string]json.RawMessage
+	if err := json.Unmarshal(traits, &t); err != nil {
+		return nil
+	}
+	raw, ok := t["aws.auth#sigv4"]
+	if !ok {
+		return nil
+	}
+	var sig struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &sig); err != nil || sig.Name == "" {
+		return nil
+	}
+	if strings.EqualFold(sig.Name, prefix) {
+		return nil
+	}
+	return []string{strings.ToLower(sig.Name)}
+}

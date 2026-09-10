@@ -1,0 +1,363 @@
+{
+  "schema": "trace/1",
+  "service": "aws.transcribe",
+  "source": "pack:internal/services/aws/transcribe@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListTranscriptionJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TranscriptionJobSummaries": null
+      }
+    },
+    {
+      "operation": "GetTranscriptionJob",
+      "input": {
+        "TranscriptionJobName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "StartTranscriptionJob",
+      "input": {
+        "LanguageCode": "en-US",
+        "Media": {
+          "MediaFileUri": "s3://in/audio.wav"
+        },
+        "TranscriptionJobName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TranscriptionJob": {
+          "LanguageCode": "en-US",
+          "Media": {
+            "MediaFileUri": "s3://in/audio.wav"
+          },
+          "Transcript": {
+            "TranscriptFileUri": "s3://mirror-transcribe/t1.json"
+          },
+          "TranscriptionJobName": "t1",
+          "TranscriptionJobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "GetTranscriptionJob",
+      "input": {
+        "TranscriptionJobName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TranscriptionJob": {
+          "LanguageCode": "en-US",
+          "Media": {
+            "MediaFileUri": "s3://in/audio.wav"
+          },
+          "Transcript": {
+            "TranscriptFileUri": "s3://mirror-transcribe/t1.json"
+          },
+          "TranscriptionJobName": "t1",
+          "TranscriptionJobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "StartTranscriptionJob",
+      "input": {
+        "LanguageCode": "fr-FR",
+        "Media": {
+          "MediaFileUri": "s3://in/audio.wav"
+        },
+        "TranscriptionJobName": "t2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TranscriptionJob": {
+          "LanguageCode": "fr-FR",
+          "Media": {
+            "MediaFileUri": "s3://in/audio.wav"
+          },
+          "Transcript": {
+            "TranscriptFileUri": "s3://mirror-transcribe/t2.json"
+          },
+          "TranscriptionJobName": "t2",
+          "TranscriptionJobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "ListTranscriptionJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TranscriptionJobSummaries": [
+          {
+            "LanguageCode": "en-US",
+            "Media": {
+              "MediaFileUri": "s3://in/audio.wav"
+            },
+            "Transcript": {
+              "TranscriptFileUri": "s3://mirror-transcribe/t1.json"
+            },
+            "TranscriptionJobName": "t1",
+            "TranscriptionJobStatus": "COMPLETED"
+          },
+          {
+            "LanguageCode": "fr-FR",
+            "Media": {
+              "MediaFileUri": "s3://in/audio.wav"
+            },
+            "Transcript": {
+              "TranscriptFileUri": "s3://mirror-transcribe/t2.json"
+            },
+            "TranscriptionJobName": "t2",
+            "TranscriptionJobStatus": "COMPLETED"
+          }
+        ]
+      },
+      "superseded": "TranscriptionJobSummary declares neither Media nor Transcript, and the pack listed the stored record, so each summarised job carried two members no SDK could read. The declared shape outranks the pack's authored behavior; the same job fetched still carries both, because TranscriptionJob declares them."
+    },
+    {
+      "operation": "ListTranscriptionJobs",
+      "input": {
+        "Status": "IN_PROGRESS"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TranscriptionJobSummaries": [
+          {
+            "LanguageCode": "en-US",
+            "Media": {
+              "MediaFileUri": "s3://in/audio.wav"
+            },
+            "Transcript": {
+              "TranscriptFileUri": "s3://mirror-transcribe/t1.json"
+            },
+            "TranscriptionJobName": "t1",
+            "TranscriptionJobStatus": "COMPLETED"
+          },
+          {
+            "LanguageCode": "fr-FR",
+            "Media": {
+              "MediaFileUri": "s3://in/audio.wav"
+            },
+            "Transcript": {
+              "TranscriptFileUri": "s3://mirror-transcribe/t2.json"
+            },
+            "TranscriptionJobName": "t2",
+            "TranscriptionJobStatus": "COMPLETED"
+          }
+        ]
+      },
+      "superseded": "TranscriptionJobSummary declares neither Media nor Transcript, and the pack listed the stored record, so each summarised job carried two members no SDK could read. The declared shape outranks the pack's authored behavior; the same job fetched still carries both, because TranscriptionJob declares them."
+    },
+    {
+      "operation": "CreateVocabulary",
+      "input": {
+        "LanguageCode": "en-US",
+        "Phrases": [
+          "mirror",
+          "cloud"
+        ],
+        "VocabularyName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LanguageCode": "en-US",
+        "VocabularyName": "v1",
+        "VocabularyState": "READY"
+      }
+    },
+    {
+      "operation": "GetVocabulary",
+      "input": {
+        "VocabularyName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LanguageCode": "en-US",
+        "VocabularyName": "v1",
+        "VocabularyState": "READY"
+      }
+    },
+    {
+      "operation": "GetVocabulary",
+      "input": {
+        "VocabularyName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListVocabularies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Vocabularies": [
+          {
+            "LanguageCode": "en-US",
+            "VocabularyName": "v1",
+            "VocabularyState": "READY"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteVocabulary",
+      "input": {
+        "VocabularyName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListVocabularies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Vocabularies": null
+      }
+    },
+    {
+      "operation": "DeleteTranscriptionJob",
+      "input": {
+        "TranscriptionJobName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTranscriptionJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TranscriptionJobSummaries": [
+          {
+            "LanguageCode": "fr-FR",
+            "Media": {
+              "MediaFileUri": "s3://in/audio.wav"
+            },
+            "Transcript": {
+              "TranscriptFileUri": "s3://mirror-transcribe/t2.json"
+            },
+            "TranscriptionJobName": "t2",
+            "TranscriptionJobStatus": "COMPLETED"
+          }
+        ]
+      },
+      "superseded": "TranscriptionJobSummary declares neither Media nor Transcript, and the pack listed the stored record, so each summarised job carried two members no SDK could read. The declared shape outranks the pack's authored behavior; the same job fetched still carries both, because TranscriptionJob declares them."
+    },
+    {
+      "operation": "DeleteTranscriptionJob",
+      "input": {
+        "TranscriptionJobName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

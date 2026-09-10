@@ -1,0 +1,283 @@
+{
+  "schema": "trace/1",
+  "service": "aws.memorydb",
+  "source": "pack:internal/services/aws/memorydb@22114f7",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": null
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "ACLName": "open-access",
+        "ClusterName": "c1",
+        "NodeType": "db.t4g.small"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cluster": {
+          "ARN": "arn:aws:memorydb:us-east-1:000000000000:cluster/c1",
+          "Name": "c1",
+          "NodeType": "db.t4g.small",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "ACLName": "open-access",
+        "ClusterName": "c2",
+        "NodeType": "db.r6g.large"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cluster": {
+          "ARN": "arn:aws:memorydb:us-east-1:000000000000:cluster/c2",
+          "Name": "c2",
+          "NodeType": "db.r6g.large",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "ClusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "ARN": "arn:aws:memorydb:us-east-1:000000000000:cluster/c1",
+            "Name": "c1",
+            "NodeType": "db.t4g.small",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "ARN": "arn:aws:memorydb:us-east-1:000000000000:cluster/c1",
+            "Name": "c1",
+            "NodeType": "db.t4g.small",
+            "Status": "available"
+          },
+          {
+            "ARN": "arn:aws:memorydb:us-east-1:000000000000:cluster/c2",
+            "Name": "c2",
+            "NodeType": "db.r6g.large",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "ClusterName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "111111111111",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": null
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "ClusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "AccessString": "on ~* \u0026* +@all",
+        "AuthenticationMode": {
+          "Type": "iam"
+        },
+        "UserName": "u1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "AccessString": "on ~* \u0026* +@all",
+          "Name": "u1",
+          "Status": "active"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUsers",
+      "input": {
+        "UserName": "u1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "AccessString": "on ~* \u0026* +@all",
+            "Name": "u1",
+            "Status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeUsers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "AccessString": "on ~* \u0026* +@all",
+            "Name": "u1",
+            "Status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "UserName": "u1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeUsers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": null
+      }
+    }
+  ]
+}

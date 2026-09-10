@@ -1,0 +1,201 @@
+{
+  "schema": "trace/1",
+  "service": "aws.account",
+  "source": "pack:internal/services/aws/account@c42371d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListRegions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Regions": [
+          {
+            "RegionName": "us-east-1",
+            "RegionOptStatus": "ENABLED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetContactInformation",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContactInformation": {}
+      }
+    },
+    {
+      "operation": "PutContactInformation",
+      "input": {
+        "ContactInformation": {
+          "AddressLine1": "1 St",
+          "City": "X",
+          "CountryCode": "US",
+          "FullName": "A",
+          "PhoneNumber": "+1",
+          "PostalCode": "00000"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetContactInformation",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContactInformation": {
+          "AddressLine1": "1 St",
+          "City": "X",
+          "CountryCode": "US",
+          "FullName": "A",
+          "PhoneNumber": "+1",
+          "PostalCode": "00000"
+        }
+      }
+    },
+    {
+      "operation": "GetAlternateContact",
+      "input": {
+        "AlternateContactType": "BILLING"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutAlternateContact",
+      "input": {
+        "AlternateContactType": "BILLING",
+        "EmailAddress": "b@x.test",
+        "Name": "Bill",
+        "PhoneNumber": "+1",
+        "Title": "Payer"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAlternateContact",
+      "input": {
+        "AlternateContactType": "BILLING"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AlternateContact": {
+          "AlternateContactType": "BILLING",
+          "EmailAddress": "b@x.test",
+          "Name": "Bill",
+          "PhoneNumber": "+1",
+          "Title": "Payer"
+        }
+      }
+    },
+    {
+      "operation": "GetAlternateContact",
+      "input": {
+        "AlternateContactType": "BILLING"
+      },
+      "identity": {
+        "Account": "111111111111",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteAlternateContact",
+      "input": {
+        "AlternateContactType": "BILLING"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAlternateContact",
+      "input": {
+        "AlternateContactType": "BILLING"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteAlternateContact",
+      "input": {
+        "AlternateContactType": "BILLING"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

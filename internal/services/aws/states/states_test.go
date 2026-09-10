@@ -20,16 +20,14 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/parquet-go/parquet-go"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/batch"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codebuild"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/emr"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
@@ -50,18 +48,14 @@ type observedClock struct {
 	beforeUntil func()
 }
 
-func (c *observedClock) After(delay time.Duration) <-chan time.Time {
-	result := c.Clock.After(delay)
-	c.after <- delay
-	return result
-}
-
-func (c *observedClock) AfterUntil(at time.Time) <-chan time.Time {
+// AfterTime reports how far ahead the wait was, so a test can still assert the
+// length of a wait now that the packs park on an instant rather than a delay.
+func (c *observedClock) AfterTime(at time.Time) <-chan time.Time {
 	delay := max(time.Duration(0), at.Sub(c.Clock.Now()))
 	if c.beforeUntil != nil {
 		c.beforeUntil()
 	}
-	result := c.Clock.AfterUntil(at)
+	result := c.Clock.AfterTime(at)
 	c.after <- delay
 	return result
 }
@@ -1410,10 +1404,16 @@ func TestStatesWaitLoopUsesAbsoluteDeadline(t *testing.T) {
 		if delay != 10*time.Second {
 			t.Fatalf("Wait scheduled after %s, want 10s", delay)
 		}
-	case <-time.After(5 * time.Second):
+	// A give-up guard, not a timing assertion: the timing this test is about is
+	// asserted against the fake clock above, as `delay == 10s`. Five real
+	// seconds is enough on an idle machine and not always enough on a loaded
+	// CI runner, which is a way to fail for a reason the test is not about.
+	case <-time.After(30 * time.Second):
 		t.Fatal("Wait loop did not observe the absolute deadline")
 	}
-	deadline := time.After(5 * time.Second)
+	// The same give-up guard, for the same reason: what is asserted is that
+	// the execution reaches SUCCEEDED, not how many real seconds that takes.
+	deadline := time.After(30 * time.Second)
 	for {
 		execution := invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
 		if execution["status"] == "SUCCEEDED" {
@@ -2850,22 +2850,22 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 		return response.Output
 	}
 
-	definition := `{"StartAt":"Batch","States":{"Batch":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","Parameters":{"JobName":"job","JobQueue":"queue"},"ResultPath":null,"Next":"Build"},"Build":{"Type":"Task","Resource":"arn:aws:states:::codebuild:startBuild.sync","Parameters":{"ProjectName":"project"},"ResultPath":null,"Next":"Glue"},"Glue":{"Type":"Task","Resource":"arn:aws:states:::glue:startJobRun.sync","Parameters":{"JobName":"job"},"ResultPath":null,"Next":"Cluster"},"Cluster":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:createCluster.sync","Parameters":{"Name":"cluster"},"ResultPath":null,"Next":"Step"},"Step":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:addStep.sync","Parameters":{"JobFlowId":"j-test"},"End":true}}}`
+	definition := `{"StartAt":"Batch","States":{"Batch":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","Parameters":{"JobName":"job","JobQueue":"queue","JobDefinition":"definition"},"ResultPath":null,"Next":"Build"},"Build":{"Type":"Task","Resource":"arn:aws:states:::codebuild:startBuild.sync","Parameters":{"ProjectName":"project"},"ResultPath":null,"Next":"Glue"},"Glue":{"Type":"Task","Resource":"arn:aws:states:::glue:startJobRun.sync","Parameters":{"JobName":"job"},"ResultPath":null,"Next":"Cluster"},"Cluster":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:createCluster.sync","Parameters":{"Name":"cluster","Instances":{"InstanceCount":1,"MasterInstanceType":"m5.xlarge"}},"ResultPath":null,"Next":"Step"},"Step":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:addStep.sync","Parameters":{"JobFlowId":"j-test","Steps":[{"Name":"step","ActionOnFailure":"CONTINUE","HadoopJarStep":{"Jar":"command-runner.jar"}}]},"End":true}}}`
 	machine := must(p, "CreateStateMachine", map[string]any{"name": "sync-jobs", "definition": definition, "roleArn": testRoleARN})
 	executionARN := must(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
 	if execution := must(p, "DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), "StepIds") {
 		t.Fatalf("sync execution %#v", execution)
 	}
-	if jobs := must(batch.New(deps), "DescribeJobs", nil)["jobs"].([]any); len(jobs) != 1 || jobs[0].(map[string]any)["jobName"] != "job" || jobs[0].(map[string]any)["status"] != "SUCCEEDED" {
+	if jobs := must(served(t, deps, "aws.batch"), "DescribeJobs", map[string]any{"jobs": []any{"any"}})["jobs"].([]any); len(jobs) != 1 || jobs[0].(map[string]any)["jobName"] != "job" || jobs[0].(map[string]any)["status"] != "SUCCEEDED" {
 		t.Fatalf("batch sync jobs %#v", jobs)
 	}
-	if builds := must(codebuild.New(deps), "ListBuilds", nil)["ids"].([]any); len(builds) != 1 || !strings.HasPrefix(builds[0].(string), "project:") {
+	if builds := must(served(t, deps, "aws.codebuild"), "ListBuilds", nil)["ids"].([]any); len(builds) != 1 || !strings.HasPrefix(builds[0].(string), "project:") {
 		t.Fatalf("codebuild sync builds %#v", builds)
 	}
-	if runs := must(glue.New(deps), "GetJobRuns", map[string]any{"JobName": "job"})["JobRuns"].([]any); len(runs) != 1 || runs[0].(map[string]any)["JobRunState"] != "SUCCEEDED" {
+	if runs := must(served(t, deps, "aws.glue"), "GetJobRuns", map[string]any{"JobName": "job"})["JobRuns"].([]any); len(runs) != 1 || runs[0].(map[string]any)["JobRunState"] != "SUCCEEDED" {
 		t.Fatalf("glue sync runs %#v", runs)
 	}
-	if steps := must(emr.New(deps), "ListSteps", map[string]any{"ClusterId": "j-test"})["Steps"].([]any); len(steps) != 1 {
+	if steps := must(served(t, deps, "aws.elasticmapreduce"), "ListSteps", map[string]any{"ClusterId": "j-test"})["Steps"].([]any); len(steps) != 1 {
 		t.Fatalf("emr sync steps %#v", steps)
 	}
 	childDefinition := `{"StartAt":"Done","States":{"Done":{"Type":"Pass","Result":{"ok":true},"End":true}}}`
@@ -4455,6 +4455,32 @@ func TestBootedServerStatesMapLambdaActivity(t *testing.T) {
 	if !strings.Contains(fmtString(ld["output"]), `"n":4`) {
 		t.Fatalf("lambda output %v", ld["output"])
 	}
+}
+
+// served builds whatever currently serves a service ID -- a hand-written pack
+// or a Behavior IR bundle -- so an assertion about a task integration survives
+// the extraction of the service it integrates with. The integration itself has
+// always resolved through the registry; only these assertions reached for the
+// Go type.
+func served(t *testing.T, deps spi.Deps, serviceID string) spi.BehaviorPack {
+	t.Helper()
+	for _, factory := range registry.Factories() {
+		if factory.ServiceID != serviceID {
+			continue
+		}
+		handler, err := factory.New(deps)
+		if err != nil {
+			t.Fatalf("build %s: %v", serviceID, err)
+		}
+		t.Cleanup(func() {
+			if closer, ok := handler.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		})
+		return handler
+	}
+	t.Fatalf("no factory serves %s", serviceID)
+	return nil
 }
 
 func mustJSON(s string) string {

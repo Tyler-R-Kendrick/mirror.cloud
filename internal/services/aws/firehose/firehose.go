@@ -60,7 +60,6 @@ type Pack struct {
 	searchMu      sync.Mutex
 	cancelKinesis func()
 	cancelMSK     func()
-	cancelSNS     func()
 }
 
 type httpRetry struct {
@@ -152,7 +151,6 @@ func New(d spi.Deps) *Pack {
 	if d.Bus != nil {
 		p.cancelKinesis = d.Bus.Subscribe("kinesis", p.consumeKinesis)
 		p.cancelMSK = d.Bus.Subscribe("kafka", p.consumeMSK)
-		p.cancelSNS = d.Bus.Subscribe("firehose", p.consumeSNS)
 	}
 	if p.hasHTTPWork(context.Background()) {
 		p.startRetryLoop()
@@ -170,33 +168,10 @@ func (p *Pack) Close() error {
 		if p.cancelMSK != nil {
 			p.cancelMSK()
 		}
-		if p.cancelSNS != nil {
-			p.cancelSNS()
-		}
 		close(p.stop)
 	})
 	<-p.done
 	return nil
-}
-
-func (p *Pack) consumeSNS(ctx context.Context, payload []byte) {
-	var event struct {
-		Account, Region, StreamARN string
-		Data                       []byte
-	}
-	if json.Unmarshal(payload, &event) != nil || event.Account == "" || event.Region == "" || event.StreamARN == "" || len(event.Data) == 0 {
-		return
-	}
-	parts := strings.SplitN(event.StreamARN, ":", 6)
-	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "firehose" || parts[3] != event.Region || parts[4] != event.Account {
-		return
-	}
-	name := strings.TrimPrefix(parts[5], "deliverystream/")
-	if name == parts[5] || name == "" {
-		return
-	}
-	req := &spi.Request{ServiceID: "aws.firehose", SourceService: "aws.sns", Identity: spi.Identity{Account: event.Account, Region: event.Region}}
-	_, _ = p.putOne(ctx, req, name, map[string]any{"Data": base64.StdEncoding.EncodeToString(event.Data)}, event.Data, "")
 }
 
 func (p *Pack) consumeMSK(ctx context.Context, payload []byte) {
@@ -3631,7 +3606,7 @@ func (p *Pack) httpRetryLoop() {
 			continue
 		}
 		select {
-		case <-p.deps.Clock.AfterUntil(next):
+		case <-p.deps.Clock.AfterTime(next):
 		case <-p.wake:
 		case <-p.stop:
 			return
@@ -4074,6 +4049,7 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 	deadline := p.deps.Clock.Now().Add(time.Duration(timeout) * time.Second)
 	ackBody, _ := json.Marshal(map[string]any{"acks": []any{ackID}})
 	for {
+		nextPoll := p.deps.Clock.Now().Add(time.Second) // before the request; see spi.Clock.AfterTime
 		ackRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/services/collector/ack", bytes.NewReader(ackBody))
 		if err != nil {
 			return false, false, "Splunk.InvalidEndpoint", err.Error()
@@ -4105,7 +4081,7 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 		select {
 		case <-ctx.Done():
 			return false, false, "Splunk.ConnectionClosed", ctx.Err().Error()
-		case <-p.deps.Clock.After(time.Second):
+		case <-p.deps.Clock.AfterTime(nextPoll):
 		}
 	}
 }

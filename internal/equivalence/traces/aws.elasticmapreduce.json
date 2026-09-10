@@ -1,0 +1,379 @@
+{
+  "schema": "trace/1",
+  "service": "aws.elasticmapreduce",
+  "source": "pack:internal/services/aws/emr@68978994",
+  "note": "Clusters that are WAITING at once, steps scoped to their cluster, and the terminate that skips what it cannot find.",
+  "steps": [
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": null
+      }
+    },
+    {
+      "operation": "RunJobFlow",
+      "input": {
+        "Instances": {
+          "InstanceCount": 3,
+          "MasterInstanceType": "m5.xlarge"
+        },
+        "Name": "analytics"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobFlowId": "j-7c589129"
+      }
+    },
+    {
+      "operation": "RunJobFlow",
+      "input": {
+        "Instances": {
+          "InstanceCount": 1
+        },
+        "Name": "reporting"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobFlowId": "j-5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "JobFlowId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cluster": {
+          "Id": "j-7c589129",
+          "Name": "analytics",
+          "Status": {
+            "State": "WAITING"
+          }
+        }
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "Id": "j-5f59f223",
+            "Name": "reporting",
+            "Status": {
+              "State": "WAITING"
+            }
+          },
+          {
+            "Id": "j-7c589129",
+            "Name": "analytics",
+            "Status": {
+              "State": "WAITING"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "ClusterId": "j-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddJobFlowSteps",
+      "input": {
+        "JobFlowId": {
+          "$fromPath": "JobFlowId",
+          "$fromStep": 1
+        },
+        "Steps": [
+          {
+            "ActionOnFailure": "CONTINUE",
+            "HadoopJarStep": {
+              "Jar": "s3://jars/count.jar"
+            },
+            "Name": "count"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StepIds": [
+          "s-9c8e2cb0"
+        ]
+      }
+    },
+    {
+      "operation": "ListSteps",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "JobFlowId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Steps": [
+          {
+            "ClusterId": "j-7c589129",
+            "Id": "s-9c8e2cb0",
+            "Status": {
+              "State": "COMPLETED"
+            }
+          }
+        ]
+      },
+      "superseded_members": {
+        "Steps[0].ClusterId": "The pack stored the cluster id on every step and answered it. Neither Step nor StepSummary declares a ClusterId -- a step is addressed by cluster and step id together and does not report the cluster back -- so it was a member no SDK could read. The bundle keeps steps in a collection named for their cluster, which is what the member was standing in for, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "DescribeStep",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "JobFlowId",
+          "$fromStep": 1
+        },
+        "StepId": {
+          "$fromPath": "StepIds.0",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Step": {
+          "ClusterId": "j-7c589129",
+          "Id": "s-9c8e2cb0",
+          "Status": {
+            "State": "COMPLETED"
+          }
+        }
+      },
+      "superseded_members": {
+        "Step.ClusterId": "The pack stored the cluster id on every step and answered it. Neither Step nor StepSummary declares a ClusterId -- a step is addressed by cluster and step id together and does not report the cluster back -- so it was a member no SDK could read. The bundle keeps steps in a collection named for their cluster, which is what the member was standing in for, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "ListSteps",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "JobFlowId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Steps": null
+      }
+    },
+    {
+      "operation": "DescribeStep",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "JobFlowId",
+          "$fromStep": 2
+        },
+        "StepId": {
+          "$fromPath": "StepIds.0",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SetTerminationProtection",
+      "input": {
+        "JobFlowIds": [
+          {
+            "$fromPath": "JobFlowId",
+            "$fromStep": 1
+          }
+        ],
+        "TerminationProtected": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TerminateJobFlows",
+      "input": {
+        "JobFlowIds": [
+          {
+            "$fromPath": "JobFlowId",
+            "$fromStep": 1
+          },
+          "j-absent"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "JobFlowId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cluster": {
+          "Id": "j-7c589129",
+          "Name": "analytics",
+          "Status": {
+            "State": "TERMINATED"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "ClusterId": "j-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "Id": "j-5f59f223",
+            "Name": "reporting",
+            "Status": {
+              "State": "WAITING"
+            }
+          },
+          {
+            "Id": "j-7c589129",
+            "Name": "analytics",
+            "Status": {
+              "State": "TERMINATED"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

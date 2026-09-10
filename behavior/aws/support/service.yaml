@@ -1,0 +1,83 @@
+schema: bir/1
+service: aws.support
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No case is ever worked: one is opened, can be described, and is
+# deleted outright when resolved. The service and severity catalogues are one
+# fixed entry each.
+provenance: authored
+
+resources:
+  case:
+    collection: supcase
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [caseId]
+    record:
+      caseId: id
+      subject: "'subject' in input ? string(input.subject) : ''"
+      status: "'opened'"
+      serviceCode: "'serviceCode' in input ? string(input.serviceCode) : ''"
+      severityCode: "'severityCode' in input ? string(input.severityCode) : ''"
+
+operations:
+  CreateCase:
+    effects:
+      - create: { resource: case }
+    output:
+      caseId: rec.caseId
+
+  # Describe-one-or-describe-all. The pack read the first entry of caseIdList
+  # and ignored the rest, so asking about several cases answers about one.
+  DescribeCases:
+    list:
+      resource: case
+      member: cases
+      paginate: model
+      key: "'caseIdList' in input && size(input.caseIdList) > 0 ? string(input.caseIdList[0]) : ''"
+
+  # Resolving deletes the case outright, so a resolved case cannot be
+  # described afterwards and the status it reports is a constant.
+  ResolveCase:
+    effects:
+      - delete: { resource: case, key: "'caseId' in input ? string(input.caseId) : ''", missing: ignore }
+    output:
+      finalCaseStatus: "'resolved'"
+      initialCaseStatus: "'opened'"
+
+  DescribeServices:
+    output:
+      services: "[{'code': 'amazon-s3', 'name': 'Amazon Simple Storage Service'}]"
+
+  DescribeSeverityLevels:
+    output:
+      severityLevels: "[{'code': 'low', 'name': 'Low'}]"
+
+  AddCommunicationToCase:
+    output:
+      result: "true"
+
+quirks:
+  - operation: ResolveCase
+    note: >
+      Resolving a case deletes it rather than moving it to a resolved status,
+      so DescribeCases cannot find a case that was just resolved and the
+      initialCaseStatus answered is always opened, whatever the case was in.
+      The real service keeps the case and reports its actual prior status; a
+      probe settles that, and the fix is a patch effect rather than a delete.
+  - operation: DescribeCases
+    note: >
+      caseIdList is a list and only its first entry is read: asking about
+      three cases answers about one. Filtering to the whole list needs a
+      per-item read the engine does not have for a narrowed list, and it is
+      not worth guessing at ahead of a probe.
+  - operation: AddCommunicationToCase
+    note: >
+      A communication is accepted and discarded: nothing is stored, the case
+      is not touched, and recentCommunications is never set on it. The answer
+      is an unconditional true.
+  - operation: DescribeServices
+    note: >
+      One service and one severity level are listed whatever is asked for, and
+      neither catalogue changes. Nothing validates a case's serviceCode or
+      severityCode against them.

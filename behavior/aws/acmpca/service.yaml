@@ -1,0 +1,110 @@
+schema: bir/1
+service: aws.acm-pca
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No key is generated and nothing is signed: a certificate authority
+# is ACTIVE at once and every certificate it issues is the same placeholder.
+provenance: authored
+
+resources:
+  # Both are addressed by their ARN everywhere but creation. The generated
+  # half of a new ARN lives in fx, which only effects can see, so the creating
+  # effect names the key and the resource only knows how to be read.
+  ca:
+    collection: pca
+    id:
+      input_members: [CertificateAuthorityArn]
+    record: {}
+
+  certificate:
+    collection: pcacert
+    id:
+      input_members: [CertificateArn]
+    record: {}
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateCertificateAuthority:
+    effects:
+      - generate: { bind: caid, kind: hex, bytes: 8 }
+      - put:
+          resource: ca
+          key: &caArn >-
+            'arn:aws:acm-pca:' + identity.region + ':' + identity.account
+            + ':certificate-authority/' + fx.caid
+          record:
+            Arn: *caArn
+            Status: "'ACTIVE'"
+            Type: >
+              'CertificateAuthorityType' in input && string(input.CertificateAuthorityType) != ''
+                ? string(input.CertificateAuthorityType) : 'ROOT'
+    output:
+      CertificateAuthorityArn: rec.Arn
+
+  DescribeCertificateAuthority:
+    reads:
+      ca: { resource: ca }
+    require:
+      - { cond: ca_found, error: NotFound }
+    output:
+      CertificateAuthority: ca
+
+  ListCertificateAuthorities:
+    list: { resource: ca, member: CertificateAuthorities, paginate: model }
+
+  DeleteCertificateAuthority:
+    effects:
+      - delete: { resource: ca, missing: ignore }
+
+  IssueCertificate:
+    effects:
+      - generate: { bind: certid, kind: hex, bytes: 8 }
+      - put:
+          resource: certificate
+          key: &certArn >-
+            string(input.CertificateAuthorityArn) + '/certificate/' + fx.certid
+          record:
+            CertificateArn: *certArn
+            # The YAML scalar must hand CEL the escape, not a real newline.
+            Certificate: "'-----BEGIN CERTIFICATE-----\\nMIRROR\\n-----END CERTIFICATE-----\\n'"
+    output:
+      CertificateArn: rec.CertificateArn
+
+  # GetCertificate declares Certificate and CertificateChain. The
+  # CertificateArn the pack answered with is not a member of this answer.
+  GetCertificate:
+    reads:
+      cert: { resource: certificate }
+    require:
+      - { cond: cert_found, error: NotFound }
+    output:
+      Certificate: cert.Certificate
+
+quirks:
+  - operation: GetCertificate
+    note: >
+      The pack answered with the CertificateArn it stored beside the
+      certificate. GetCertificate declares Certificate and CertificateChain
+      only, so the ARN was a member no SDK could read. The declared shape
+      outranks the pack's authored behavior, so it is dropped and the recorded
+      step is superseded with that reason. CertificateAuthorityArn is required
+      on the request and ignored: a certificate is found by its own ARN alone,
+      so asking the wrong CA for one still answers with it.
+  - operation: IssueCertificate
+    note: >
+      Csr, SigningAlgorithm and Validity are required by the model and none is
+      stored, so nothing is signed and every certificate is the same
+      placeholder PEM. No CertificateChain is ever issued, and nothing checks
+      that the CA the certificate is issued from exists.
+  - operation: CreateCertificateAuthority
+    note: >
+      CertificateAuthorityConfiguration is required and is not stored, so a CA
+      has no subject, no key algorithm and no signing algorithm -- all of
+      which CertificateAuthority declares -- and no Serial, CreatedAt or
+      NotBefore/NotAfter. It is ACTIVE at once, where the real service creates
+      one PENDING_CERTIFICATE until its own certificate is imported.

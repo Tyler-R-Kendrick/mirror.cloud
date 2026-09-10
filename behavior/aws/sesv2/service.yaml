@@ -1,0 +1,120 @@
+schema: bir/1
+service: aws.sesv2
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no SMTP here: an identity is verified for sending the
+# moment it is created, and a sent message is stored and never delivered.
+provenance: authored
+
+resources:
+  email:
+    collection: sesv2id
+    id:
+      input_members: [EmailIdentity]
+    record:
+      IdentityName: id
+      IdentityType: "'EMAIL_ADDRESS'"
+      VerifiedForSendingStatus: "true"
+
+  # A sent message is write-only: no operation reads one back.
+  message:
+    collection: sesv2msg
+    id:
+      generate: { kind: hex, bytes: 16 }
+    record:
+      MessageId: id
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateEmailIdentity:
+    effects:
+      - create: { resource: email }
+    output:
+      IdentityType: "'EMAIL_ADDRESS'"
+      VerifiedForSendingStatus: "true"
+
+  GetEmailIdentity:
+    reads:
+      ident: { resource: email }
+    require:
+      - { cond: ident_found, error: NotFound }
+    output:
+      IdentityType: ident.IdentityType
+      VerifiedForSendingStatus: ident.VerifiedForSendingStatus
+
+  # IdentityInfo declares SendingEnabled, not VerifiedForSendingStatus, so the
+  # listed form of an identity is not the stored record. The loader checks the
+  # name of the member items are placed in, but not the members of the items
+  # themselves, so this projection is the only thing keeping the listing
+  # readable by an SDK.
+  ListEmailIdentities:
+    list: { resource: email, member: EmailIdentities, paginate: model }
+    output:
+      EmailIdentities: >
+        items.map(e, {
+          'IdentityName': e.IdentityName,
+          'IdentityType': e.IdentityType,
+          'SendingEnabled': e.VerifiedForSendingStatus
+        })
+
+  DeleteEmailIdentity:
+    effects:
+      - delete: { resource: email, missing: ignore }
+    output: {}
+
+  SendEmail:
+    effects:
+      - create: { resource: message }
+    output:
+      MessageId: id
+
+  # The pack answered a bulk send with a single MessageId, which is not a
+  # member this operation declares. The declared answer is one result per
+  # entry, so that is what is produced -- one per entry offered, each carrying
+  # the same generated identifier the pack would have returned.
+  SendBulkEmail:
+    effects:
+      - create: { resource: message }
+    output:
+      BulkEmailEntryResults: "input.BulkEmailEntries.map(e, {'Status': 'SUCCESS', 'MessageId': id})"
+
+  GetAccount:
+    output:
+      SendingEnabled: "true"
+      ProductionAccessEnabled: "true"
+
+quirks:
+  - operation: CreateEmailIdentity
+    note: >
+      The pack answered Create, Get and List with the record it stored, which
+      carried EmailIdentity and VerifiedForSendingStatus. The model names those
+      IdentityName and SendingEnabled inside IdentityInfo, and declares no
+      EmailIdentity member on the Create or Get answers at all. The declared
+      shapes outrank the pack's authored behavior, so the record is stored
+      under the declared names and the recorded steps are superseded with that
+      reason.
+  - operation: SendBulkEmail
+    note: >
+      The pack served SendBulkEmail and SendEmail with the same code, answering
+      both with a MessageId. SendBulkEmail declares no MessageId member and
+      does declare a required BulkEmailEntryResults, so the pack's answer could
+      not be read by any SDK and the required member was absent. One result per
+      entry is produced instead, all sharing one identifier, because the pack
+      only ever generated one; whether the real service issues one per entry is
+      a probe away.
+  - operation: ListEmailIdentities
+    note: >
+      Every identity lists as verified and of type EMAIL_ADDRESS, whatever was
+      asked for: the pack never modelled a domain identity or a pending
+      verification, so nothing can observe one.
+  - operation: GetAccount
+    note: >
+      Only SendingEnabled and ProductionAccessEnabled are answered. The model
+      declares SendQuota, SuppressionAttributes, Details and more; the pack set
+      none of them and inventing values here would put guesses where a probe
+      should put observations.

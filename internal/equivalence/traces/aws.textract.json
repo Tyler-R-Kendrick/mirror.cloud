@@ -1,0 +1,184 @@
+{
+  "schema": "trace/1",
+  "service": "aws.textract",
+  "source": "pack:internal/services/aws/textract@c42371d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DetectDocumentText",
+      "input": {
+        "Document": {
+          "Bytes": "abc"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Blocks": [
+          {
+            "BlockType": "LINE",
+            "Confidence": 99,
+            "Text": "HELLO"
+          }
+        ],
+        "DocumentMetadata": {
+          "Pages": 1
+        }
+      }
+    },
+    {
+      "operation": "AnalyzeDocument",
+      "input": {
+        "Document": {
+          "Bytes": "abc"
+        },
+        "FeatureTypes": [
+          "TABLES"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Blocks": [
+          {
+            "BlockType": "LINE",
+            "Confidence": 99,
+            "Text": "HELLO"
+          }
+        ],
+        "DocumentMetadata": {
+          "Pages": 1
+        }
+      }
+    },
+    {
+      "operation": "StartDocumentTextDetection",
+      "input": {
+        "DocumentLocation": {
+          "S3Object": {
+            "Bucket": "b",
+            "Name": "n"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "7c589129"
+      }
+    },
+    {
+      "operation": "GetDocumentTextDetection",
+      "input": {
+        "JobId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidJobIdException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "StartDocumentAnalysis",
+      "input": {
+        "DocumentLocation": {
+          "S3Object": {
+            "Bucket": "b",
+            "Name": "n"
+          }
+        },
+        "FeatureTypes": [
+          "FORMS"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "5f59f223"
+      }
+    },
+    {
+      "operation": "GetDocumentAnalysis",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 4
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Blocks": [
+          {
+            "BlockType": "LINE",
+            "Confidence": 99,
+            "Text": "HELLO"
+          }
+        ],
+        "JobId": "5f59f223",
+        "JobStatus": "SUCCEEDED"
+      },
+      "superseded": "The pack returned JobId, which is not a member of this operation's output shape, so no SDK could read it. The bundle omits it. Evidence: the @output shape in internal/generated/aws/textract (declared), which outranks the pack's behavior (authored)."
+    },
+    {
+      "operation": "GetDocumentTextDetection",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Blocks": [
+          {
+            "BlockType": "LINE",
+            "Confidence": 99,
+            "Text": "HELLO"
+          }
+        ],
+        "JobId": "7c589129",
+        "JobStatus": "SUCCEEDED"
+      },
+      "superseded": "The pack returned JobId, which is not a member of this operation's output shape, so no SDK could read it. The bundle omits it. Evidence: the @output shape in internal/generated/aws/textract (declared), which outranks the pack's behavior (authored)."
+    }
+  ]
+}

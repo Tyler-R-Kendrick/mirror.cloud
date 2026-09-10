@@ -1,0 +1,251 @@
+{
+  "schema": "trace/1",
+  "service": "aws.codeconnections",
+  "source": "pack:internal/services/aws/codeconnections@571d5d1",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListConnections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Connections": null
+      }
+    },
+    {
+      "operation": "GetConnection",
+      "input": {
+        "ConnectionArn": "arn:aws:codeconnections:us-east-1:000000000000:connection/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateConnection",
+      "input": {
+        "ConnectionName": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateConnection",
+      "input": {
+        "ConnectionName": "gh",
+        "ProviderType": "GitHub"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ConnectionArn": "arn:aws:codeconnections:us-east-1:000000000000:connection/gh"
+      }
+    },
+    {
+      "operation": "GetConnection",
+      "input": {
+        "ConnectionArn": {
+          "$fromPath": "ConnectionArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Connection": {
+          "ConnectionArn": "arn:aws:codeconnections:us-east-1:000000000000:connection/gh",
+          "ConnectionName": "gh",
+          "ConnectionStatus": "AVAILABLE",
+          "ProviderType": "GitHub"
+        }
+      }
+    },
+    {
+      "operation": "CreateConnection",
+      "input": {
+        "ConnectionName": "gl",
+        "ProviderType": "GitLab"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ConnectionArn": "arn:aws:codeconnections:us-east-1:000000000000:connection/gl"
+      }
+    },
+    {
+      "operation": "ListConnections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Connections": [
+          {
+            "ConnectionArn": "arn:aws:codeconnections:us-east-1:000000000000:connection/gh",
+            "ConnectionName": "gh",
+            "ConnectionStatus": "AVAILABLE",
+            "ProviderType": "GitHub"
+          },
+          {
+            "ConnectionArn": "arn:aws:codeconnections:us-east-1:000000000000:connection/gl",
+            "ConnectionName": "gl",
+            "ConnectionStatus": "AVAILABLE",
+            "ProviderType": "GitLab"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateHost",
+      "input": {
+        "Name": "ghe",
+        "ProviderEndpoint": "https://ghe.example.com",
+        "ProviderType": "GitHubEnterpriseServer"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostArn": "arn:aws:codeconnections:us-east-1:000000000000:host/ghe"
+      }
+    },
+    {
+      "operation": "GetHost",
+      "input": {
+        "HostArn": {
+          "$fromPath": "HostArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostArn": "arn:aws:codeconnections:us-east-1:000000000000:host/ghe",
+        "Name": "ghe",
+        "Status": "AVAILABLE"
+      },
+      "superseded": "The pack answered with the HostArn it stored. GetHost declares Name, ProviderEndpoint, ProviderType, Status and VpcConfiguration -- the ARN is how the request names the host, not part of the answer -- so it was a member no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "GetHost",
+      "input": {
+        "HostArn": "arn:aws:codeconnections:us-east-1:000000000000:host/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteConnection",
+      "input": {
+        "ConnectionArn": {
+          "$fromPath": "ConnectionArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListConnections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Connections": [
+          {
+            "ConnectionArn": "arn:aws:codeconnections:us-east-1:000000000000:connection/gl",
+            "ConnectionName": "gl",
+            "ConnectionStatus": "AVAILABLE",
+            "ProviderType": "GitLab"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteConnection",
+      "input": {
+        "ConnectionArn": "arn:aws:codeconnections:us-east-1:000000000000:connection/gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

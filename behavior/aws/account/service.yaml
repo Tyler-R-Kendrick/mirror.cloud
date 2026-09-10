@@ -1,0 +1,80 @@
+schema: bir/1
+service: aws.account
+
+# Transcribed from the hand-written pack, not established against the real
+# service.
+provenance: authored
+
+resources:
+  contact:
+    collection: acctc
+    # Keyed by which alternate contact it is: an account has at most one
+    # billing, one operations and one security contact.
+    id:
+      input_members: [AlternateContactType]
+    record:
+      AlternateContactType: id
+      EmailAddress: input.EmailAddress
+      Name: input.Name
+      PhoneNumber: input.PhoneNumber
+      Title: input.Title
+
+  info:
+    collection: acctinfo
+    singleton: primary
+    record:
+      ContactInformation: input.ContactInformation
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  ListRegions:
+    output:
+      Regions: "[{'RegionName': identity.region, 'RegionOptStatus': 'ENABLED'}]"
+
+  PutContactInformation:
+    effects:
+      - put: { resource: info }
+
+  GetContactInformation:
+    reads:
+      rec: { resource: info }
+    # An account with no contact information answers with an empty one rather
+    # than a fault, which is what the pack does.
+    output:
+      ContactInformation: "rec_found ? rec.ContactInformation : {}"
+
+  PutAlternateContact:
+    effects:
+      - put: { resource: contact }
+
+  GetAlternateContact:
+    reads:
+      rec: { resource: contact }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output:
+      AlternateContact: rec
+
+  DeleteAlternateContact:
+    effects:
+      - delete: { resource: contact }
+
+quirks:
+  - operation: ListRegions
+    note: >
+      One region is reported -- the caller's own -- and always as ENABLED.
+      Real Account lists every region with its opt-in status, which callers
+      that enumerate regions depend on.
+    provenance: authored
+
+  - operation: DeleteAlternateContact
+    note: >
+      Deleting a contact that is not set succeeds. Real Account returns
+      ResourceNotFoundException; transcribed from the pack, and a probe should
+      settle it.
+    provenance: authored

@@ -1,0 +1,383 @@
+{
+  "schema": "trace/1",
+  "service": "aws.elasticfilesystem",
+  "source": "pack:internal/services/aws/efs@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeFileSystems",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": null
+      }
+    },
+    {
+      "operation": "CreateFileSystem",
+      "input": {
+        "CreationToken": "tok-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CreationToken": "tok-1",
+        "FileSystemArn": "arn:aws:elasticfilesystem:us-east-1:000000000000:file-system/fs-7c589129",
+        "FileSystemId": "fs-7c589129",
+        "LifeCycleState": "available",
+        "OwnerId": "000000000000"
+      }
+    },
+    {
+      "operation": "DescribeFileSystems",
+      "input": {
+        "FileSystemId": {
+          "$fromPath": "FileSystemId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": [
+          {
+            "CreationToken": "tok-1",
+            "FileSystemArn": "arn:aws:elasticfilesystem:us-east-1:000000000000:file-system/fs-7c589129",
+            "FileSystemId": "fs-7c589129",
+            "LifeCycleState": "available",
+            "OwnerId": "000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateFileSystem",
+      "input": {
+        "CreationToken": "tok-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CreationToken": "tok-2",
+        "FileSystemArn": "arn:aws:elasticfilesystem:us-east-1:000000000000:file-system/fs-5f59f223",
+        "FileSystemId": "fs-5f59f223",
+        "LifeCycleState": "available",
+        "OwnerId": "000000000000"
+      }
+    },
+    {
+      "operation": "DescribeFileSystems",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": [
+          {
+            "CreationToken": "tok-2",
+            "FileSystemArn": "arn:aws:elasticfilesystem:us-east-1:000000000000:file-system/fs-5f59f223",
+            "FileSystemId": "fs-5f59f223",
+            "LifeCycleState": "available",
+            "OwnerId": "000000000000"
+          },
+          {
+            "CreationToken": "tok-1",
+            "FileSystemArn": "arn:aws:elasticfilesystem:us-east-1:000000000000:file-system/fs-7c589129",
+            "FileSystemId": "fs-7c589129",
+            "LifeCycleState": "available",
+            "OwnerId": "000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateMountTarget",
+      "input": {
+        "FileSystemId": {
+          "$fromPath": "FileSystemId",
+          "$fromStep": 1
+        },
+        "SubnetId": "subnet-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystemId": "fs-7c589129",
+        "LifeCycleState": "available",
+        "MountTargetId": "fsmt-9c8e2cb0",
+        "SubnetId": "subnet-1"
+      }
+    },
+    {
+      "operation": "DescribeMountTargets",
+      "input": {
+        "MountTargetId": {
+          "$fromPath": "MountTargetId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MountTargets": [
+          {
+            "FileSystemId": "fs-7c589129",
+            "LifeCycleState": "available",
+            "MountTargetId": "fsmt-9c8e2cb0",
+            "SubnetId": "subnet-1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeMountTargets",
+      "input": {
+        "FileSystemId": {
+          "$fromPath": "FileSystemId",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MountTargets": [
+          {
+            "FileSystemId": "fs-7c589129",
+            "LifeCycleState": "available",
+            "MountTargetId": "fsmt-9c8e2cb0",
+            "SubnetId": "subnet-1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateAccessPoint",
+      "input": {
+        "ClientToken": "ct-1",
+        "FileSystemId": {
+          "$fromPath": "FileSystemId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPointId": "fsap-33f6fc5d",
+        "FileSystemId": "fs-7c589129",
+        "LifeCycleState": "available"
+      }
+    },
+    {
+      "operation": "DescribeAccessPoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPoints": [
+          {
+            "AccessPointId": "fsap-33f6fc5d",
+            "FileSystemId": "fs-7c589129",
+            "LifeCycleState": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAccessPoints",
+      "input": {
+        "AccessPointId": {
+          "$fromPath": "AccessPointId",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessPoints": [
+          {
+            "AccessPointId": "fsap-33f6fc5d",
+            "FileSystemId": "fs-7c589129",
+            "LifeCycleState": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteFileSystem",
+      "input": {
+        "FileSystemId": {
+          "$fromPath": "FileSystemId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeFileSystems",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": [
+          {
+            "CreationToken": "tok-2",
+            "FileSystemArn": "arn:aws:elasticfilesystem:us-east-1:000000000000:file-system/fs-5f59f223",
+            "FileSystemId": "fs-5f59f223",
+            "LifeCycleState": "available",
+            "OwnerId": "000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeMountTargets",
+      "input": {
+        "MountTargetId": {
+          "$fromPath": "MountTargetId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MountTargets": [
+          {
+            "FileSystemId": "fs-7c589129",
+            "LifeCycleState": "available",
+            "MountTargetId": "fsmt-9c8e2cb0",
+            "SubnetId": "subnet-1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteMountTarget",
+      "input": {
+        "MountTargetId": {
+          "$fromPath": "MountTargetId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAccessPoint",
+      "input": {
+        "AccessPointId": {
+          "$fromPath": "AccessPointId",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeMountTargets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MountTargets": null
+      }
+    },
+    {
+      "operation": "DeleteFileSystem",
+      "input": {
+        "FileSystemId": "fs-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

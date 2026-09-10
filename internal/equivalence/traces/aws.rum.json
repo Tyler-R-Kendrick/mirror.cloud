@@ -1,0 +1,211 @@
+{
+  "schema": "trace/1",
+  "service": "aws.rum",
+  "source": "pack:internal/services/aws/rum@44547e0",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListAppMonitors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AppMonitorSummaries": null
+      }
+    },
+    {
+      "operation": "GetAppMonitor",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateAppMonitor",
+      "input": {
+        "Domain": "example.test",
+        "Name": "storefront"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "7c589129"
+      }
+    },
+    {
+      "operation": "GetAppMonitor",
+      "input": {
+        "Name": "storefront"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AppMonitor": {
+          "Id": "7c589129",
+          "Name": "storefront",
+          "State": "CREATED"
+        }
+      }
+    },
+    {
+      "operation": "CreateAppMonitor",
+      "input": {
+        "Domain": "example.test",
+        "Name": "checkout"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "5f59f223"
+      }
+    },
+    {
+      "operation": "ListAppMonitors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AppMonitorSummaries": [
+          {
+            "Id": "5f59f223",
+            "Name": "checkout",
+            "State": "CREATED"
+          },
+          {
+            "Id": "7c589129",
+            "Name": "storefront",
+            "State": "CREATED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutRumEvents",
+      "input": {
+        "AppMonitorDetails": {
+          "name": {
+            "$fromPath": "AppMonitor.Name",
+            "$fromStep": 3
+          }
+        },
+        "BatchId": "batch-1",
+        "Id": "monitor-id",
+        "RumEvents": [
+          {
+            "details": "{}",
+            "id": "e1",
+            "timestamp": 0,
+            "type": "page_view"
+          }
+        ],
+        "UserDetails": {
+          "userId": "u1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAppMonitorData",
+      "input": {
+        "Name": {
+          "$fromPath": "AppMonitor.Name",
+          "$fromStep": 3
+        },
+        "TimeRange": {
+          "After": 0,
+          "Before": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RumEventSummaries": []
+      },
+      "superseded": "the pack answers with a `RumEventSummaries` member; the model declares it as `Events` and the restJson codec writes the response map through unchanged, so the pack's member name is one no generated SDK client can read. The bundle answers with the declared name."
+    },
+    {
+      "operation": "DeleteAppMonitor",
+      "input": {
+        "Name": {
+          "$fromPath": "AppMonitor.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAppMonitor",
+      "input": {
+        "Name": {
+          "$fromPath": "AppMonitor.Name",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

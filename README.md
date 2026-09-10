@@ -14,6 +14,17 @@ mirror.cloud generates cloud API emulators from the cloud providers' own publish
 
 Run one product or many — `mirror up s3` is one process, one port, sub-second.
 
+## Where this fits
+
+The local-AWS-emulator field is crowded and well served. What is not served, by anything currently in the field:
+
+- **more than one cloud** — every incumbent is AWS-only;
+- **running a single product standalone**, instead of a whole cloud on one port;
+- **a proxy tier** that records real-cloud behavior, replays it, and reports drift — which is also how this project grades its own accuracy, rather than claiming fidelity from spec conformance alone;
+- **spec-update diffs as a day-2 workflow**, so provider API drift becomes a reviewable pull request.
+
+AWS is where the pipeline gets validated, because it has the best-published specs and the most mature SDKs to test against. It is not where the differentiation lives.
+
 ## Status
 
 v1 spine is in tree: frozen interfaces, edge + codecs, emulate-tier packs, mock synthesizer, CLI. Spec ingestion (`make specs-sync`) still vendors AWS Smithy / GCS Discovery; until that pin lands, the process boots from a hand-built catalog.
@@ -43,9 +54,12 @@ See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2
 
 ## Documents
 
-- **[docs/DIRECTION.md](docs/DIRECTION.md)** — the thesis, the market analysis behind it, and the scope decisions for v1.
-- **[docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md)** — the complete, self-contained implementation specification: frozen interfaces, protocol reference, per-service fidelity table, subagent swarm contracts, and the definition of done.
-- **[docs/CRITIQUE.md](docs/CRITIQUE.md)** — an adversarial review of both documents, plus positioning, iteration, and delivery advice.
+- **[docs/DIRECTION.md](docs/DIRECTION.md)** — the thesis, the market analysis, the v1 scope decisions, and the v2 correction (§9): generate *behavior*, not just protocol.
+- **[docs/BEHAVIOR_IR.md](docs/BEHAVIOR_IR.md)** — the Behavior IR: service semantics as versioned, provenance-tagged data (statecharts, CEL rules, effect vocabulary, budgeted primitives), executed by one generic engine.
+- **[docs/PARITY_PIPELINE.md](docs/PARITY_PIPELINE.md)** — how ground truth is acquired: real-cloud probing, versioned behavior corpora, differential replay, per-operation grades, and the behavioral changelog for vendor changes nobody announced.
+- **[docs/MASTER_PROMPT_V2.md](docs/MASTER_PROMPT_V2.md)** — the current execution contract: strangler extraction of the hand-written packs, frozen v2 interfaces, swarm contracts, and the anti-scope-drift CI gates.
+- **[docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md)** — the v1 specification (still authoritative for the SPI, wire protocols, identity, and diagnostics).
+- **[docs/CRITIQUE.md](docs/CRITIQUE.md)** — five adversarial passes, including the audit of the v1 implementation that triggered the v2 pivot.
 
 ## Covenants
 
@@ -58,17 +72,12 @@ These are binding project policy, decided at founding because they cannot be ret
 ## Development
 
 ```bash
-npm install
-uv tool install pre-commit   # official pre-commit (https://pre-commit.com)
-npm run hooks:install
+go build ./...        # build everything
+make test             # unit tests (includes determinism lint + import-graph checks)
+make test-coverage    # unit tests with the coverage floor
+make test-race        # race detector
 ```
 
-Hooks (pre-commit): trailing whitespace and file hygiene, Gitleaks, **anti-slop Oxlint**, and `tsc --noEmit`. Bypass only in an emergency with `SKIP_GIT_HOOKS=1`.
-
-```bash
-npm run lint           # anti-slop + Oxlint
-npm run typecheck
-npm run hooks:run      # run every hook against the tree
-```
+`gofmt` and `go vet` must be clean; CI enforces both. See [docs/TESTING.md](docs/TESTING.md) for the full suite map (snapshot, chaos, BDD, fuzz, mutation).
 
 Licensed under [Apache-2.0](LICENSE).

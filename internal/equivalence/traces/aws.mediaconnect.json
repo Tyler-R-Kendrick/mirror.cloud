@@ -1,0 +1,326 @@
+{
+  "schema": "trace/1",
+  "service": "aws.mediaconnect",
+  "source": "pack:internal/services/aws/mediaconnect@d3f18de",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListFlows",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flows": null
+      }
+    },
+    {
+      "operation": "DescribeFlow",
+      "input": {
+        "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateFlow",
+      "input": {
+        "Name": "feed-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flow": {
+          "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+          "Name": "feed-one",
+          "Status": "STANDBY"
+        }
+      }
+    },
+    {
+      "operation": "DescribeFlow",
+      "input": {
+        "FlowArn": {
+          "$fromPath": "Flow.FlowArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flow": {
+          "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+          "Name": "feed-one",
+          "Status": "STANDBY"
+        }
+      }
+    },
+    {
+      "operation": "CreateFlow",
+      "input": {
+        "Name": "feed-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flow": {
+          "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-two",
+          "Name": "feed-two",
+          "Status": "STANDBY"
+        }
+      }
+    },
+    {
+      "operation": "ListFlows",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flows": [
+          {
+            "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+            "Name": "feed-one",
+            "Status": "STANDBY"
+          },
+          {
+            "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-two",
+            "Name": "feed-two",
+            "Status": "STANDBY"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartFlow",
+      "input": {
+        "FlowArn": {
+          "$fromPath": "Flow.FlowArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+        "Status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "DescribeFlow",
+      "input": {
+        "FlowArn": {
+          "$fromPath": "Flow.FlowArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flow": {
+          "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+          "Name": "feed-one",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListFlows",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flows": [
+          {
+            "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+            "Name": "feed-one",
+            "Status": "ACTIVE"
+          },
+          {
+            "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-two",
+            "Name": "feed-two",
+            "Status": "STANDBY"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartFlow",
+      "input": {
+        "FlowArn": {
+          "$fromPath": "Flow.FlowArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+        "Status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "StopFlow",
+      "input": {
+        "FlowArn": {
+          "$fromPath": "Flow.FlowArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+        "Status": "STANDBY"
+      }
+    },
+    {
+      "operation": "DescribeFlow",
+      "input": {
+        "FlowArn": {
+          "$fromPath": "Flow.FlowArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flow": {
+          "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-one",
+          "Name": "feed-one",
+          "Status": "STANDBY"
+        }
+      }
+    },
+    {
+      "operation": "StartFlow",
+      "input": {
+        "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteFlow",
+      "input": {
+        "FlowArn": {
+          "$fromPath": "Flow.FlowArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListFlows",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Flows": [
+          {
+            "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:feed-two",
+            "Name": "feed-two",
+            "Status": "STANDBY"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteFlow",
+      "input": {
+        "FlowArn": "arn:aws:mediaconnect:us-east-1:000000000000:flow:gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

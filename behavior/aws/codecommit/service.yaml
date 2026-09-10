@@ -1,0 +1,239 @@
+schema: bir/1
+service: aws.codecommit
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no git here: a branch is a name beside a commit id nobody
+# minted from a tree, and a file is a blob with no history behind it.
+provenance: authored
+
+resources:
+  repository:
+    collection: ccrepo
+    arn: "arn:aws:codecommit:{region}:{account}:{id}"
+    id:
+      input_members: [repositoryName]
+    record:
+      repositoryName: id
+      # Lower-case, which is what the pack wrote. RepositoryMetadata declares
+      # this member as `Arn`, so an SDK reading the ARN off a repository reads
+      # nothing -- see the quirk below.
+      arn: arn
+
+  # Branches and files are each scoped to their repository rather than filtered
+  # out of one shared collection, which is what the pack's "ccbr:"+name and
+  # "ccfile:"+name did. Every operation on either reads its repository first,
+  # not to check it exists -- this service never does -- but because the
+  # collection is named for it.
+  branch:
+    collection: "ccbr:{repository.id}"
+    parent: repository
+    id:
+      input_members: [branchName]
+    record:
+      branchName: id
+
+  file:
+    collection: "ccfile:{repository.id}"
+    parent: repository
+    id:
+      input_members: [filePath]
+    record:
+      filePath: id
+
+errors:
+  RepositoryNotFound:
+    code: RepositoryDoesNotExistException
+    http: 400
+    fault: client
+  BranchNotFound:
+    code: BranchDoesNotExistException
+    http: 400
+    fault: client
+  FileNotFound:
+    code: FileDoesNotExistException
+    http: 400
+    fault: client
+
+operations:
+  CreateRepository:
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8 }
+      - create:
+          resource: repository
+          record:
+            repositoryId: fx.rid
+            cloneUrlHttp: >
+              'http://127.0.0.1/codecommit/' + string(input.repositoryName)
+      # A description the request did not carry is absent from the record, not
+      # null: the pack copied request members in, so it had no member to set.
+      # A record expression always produces a value, so the member is added by
+      # a second, conditional write instead.
+      - patch:
+          resource: repository
+          when: "'repositoryDescription' in input"
+          record:
+            repositoryDescription: "string(input.repositoryDescription)"
+    output:
+      repositoryMetadata: rec
+
+  GetRepository:
+    reads:
+      repository: { resource: repository }
+    require:
+      - { cond: repository_found, error: RepositoryNotFound }
+    output:
+      repositoryMetadata: repository
+
+  ListRepositories:
+    list: { resource: repository, member: repositories, paginate: model }
+    output:
+      repositories: "items.map(r, {'repositoryName': r.repositoryName})"
+
+  DeleteRepository:
+    effects:
+      - delete: { resource: repository, missing: ignore }
+
+  CreateBranch:
+    reads:
+      repository: { resource: repository }
+    effects:
+      - create:
+          resource: branch
+          record:
+            commitId: "string(input.commitId)"
+
+  GetBranch:
+    reads:
+      branch: { resource: branch }
+      repository: { resource: repository }
+    require:
+      - { cond: branch_found, error: BranchNotFound }
+    output:
+      branch: branch
+
+  ListBranches:
+    reads:
+      repository: { resource: repository }
+    list: { resource: branch, member: branches, paginate: model }
+    output:
+      branches: "items.map(b, string(b.branchName))"
+
+  DeleteBranch:
+    reads:
+      repository: { resource: repository }
+    effects:
+      - delete: { resource: branch, missing: ignore }
+
+  PutFile:
+    reads:
+      repository: { resource: repository }
+    effects:
+      - generate: { bind: commit, kind: hex, bytes: 8 }
+      - generate: { bind: blob, kind: hex, bytes: 8 }
+      - put:
+          resource: file
+          record:
+            commitId: fx.commit
+            blobId: fx.blob
+            fileContent: "'fileContent' in input ? input.fileContent : null"
+    output:
+      commitId: rec.commitId
+      blobId: rec.blobId
+
+  GetFile:
+    reads:
+      file: { resource: file }
+      repository: { resource: repository }
+    require:
+      - { cond: file_found, error: FileNotFound }
+    output:
+      filePath: file.filePath
+      commitId: file.commitId
+      blobId: file.blobId
+      fileContent: file.fileContent
+
+  DeleteFile:
+    reads:
+      repository: { resource: repository }
+    effects:
+      - generate: { bind: commit, kind: hex, bytes: 8 }
+      - delete: { resource: file, missing: ignore }
+    output:
+      commitId: fx.commit
+
+quirks:
+  - operation: CreateRepository
+    note: >
+      The pack copied every request member into the stored repository and
+      answered it back, so a repository carried whatever had been sent --
+      including members RepositoryMetadata does not declare. Only the declared
+      ones are stored now: repositoryName, repositoryId, cloneUrlHttp,
+      repositoryDescription and the ARN. accountId, creationDate,
+      lastModifiedDate, defaultBranch, cloneUrlSsh and kmsKeyId are declared
+      and never set, so a repository has no default branch however many
+      branches it has.
+
+      The ARN is stored under `arn`, lower-case, where RepositoryMetadata
+      declares `Arn`. Every other member of that shape is lower-camel, so the
+      capital is easy to miss and the pack missed it: a caller reading the ARN
+      off a created or fetched repository reads nothing at all. That is the
+      most consequential thing in this service, because it fails silently --
+      an empty ARN is not an error, it is an empty string.
+
+      Creating a repository that already exists overwrites it and answers as
+      if it were new, where the real service faults with
+      RepositoryNameExistsException, and the repositoryId changes under a
+      caller holding the old one.
+  - operation: PutFile
+    note: >
+      A file is a path, a content blob and two fresh identifiers. Nothing is
+      committed: parentCommitId, branchName, commitMessage, name and email are
+      all dropped, so a put to a branch that does not exist succeeds, a put
+      with a stale parentCommitId succeeds, and the file lands in one flat
+      per-repository namespace that no branch owns. Every put mints a new
+      commitId and blobId whether or not the content changed, and treeId is
+      declared and never set.
+
+      The pack answered the whole stored record, which carries filePath and
+      fileContent -- neither declared by PutFileOutput, so no SDK could read
+      them. The bundle answers the declared members only.
+  - operation: GetFile
+    note: >
+      A file is fetched by path alone: the required commitSpecifier is ignored,
+      so asking for a path at an old commit answers the current content, and
+      there is no way to read history because none is kept. fileMode and
+      fileSize are declared and never set, so a caller cannot tell an
+      executable from a symlink from a regular file.
+  - operation: CreateBranch
+    note: >
+      A branch is a name and a commit id, and the commit id is not checked to
+      name a commit -- there are no commits, so every branch points at one that
+      never existed. The pack also generated a commit id when the request
+      omitted one, which CreateBranchInput declares as required: no SDK could
+      send a request that reached that branch, so the bundle does not carry it.
+      Creating
+      a branch that already exists overwrites it silently, and neither the
+      branch nor the file operations consult each other: deleting a branch
+      leaves every file in the repository untouched, because files are not
+      stored per branch.
+  - operation: DeleteRepository
+    note: >
+      Deleting an absent repository succeeds where getting it faults, and
+      answers an empty body where DeleteRepositoryOutput declares the
+      repositoryId. Deleting a repository leaves its branches and files behind
+      in their own collections, unreachable but not gone.
+  - operation: ListBranches
+    note: >
+      ListBranches answers every branch of the named repository and
+      ListRepositories every repository in the account and region; neither
+      paginates in practice, and ListRepositories ignores its sortBy and order.
+      A repository name that does not exist lists empty rather than faulting,
+      which is the opposite of what GetRepository does with the same name.
+  - operation: UpdateRepository
+    note: >
+      The pack served an operation called UpdateRepository, which CodeCommit
+      does not have -- the real service splits it into
+      UpdateRepositoryDescription, UpdateRepositoryName and
+      UpdateRepositoryEncryptionKey. No SDK could reach it, so the bundle does
+      not serve it, and a caller that somehow sent it now gets an unsupported
+      operation rather than a silent overwrite of the whole repository record.

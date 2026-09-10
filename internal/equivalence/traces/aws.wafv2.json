@@ -1,0 +1,542 @@
+{
+  "schema": "trace/1",
+  "service": "aws.wafv2",
+  "source": "pack:internal/services/aws/wafv2@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListWebACLs",
+      "input": {
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACLs": null
+      }
+    },
+    {
+      "operation": "CreateWebACL",
+      "input": {
+        "DefaultAction": {
+          "Allow": {}
+        },
+        "Name": "acl-one",
+        "Scope": "REGIONAL",
+        "VisibilityConfig": {
+          "CloudWatchMetricsEnabled": false,
+          "MetricName": "m",
+          "SampledRequestsEnabled": false
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "acl-7c589129",
+        "Summary": {
+          "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/webacl/acl-7c589129",
+          "DefaultAction": {
+            "Allow": {}
+          },
+          "Id": "acl-7c589129",
+          "Name": "acl-one",
+          "Scope": "REGIONAL"
+        }
+      },
+      "superseded": "None of the three create answers declares an Id -- the Summary carries it -- and the pack answered a bare Id beside the Summary. The member no SDK could read was the identifier the caller most wanted; it is dropped here and still present inside the Summary, where the model puts it."
+    },
+    {
+      "operation": "GetWebACL",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 1
+        },
+        "Name": "acl-one",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACL": {
+          "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/webacl/acl-7c589129",
+          "DefaultAction": {
+            "Allow": {}
+          },
+          "Id": "acl-7c589129",
+          "Name": "acl-one",
+          "Scope": "REGIONAL"
+        }
+      }
+    },
+    {
+      "operation": "GetWebACL",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 1
+        },
+        "Name": "acl-one",
+        "Scope": "CLOUDFRONT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "WAFNonexistentItemException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateWebACL",
+      "input": {
+        "DefaultAction": {
+          "Allow": {}
+        },
+        "Name": "acl-cf",
+        "Scope": "CLOUDFRONT",
+        "VisibilityConfig": {
+          "CloudWatchMetricsEnabled": false,
+          "MetricName": "m",
+          "SampledRequestsEnabled": false
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "acl-5f59f223",
+        "Summary": {
+          "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/webacl/acl-5f59f223",
+          "DefaultAction": {
+            "Allow": {}
+          },
+          "Id": "acl-5f59f223",
+          "Name": "acl-cf",
+          "Scope": "CLOUDFRONT"
+        }
+      },
+      "superseded": "None of the three create answers declares an Id -- the Summary carries it -- and the pack answered a bare Id beside the Summary. The member no SDK could read was the identifier the caller most wanted; it is dropped here and still present inside the Summary, where the model puts it."
+    },
+    {
+      "operation": "ListWebACLs",
+      "input": {
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACLs": [
+          {
+            "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/webacl/acl-7c589129",
+            "DefaultAction": {
+              "Allow": {}
+            },
+            "Id": "acl-7c589129",
+            "Name": "acl-one",
+            "Scope": "REGIONAL"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListWebACLs",
+      "input": {
+        "Scope": "CLOUDFRONT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACLs": [
+          {
+            "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/webacl/acl-5f59f223",
+            "DefaultAction": {
+              "Allow": {}
+            },
+            "Id": "acl-5f59f223",
+            "Name": "acl-cf",
+            "Scope": "CLOUDFRONT"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateWebACL",
+      "input": {
+        "DefaultAction": {
+          "Allow": {}
+        },
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 1
+        },
+        "LockToken": "lock-1",
+        "Name": "acl-one",
+        "Scope": "REGIONAL",
+        "VisibilityConfig": {
+          "CloudWatchMetricsEnabled": false,
+          "MetricName": "m",
+          "SampledRequestsEnabled": false
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "acl-7c589129",
+        "Summary": {
+          "DefaultAction": {
+            "Allow": {}
+          },
+          "Id": "acl-7c589129",
+          "Name": "acl-one",
+          "Scope": "REGIONAL"
+        }
+      },
+      "superseded": "UpdateWebACLResponse declares one member, NextLockToken. The pack answered a Summary and an Id, neither declared, and no NextLockToken -- so the whole update answer was unreadable. The bundle answers nothing rather than answering a token it does not have."
+    },
+    {
+      "operation": "GetWebACL",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 1
+        },
+        "Name": "acl-one",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACL": {
+          "DefaultAction": {
+            "Allow": {}
+          },
+          "Id": "acl-7c589129",
+          "Name": "acl-one",
+          "Scope": "REGIONAL"
+        }
+      }
+    },
+    {
+      "operation": "CreateIPSet",
+      "input": {
+        "Addresses": [
+          "192.0.2.0/24"
+        ],
+        "IPAddressVersion": "IPV4",
+        "Name": "ips",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "ipset-9c8e2cb0",
+        "Summary": {
+          "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/ipset/ipset-9c8e2cb0",
+          "Addresses": [
+            "192.0.2.0/24"
+          ],
+          "Id": "ipset-9c8e2cb0",
+          "Name": "ips",
+          "Scope": "REGIONAL"
+        }
+      },
+      "superseded": "None of the three create answers declares an Id -- the Summary carries it -- and the pack answered a bare Id beside the Summary. The member no SDK could read was the identifier the caller most wanted; it is dropped here and still present inside the Summary, where the model puts it."
+    },
+    {
+      "operation": "GetIPSet",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 9
+        },
+        "Name": "ips",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IPSet": {
+          "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/ipset/ipset-9c8e2cb0",
+          "Addresses": [
+            "192.0.2.0/24"
+          ],
+          "Id": "ipset-9c8e2cb0",
+          "Name": "ips",
+          "Scope": "REGIONAL"
+        }
+      }
+    },
+    {
+      "operation": "ListIPSets",
+      "input": {
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IPSets": [
+          {
+            "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/ipset/ipset-9c8e2cb0",
+            "Addresses": [
+              "192.0.2.0/24"
+            ],
+            "Id": "ipset-9c8e2cb0",
+            "Name": "ips",
+            "Scope": "REGIONAL"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateRuleGroup",
+      "input": {
+        "Capacity": 10,
+        "Name": "rg",
+        "Scope": "REGIONAL",
+        "VisibilityConfig": {
+          "CloudWatchMetricsEnabled": false,
+          "MetricName": "m",
+          "SampledRequestsEnabled": false
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "rg-33f6fc5d",
+        "Summary": {
+          "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/rulegroup/rg-33f6fc5d",
+          "Id": "rg-33f6fc5d",
+          "Name": "rg",
+          "Scope": "REGIONAL"
+        }
+      },
+      "superseded": "None of the three create answers declares an Id -- the Summary carries it -- and the pack answered a bare Id beside the Summary. The member no SDK could read was the identifier the caller most wanted; it is dropped here and still present inside the Summary, where the model puts it."
+    },
+    {
+      "operation": "GetRuleGroup",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 12
+        },
+        "Name": "rg",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RuleGroup": {
+          "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/rulegroup/rg-33f6fc5d",
+          "Id": "rg-33f6fc5d",
+          "Name": "rg",
+          "Scope": "REGIONAL"
+        }
+      }
+    },
+    {
+      "operation": "ListRuleGroups",
+      "input": {
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RuleGroups": [
+          {
+            "ARN": "arn:aws:wafv2:us-east-1:000000000000:regional/rulegroup/rg-33f6fc5d",
+            "Id": "rg-33f6fc5d",
+            "Name": "rg",
+            "Scope": "REGIONAL"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteRuleGroup",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 12
+        },
+        "LockToken": "lock-2",
+        "Name": "rg",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRuleGroups",
+      "input": {
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RuleGroups": null
+      }
+    },
+    {
+      "operation": "DeleteIPSet",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 9
+        },
+        "LockToken": "lock-3",
+        "Name": "ips",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteWebACL",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 1
+        },
+        "LockToken": "lock-4",
+        "Name": "acl-one",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListWebACLs",
+      "input": {
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACLs": null
+      }
+    },
+    {
+      "operation": "GetWebACL",
+      "input": {
+        "Id": {
+          "$fromPath": "Summary.Id",
+          "$fromStep": 1
+        },
+        "Name": "acl-one",
+        "Scope": "REGIONAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "WAFNonexistentItemException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

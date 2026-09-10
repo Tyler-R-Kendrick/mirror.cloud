@@ -1,0 +1,293 @@
+{
+  "schema": "trace/1",
+  "service": "aws.serverlessrepo",
+  "source": "pack:internal/services/aws/serverlessrepo@c575425",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Applications": null
+      }
+    },
+    {
+      "operation": "GetApplication",
+      "input": {
+        "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "Author": "someone",
+        "Description": "an app",
+        "Name": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BadRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "Author": "someone",
+        "Description": "an app",
+        "Name": "app-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+        "Author": "someone",
+        "Name": "app-one"
+      }
+    },
+    {
+      "operation": "GetApplication",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationId",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+        "Author": "someone",
+        "Name": "app-one"
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "Author": "someone",
+        "Description": "an app",
+        "Name": "app-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-two",
+        "Author": "someone",
+        "Name": "app-two"
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Applications": [
+          {
+            "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+            "Author": "someone",
+            "Name": "app-one"
+          },
+          {
+            "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-two",
+            "Author": "someone",
+            "Name": "app-two"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateApplicationVersion",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationId",
+          "$fromStep": 3
+        },
+        "SemanticVersion": "1.0.0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+        "SemanticVersion": "1.0.0"
+      }
+    },
+    {
+      "operation": "CreateApplicationVersion",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationId",
+          "$fromStep": 3
+        },
+        "SemanticVersion": "1.1.0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+        "SemanticVersion": "1.1.0"
+      }
+    },
+    {
+      "operation": "ListApplicationVersions",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Versions": [
+          {
+            "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+            "SemanticVersion": "1.0.0"
+          },
+          {
+            "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+            "SemanticVersion": "1.1.0"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationId",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Applications": [
+          {
+            "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-two",
+            "Author": "someone",
+            "Name": "app-two"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListApplicationVersions",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationId",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Versions": [
+          {
+            "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+            "SemanticVersion": "1.0.0"
+          },
+          {
+            "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/app-one",
+            "SemanticVersion": "1.1.0"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationId": "arn:aws:serverlessrepo:us-east-1:000000000000:applications/gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

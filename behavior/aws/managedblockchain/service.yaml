@@ -1,0 +1,106 @@
+schema: bir/1
+service: aws.managedblockchain
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No ledger is started: a network and a member are records that are
+# AVAILABLE the moment they are created.
+provenance: authored
+
+resources:
+  network:
+    collection: mbn
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [NetworkId]
+    record:
+      Id: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+      Status: "'AVAILABLE'"
+      Framework: "'Framework' in input ? string(input.Framework) : ''"
+
+  member:
+    collection: mbm
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [MemberId]
+    record:
+      Id: id
+      # The pack read the member's name out of MemberConfiguration, which is a
+      # structure, so the read always produced nothing and the name was always
+      # empty. Transcribed rather than corrected: the name lives at
+      # MemberConfiguration.Name and reaching for it here would be a behavior
+      # change dressed up as a fix.
+      Name: "''"
+      NetworkId: "'NetworkId' in input ? string(input.NetworkId) : ''"
+      Status: "'AVAILABLE'"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateNetwork:
+    effects:
+      - create: { resource: network }
+    output:
+      NetworkId: rec.Id
+
+  GetNetwork:
+    reads:
+      net: { resource: network }
+    require:
+      - { cond: net_found, error: NotFound }
+    output:
+      Network: net
+
+  ListNetworks:
+    list: { resource: network, member: Networks, paginate: model }
+
+  CreateMember:
+    effects:
+      - create: { resource: member }
+    output:
+      MemberId: rec.Id
+
+  GetMember:
+    reads:
+      mem: { resource: member }
+    require:
+      - { cond: mem_found, error: NotFound }
+    output:
+      Member: mem
+
+quirks:
+  - operation: CreateNetwork
+    note: >
+      The pack served a DeleteNetwork operation. There is no such operation in
+      the AWS model -- it declares DeleteMember, DeleteNode and DeleteAccessor,
+      and a network goes away when its last member does -- so no SDK could ever
+      have called it, and the bundle cannot express it. It is the one operation
+      this extraction removes from the emulated tier.
+
+      It does not disappear: the catalog still carries it, so it falls to the
+      mock tier and answers 200 with a synthesized body and an
+      x-mirror-fidelity: mock header, where before it answered as an emulated
+      success. The support matrix records the move as 5 emulate and 1 mock.
+      What it no longer does is delete anything, which is right -- deleting was
+      behavior invented for an operation the service does not have.
+  - operation: CreateNetwork
+    note: >
+      MemberId is a declared member of the answer and is not set: the real
+      CreateNetwork takes a MemberConfiguration and creates the network's first
+      member with it, and the pack created only the network. Nothing here
+      relates a member to its network beyond storing the NetworkId it was
+      given, which is not checked against an existing network.
+  - operation: CreateMember
+    note: >
+      A member's name is always empty, because the pack looked for it at the
+      top of the request while the model puts it inside MemberConfiguration.
+      InvitationId is required and ignored, so a member is created without an
+      invitation ever having been issued.
+  - operation: GetMember
+    note: >
+      NetworkId is required and ignored: a member is fetched by its own id
+      alone, so asking the wrong network for a member still answers with it.

@@ -1,0 +1,252 @@
+schema: bir/1
+service: aws.codedeploy
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing deploys: no instance is contacted, no revision is fetched
+# from S3 and no lifecycle hook runs, so a deployment is Succeeded before the
+# call that created it returns.
+provenance: authored
+
+resources:
+  application:
+    collection: cdapp
+    id:
+      input_members: [applicationName]
+    record:
+      applicationName: id
+
+  # A group is scoped to its application, so two applications may each have a
+  # group called grp and they are different records. Every operation on one
+  # reads its application first -- not to check it exists, which this service
+  # never does, but because the collection is named for it.
+  group:
+    collection: "cdg:{application.id}"
+    parent: application
+    id:
+      input_members: [deploymentGroupName]
+    record:
+      deploymentGroupName: id
+
+  deployment:
+    collection: cddep
+    id:
+      input_members: [deploymentId]
+    record:
+      deploymentId: id
+
+errors:
+  ApplicationNotFound:
+    code: ApplicationDoesNotExistException
+    http: 400
+    fault: client
+  GroupNotFound:
+    code: DeploymentGroupDoesNotExistException
+    http: 400
+    fault: client
+  DeploymentNotFound:
+    code: DeploymentDoesNotExistException
+    http: 400
+    fault: client
+
+operations:
+  CreateApplication:
+    effects:
+      - create:
+          resource: application
+          record:
+            applicationId: { generate: { kind: hex, bytes: 8 } }
+            computePlatform: >
+              'computePlatform' in input ? string(input.computePlatform) : ''
+    output:
+      applicationId: rec.applicationId
+
+  GetApplication:
+    reads:
+      application: { resource: application }
+    require:
+      - { cond: application_found, error: ApplicationNotFound }
+    output:
+      application: application
+
+  ListApplications:
+    list: { resource: application, member: applications, paginate: model }
+    output:
+      applications: "items.map(a, string(a.applicationName))"
+
+  DeleteApplication:
+    effects:
+      - delete: { resource: application, missing: ignore }
+
+  CreateDeploymentGroup:
+    reads:
+      application: { resource: application }
+    effects:
+      - create:
+          resource: group
+          record:
+            applicationName: "string(input.applicationName)"
+            deploymentGroupId: { generate: { kind: hex, bytes: 8 } }
+    output:
+      deploymentGroupId: rec.deploymentGroupId
+
+  GetDeploymentGroup:
+    reads:
+      application: { resource: application }
+      group: { resource: group }
+    require:
+      - { cond: group_found, error: GroupNotFound }
+    output:
+      deploymentGroupInfo: group
+
+  ListDeploymentGroups:
+    reads:
+      application: { resource: application }
+    list: { resource: group, member: deploymentGroups, paginate: model }
+    output:
+      deploymentGroups: "items.map(g, string(g.deploymentGroupName))"
+
+  DeleteDeploymentGroup:
+    reads:
+      application: { resource: application }
+    effects:
+      - delete: { resource: group, missing: ignore }
+
+  # The record is the request. Every member CreateDeploymentInput declares is
+  # stored as it arrived and answered by a later GetDeployment, with the id and
+  # the status forced on top -- see the quirk for what that means for a caller.
+  CreateDeployment:
+    effects:
+      - generate: { bind: did, kind: hex, bytes: 8 }
+      - create:
+          resource: deployment
+          key: "fx.did"
+          spread: input
+          record:
+            status: "'Succeeded'"
+    output:
+      deploymentId: rec.deploymentId
+
+  GetDeployment:
+    reads:
+      deployment: { resource: deployment }
+    require:
+      - { cond: deployment_found, error: DeploymentNotFound }
+    output:
+      deploymentInfo: deployment
+
+  ListDeployments:
+    list: { resource: deployment, member: deployments, paginate: model }
+    output:
+      deployments: "items.map(d, string(d.deploymentId))"
+
+  # A stop answers Stopped whether or not there was anything to stop, and only
+  # writes when there was.
+  StopDeployment:
+    reads:
+      deployment: { resource: deployment }
+    effects:
+      - patch:
+          resource: deployment
+          when: deployment_found
+          record:
+            status: "'Stopped'"
+    output:
+      status: "'Stopped'"
+
+quirks:
+  - operation: CreateDeployment
+    note: >
+      A deployment is Succeeded before the call returns, so nothing observes
+      Created, Queued, InProgress or Ready and nothing ever reaches Failed.
+      No instance is contacted, no revision is fetched -- the `revision` the
+      request carries is stored verbatim and never resolved, so it may name an
+      S3 bucket or a GitHub repository that does not exist -- and none of the
+      lifecycle hooks a deployment exists to run is run.
+
+      The record is the request. Whatever CreateDeploymentInput carried is
+      stored as it arrived and answered by GetDeployment, with `deploymentId`
+      and `status` forced on top. That is why the record looks fuller than the
+      rest of this service: it is not that the members are understood, it is
+      that they were copied. The consequence is the opposite of what the shape
+      suggests -- `deploymentConfigName` is stored and ignored, so
+      OneAtATime and AllAtOnce are the same thing here, and
+      `autoRollbackConfiguration` is stored and never consulted, so nothing
+      rolls back.
+
+      What the record does not have is everything DeploymentInfo declares and
+      the request does not carry: `createTime`, `completeTime`, `creator`,
+      `deploymentOverview`, `errorInformation`, `revisionUpdated`. So a
+      caller reading a deployment sees its own request back, plus a status
+      that was never anything else.
+
+      Neither the application nor the deployment group is checked to exist, so
+      a deployment can name both and have neither, and `deploymentGroupName`
+      is optional on the input -- a deployment need not name a group at all.
+  - operation: CreateApplication
+    note: >
+      An application is a name, eight hex bytes of applicationId and whatever
+      `computePlatform` said, unvalidated -- Server, Lambda, ECS and anything
+      else are equally accepted and equally ignored. `tags` are dropped.
+      Creating over an existing name replaces the application, minting a new
+      applicationId for it, where the real service faults with
+      ApplicationAlreadyExistsException. The `linkedToGitHub`,
+      `gitHubAccountName` and `createTime` members ApplicationInfo declares
+      are never set.
+
+      The pack looked for the name under `ApplicationName` before `applicationName`
+      and faulted with InvalidApplicationNameException when it found neither.
+      Every input shape here that takes an application declares
+      `applicationName` and requires it, so both the alternate spelling and
+      the fault behind it were unreachable under model validation and the
+      bundle does not carry them.
+  - operation: CreateDeploymentGroup
+    note: >
+      A deployment group is three members: the application it belongs to, its
+      own name and eight hex bytes of id. The `serviceRoleArn` the input
+      requires is dropped, as are `ec2TagFilters`, `autoScalingGroups`,
+      `deploymentConfigName`, `blueGreenDeploymentConfiguration`,
+      `loadBalancerInfo`, `alarmConfiguration` and `triggerConfigurations` --
+      so a group targets no instances, and a deployment against it reaches
+      none.
+
+      The application is not checked to exist, so a group can be created under
+      one that was never created, and it is then listed and fetched normally.
+      Creating over an existing group replaces it and mints a new
+      deploymentGroupId rather than faulting with
+      DeploymentGroupAlreadyExistsException.
+  - operation: DeleteDeploymentGroup
+    note: >
+      Both deletes answer an empty body and succeed whether or not their
+      subject existed. DeleteDeploymentGroupOutput declares
+      `hooksNotCleanedUp` and it is never set, which is accurate as far as it
+      goes -- there are no hooks.
+
+      Deleting an application leaves its deployments behind: they live in one
+      flat collection rather than under the application, so ListDeployments
+      still answers them and GetDeployment still resolves them afterwards.
+      Its groups do go, since those are scoped to it, but nothing checks that
+      a group is empty first.
+  - operation: ListDeployments
+    note: >
+      All three lists answer everything in the account and region and none of
+      them paginates: `nextToken` is accepted, ignored, and never returned.
+      ListDeployments in particular ignores `applicationName`,
+      `deploymentGroupName`, `includeOnlyStatuses` and `createTimeRange` --
+      every one of the four ways the operation exists to be narrowed -- so a
+      caller asking for one application's failed deployments gets every
+      deployment in the account, all of them Succeeded.
+
+      ListDeploymentGroups declares an `applicationName` on its response
+      alongside the group names and never sets it, so a caller cannot tell
+      from the answer which application it asked about.
+  - operation: StopDeployment
+    note: >
+      A stop answers `status: Stopped` whether or not the deployment exists,
+      and writes only when it does -- so stopping an id that was never created
+      succeeds and leaves nothing behind, while stopping a real one rewrites
+      its status. `statusMessage` is declared on the response and never set,
+      and `autoRollbackEnabled` is ignored, so a stop never rolls back.
+
+      Nothing checks what status the deployment is in, so a deployment that
+      already says Succeeded -- which is all of them -- can be stopped, and a
+      stopped one can be stopped again.

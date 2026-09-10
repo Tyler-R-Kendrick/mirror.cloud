@@ -1,0 +1,127 @@
+schema: bir/1
+service: aws.resource-explorer-2
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is indexed and nothing can be searched: an index is a
+# single record per region and a view is a name.
+provenance: authored
+
+resources:
+  # One index per account and region, which is what the real service allows,
+  # so the record has a fixed key rather than one drawn from the request.
+  index:
+    collection: reidx
+    singleton: index
+    arn: "arn:{partition}:resource-explorer-2:{region}:{account}:index/{id}"
+    record: {}
+
+  view:
+    collection: review
+    # A view is created by name and fetched by ARN, so the identifier is
+    # derived to cover both without taking an ARN apart.
+    id:
+      derive: >
+        'ViewArn' in input
+          ? string(input.ViewArn)
+          : 'arn:aws:resource-explorer-2:' + identity.region + ':' + identity.account
+            + ':view/' + string(input.ViewName)
+    record: {}
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # CreateIndex declares Arn, CreatedAt and State. The Type the pack answered
+  # with is declared on GetIndex, not here.
+  CreateIndex:
+    effects:
+      - generate: { bind: ix, kind: hex, bytes: 8 }
+      - put:
+          resource: index
+          record:
+            Arn: >
+              'arn:aws:resource-explorer-2:' + identity.region + ':'
+              + identity.account + ':index/' + fx.ix
+            State: "'ACTIVE'"
+            Type: "'LOCAL'"
+    output:
+      Arn: rec.Arn
+      State: rec.State
+
+  GetIndex:
+    reads:
+      ix: { resource: index }
+    require:
+      - { cond: ix_found, error: NotFound }
+    output:
+      Arn: ix.Arn
+      State: ix.State
+      Type: ix.Type
+
+  # A listed index declares Arn, Region and Type, and no State.
+  ListIndexes:
+    list: { resource: index, member: Indexes, paginate: model }
+    output:
+      Indexes: >
+        items.map(i, {
+          'Arn': i.Arn,
+          'Type': i.Type,
+          'Region': identity.region
+        })
+
+  DeleteIndex:
+    effects:
+      - delete: { resource: index, missing: ignore }
+    output: {}
+
+  CreateView:
+    effects:
+      - put:
+          resource: view
+          record:
+            ViewName: "string(input.ViewName)"
+            ViewArn: id
+    output:
+      View: rec
+
+  GetView:
+    reads:
+      v: { resource: view }
+    require:
+      - { cond: v_found, error: NotFound }
+    output:
+      View: v
+
+quirks:
+  - operation: CreateIndex
+    note: >
+      The pack answered a created index with its Type. CreateIndex declares
+      Arn, CreatedAt and State only -- Type is declared on GetIndex -- so it
+      was a member no SDK could read there. The declared shape outranks the
+      pack's authored behavior, so it is dropped from the answer and the
+      recorded step is superseded with that reason. CreatedAt is required and
+      is not set.
+  - operation: DeleteIndex
+    note: >
+      Arn is required and ignored: the one index in the region is deleted
+      whatever ARN is named, so deleting another account's index ARN deletes
+      this one. Deleting answers with nothing where the model declares Arn,
+      LastUpdatedAt and State.
+  - operation: CreateIndex
+    note: >
+      Creating an index twice overwrites the first rather than faulting, and
+      nothing is ever indexed: there is no Search operation here, so an index
+      is a record that says an index exists.
+  - operation: ListIndexes
+    note: >
+      The pack listed an index with its State. A listed index declares Arn,
+      Region and Type, and no State, so the listing carried a member no SDK
+      can read and left Region absent. The declared shape outranks the pack's
+      authored behavior, so the listing is projected and the recorded steps
+      are superseded with that reason. The Region reported is the caller's
+      own, because that is the only region an index can be in here; the real
+      service lists indexes across regions and a probe should say what that
+      answer looks like.

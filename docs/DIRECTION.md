@@ -1,8 +1,8 @@
 # mirror.cloud — Direction
 
 > Critical analysis of two competing proposals, and the synthesis that becomes the project thesis.
-> Status: **decided**. The executable form of this document is [`MASTER_PROMPT.md`](./MASTER_PROMPT.md).
-> This document has been through an adversarial review; the attacks on it, and the positioning and delivery advice that came out of that review, are in [`CRITIQUE.md`](./CRITIQUE.md).
+> Status: **decided, twice**. The v1 executable form is [`MASTER_PROMPT.md`](./MASTER_PROMPT.md); the current one — after auditing the v1 implementation — is [`MASTER_PROMPT_V2.md`](./MASTER_PROMPT_V2.md) (see §9).
+> Adversarial reviews of every revision, including the implementation audit, are in [`CRITIQUE.md`](./CRITIQUE.md).
 
 ---
 
@@ -23,9 +23,27 @@ Three properties fall out of that sentence, and every design decision below is d
 These are load-bearing facts, independently confirmed rather than assumed:
 
 - **LocalStack Community Edition is gone.** On 2026-03-23 LocalStack consolidated to a single image requiring `LOCALSTACK_AUTH_TOKEN`; the public GitHub repository was archived read-only. The last unauthenticated community release was `localstack/localstack:4.4.0`. Downstream ecosystems felt it immediately — Testcontainers (Java, Rust), Quarkus Dev Services, and Spring Cloud AWS all opened migration issues.
-- **A challenger wave already exists.** Floci (MIT, `floci-io/floci`) crossed 10k stars within months, marketing itself explicitly as a drop-in LocalStack CE replacement (~90 MB image, ~24 ms start, 20+ AWS services). Ecosystem projects are actively evaluating it as the default replacement.
+- **A challenger wave already exists.** Floci (MIT, `floci-io/floci`) crossed 10k stars within months, marketing itself explicitly as a drop-in LocalStack CE replacement (~90 MB image, ~24 ms start, 20+ AWS services). Ecosystem projects are actively evaluating it as the default replacement. MiniStack and kumo are also in the field.
+- **The spec-driven approach is already shipped, by someone else.** `faiscadev/fakecloud` (Rust, AGPL-3.0, ~521 stars, 6,300+ commits) generates from AWS's own Smithy models and claims 105 services, 7,391 operations, and 100% Smithy conformance across 248,319 generated test variants — plus real engines behind the stateful services (Lambda runtimes, Postgres/MySQL behind RDS, Redis behind ElastiCache).
 
-**The strategic reading.** The vacuum is real, but it is *already being filled* by hand-written AWS emulators. Entering that race with another hand-written AWS emulator means arriving late to a fight decided on service-count velocity — a fight where the incumbent has months of head start and the same ceiling LocalStack hit. The differentiated position is not "another emulator." It is **the thing that generates emulators**.
+**The strategic reading — corrected.** An earlier draft of this document claimed the differentiator was "we generate, they hand-write." **That claim is false, and it was the load-bearing claim.** fakecloud already generates from Smithy, at roughly ten times the service coverage this plan proposes.
+
+Two things follow, and they point in the same direction:
+
+1. **The AWS lane is crowded, not vacant.** Four credible entrants appeared within five months of the sunset. A fifth AWS emulator — generated or not — is arriving to a decided fight.
+2. **The scoreboard is not measuring technical completeness.** fakecloud is by a wide margin the most complete implementation and has roughly 2.5% of Floci's traction. The variables that differ are AGPL versus MIT, all-in-one-process versus drop-in simplicity, and marketing surface. This is the same lesson the LocalStack sunset taught, restated: **distribution and licensing beat capability**, and building a technically superior AWS emulator is not a strategy.
+
+What survives scrutiny is narrower and more defensible than "we generate emulators," because it is what *none* of the four entrants do:
+
+| Property | LocalStack | Floci | fakecloud | mirror.cloud |
+|---|---|---|---|---|
+| Non-AWS clouds | no | no | no | **yes — the whole point** |
+| Run one product standalone | no | no | no (all 105 on one port) | **yes** |
+| Proxy / record / replay against real cloud | no | no | no | **yes** |
+| Permissive license | (gated) | MIT | AGPL-3.0 | **Apache-2.0** |
+| Spec-update diffs as a day-2 workflow | no | no | no | **yes** |
+
+**The honest repositioning: AWS is the validation target, not the market.** Prove the generation pipeline against the best-documented specs in existence, then spend the differentiation where the field is genuinely empty — Azure and GCP, per-product composition, and the proxy tier. Competing for the AWS-emulator crown is the one move guaranteed not to pay.
 
 ---
 
@@ -128,7 +146,9 @@ flowchart LR
 | **emulate** | A hand-written behavior pack implementing real semantics on top of the generated protocol layer. | expensive, deliberate, few | The services people actually build on |
 | **proxy** | Pass-through to the real cloud, with record → replay cassettes and drift reporting. Off by default; secrets scrubbed. | cheap, requires credentials | Fidelity escape hatch, and the oracle that keeps the other two tiers honest |
 
-Every response carries `x-mirror-fidelity: mock|emulate|proxy`. A `--strict` mode refuses to serve mock-tier at all. **This is the differentiation:** Floci and LocalStack give you a curated list and a wall. mirror.cloud gives you a curated list, and behind it the entire published API surface at declared-lower fidelity, and behind that the real thing.
+Every response carries `x-mirror-fidelity: mock|emulate|proxy`. A `--strict` mode refuses to serve mock-tier at all.
+
+**What this buys, stated honestly.** Against a hand-written emulator, mock tier means one unsupported call doesn't end your test run. Against fakecloud's 105 AWS services it buys much less on AWS specifically — and it buys a great deal on every cloud where no emulator has 105 services, which is every cloud other than AWS. The tier system's durable value is not coverage; it is that **the fidelity is declared rather than guessed**, and that the same three tiers apply uniformly across providers. Nobody else offers proxy at all, and proxy is what makes the other two tiers auditable (§5.4, and `CRITIQUE.md` A9).
 
 ### 5.3 Per-product granularity
 
@@ -158,7 +178,7 @@ Apache-2.0. No auth token, ever, for any capability. No telemetry, no phone-home
 |---|---|---|
 | Language | **Go** | Single static binary, fast cold start, strongest precedent in this tool class, best agent reliability on large codebases |
 | Emulate-tier services | **S3, DynamoDB, SQS, SNS, STS, IAM(-lite), SSM, Secrets Manager** | The verified core of what the vacated market actually used |
-| Cross-cloud proof | **Google Cloud Storage**, generated through the same pipeline | Forces the canonical model to be provider-neutral in practice, not just in claim. Without a second provider, the abstraction is unfalsifiable |
+| Cross-cloud proof | **Google Cloud Storage**, generated through the same pipeline | Forces the canonical model to be provider-neutral in practice, not just in claim. Without a second provider, the abstraction is unfalsifiable. Given §2, this is no longer merely a proof — it is the direction the project's differentiation actually lives in, and the case for widening it in v2 is strong |
 | Mock tier | **A curated set (~20–30 commonly co-used services), extensible with `mirror spec add`** | The differentiation, without a heavy default binary. Generating every published service would blow both the cold-start and binary-size budgets that make the tool pleasant |
 | Lambda | **Cut from v1**, extension point specified | Honest scoping. Compute lifecycle is a project unto itself; shipping it as a stub violates the no-stubs rule |
 | IAM policy evaluation | **Not implemented**, `Authorizer` interface is the seam | Documented allow-all beats a wrong policy engine |
@@ -185,3 +205,22 @@ The full positioning, iteration, and delivery argument — including why this pr
 The definition of done is behavioral, automated, and hostile to self-congratulation: official SDKs (Go, Python, and the Google storage client) round-trip; AWS CLI v2 works against it unmodified; `terraform apply` and `terraform destroy` both succeed across all emulate-tier services; two accounts cannot see each other's resources; snapshot/restore round-trips; identical seeds produce byte-identical responses; a single product boots standalone; cold start is under two seconds; regeneration from pinned specs produces a zero diff; and unimplemented operations return an error that is unmistakably ours and never mistakable for the real cloud's.
 
 The full, self-contained execution specification — frozen interfaces, protocol details, per-service operation lists, swarm contracts, and every validation oracle — is in [`MASTER_PROMPT.md`](./MASTER_PROMPT.md).
+
+---
+
+## 9. The v2 correction: generate behavior, not just protocol
+
+An implementation of the v1 specification now exists in this tree — wire-compatible, well-tested, and built the wrong way. An audit (three independent explorations; findings in [`CRITIQUE.md`](./CRITIQUE.md) Part 5) established that 81% of its source is hand-written behavior across 152 service packs, the spec-ingestion pipeline is disconnected (the booted model has empty shape maps), nothing has ever been compared to a real cloud, and tier labels are self-declared rather than measured. That is the LocalStack maintenance treadmill this document's own §3 warned against — rebuilt locally, with better tests.
+
+The v2 direction closes the gap between the founding claim and the code, and widens the claim where the evidence supports it:
+
+1. **Behavior becomes data.** A Behavior IR — resources, lifecycle statecharts, CEL preconditions, a closed effect vocabulary, ordered error tables, limits, quirks — executed by one generic engine, with the genuinely algorithmic cores (DynamoDB expressions, ASL, policy eval, the object store) as budgeted, versioned primitives. Schema and worked examples: [`BEHAVIOR_IR.md`](./BEHAVIOR_IR.md).
+2. **Parity becomes a measurement.** Edge cases, failure scenarios, and undocumented behaviors — the things parity actually consists of — are acquired by maintainer-side probing of real clouds, versioned as content-addressed corpora, replayed differentially, and rolled up into per-operation provenance grades. Vendor changes that were never announced fall out mechanically as a **behavioral changelog**. Design: [`PARITY_PIPELINE.md`](./PARITY_PIPELINE.md).
+3. **The 152 packs become the migration oracle.** Strangler extraction: each pack's own tests gate its replacement's equivalence, then the pack is deleted. CI ratchets make the hand-rolling path unmergeable — new services enter as spec + behavior data only.
+4. **Provider neutrality gets real targets.** All eight intended clouds (AWS, Azure, GCP, Cloudflare, Vercel, Hetzner, Hostinger, DigitalOcean) publish machine-readable specs, and one OpenAPI receiver covers six of them. The next proof is DigitalOcean and Hetzner served with zero provider-specific Go.
+
+The execution contract for the implementing agent is [`MASTER_PROMPT_V2.md`](./MASTER_PROMPT_V2.md).
+
+### Where this stands
+
+The machinery is in the tree and under test; the migration has begun and is 3.9% done. What exists: anti-drift ratchets that fail CI on any growth of the hand-written surface; a reconnected spec pipeline producing 149 committed service models carrying 77,656 shapes, reproducible byte-for-byte from the lock; the B-IR schema, loader and validator; the engine that serves a bundle as an ordinary behavior pack; the equivalence recorder and its committed traces; and six services -- `aws.shield`, `aws.memorydb`, `aws.textract`, `aws.polly`, `aws.account`, `aws.iot-data` -- served entirely from `behavior/aws/<service>/service.yaml` with their Go packs deleted. `aws.sqs`'s message plane is expressed and gated too -- statecharts with lazily-fired deadlines, FIFO ordering, deduplication, dead-letter redrive and long polling all fit -- though six of its operations are not yet, so its pack still serves and the bundle shadows it. What does not exist: the probe harness and corpora, so every provenance cell still reads `authored`; and 146 packs remain. The measured trend is in [`CRITIQUE.md`](./CRITIQUE.md) Part 7.

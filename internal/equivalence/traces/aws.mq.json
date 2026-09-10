@@ -1,0 +1,775 @@
+{
+  "schema": "trace/1",
+  "service": "aws.mq",
+  "source": "internal/services/aws/mq",
+  "note": "Brokers, the users scoped under them, and configurations attached to nothing.",
+  "steps": [
+    {
+      "operation": "ListBrokers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerSummaries": null
+      }
+    },
+    {
+      "operation": "CreateBroker",
+      "input": {
+        "AutoMinorVersionUpgrade": true,
+        "BrokerName": "bus",
+        "DeploymentMode": "SINGLE_INSTANCE",
+        "EngineType": "RABBITMQ",
+        "EngineVersion": "3.11.20",
+        "HostInstanceType": "mq.t3.micro",
+        "PubliclyAccessible": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerArn": "arn:aws:mq:us-east-1:000000000000:broker:b-7c589129",
+        "BrokerId": "b-7c589129"
+      }
+    },
+    {
+      "operation": "CreateBroker",
+      "input": {
+        "AutoMinorVersionUpgrade": true,
+        "BrokerName": "other",
+        "DeploymentMode": "SINGLE_INSTANCE",
+        "EngineType": "ACTIVEMQ",
+        "HostInstanceType": "mq.t3.micro",
+        "PubliclyAccessible": false
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerArn": "arn:aws:mq:us-east-1:000000000000:broker:b-5f59f223",
+        "BrokerId": "b-5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeBroker",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerArn": "arn:aws:mq:us-east-1:000000000000:broker:b-7c589129",
+        "BrokerId": "b-7c589129",
+        "BrokerName": "bus",
+        "BrokerState": "RUNNING",
+        "EngineType": "RABBITMQ",
+        "EngineVersion": "3.11.20",
+        "HostInstanceType": "mq.t3.micro"
+      }
+    },
+    {
+      "operation": "DescribeBroker",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerArn": "arn:aws:mq:us-east-1:000000000000:broker:b-5f59f223",
+        "BrokerId": "b-5f59f223",
+        "BrokerName": "other",
+        "BrokerState": "RUNNING",
+        "EngineType": "ACTIVEMQ",
+        "EngineVersion": "",
+        "HostInstanceType": "mq.t3.micro"
+      }
+    },
+    {
+      "operation": "DescribeBroker",
+      "input": {
+        "BrokerId": "b-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListBrokers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerSummaries": [
+          {
+            "BrokerArn": "arn:aws:mq:us-east-1:000000000000:broker:b-5f59f223",
+            "BrokerId": "b-5f59f223",
+            "BrokerName": "other",
+            "BrokerState": "RUNNING",
+            "EngineType": "ACTIVEMQ",
+            "EngineVersion": "",
+            "HostInstanceType": "mq.t3.micro"
+          },
+          {
+            "BrokerArn": "arn:aws:mq:us-east-1:000000000000:broker:b-7c589129",
+            "BrokerId": "b-7c589129",
+            "BrokerName": "bus",
+            "BrokerState": "RUNNING",
+            "EngineType": "RABBITMQ",
+            "EngineVersion": "3.11.20",
+            "HostInstanceType": "mq.t3.micro"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RebootBroker",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "RebootBroker",
+      "input": {
+        "BrokerId": "b-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeBroker",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerArn": "arn:aws:mq:us-east-1:000000000000:broker:b-7c589129",
+        "BrokerId": "b-7c589129",
+        "BrokerName": "bus",
+        "BrokerState": "RUNNING",
+        "EngineType": "RABBITMQ",
+        "EngineVersion": "3.11.20",
+        "HostInstanceType": "mq.t3.micro"
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        },
+        "ConsoleAccess": true,
+        "Password": "hunter2hunter2",
+        "Username": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        },
+        "Password": "hunter2hunter2",
+        "Username": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 2
+        },
+        "Password": "different-pass",
+        "Username": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        },
+        "Username": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerId": "b-7c589129",
+        "ConsoleAccess": true,
+        "Username": "amy"
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 2
+        },
+        "Username": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerId": "b-5f59f223",
+        "ConsoleAccess": null,
+        "Username": "amy"
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        },
+        "Username": "nobody"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "BrokerId": "b-7c589129",
+            "ConsoleAccess": true,
+            "Username": "amy"
+          },
+          {
+            "BrokerId": "b-7c589129",
+            "ConsoleAccess": null,
+            "Username": "bob"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "BrokerId": "b-5f59f223",
+            "ConsoleAccess": null,
+            "Username": "amy"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "BrokerId": "b-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": null
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        },
+        "Username": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "BrokerId": "b-7c589129",
+            "ConsoleAccess": true,
+            "Username": "amy"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 1
+        },
+        "Username": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Configurations": null
+      }
+    },
+    {
+      "operation": "CreateConfiguration",
+      "input": {
+        "EngineType": "ACTIVEMQ",
+        "Name": "activemq-defaults"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:mq:us-east-1:000000000000:configuration:c-9c8e2cb0",
+        "EngineType": "ACTIVEMQ",
+        "Id": "c-9c8e2cb0",
+        "Name": "activemq-defaults"
+      },
+      "superseded": "CreateConfigurationResponse declares Arn, Id, Name, Created, LatestRevision and AuthenticationStrategy; the pack answered the whole stored record, so EngineType travelled in a response with no place for it. The declared shape outranks the pack."
+    },
+    {
+      "operation": "CreateConfiguration",
+      "input": {
+        "EngineType": "RABBITMQ",
+        "Name": "rabbit-defaults"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:mq:us-east-1:000000000000:configuration:c-33f6fc5d",
+        "EngineType": "RABBITMQ",
+        "Id": "c-33f6fc5d",
+        "Name": "rabbit-defaults"
+      },
+      "superseded": "Same as step 23: the pack answered an EngineType CreateConfigurationResponse does not declare."
+    },
+    {
+      "operation": "DescribeConfiguration",
+      "input": {
+        "ConfigurationId": {
+          "$fromPath": "Id",
+          "$fromStep": 23
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:mq:us-east-1:000000000000:configuration:c-9c8e2cb0",
+        "EngineType": "ACTIVEMQ",
+        "Id": "c-9c8e2cb0",
+        "Name": "activemq-defaults"
+      }
+    },
+    {
+      "operation": "DescribeConfiguration",
+      "input": {
+        "ConfigurationId": "c-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Configurations": [
+          {
+            "Arn": "arn:aws:mq:us-east-1:000000000000:configuration:c-33f6fc5d",
+            "EngineType": "RABBITMQ",
+            "Id": "c-33f6fc5d",
+            "Name": "rabbit-defaults"
+          },
+          {
+            "Arn": "arn:aws:mq:us-east-1:000000000000:configuration:c-9c8e2cb0",
+            "EngineType": "ACTIVEMQ",
+            "Id": "c-9c8e2cb0",
+            "Name": "activemq-defaults"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteConfiguration",
+      "input": {
+        "ConfigurationId": {
+          "$fromPath": "Id",
+          "$fromStep": 24
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Configurations": [
+          {
+            "Arn": "arn:aws:mq:us-east-1:000000000000:configuration:c-9c8e2cb0",
+            "EngineType": "ACTIVEMQ",
+            "Id": "c-9c8e2cb0",
+            "Name": "activemq-defaults"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteConfiguration",
+      "input": {
+        "ConfigurationId": {
+          "$fromPath": "Id",
+          "$fromStep": 24
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeBrokerEngineTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerEngineTypes": [
+          {
+            "EngineType": "ACTIVEMQ"
+          },
+          {
+            "EngineType": "RABBITMQ"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteBroker",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerId": "b-5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeBroker",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "BrokerId": {
+          "$fromPath": "BrokerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "BrokerId": "b-5f59f223",
+            "ConsoleAccess": null,
+            "Username": "amy"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteBroker",
+      "input": {
+        "BrokerId": "b-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerId": "b-nope"
+      }
+    },
+    {
+      "operation": "ListBrokers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BrokerSummaries": [
+          {
+            "BrokerArn": "arn:aws:mq:us-east-1:000000000000:broker:b-7c589129",
+            "BrokerId": "b-7c589129",
+            "BrokerName": "bus",
+            "BrokerState": "RUNNING",
+            "EngineType": "RABBITMQ",
+            "EngineVersion": "3.11.20",
+            "HostInstanceType": "mq.t3.micro"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,319 @@
+{
+  "schema": "trace/1",
+  "service": "aws.elasticsearch",
+  "source": "pack:internal/services/aws/elasticsearch@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListDomainNames",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainNames": null
+      }
+    },
+    {
+      "operation": "DescribeElasticsearchDomain",
+      "input": {
+        "DomainName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateElasticsearchDomain",
+      "input": {
+        "DomainName": "d1",
+        "ElasticsearchVersion": "7.9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainName": "d1",
+        "DomainStatus": {
+          "Created": true,
+          "Deleted": false,
+          "DomainName": "d1",
+          "Engine": "Elasticsearch",
+          "Processing": false
+        },
+        "ElasticsearchVersion": "7.9"
+      },
+      "superseded": "CreateElasticsearchDomainResponse declares a DomainStatus and nothing else, and the pack answered a DomainName and an ElasticsearchVersion beside it. UpdateElasticsearchDomainConfigResponse declares a DomainConfig and a DryRunResults, and the pack answered none of those -- so the whole update answer was unreadable. The declared shapes outrank the pack's authored behavior; the write itself is unchanged."
+    },
+    {
+      "operation": "DescribeElasticsearchDomain",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "Created": true,
+          "Deleted": false,
+          "DomainName": "d1",
+          "Engine": "Elasticsearch",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "CreateElasticsearchDomain",
+      "input": {
+        "DomainName": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainName": "d2",
+        "DomainStatus": {
+          "Created": true,
+          "Deleted": false,
+          "DomainName": "d2",
+          "Engine": "Elasticsearch",
+          "Processing": false
+        },
+        "ElasticsearchVersion": "7.10"
+      },
+      "superseded": "CreateElasticsearchDomainResponse declares a DomainStatus and nothing else, and the pack answered a DomainName and an ElasticsearchVersion beside it. UpdateElasticsearchDomainConfigResponse declares a DomainConfig and a DryRunResults, and the pack answered none of those -- so the whole update answer was unreadable. The declared shapes outrank the pack's authored behavior; the write itself is unchanged."
+    },
+    {
+      "operation": "ListDomainNames",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainNames": [
+          {
+            "DomainName": "d1",
+            "EngineType": "Elasticsearch"
+          },
+          {
+            "DomainName": "d2",
+            "EngineType": "Elasticsearch"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeElasticsearchDomains",
+      "input": {
+        "DomainNames": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatusList": [
+          {
+            "Created": true,
+            "Deleted": false,
+            "DomainName": "d1",
+            "Engine": "Elasticsearch",
+            "Processing": false
+          },
+          {
+            "Created": true,
+            "Deleted": false,
+            "DomainName": "d2",
+            "Engine": "Elasticsearch",
+            "Processing": false
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeElasticsearchDomains",
+      "input": {
+        "DomainNames": [
+          "d1",
+          "missing"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatusList": [
+          {
+            "Created": true,
+            "Deleted": false,
+            "DomainName": "d1",
+            "Engine": "Elasticsearch",
+            "Processing": false
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateElasticsearchDomainConfig",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainName": "d1",
+        "DomainStatus": {
+          "Created": true,
+          "Deleted": false,
+          "DomainName": "d1",
+          "Engine": "Elasticsearch",
+          "Processing": false
+        },
+        "ElasticsearchVersion": "7.10"
+      },
+      "superseded": "CreateElasticsearchDomainResponse declares a DomainStatus and nothing else, and the pack answered a DomainName and an ElasticsearchVersion beside it. UpdateElasticsearchDomainConfigResponse declares a DomainConfig and a DryRunResults, and the pack answered none of those -- so the whole update answer was unreadable. The declared shapes outrank the pack's authored behavior; the write itself is unchanged."
+    },
+    {
+      "operation": "DescribeElasticsearchDomain",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "Created": true,
+          "Deleted": false,
+          "DomainName": "d1",
+          "Engine": "Elasticsearch",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "DeleteElasticsearchDomain",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "Created": true,
+          "Deleted": true,
+          "DomainName": "d1",
+          "Engine": "Elasticsearch",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "DescribeElasticsearchDomain",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDomainNames",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainNames": [
+          {
+            "DomainName": "d2",
+            "EngineType": "Elasticsearch"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteElasticsearchDomain",
+      "input": {
+        "DomainName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "Deleted": true,
+          "DomainName": "absent"
+        }
+      }
+    }
+  ]
+}

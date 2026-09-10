@@ -1,0 +1,93 @@
+schema: bir/1
+service: aws.mwaa
+
+# Transcribed from the hand-written pack, not established against the real
+# service. MWAA stores environment records; there is no scheduler, no workers
+# and nothing ever leaves AVAILABLE, which is what the pack did and is stated
+# in quirks rather than implied by silence.
+provenance: authored
+
+resources:
+  environment:
+    collection: mwaaenv
+    id:
+      input_members: [Name]
+    arn: "arn:{partition}:airflow:{region}:{account}:environment/{id}"
+    record:
+      Name: id
+      Arn: arn
+      # An environment is born available and stays there: nothing in this
+      # emulator provisions anything, so a CREATING state would be a promise
+      # of a transition that never comes.
+      Status: "'AVAILABLE'"
+      AirflowVersion: "'AirflowVersion' in input ? string(input.AirflowVersion) : ''"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # Create and update are one operation here: the pack replaced the record
+  # wholesale either way, and the fields it keeps are the ones both carry.
+  CreateEnvironment:
+    require:
+      - { cond: "string(input.Name) != ''", error: Validation }
+    effects:
+      - put: { resource: environment }
+    output:
+      Arn: rec.Arn
+
+  UpdateEnvironment:
+    require:
+      - { cond: "string(input.Name) != ''", error: Validation }
+    effects:
+      - put: { resource: environment }
+    output:
+      Arn: rec.Arn
+
+  GetEnvironment:
+    reads:
+      env: { resource: environment }
+    require:
+      - { cond: env_found, error: NotFound }
+    output:
+      Environment: env
+
+  ListEnvironments:
+    list: { resource: environment, member: Environments, paginate: model }
+    output:
+      Environments: "items.map(e, e.Name)"
+
+  # Deleting an environment that is not there is not an error in this service.
+  DeleteEnvironment:
+    effects:
+      - delete: { resource: environment, missing: ignore }
+
+  CreateCliToken:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 16 }
+    output:
+      CliToken: fx.token
+      WebServerHostname: "string(input.Name) + '.airflow.local'"
+
+quirks:
+  - operation: CreateEnvironment
+    note: >
+      The environment is answered as AVAILABLE immediately and never leaves
+      that state. Real MWAA spends twenty minutes or so in CREATING and can
+      end in CREATE_FAILED, which a caller polling GetEnvironment would see;
+      here it never does. Transcribed from the pack; a probe should record
+      the real state sequence.
+  - operation: UpdateEnvironment
+    note: >
+      Update replaces the stored record rather than merging into it, so a
+      field the update omits is cleared rather than kept. That is the pack's
+      behavior and almost certainly not the service's; it is left as-is
+      because the two operations were one code path and separating them on
+      guesswork would be inventing behavior rather than transcribing it.

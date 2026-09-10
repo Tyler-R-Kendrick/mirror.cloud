@@ -1,0 +1,360 @@
+{
+  "schema": "trace/1",
+  "service": "aws.pinpoint",
+  "source": "pack:internal/services/aws/pinpoint@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationsResponse": {
+          "Item": null
+        }
+      }
+    },
+    {
+      "operation": "GetApp",
+      "input": {
+        "ApplicationId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateApp",
+      "input": {
+        "CreateApplicationRequest": {
+          "Name": "app-one"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationResponse": {
+          "Arn": "arn:aws:mobiletargeting:us-east-1:000000000000:apps/7c589129",
+          "Id": "7c589129",
+          "Name": "app-one"
+        }
+      }
+    },
+    {
+      "operation": "GetApp",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationResponse": {
+          "Arn": "arn:aws:mobiletargeting:us-east-1:000000000000:apps/7c589129",
+          "Id": "7c589129",
+          "Name": "app-one"
+        }
+      }
+    },
+    {
+      "operation": "CreateApp",
+      "input": {
+        "CreateApplicationRequest": {
+          "Name": "app-two"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationResponse": {
+          "Arn": "arn:aws:mobiletargeting:us-east-1:000000000000:apps/5f59f223",
+          "Id": "5f59f223",
+          "Name": "app-two"
+        }
+      }
+    },
+    {
+      "operation": "GetApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationsResponse": {
+          "Item": [
+            {
+              "Arn": "arn:aws:mobiletargeting:us-east-1:000000000000:apps/5f59f223",
+              "Id": "5f59f223",
+              "Name": "app-two"
+            },
+            {
+              "Arn": "arn:aws:mobiletargeting:us-east-1:000000000000:apps/7c589129",
+              "Id": "7c589129",
+              "Name": "app-one"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "CreateCampaign",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 2
+        },
+        "WriteCampaignRequest": {
+          "Name": "spring",
+          "SegmentId": "seg-1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CampaignResponse": {
+          "ApplicationId": "7c589129",
+          "Id": "9c8e2cb0",
+          "Name": "",
+          "State": "SCHEDULED"
+        }
+      },
+      "superseded": "CampaignResponse declares State as a CampaignState structure carrying a CampaignStatus, and the pack answered with the bare string SCHEDULED, which no SDK can deserialize. The declared shape outranks the pack's authored behavior, so the same value is written in the shape that declares it; nothing about the value changed."
+    },
+    {
+      "operation": "GetCampaign",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 2
+        },
+        "CampaignId": {
+          "$fromPath": "CampaignResponse.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CampaignResponse": {
+          "ApplicationId": "7c589129",
+          "Id": "9c8e2cb0",
+          "Name": "",
+          "State": "SCHEDULED"
+        }
+      },
+      "superseded": "CampaignResponse declares State as a CampaignState structure carrying a CampaignStatus, and the pack answered with the bare string SCHEDULED, which no SDK can deserialize. The declared shape outranks the pack's authored behavior, so the same value is written in the shape that declares it; nothing about the value changed."
+    },
+    {
+      "operation": "GetCampaign",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 4
+        },
+        "CampaignId": {
+          "$fromPath": "CampaignResponse.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SendMessages",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 2
+        },
+        "MessageRequest": {
+          "Addresses": {
+            "a@example.com": {
+              "ChannelType": "EMAIL"
+            }
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MessageResponse": {
+          "ApplicationId": "7c589129",
+          "Result": {}
+        }
+      }
+    },
+    {
+      "operation": "DeleteApp",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetApps",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationsResponse": {
+          "Item": [
+            {
+              "Arn": "arn:aws:mobiletargeting:us-east-1:000000000000:apps/5f59f223",
+              "Id": "5f59f223",
+              "Name": "app-two"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "GetCampaign",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 2
+        },
+        "CampaignId": {
+          "$fromPath": "CampaignResponse.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CampaignResponse": {
+          "ApplicationId": "7c589129",
+          "Id": "9c8e2cb0",
+          "Name": "",
+          "State": "SCHEDULED"
+        }
+      },
+      "superseded": "CampaignResponse declares State as a CampaignState structure carrying a CampaignStatus, and the pack answered with the bare string SCHEDULED, which no SDK can deserialize. The declared shape outranks the pack's authored behavior, so the same value is written in the shape that declares it; nothing about the value changed."
+    },
+    {
+      "operation": "DeleteCampaign",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 2
+        },
+        "CampaignId": {
+          "$fromPath": "CampaignResponse.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetCampaign",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "ApplicationResponse.Id",
+          "$fromStep": 2
+        },
+        "CampaignId": {
+          "$fromPath": "CampaignResponse.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    }
+  ]
+}

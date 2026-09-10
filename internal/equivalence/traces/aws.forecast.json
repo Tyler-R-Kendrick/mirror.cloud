@@ -1,0 +1,286 @@
+{
+  "schema": "trace/1",
+  "service": "aws.forecast",
+  "source": "pack:internal/services/aws/forecast@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListDatasets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Datasets": null
+      }
+    },
+    {
+      "operation": "DescribeDataset",
+      "input": {
+        "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDataset",
+      "input": {
+        "DatasetName": "ds1",
+        "DatasetType": "TARGET_TIME_SERIES",
+        "Domain": "RETAIL",
+        "Schema": {
+          "Attributes": [
+            {
+              "AttributeName": "item_id",
+              "AttributeType": "string"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds1"
+      }
+    },
+    {
+      "operation": "DescribeDataset",
+      "input": {
+        "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds1",
+        "DatasetName": "ds1",
+        "Domain": "RETAIL",
+        "Status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "CreateDataset",
+      "input": {
+        "DatasetName": "ds2",
+        "DatasetType": "TARGET_TIME_SERIES",
+        "Domain": "WEB_TRAFFIC",
+        "Schema": {
+          "Attributes": [
+            {
+              "AttributeName": "item_id",
+              "AttributeType": "string"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds2"
+      }
+    },
+    {
+      "operation": "ListDatasets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Datasets": [
+          {
+            "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds1",
+            "DatasetName": "ds1",
+            "Domain": "RETAIL",
+            "Status": "ACTIVE"
+          },
+          {
+            "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds2",
+            "DatasetName": "ds2",
+            "Domain": "WEB_TRAFFIC",
+            "Status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "DatasetSummary declares no Status, and the pack listed the stored record, which carries one -- a member no SDK could read in a listing. The declared shape outranks the pack's authored behavior, so the listed form projects to the summary's own members."
+    },
+    {
+      "operation": "CreatePredictor",
+      "input": {
+        "FeaturizationConfig": {
+          "ForecastFrequency": "D"
+        },
+        "ForecastHorizon": 24,
+        "InputDataConfig": {
+          "DatasetGroupArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds1"
+        },
+        "PredictorName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PredictorArn": "arn:aws:forecast:us-east-1:000000000000:predictor/p1"
+      }
+    },
+    {
+      "operation": "DescribePredictor",
+      "input": {
+        "PredictorArn": {
+          "$fromPath": "PredictorArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PredictorArn": "arn:aws:forecast:us-east-1:000000000000:predictor/p1",
+        "PredictorName": "p1",
+        "Status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "DescribePredictor",
+      "input": {
+        "PredictorArn": "arn:aws:forecast:us-east-1:000000000000:predictor/p1-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeletePredictor",
+      "input": {
+        "PredictorArn": {
+          "$fromPath": "PredictorArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribePredictor",
+      "input": {
+        "PredictorArn": {
+          "$fromPath": "PredictorArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDataset",
+      "input": {
+        "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDatasets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Datasets": [
+          {
+            "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds2",
+            "DatasetName": "ds2",
+            "Domain": "WEB_TRAFFIC",
+            "Status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "DatasetSummary declares no Status, and the pack listed the stored record, which carries one -- a member no SDK could read in a listing. The declared shape outranks the pack's authored behavior, so the listed form projects to the summary's own members."
+    },
+    {
+      "operation": "DeleteDataset",
+      "input": {
+        "DatasetArn": "arn:aws:forecast:us-east-1:000000000000:dataset/ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

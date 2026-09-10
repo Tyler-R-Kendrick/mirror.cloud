@@ -1,0 +1,256 @@
+{
+  "schema": "trace/1",
+  "service": "aws.access-analyzer",
+  "source": "pack:internal/services/aws/accessanalyzer@55959ff",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListAnalyzers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "analyzers": null
+      }
+    },
+    {
+      "operation": "GetAnalyzer",
+      "input": {
+        "analyzerName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateAnalyzer",
+      "input": {
+        "analyzerName": "",
+        "type": "ACCOUNT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateAnalyzer",
+      "input": {
+        "analyzerName": "acct",
+        "type": "ACCOUNT"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:access-analyzer:us-east-1:000000000000:analyzer/acct"
+      }
+    },
+    {
+      "operation": "GetAnalyzer",
+      "input": {
+        "analyzerName": "acct"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "analyzer": {
+          "arn": "arn:aws:access-analyzer:us-east-1:000000000000:analyzer/acct",
+          "name": "acct",
+          "status": "ACTIVE",
+          "type": "ACCOUNT"
+        }
+      }
+    },
+    {
+      "operation": "CreateAnalyzer",
+      "input": {
+        "analyzerName": "org",
+        "type": "ORGANIZATION"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:access-analyzer:us-east-1:000000000000:analyzer/org"
+      }
+    },
+    {
+      "operation": "ListAnalyzers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "analyzers": [
+          {
+            "arn": "arn:aws:access-analyzer:us-east-1:000000000000:analyzer/acct",
+            "name": "acct",
+            "status": "ACTIVE",
+            "type": "ACCOUNT"
+          },
+          {
+            "arn": "arn:aws:access-analyzer:us-east-1:000000000000:analyzer/org",
+            "name": "org",
+            "status": "ACTIVE",
+            "type": "ORGANIZATION"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListFindings",
+      "input": {
+        "analyzerArn": {
+          "$fromPath": "arn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "findings": []
+      }
+    },
+    {
+      "operation": "CreateArchiveRule",
+      "input": {
+        "analyzerName": "acct",
+        "filter": {
+          "principal": {
+            "eq": [
+              "000000000000"
+            ]
+          }
+        },
+        "ruleName": "rule-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteArchiveRule",
+      "input": {
+        "analyzerName": "acct",
+        "ruleName": "rule-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteArchiveRule",
+      "input": {
+        "analyzerName": "acct",
+        "ruleName": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAnalyzer",
+      "input": {
+        "analyzerName": "acct"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAnalyzers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "analyzers": [
+          {
+            "arn": "arn:aws:access-analyzer:us-east-1:000000000000:analyzer/org",
+            "name": "org",
+            "status": "ACTIVE",
+            "type": "ORGANIZATION"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAnalyzer",
+      "input": {
+        "analyzerName": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

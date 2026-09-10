@@ -1,0 +1,224 @@
+schema: bir/1
+service: aws.config
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is recorded and no rule is ever evaluated: a configuration
+# recorder is a stored document, a config rule is ACTIVE the moment it is put,
+# and the only evaluations that exist are the ones a caller pushed in with
+# PutEvaluations.
+provenance: authored
+
+resources:
+  # The three Put operations each store the document the caller sent, forcing
+  # the members the service owns on top of it. Spelling those documents out
+  # member by member would not reproduce them: a recorder the caller sent with
+  # no recordingGroup would gain a null one, which a later describe would then
+  # answer.
+  recorder:
+    collection: cfgr
+    id:
+      input_members: [ConfigurationRecorderName]
+    record:
+      name: id
+
+  channel:
+    collection: cfgc
+    id:
+      input_members: [DeliveryChannelName]
+    record:
+      name: id
+
+  rule:
+    collection: cfgrule
+    id:
+      input_members: [ConfigRuleName]
+    arn: "arn:{partition}:config:{region}:{account}:config-rule/{id}"
+    record:
+      ConfigRuleArn: arn
+      ConfigRuleState: "'ACTIVE'"
+
+  # An evaluation the caller pushed in. It is stored twice under the same key,
+  # once as an evaluation and once as a discovered resource, which is what the
+  # pack did -- so ListDiscoveredResources answers whatever was last evaluated
+  # rather than anything discovered.
+  evaluation:
+    collection: cfgeval
+
+  discovered:
+    collection: cfgres
+
+errors:
+  InvalidParameterValue:
+    code: InvalidParameterValueException
+    http: 400
+    fault: client
+
+operations:
+  # The name is taken from inside the document, and defaults to `default` --
+  # which is what the real service calls the one recorder an account may have.
+  PutConfigurationRecorder:
+    effects:
+      - put:
+          resource: recorder
+          key: >
+            'ConfigurationRecorder' in input && 'name' in input.ConfigurationRecorder
+              && string(input.ConfigurationRecorder.name) != ''
+              ? string(input.ConfigurationRecorder.name) : 'default'
+          spread: input.ConfigurationRecorder
+
+  DescribeConfigurationRecorders:
+    list: { resource: recorder, member: ConfigurationRecorders, paginate: model }
+
+  DeleteConfigurationRecorder:
+    effects:
+      - delete: { resource: recorder, missing: ignore }
+
+  # Starting and stopping a recorder change nothing that any caller can read --
+  # see the quirk.
+  StartConfigurationRecorder: {}
+  StopConfigurationRecorder: {}
+
+  PutDeliveryChannel:
+    effects:
+      - put:
+          resource: channel
+          key: >
+            'DeliveryChannel' in input && 'name' in input.DeliveryChannel
+              && string(input.DeliveryChannel.name) != ''
+              ? string(input.DeliveryChannel.name) : 'default'
+          spread: input.DeliveryChannel
+
+  DescribeDeliveryChannels:
+    list: { resource: channel, member: DeliveryChannels, paginate: model }
+
+  DeleteDeliveryChannel:
+    effects:
+      - delete: { resource: channel, missing: ignore }
+
+  PutConfigRule:
+    require:
+      - cond: >
+          'ConfigRule' in input && 'ConfigRuleName' in input.ConfigRule
+            && string(input.ConfigRule.ConfigRuleName) != ''
+        error: InvalidParameterValue
+    effects:
+      - put:
+          resource: rule
+          key: "string(input.ConfigRule.ConfigRuleName)"
+          spread: input.ConfigRule
+
+  DescribeConfigRules:
+    list: { resource: rule, member: ConfigRules, paginate: model }
+
+  DeleteConfigRule:
+    effects:
+      - delete: { resource: rule, missing: ignore }
+
+  # One evaluation per entry, addressed by the resource it is about, and stored
+  # twice. An entry carrying no resource id is skipped rather than written to a
+  # row keyed by the empty string that every such entry in the account would
+  # then share.
+  PutEvaluations:
+    effects:
+      - put:
+          resource: evaluation
+          for_each: input.Evaluations
+          key: "string(item.ComplianceResourceId)"
+          when: "'ComplianceResourceId' in item && string(item.ComplianceResourceId) != ''"
+          spread: item
+      - put:
+          resource: discovered
+          for_each: input.Evaluations
+          key: "string(item.ComplianceResourceId)"
+          when: "'ComplianceResourceId' in item && string(item.ComplianceResourceId) != ''"
+          spread: item
+    output:
+      FailedEvaluations: "[]"
+
+  # An Evaluation is not an EvaluationResult: what the caller pushed in carries
+  # a resource id and a type, and the answer carries an identifier built from
+  # them. The pack answered the stored evaluation unchanged, so three of its
+  # members were ones no SDK could read.
+  GetComplianceDetailsByConfigRule:
+    list: { resource: evaluation, member: EvaluationResults, paginate: model }
+    output:
+      EvaluationResults: >
+        items.map(e, merge({
+          'ComplianceType': 'ComplianceType' in e ? e.ComplianceType : '',
+          'EvaluationResultIdentifier': {
+            'EvaluationResultQualifier': {
+              'ResourceId': 'ComplianceResourceId' in e ? e.ComplianceResourceId : '',
+              'ResourceType': 'ComplianceResourceType' in e ? e.ComplianceResourceType : '',
+            },
+            'OrderingTimestamp': 'OrderingTimestamp' in e ? e.OrderingTimestamp : '',
+          },
+        }, 'Annotation' in e ? {'Annotation': e.Annotation} : {}))
+
+  # One row, whatever was asked about: see the quirk.
+  DescribeComplianceByConfigRule:
+    list: { resource: evaluation, member: ComplianceByConfigRules, paginate: model }
+    output:
+      ComplianceByConfigRules: >
+        [{
+          'ConfigRuleName': '',
+          'Compliance': {
+            'ComplianceType': size(items) == 0 ? 'INSUFFICIENT_DATA' : 'NON_COMPLIANT',
+          },
+        }]
+
+  GetResourceConfigHistory:
+    list: { resource: discovered, member: configurationItems, paginate: model, key: "string(input.resourceId)" }
+    output:
+      configurationItems: >
+        items.map(e, {
+          'resourceId': 'ComplianceResourceId' in e ? e.ComplianceResourceId : '',
+          'resourceType': 'ComplianceResourceType' in e ? e.ComplianceResourceType : '',
+        })
+
+  ListDiscoveredResources:
+    list: { resource: discovered, member: resourceIdentifiers, paginate: model }
+    output:
+      resourceIdentifiers: >
+        items.map(e, {
+          'resourceId': 'ComplianceResourceId' in e ? e.ComplianceResourceId : '',
+          'resourceType': 'ComplianceResourceType' in e ? e.ComplianceResourceType : '',
+        })
+
+quirks:
+  - operation: StartConfigurationRecorder
+    note: >
+      Starting and stopping a recorder change nothing a caller can read. The
+      pack set a `recording` flag on the stored recorder, and
+      ConfigurationRecorder declares no such member -- an SDK deserializing
+      DescribeConfigurationRecorders drops it -- so the bundle does not store
+      it. The real service records whether a recorder is running through
+      DescribeConfigurationRecorderStatus, which is not served here at all, so
+      there is nowhere for the flag to be answered from either way.
+  - operation: PutConfigRule
+    note: >
+      A rule is ACTIVE the instant it is put and nothing ever evaluates it. No
+      Source is checked to exist, no ConfigRuleId is assigned, and
+      MaximumExecutionFrequency is stored and never acted on, so a rule that
+      says it evaluates every three hours evaluates never.
+  - operation: PutEvaluations
+    note: >
+      The only evaluations that exist are the ones a caller pushed in, and they
+      are keyed by resource id alone -- not by rule -- so two rules evaluating
+      the same resource overwrite each other and
+      GetComplianceDetailsByConfigRule answers the same list whichever rule is
+      named. FailedEvaluations is always empty.
+  - operation: DescribeComplianceByConfigRule
+    note: >
+      One row is answered whatever was asked about, its ConfigRuleName is
+      always empty, and its compliance is INSUFFICIENT_DATA when no evaluation
+      has ever been pushed in and NON_COMPLIANT otherwise -- so a rule with
+      only compliant evaluations reads as NON_COMPLIANT. The empty name is a
+      transcribed defect: the pack read ConfigRuleNames, which is a list, as
+      though it were a string, and a list never matched.
+  - operation: ListDiscoveredResources
+    note: >
+      Nothing is discovered. This lists the evaluations a caller pushed in,
+      projected to a resource id and type, so an account that has never called
+      PutEvaluations has no resources at all. GetResourceConfigHistory answers
+      the same records with no configuration, no capture time and no version --
+      a configuration history with no configuration in it.

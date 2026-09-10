@@ -1,0 +1,1080 @@
+{
+  "schema": "trace/1",
+  "service": "aws.guardduty",
+  "source": "internal/services/aws/guardduty",
+  "note": "Detectors, IP sets, filters, sample findings and members; the status outside the enum, and the batch that writes one record per entry.",
+  "steps": [
+    {
+      "operation": "ListDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorIds": null
+      }
+    },
+    {
+      "operation": "CreateDetector",
+      "input": {
+        "Enable": true,
+        "FindingPublishingFrequency": "FIFTEEN_MINUTES",
+        "Tags": {
+          "env": "test"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorId": "7c5891299f6489f8"
+      }
+    },
+    {
+      "operation": "CreateDetector",
+      "input": {
+        "Enable": false
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorId": "5f59f223d7974d14"
+      }
+    },
+    {
+      "operation": "ListDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorIds": [
+          "5f59f223d7974d14",
+          "7c5891299f6489f8"
+        ]
+      }
+    },
+    {
+      "operation": "GetDetector",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorId": "7c5891299f6489f8",
+        "FindingPublishingFrequency": "FIFTEEN_MINUTES",
+        "Status": "ENABLED"
+      },
+      "superseded_members": {
+        "DetectorId": "GetDetectorResponse does not declare DetectorId and requires a ServiceRole the pack never set: the pack answered the whole stored record, so the id travelled in a response with no place for it. The declared shape outranks the pack's authored behavior. Only this member is exempt -- Status and FindingPublishingFrequency are still compared on every one of these steps."
+      }
+    },
+    {
+      "operation": "GetDetector",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorId": "5f59f223d7974d14",
+        "FindingPublishingFrequency": "",
+        "Status": "false"
+      },
+      "superseded_members": {
+        "DetectorId": "GetDetectorResponse does not declare DetectorId and requires a ServiceRole the pack never set: the pack answered the whole stored record, so the id travelled in a response with no place for it. The declared shape outranks the pack's authored behavior. Only this member is exempt -- Status and FindingPublishingFrequency are still compared on every one of these steps."
+      }
+    },
+    {
+      "operation": "GetDetector",
+      "input": {
+        "DetectorId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BadRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateDetector",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FindingPublishingFrequency": "ONE_HOUR"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDetector",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorId": "7c5891299f6489f8",
+        "FindingPublishingFrequency": "ONE_HOUR",
+        "Status": "ENABLED"
+      },
+      "superseded_members": {
+        "DetectorId": "GetDetectorResponse does not declare DetectorId and requires a ServiceRole the pack never set: the pack answered the whole stored record, so the id travelled in a response with no place for it. The declared shape outranks the pack's authored behavior. Only this member is exempt -- Status and FindingPublishingFrequency are still compared on every one of these steps."
+      }
+    },
+    {
+      "operation": "UpdateDetector",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "Enable": false
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDetector",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorId": "7c5891299f6489f8",
+        "FindingPublishingFrequency": "ONE_HOUR",
+        "Status": "ENABLED"
+      },
+      "superseded_members": {
+        "DetectorId": "GetDetectorResponse does not declare DetectorId and requires a ServiceRole the pack never set: the pack answered the whole stored record, so the id travelled in a response with no place for it. The declared shape outranks the pack's authored behavior. Only this member is exempt -- Status and FindingPublishingFrequency are still compared on every one of these steps."
+      }
+    },
+    {
+      "operation": "UpdateDetector",
+      "input": {
+        "DetectorId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BadRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListIPSets",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IpSetIds": null
+      }
+    },
+    {
+      "operation": "CreateIPSet",
+      "input": {
+        "Activate": true,
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "Format": "TXT",
+        "Location": "https://example.invalid/list.txt",
+        "Name": "allow"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IpSetId": "ipset-9c8e2cb0"
+      }
+    },
+    {
+      "operation": "GetIPSet",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "IpSetId": {
+          "$fromPath": "IpSetId",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Format": "TXT",
+        "IpSetId": "ipset-9c8e2cb0",
+        "Location": "https://example.invalid/list.txt",
+        "Name": "allow"
+      },
+      "superseded_members": {
+        "IpSetId": "GetIPSetResponse does not declare IpSetId and requires a Status the pack never set. Same shape as step 4, on the other read. Name, Location and Format are still compared."
+      }
+    },
+    {
+      "operation": "GetIPSet",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "IpSetId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BadRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListIPSets",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IpSetIds": [
+          "ipset-9c8e2cb0"
+        ]
+      }
+    },
+    {
+      "operation": "ListIPSets",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IpSetIds": null
+      }
+    },
+    {
+      "operation": "CreateFilter",
+      "input": {
+        "Action": "ARCHIVE",
+        "Description": "dropped",
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FindingCriteria": {
+          "Criterion": {
+            "severity": {
+              "Gte": 4
+            }
+          }
+        },
+        "Name": "high",
+        "Rank": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "high"
+      }
+    },
+    {
+      "operation": "GetFilter",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FilterName": "high"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Action": "ARCHIVE",
+        "FindingCriteria": {
+          "Criterion": {
+            "severity": {
+              "Gte": 4
+            }
+          }
+        },
+        "Name": "high"
+      }
+    },
+    {
+      "operation": "GetFilter",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FilterName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BadRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListFilters",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FilterNames": [
+          "high"
+        ]
+      }
+    },
+    {
+      "operation": "ListFindings",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FindingIds": null
+      }
+    },
+    {
+      "operation": "CreateSampleFindings",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FindingTypes": [
+          "Backdoor:EC2/C&CActivity.B"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateSampleFindings",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListFindings",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FindingIds": [
+          "finding-33f6fc5d",
+          "finding-83d4958a"
+        ]
+      }
+    },
+    {
+      "operation": "GetFindings",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FindingIds": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Findings": [
+          {
+            "DetectorId": "7c5891299f6489f8",
+            "Id": "finding-33f6fc5d",
+            "Severity": 5,
+            "Title": "sample",
+            "Type": "Recon:EC2/PortProbeUnprotectedPort"
+          },
+          {
+            "DetectorId": "7c5891299f6489f8",
+            "Id": "finding-83d4958a",
+            "Severity": 5,
+            "Title": "sample",
+            "Type": "Recon:EC2/PortProbeUnprotectedPort"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetFindings",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FindingIds": [
+          {
+            "$fromPath": "FindingIds.0",
+            "$fromStep": 25
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Findings": [
+          {
+            "DetectorId": "7c5891299f6489f8",
+            "Id": "finding-33f6fc5d",
+            "Severity": 5,
+            "Title": "sample",
+            "Type": "Recon:EC2/PortProbeUnprotectedPort"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetFindings",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FindingIds": [
+          "absent"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Findings": null
+      }
+    },
+    {
+      "operation": "ListMembers",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Members": null
+      }
+    },
+    {
+      "operation": "CreateMembers",
+      "input": {
+        "AccountDetails": [
+          {
+            "AccountId": "111111111111",
+            "Email": "a@example.invalid"
+          },
+          {
+            "AccountId": "222222222222",
+            "Email": "b@example.invalid"
+          }
+        ],
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UnprocessedAccounts": []
+      }
+    },
+    {
+      "operation": "ListMembers",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Members": [
+          {
+            "AccountId": "111111111111",
+            "Email": "a@example.invalid",
+            "RelationshipStatus": "Enabled"
+          },
+          {
+            "AccountId": "222222222222",
+            "Email": "b@example.invalid",
+            "RelationshipStatus": "Enabled"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetMembers",
+      "input": {
+        "AccountIds": [
+          "111111111111"
+        ],
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Members": [
+          {
+            "AccountId": "111111111111",
+            "Email": "a@example.invalid",
+            "RelationshipStatus": "Enabled"
+          },
+          {
+            "AccountId": "222222222222",
+            "Email": "b@example.invalid",
+            "RelationshipStatus": "Enabled"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateMembers",
+      "input": {
+        "AccountDetails": [
+          {
+            "AccountId": "111111111111",
+            "Email": "changed@example.invalid"
+          },
+          {
+            "AccountId": "333333333333",
+            "Email": "c@example.invalid"
+          }
+        ],
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UnprocessedAccounts": []
+      }
+    },
+    {
+      "operation": "ListMembers",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Members": [
+          {
+            "AccountId": "111111111111",
+            "Email": "changed@example.invalid",
+            "RelationshipStatus": "Enabled"
+          },
+          {
+            "AccountId": "222222222222",
+            "Email": "b@example.invalid",
+            "RelationshipStatus": "Enabled"
+          },
+          {
+            "AccountId": "333333333333",
+            "Email": "c@example.invalid",
+            "RelationshipStatus": "Enabled"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListMembers",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Members": null
+      }
+    },
+    {
+      "operation": "DeleteMembers",
+      "input": {
+        "AccountIds": [
+          "222222222222",
+          "999999999999"
+        ],
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UnprocessedAccounts": []
+      }
+    },
+    {
+      "operation": "ListMembers",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Members": [
+          {
+            "AccountId": "111111111111",
+            "Email": "changed@example.invalid",
+            "RelationshipStatus": "Enabled"
+          },
+          {
+            "AccountId": "333333333333",
+            "Email": "c@example.invalid",
+            "RelationshipStatus": "Enabled"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteFilter",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FilterName": "high"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteFilter",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "FilterName": "high"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListFilters",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FilterNames": null
+      }
+    },
+    {
+      "operation": "DeleteIPSet",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        },
+        "IpSetId": {
+          "$fromPath": "IpSetId",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListIPSets",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IpSetIds": null
+      }
+    },
+    {
+      "operation": "DeleteDetector",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDetector",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectorIds": [
+          "5f59f223d7974d14"
+        ]
+      }
+    },
+    {
+      "operation": "ListMembers",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Members": [
+          {
+            "AccountId": "111111111111",
+            "Email": "changed@example.invalid",
+            "RelationshipStatus": "Enabled"
+          },
+          {
+            "AccountId": "333333333333",
+            "Email": "c@example.invalid",
+            "RelationshipStatus": "Enabled"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListFindings",
+      "input": {
+        "DetectorId": {
+          "$fromPath": "DetectorId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FindingIds": [
+          "finding-33f6fc5d",
+          "finding-83d4958a"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+schema: bir/1
+service: aws.mediaconnect
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No stream is carried: a flow is a name that can be started and
+# stopped, with no source, no output and no entitlement.
+provenance: authored
+
+resources:
+  flow:
+    collection: mcflow
+    # A flow is addressed by its ARN everywhere but creation, so the ARN is
+    # the identifier itself rather than a member the record carries. Keying on
+    # a record member would mean re-deriving that member on every write, and a
+    # patch carries a FlowArn and no Name -- it would file the flow under an
+    # ARN built from an empty name instead of updating it.
+    id:
+      derive: >
+        'FlowArn' in input
+          ? string(input.FlowArn)
+          : 'arn:aws:mediaconnect:' + identity.region + ':' + identity.account
+            + ':flow:' + string(input.Name)
+    # Deliberately empty: resource-level members are re-evaluated on every
+    # write, including a patch, so anything here would overwrite what a patch
+    # did not mean to touch. The creation members belong to CreateFlow, which
+    # has the inputs to build them.
+    record: {}
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateFlow:
+    effects:
+      - put:
+          resource: flow
+          record:
+            Name: "string(input.Name)"
+            FlowArn: id
+            Status: "'STANDBY'"
+    output:
+      Flow: rec
+
+  DescribeFlow:
+    reads:
+      f: { resource: flow, key: "string(input.FlowArn)" }
+    require:
+      - { cond: f_found, error: NotFound }
+    output:
+      Flow: f
+
+  ListFlows:
+    list: { resource: flow, member: Flows, paginate: model }
+
+  # Starting and stopping do change the stored status, so a started flow
+  # describes and lists as ACTIVE.
+  StartFlow:
+    reads:
+      f: { resource: flow, key: "string(input.FlowArn)" }
+    require:
+      - { cond: f_found, error: NotFound }
+    effects:
+      - patch:
+          resource: flow
+          key: "string(input.FlowArn)"
+          record:
+            Status: "'ACTIVE'"
+    output:
+      FlowArn: "string(input.FlowArn)"
+      Status: "'ACTIVE'"
+
+  StopFlow:
+    reads:
+      f: { resource: flow, key: "string(input.FlowArn)" }
+    require:
+      - { cond: f_found, error: NotFound }
+    effects:
+      - patch:
+          resource: flow
+          key: "string(input.FlowArn)"
+          record:
+            Status: "'STANDBY'"
+    output:
+      FlowArn: "string(input.FlowArn)"
+      Status: "'STANDBY'"
+
+  DeleteFlow:
+    effects:
+      - delete: { resource: flow, key: "string(input.FlowArn)", missing: ignore }
+    output: {}
+
+quirks:
+  - operation: StartFlow
+    note: >
+      A flow goes straight to ACTIVE and straight back to STANDBY, so nothing
+      observes STARTING or STOPPING, and starting an already-started flow
+      succeeds. The real service moves through the intermediate states and
+      rejects the second start; a probe settles both.
+  - operation: CreateFlow
+    note: >
+      A flow has no Source, Outputs, Entitlements or AvailabilityZone -- all
+      of which Flow declares -- because the pack stored none of them, and the
+      Source the real operation requires in practice is neither read nor
+      validated. Nothing streams, so a flow that is ACTIVE is carrying
+      nothing.
+  - operation: DeleteFlow
+    note: >
+      Deleting answers with nothing where the model declares FlowArn and
+      Status, and deleting an absent flow succeeds, where DescribeFlow on the
+      same ARN faults. The real service faults on both.

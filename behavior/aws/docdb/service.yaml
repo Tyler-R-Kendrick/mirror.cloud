@@ -1,0 +1,256 @@
+schema: bir/1
+service: aws.docdb
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no MongoDB engine: a cluster is a record with an endpoint
+# hostname that resolves to nothing, and no client can connect to it.
+provenance: authored
+
+resources:
+  cluster:
+    collection: ddbcl
+    id:
+      input_members: [DBClusterIdentifier]
+    record:
+      DBClusterIdentifier: id
+
+  instance:
+    collection: ddbinst
+    id:
+      input_members: [DBInstanceIdentifier]
+    record:
+      DBInstanceIdentifier: id
+
+  subnetgroup:
+    collection: ddbsg
+    id:
+      input_members: [DBSubnetGroupName]
+    record:
+      DBSubnetGroupName: id
+
+  snapshot:
+    collection: ddbsnap
+    id:
+      input_members: [DBClusterSnapshotIdentifier]
+    record:
+      DBClusterSnapshotIdentifier: id
+
+errors:
+  ClusterNotFound:
+    code: DBClusterNotFoundFault
+    http: 404
+    fault: client
+
+operations:
+  CreateDBCluster:
+    effects:
+      - create:
+          resource: cluster
+          record:
+            Status: "'available'"
+            Engine: "'docdb'"
+            EngineVersion: >
+              'EngineVersion' in input && string(input.EngineVersion) != ''
+                ? string(input.EngineVersion) : '5.0.0'
+            MasterUsername: >
+              'MasterUsername' in input ? string(input.MasterUsername) : ''
+            Endpoint: >
+              string(input.DBClusterIdentifier) + '.' + identity.region
+                + '.docdb.amazonaws.com'
+            Port: "27017"
+    output:
+      DBCluster: rec
+
+  DescribeDBClusters:
+    list:
+      resource: cluster
+      member: DBClusters
+      paginate: model
+      key: >
+        'DBClusterIdentifier' in input ? string(input.DBClusterIdentifier) : ''
+
+  # The pack read the cluster, applied nothing, and wrote the same bytes back:
+  # its one modifiable member is read with a string accessor and
+  # BackupRetentionPeriod is declared an integer, so the branch never fired.
+  # See the quirk -- a modify here modifies nothing.
+  ModifyDBCluster:
+    reads:
+      cluster: { resource: cluster }
+    require:
+      - { cond: cluster_found, error: ClusterNotFound }
+    output:
+      DBCluster: cluster
+
+  DeleteDBCluster:
+    reads:
+      cluster: { resource: cluster }
+    effects:
+      - delete: { resource: cluster, missing: ignore }
+    output:
+      DBCluster: >
+        cluster_found
+          ? merge(cluster, {'Status': 'deleting'})
+          : {
+              'DBClusterIdentifier': string(input.DBClusterIdentifier),
+              'Status': 'deleting'
+            }
+
+  # A failover reads the cluster and answers it unchanged: there is no writer
+  # to move, and no instance is promoted.
+  FailoverDBCluster:
+    reads:
+      cluster: { resource: cluster }
+    require:
+      - { cond: cluster_found, error: ClusterNotFound }
+    output:
+      DBCluster: cluster
+
+  CreateDBInstance:
+    effects:
+      - create:
+          resource: instance
+          record:
+            DBInstanceStatus: "'available'"
+            Engine: "'docdb'"
+            DBClusterIdentifier: >
+              'DBClusterIdentifier' in input ? string(input.DBClusterIdentifier) : ''
+            DBInstanceClass: >
+              'DBInstanceClass' in input ? string(input.DBInstanceClass) : ''
+            Endpoint: >
+              {
+                'Address': string(input.DBInstanceIdentifier) + '.'
+                  + identity.region + '.docdb.amazonaws.com',
+                'Port': 27017
+              }
+    output:
+      DBInstance: rec
+
+  DescribeDBInstances:
+    list:
+      resource: instance
+      member: DBInstances
+      paginate: model
+      key: >
+        'DBInstanceIdentifier' in input ? string(input.DBInstanceIdentifier) : ''
+
+  # Answers a two-member instance built from the request, not from the record
+  # it removed, so the answer is the same whether or not one existed.
+  DeleteDBInstance:
+    effects:
+      - delete: { resource: instance, missing: ignore }
+    output:
+      DBInstance: >
+        {
+          'DBInstanceIdentifier': string(input.DBInstanceIdentifier),
+          'DBInstanceStatus': 'deleting'
+        }
+
+  CreateDBSubnetGroup:
+    effects:
+      - create:
+          resource: subnetgroup
+          record:
+            DBSubnetGroupDescription: >
+              'DBSubnetGroupDescription' in input
+                ? string(input.DBSubnetGroupDescription) : ''
+    output:
+      DBSubnetGroup: rec
+
+  DescribeDBSubnetGroups:
+    list:
+      resource: subnetgroup
+      member: DBSubnetGroups
+      paginate: model
+      key: >
+        'DBSubnetGroupName' in input ? string(input.DBSubnetGroupName) : ''
+
+  DeleteDBSubnetGroup:
+    effects:
+      - delete: { resource: subnetgroup, missing: ignore }
+
+  CreateDBClusterSnapshot:
+    effects:
+      - create:
+          resource: snapshot
+          record:
+            DBClusterIdentifier: >
+              'DBClusterIdentifier' in input ? string(input.DBClusterIdentifier) : ''
+            Status: "'available'"
+    output:
+      DBClusterSnapshot: rec
+
+  DescribeDBClusterSnapshots:
+    list:
+      resource: snapshot
+      member: DBClusterSnapshots
+      paginate: model
+      key: >
+        'DBClusterSnapshotIdentifier' in input
+          ? string(input.DBClusterSnapshotIdentifier) : ''
+
+  DeleteDBClusterSnapshot:
+    effects:
+      - delete: { resource: snapshot, missing: ignore }
+
+quirks:
+  - operation: ModifyDBCluster
+    note: >
+      A modify modifies nothing. The pack read the cluster, looked for a
+      BackupRetentionPeriod with a string accessor -- the member is declared an
+      integer, so it never matched -- and wrote the record back unchanged. Every
+      other modifiable member is dropped without being looked for at all:
+      MasterUserPassword, PreferredBackupWindow, VpcSecurityGroupIds,
+      DeletionProtection, the new DBClusterIdentifier a rename would carry.
+
+      The call succeeds and answers the cluster, so a caller reading the
+      response sees the old values and has no signal that nothing happened.
+      That is the failure mode worth knowing here: a test that modifies a
+      cluster and asserts the call succeeded passes; one that asserts the value
+      changed does not.
+  - operation: CreateDBCluster
+    note: >
+      A cluster is available before the call returns, so nothing observes
+      creating, and it has an Endpoint hostname that resolves to nothing: no
+      MongoDB engine is started and no client can connect. EngineVersion
+      defaults to 5.0.0 and is not validated; Engine is forced to docdb whatever
+      the request said. MasterUserPassword, VpcSecurityGroupIds,
+      DBSubnetGroupName, StorageEncrypted, KmsKeyId and the rest are dropped, so
+      a cluster is not in any subnet group and not encrypted.
+
+      Creating a cluster whose identifier already exists replaces it rather than
+      faulting with DBClusterAlreadyExistsFault, and the same is true of every
+      other create here. Nothing is cross-checked: an instance names a cluster
+      that need not exist, a snapshot names a cluster that need not exist, and
+      deleting a cluster leaves both behind still naming it.
+  - operation: DeleteDBInstance
+    note: >
+      Deleting an instance answers a two-member DBInstance built from the
+      request rather than from the record it removed, so the answer is
+      identical whether or not the instance existed -- and it carries neither
+      the Engine nor the endpoint the caller stored. Deleting a cluster is the
+      opposite: it answers the record it removed, with Status rewritten to
+      deleting, falling back to a two-member body only when there was none.
+      SkipFinalSnapshot and FinalDBSnapshotIdentifier are ignored, so a delete
+      never takes a final snapshot.
+  - operation: FailoverDBCluster
+    note: >
+      A failover answers the cluster unchanged. There is no writer instance to
+      move and no reader to promote -- instances are stored beside clusters and
+      never consulted by them -- so the TargetDBInstanceIdentifier the request
+      may name is ignored, and nothing in the answer distinguishes a failover
+      that happened from one that did not.
+  - operation: CreateDBClusterSnapshot
+    note: >
+      A snapshot is available immediately and holds nothing: no data is copied,
+      because there is no data. The cluster it names is not checked to exist,
+      and no operation restores from one -- RestoreDBClusterFromSnapshot is not
+      served -- so a snapshot is a row that can be listed and deleted and
+      nothing else. Its declared SnapshotCreateTime, Engine and
+      PercentProgress are never set.
+  - operation: CreateDBSubnetGroup
+    note: >
+      A subnet group is a name and a description; the SubnetIds that are the
+      point of it are dropped, so it describes no subnets, and nothing consults
+      it -- CreateDBCluster's DBSubnetGroupName is dropped too. Deleting one
+      answers an empty body and succeeds whether or not it existed, and no
+      cluster is checked to be using it.

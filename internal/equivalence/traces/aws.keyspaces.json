@@ -1,0 +1,343 @@
+{
+  "schema": "trace/1",
+  "service": "aws.keyspaces",
+  "source": "pack:internal/services/aws/keyspaces@571d5d1",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListKeyspaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keyspaces": null
+      }
+    },
+    {
+      "operation": "GetKeyspace",
+      "input": {
+        "keyspaceName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateKeyspace",
+      "input": {
+        "keyspaceName": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateKeyspace",
+      "input": {
+        "keyspaceName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/app/"
+      }
+    },
+    {
+      "operation": "GetKeyspace",
+      "input": {
+        "keyspaceName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keyspaceName": "app",
+        "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/app/"
+      }
+    },
+    {
+      "operation": "CreateKeyspace",
+      "input": {
+        "keyspaceName": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/other/"
+      }
+    },
+    {
+      "operation": "ListKeyspaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keyspaces": [
+          {
+            "keyspaceName": "app",
+            "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/app/"
+          },
+          {
+            "keyspaceName": "other",
+            "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/other/"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "keyspaceName": "app",
+        "schemaDefinition": {
+          "allColumns": [
+            {
+              "name": "pk",
+              "type": "text"
+            }
+          ],
+          "partitionKeys": [
+            {
+              "name": "pk"
+            }
+          ]
+        },
+        "tableName": "users"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/app/table/users"
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "keyspaceName": "other",
+        "schemaDefinition": {
+          "allColumns": [
+            {
+              "name": "pk",
+              "type": "text"
+            }
+          ],
+          "partitionKeys": [
+            {
+              "name": "pk"
+            }
+          ]
+        },
+        "tableName": "users"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/other/table/users"
+      }
+    },
+    {
+      "operation": "GetTable",
+      "input": {
+        "keyspaceName": "app",
+        "tableName": "users"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keyspaceName": "app",
+        "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/app/table/users",
+        "status": "ACTIVE",
+        "tableName": "users"
+      }
+    },
+    {
+      "operation": "ListTables",
+      "input": {
+        "keyspaceName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tables": [
+          {
+            "keyspaceName": "app",
+            "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/app/table/users",
+            "status": "ACTIVE",
+            "tableName": "users"
+          }
+        ]
+      },
+      "superseded": "The pack listed a table with the status it stored. A listed table declares keyspaceName, resourceArn and tableName and no status, so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; GetTable still answers with the status."
+    },
+    {
+      "operation": "ListTables",
+      "input": {
+        "keyspaceName": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tables": [
+          {
+            "keyspaceName": "other",
+            "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/other/table/users",
+            "status": "ACTIVE",
+            "tableName": "users"
+          }
+        ]
+      },
+      "superseded": "The pack listed a table with the status it stored. A listed table declares keyspaceName, resourceArn and tableName and no status, so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; GetTable still answers with the status."
+    },
+    {
+      "operation": "GetTable",
+      "input": {
+        "keyspaceName": "app",
+        "tableName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteKeyspace",
+      "input": {
+        "keyspaceName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListKeyspaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keyspaces": [
+          {
+            "keyspaceName": "other",
+            "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/other/"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetTable",
+      "input": {
+        "keyspaceName": "app",
+        "tableName": "users"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keyspaceName": "app",
+        "resourceArn": "arn:aws:cassandra:us-east-1:000000000000:/keyspace/app/table/users",
+        "status": "ACTIVE",
+        "tableName": "users"
+      }
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {
+        "keyspaceName": "app",
+        "tableName": "users"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

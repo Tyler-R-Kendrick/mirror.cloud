@@ -1,0 +1,325 @@
+{
+  "schema": "trace/1",
+  "service": "aws.ce",
+  "source": "pack:internal/services/aws/ce@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetAnomalyMonitors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyMonitors": null
+      }
+    },
+    {
+      "operation": "CreateAnomalyMonitor",
+      "input": {
+        "AnomalyMonitor": {
+          "MonitorDimension": "SERVICE",
+          "MonitorName": "spend",
+          "MonitorType": "DIMENSIONAL"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MonitorArn": "arn:aws:ce::000000000000:anomalymonitor/spend"
+      }
+    },
+    {
+      "operation": "GetAnomalyMonitors",
+      "input": {
+        "MonitorArnList": [
+          {
+            "$fromPath": "MonitorArn",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyMonitors": [
+          {
+            "MonitorArn": "arn:aws:ce::000000000000:anomalymonitor/spend",
+            "MonitorName": "spend",
+            "MonitorType": "CUSTOM"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetAnomalyMonitors",
+      "input": {
+        "MonitorArn": {
+          "$fromPath": "MonitorArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyMonitors": [
+          {
+            "MonitorArn": "arn:aws:ce::000000000000:anomalymonitor/spend",
+            "MonitorName": "spend",
+            "MonitorType": "CUSTOM"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateAnomalyMonitor",
+      "input": {
+        "AnomalyMonitor": {
+          "MonitorName": "other",
+          "MonitorType": "CUSTOM"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MonitorArn": "arn:aws:ce::000000000000:anomalymonitor/other"
+      }
+    },
+    {
+      "operation": "GetAnomalyMonitors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyMonitors": [
+          {
+            "MonitorArn": "arn:aws:ce::000000000000:anomalymonitor/other",
+            "MonitorName": "other",
+            "MonitorType": "CUSTOM"
+          },
+          {
+            "MonitorArn": "arn:aws:ce::000000000000:anomalymonitor/spend",
+            "MonitorName": "spend",
+            "MonitorType": "CUSTOM"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateCostCategoryDefinition",
+      "input": {
+        "Name": "team",
+        "RuleVersion": "CostCategoryExpression.v1",
+        "Rules": [
+          {
+            "Value": "eng"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CostCategoryArn": "arn:aws:ce::000000000000:costcategory/team"
+      }
+    },
+    {
+      "operation": "DescribeCostCategoryDefinition",
+      "input": {
+        "CostCategoryArn": {
+          "$fromPath": "CostCategoryArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CostCategory": {
+          "CostCategoryArn": "arn:aws:ce::000000000000:costcategory/team",
+          "Name": "team"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCostCategoryDefinition",
+      "input": {
+        "CostCategoryArn": "arn:aws:ce::000000000000:costcategory/team-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetCostAndUsage",
+      "input": {
+        "Granularity": "MONTHLY",
+        "Metrics": [
+          "UnblendedCost"
+        ],
+        "TimePeriod": {
+          "End": "2026-02-01",
+          "Start": "2026-01-01"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResultsByTime": [
+          {
+            "TimePeriod": {
+              "End": "2020-01-02",
+              "Start": "2020-01-01"
+            },
+            "Total": {
+              "UnblendedCost": {
+                "Amount": "0",
+                "Unit": "USD"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCostCategoryDefinition",
+      "input": {
+        "CostCategoryArn": {
+          "$fromPath": "CostCategoryArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeCostCategoryDefinition",
+      "input": {
+        "CostCategoryArn": {
+          "$fromPath": "CostCategoryArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteAnomalyMonitor",
+      "input": {
+        "MonitorArn": {
+          "$fromPath": "MonitorArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAnomalyMonitors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyMonitors": [
+          {
+            "MonitorArn": "arn:aws:ce::000000000000:anomalymonitor/other",
+            "MonitorName": "other",
+            "MonitorType": "CUSTOM"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAnomalyMonitor",
+      "input": {
+        "MonitorArn": {
+          "$fromPath": "MonitorArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

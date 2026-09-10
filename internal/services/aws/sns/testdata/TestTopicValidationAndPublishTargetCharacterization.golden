@@ -1,0 +1,57 @@
+{
+  "different": {
+    "Code": "TopicAlreadyExists",
+    "Message": "Topic already exists with a different attribute value."
+  },
+  "invalidFIFO": {
+    "Code": "InvalidParameter",
+    "Message": "Invalid parameter: FifoTopic"
+  },
+  "invalidName": {
+    "Code": "InvalidParameter",
+    "Message": "Invalid parameter: Name"
+  },
+  "malformed": {
+    "Code": "InvalidParameter",
+    "Message": "Invalid parameter: TopicArn"
+  },
+  "missing": {
+    "Code": "NotFound",
+    "Message": "Topic does not exist"
+  },
+  "missingAttribute": {
+    "Code": "NotFound",
+    "Message": "Topic does not exist"
+  },
+  "missingPermission": {
+    "Code": "NotFound",
+    "Message": "Topic does not exist"
+  },
+  "missingSubscription": {
+    "Code": "NotFound",
+    "Message": "Topic does not exist"
+  },
+  "missingTag": {
+    "Code": "NotFound",
+    "Message": "Topic does not exist"
+  },
+  "moreTags": {
+    "Code": "TopicAlreadyExists",
+    "Message": "Topic already exists with a different attribute value."
+  },
+  "tagsAfterDelete": {
+    "Tags": []
+  },
+  "tagsAfterSelectiveUntag": {
+    "Tags": [
+      {
+        "Key": "b",
+        "Value": "2"
+      },
+      {
+        "Key": "c",
+        "Value": "3"
+      }
+    ]
+  }
+}

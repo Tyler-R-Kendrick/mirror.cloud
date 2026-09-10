@@ -1681,6 +1681,12 @@ func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 	}}); err == nil {
 		t.Fatal("accepted subscription to a missing topic")
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "email", "Endpoint": "invalid-filter@example.com",
+		"Attributes": map[string]any{"FilterPolicy": "invalid-json"},
+	}}); err == nil {
+		t.Fatal("accepted invalid subscription filter policy")
+	}
 	for _, endpoint := range []string{"+15--551234567", "NAA+15551234567", "+15551234567.", "/+15551234567"} {
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": topic, "Protocol": "sms", "Endpoint": endpoint}}); err == nil {
 			t.Fatalf("invalid SMS endpoint accepted: %s", endpoint)
@@ -2689,6 +2695,61 @@ func TestSNSGetMissingSubscriptionAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSConfirmSubscriptionTokenValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "confirm-token"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := str(created.Output["TopicArn"])
+	missing := topic[:len(topic)-1] + "i"
+	unissued := strings.Repeat("ab", 80)
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ConfirmSubscription", Input: map[string]any{
+		"TopicArn": missing, "Token": unissued,
+	}}); err == nil {
+		t.Fatal("confirmed a missing topic")
+	}
+	for _, token := range []string{"randomtoken", unissued} {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ConfirmSubscription", Input: map[string]any{"TopicArn": topic, "Token": token}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidParameter" {
+			t.Fatalf("token %q fault=%v", token, err)
+		}
+	}
+	received := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		defer request.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Errorf("confirmation payload: %v", err)
+			return
+		}
+		received <- payload
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "http", "Endpoint": server.URL, "ReturnSubscriptionArn": true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := str((<-received)["Token"])
+	confirmed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ConfirmSubscription", Input: map[string]any{
+		"TopicArn": topic, "Token": token, "AuthenticateOnUnsubscribe": "true",
+	}})
+	if err != nil || str(confirmed.Output["SubscriptionArn"]) != str(sub.Output["SubscriptionArn"]) {
+		t.Fatalf("confirm=%#v err=%v", confirmed, err)
+	}
+	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": confirmed.Output["SubscriptionArn"]}).Output["Attributes"])
+	if str(attrs["PendingConfirmation"]) != "false" {
+		t.Fatalf("confirmed subscription remained pending: %#v", attrs)
+	}
+}
+
 func TestSNSPendingEmailSubscription(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
@@ -2772,7 +2833,7 @@ func TestSNSSubscriptionIdempotency(t *testing.T) {
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
 		"TopicArn": topic, "Protocol": "sqs", "Endpoint": endpoint,
-		"Attributes": map[string]any{"RawMessageDelivery": "false", "FilterPolicyScope": "MessageBody"},
+		"Attributes":            map[string]any{"RawMessageDelivery": "false", "FilterPolicyScope": "MessageBody"},
 		"ReturnSubscriptionArn": true,
 	}}); err == nil {
 		t.Fatal("accepted subscription with different attributes")

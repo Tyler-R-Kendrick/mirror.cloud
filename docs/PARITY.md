@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 851 of 907 direct upstream test functions are explicitly traced (93.8%). The routed-operation denominator is 242 of 242 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 865 of 907 direct upstream test functions are explicitly traced (95.4%). The routed-operation denominator is 242 of 242 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 42 / 42 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 124 / 180 |
+| LocalStack SNS test functions explicitly traced | 138 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -158,6 +158,20 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSubscriptionCrudV2::test_subscribe_attributes` | `TestSNSControlPlaneOperations` verifies `GetSubscriptionAttributes` exposes the owning account alongside public subscription attributes |
 | `test_sns.py::TestSNSTopicCrud::test_create_topic_with_attributes` | `TestSNSTopicAttributeARNValidation` rejects malformed `GetTopicAttributes` ARNs |
 | `test_sns.py::TestSNSTopicCrud::test_create_topic_with_attributes` | `TestSNSTopicAttributeARNScope` rejects cross-region `GetTopicAttributes` ARNs |
+| `test_sns.py::TestSNSSubscriptionCrud::test_unsubscribe_from_non_existing_subscription` | `TestSNSSetSubscriptionAttributesAfterUnsubscribe` treats a second unsubscribe of a valid-shaped ARN as success |
+| `test_sns.py::TestSNSSubscriptionCrud::test_sns_confirm_subscription_wrong_token` | `TestSNSConfirmSubscriptionTokenValidation` rejects a missing topic, a malformed token, and a well-formed token that was never issued |
+| `test_sns.py::TestSNSSubscriptionCrud::test_list_subscriptions_by_topic_pagination` | `TestSNSListSubscriptionsByTopicPagination` returns a 100-item page plus a continuation token |
+| `test_sns.py::TestSNSSubscriptionCrudV2::test_creating_subscription` | `TestSNSPendingEmailSubscription` returns pending confirmation for HTTP and email subscriptions |
+| `test_sns.py::TestSNSSubscriptionCrudV2::test_creating_subscription_with_attributes` | `TestSNSSubscriptionAttributesProjection` stores RawMessageDelivery on subscribe |
+| `test_sns.py::TestSNSSubscriptionCrudV2::test_set_subscription_attributes` | `TestSNSFilterPolicyScopeCharacterization` updates RawMessageDelivery and FilterPolicy after subscribe |
+| `test_sns.py::TestSNSSubscriptionCrudV2::test_subscribe_invalid_filter_policy` | `TestSNSSubscriptionProtocolAndQueueValidation` rejects invalid FilterPolicy JSON on subscribe |
+| `test_sns.py::TestSNSSubscriptionCrudV2::test_confirm_subscription` | `TestSNSConfirmSubscriptionTokenValidation` confirms an HTTP subscription with the issued token |
+| `test_sns.py::TestSNSSMS::test_is_phone_number_opted_out` | `TestSNSControlPlaneOperations` reports opted-out numbers through CheckIfPhoneNumberIsOptedOut |
+| `test_sns.py::TestSNSSMS::test_list_phone_numbers_opted_out` | `TestSNSControlPlaneOperations` lists opted-out numbers |
+| `test_sns.py::TestSNSSMS::test_opt_in_phone_number` | `TestSNSControlPlaneOperations` clears opt-out state through OptInPhoneNumber |
+| `test_sns.py::TestSNSSMS::test_opt_in_non_existing_phone_number` | `TestSNSOptInPhoneValidation` accepts OptInPhoneNumber for a number that was never opted out |
+| `test_sns.py::TestSNSSubscriptionSQSFifo::test_validations_for_fifo` | `TestSNSSubscriptionProtocolAndQueueValidation` rejects a FIFO queue on a standard topic while `TestSNSFIFOTopicToStandardSQS` allows a standard queue on a FIFO topic |
+| `test_sns.py::TestSNSSubscriptionSQS::test_message_attributes_prefixes` | `TestSNSMessageAttributeValidation` rejects `String.` / un-dotted prefixes and accepts `String.prefixed` |
 
 ## S3 baseline
 

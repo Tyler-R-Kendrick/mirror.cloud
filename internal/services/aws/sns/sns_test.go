@@ -64,6 +64,34 @@ func TestTopicSubscribePublish(t *testing.T) {
 	}
 }
 
+func TestSNSPublishTargetAndSubscriptionTimingCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	qp := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invokeSNSQueue(t, qp, id, "CreateQueue", map[string]any{"QueueName": "publish-target"})
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "publish-target"}).Output["TopicArn"])
+	queueARN := "arn:aws:sqs:us-east-1:1:publish-target"
+
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": "before"})
+	if messages := asSlice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "publish-target"}).Output["Messages"]); len(messages) != 0 {
+		t.Fatalf("message published before subscription was delivered: %#v", messages)
+	}
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": queueARN})
+	for _, field := range []string{"TopicArn", "TargetArn"} {
+		invokeSNS(t, p, id, "Publish", map[string]any{field: topic, "Message": "after"})
+		messages := asSlice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "publish-target"}).Output["Messages"])
+		if len(messages) != 1 || !strings.Contains(str(asMap(messages[0])["Body"]), "after") {
+			t.Fatalf("target publish %#v", messages)
+		}
+		invokeSNSQueue(t, qp, id, "DeleteMessage", map[string]any{"QueueName": "publish-target", "ReceiptHandle": asMap(messages[0])["ReceiptHandle"]})
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": "randomstring", "Message": "bad"}}); err == nil {
+		t.Fatal("accepted malformed topic ARN")
+	}
+}
+
 func TestSNSFirehoseSubscriptionPublishesNotification(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

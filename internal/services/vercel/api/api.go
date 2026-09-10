@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -20,7 +21,11 @@ func init() {
 }
 
 // Pack implements vercel.api.
-type Pack struct{ deps spi.Deps }
+type Pack struct {
+	deps spi.Deps
+	// ponytail: process-wide lock; per-account locks if concurrent create/KV throughput matters.
+	mu sync.Mutex
+}
 
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
@@ -42,6 +47,8 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if req.Input == nil {
 		req.Input = map[string]any{}
 	}

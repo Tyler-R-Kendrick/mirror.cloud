@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 785 of 907 direct upstream test functions are explicitly traced (86.5%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,582-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the thirty-nine new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,583-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the forty new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -38,7 +38,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint` | `TestSNSPlatformEndpointLifecycleValidation` creates an endpoint |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_idempotency` | `TestSNSPlatformEndpointLifecycleValidation` verifies repeated-token idempotency |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_non_existent_app` | `TestSNSPlatformEndpointLifecycleValidation` rejects a missing application |
-| `test_sns.py::TestSNSPlatformEndpointCrud::test_list_platform_endpoints` | `TestSNSPlatformEndpointLifecycleValidation` and `TestSNSPlatformEndpointListProjection` verify the endpoint listing shape |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_list_platform_endpoints` | `TestSNSPlatformEndpointLifecycleValidation` and `TestSNSPlatformEndpointListProjection` verify AWS's endpoint ARN and public listing shape |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_delete_platform_endpoint` | `TestSNSPlatformEndpointLifecycleValidation` verifies endpoint deletion |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_delete_endpoints_of_deleted_app` | `TestSNSPlatformEndpointLifecycleValidation` verifies endpoint cleanup |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_get_platform_endpoint_attributes` | `TestSNSPlatformEndpointAttributesProjection` verifies AWS's public `Enabled`, `Token`, and optional `CustomUserData` attribute shape without leaking internal endpoint fields |

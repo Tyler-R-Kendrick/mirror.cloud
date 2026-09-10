@@ -2677,6 +2677,18 @@ func TestSNSSubscriptionAttributesARNValidation(t *testing.T) {
 	}
 }
 
+func TestSNSGetMissingSubscriptionAttributes(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{
+		"SubscriptionArn": "arn:aws:sns:us-east-1:1:missing-subscription:00000000-0000-0000-0000-000000000000",
+	}})
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.Code != "NotFound" {
+		t.Fatalf("missing subscription attributes fault=%v", err)
+	}
+}
+
 func TestSNSPendingEmailSubscription(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 865 of 907 direct upstream test functions are explicitly traced (95.4%). The routed-operation denominator is 242 of 242 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 907 of 907 direct upstream test functions are explicitly traced (100%). The routed-operation denominator is 242 of 242 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
@@ -18,9 +18,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 42 / 42 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 138 / 180 |
+| LocalStack SNS test functions explicitly traced | 180 / 180 |
 
-The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
+The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, filter-policy constraints, HTTP/Lambda notification signatures, and an AWS SDK publish/list lifecycle contract. Every pinned LocalStack SNS test function now has an explicit evidence row. This is not an AWS differential proof and a live AWS oracle is still absent. LocalStack-only retrospect/opt-out/SES mailbox endpoints are recorded as skipped.
 
 Initial SNS trace rows:
 
@@ -172,6 +172,43 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSMS::test_opt_in_non_existing_phone_number` | `TestSNSOptInPhoneValidation` accepts OptInPhoneNumber for a number that was never opted out |
 | `test_sns.py::TestSNSSubscriptionSQSFifo::test_validations_for_fifo` | `TestSNSSubscriptionProtocolAndQueueValidation` rejects a FIFO queue on a standard topic while `TestSNSFIFOTopicToStandardSQS` allows a standard queue on a FIFO topic |
 | `test_sns.py::TestSNSSubscriptionSQS::test_message_attributes_prefixes` | `TestSNSMessageAttributeValidation` rejects `String.` / un-dotted prefixes and accepts `String.prefixed` |
+| `test_sns.py::TestSNSSubscriptionSQS::test_subscribe_sqs_queue` | `TestTopicSubscribePublish` subscribes an SQS queue and lists it on the topic |
+| `test_sns.py::TestSNSSubscriptionSQS::test_publish_sqs_from_sns` | `TestTopicSubscribePublish` and `TestPublishFilterAndSQSDelivery` publish a topic message onto the subscribed queue |
+| `test_sns.py::TestSNSSubscriptionLambda::test_python_lambda_subscribe_sns_topic` | `TestSNSLambdaSubscribeNotificationEnvelope` confirms a Lambda subscription immediately and delivers a signed `Records[].Sns` notification with Subject |
+| `test_sns.py::TestSNSSubscriptionLambda::test_publish_lambda_verify_signature` | `TestSNSLambdaSubscribeNotificationEnvelope` verifies the Lambda SNS envelope signature against the served certificate |
+| `test_sns.py::TestSNSSubscriptionLambda::test_sns_topic_as_lambda_dead_letter_queue` | `TestSNSLambdaSubscriptionRedrive` redrives a failed Lambda subscription notification to the configured SQS DLQ; Lambda-owned `DeadLetterConfig` targeting an SNS topic is not implemented |
+| `test_sns.py::TestSNSSubscriptionSES::test_topic_email_subscription_confirmation` | `TestSNSPendingEmailSubscription` and `TestSNSConfirmSubscriptionTokenValidation` keep email subscriptions pending until the issued token is confirmed |
+| `test_sns.py::TestSNSSubscriptionSES::test_email_sender` | LocalStack-only SES `_aws/ses` mailbox; AWS has no public equivalent. Skipped |
+| `test_sns.py::TestSNSSMS::test_opt_out_phone_number_via_endpoint` | LocalStack-only internal SMS opt-out endpoint; AWS opt-out is account-console/SMS sandbox, not this HTTP API. Skipped |
+| `test_sns.py::TestSNSSubscriptionHttp::test_multiple_subscriptions_http_endpoint` | `TestSNSMultipleHTTPSubscriptions` keeps unconfirmed HTTP subscriptions pending and confirms one token independently |
+| `test_sns.py::TestSNSSubscriptionHttp::test_dlq_external_http_endpoint` | `TestSNSHTTPSubscriptionRedrive` sends failed HTTP notifications to the configured SQS DLQ after confirmation |
+| `test_sns.py::TestSNSSubscriptionHttp::test_subscribe_external_http_endpoint_lambda_url_sig_validation` | `TestSNSHTTPSubscriptionConfirmationSignature` and `TestSNSHTTPNotificationSignature` verify signed confirmation and notification envelopes |
+| `test_sns.py::TestSNSCertEndpoint::test_cert_endpoint_host` | LocalStack-only certificate host rewrite; Mirror serves `SimpleNotificationService.pem` from the existing signing URL. Skipped as a LocalStack endpoint, not an AWS API |
+| `test_sns.py::TestSNSRetrospectionEndpoints::test_publish_to_platform_endpoint_can_retrospect` | LocalStack-only retrospect endpoint. Skipped |
+| `test_sns.py::TestSNSRetrospectionEndpoints::test_publish_sms_can_retrospect` | LocalStack-only retrospect endpoint. Skipped |
+| `test_sns.py::TestSNSRetrospectionEndpoints::test_subscription_tokens_can_retrospect` | LocalStack-only retrospect endpoint. Skipped |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyCrud::test_set_subscription_filter_policy_scope` | `TestSNSFilterPolicyScopeCharacterization` hides FilterPolicyScope until a filter policy exists and rejects invalid scope values |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyCrud::test_sub_filter_policy_nested_property` | `TestSNSFilterPolicyConstraints` rejects nested filter policies unless `FilterPolicyScope=MessageBody` |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyCrud::test_sub_filter_policy_nested_property_constraints` | `TestSNSFilterPolicyConstraints` rejects more than five parent keys, non-list rules, and combination counts over 150 |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyAttributes::test_filter_policy` | `TestSNSFilterPolicyNumericSQSDelivery` delivers in-range numeric attributes and drops out-of-range values |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyAttributes::test_exists_filter_policy` | `TestSNSFilterOperators` matches `exists` true/false operators |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyAttributes::test_exists_filter_policy_attributes_array` | `TestSNSFilterOperators` matches exact attribute values |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_on_message_body` | `TestSNSMessageBodyFilterDelivery` applies nested body filters |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_for_batch` | `TestSNSFilterPolicyNumericSQSDelivery` applies the same numeric filter used by batch publishes |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_on_message_body_dot_attribute` | `TestSNSMessageBodyFilterDelivery` matches nested body keys |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_on_message_body_array_attributes` | `TestSNSFilterOperators` matches nested body values |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_on_message_body_array_of_object_attributes` | `TestSNSFilterOperators` matches nested body objects |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_on_message_body_or_attribute` | `TestSNSFilterOperators` matches `$or` alternatives |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_empty_array_payload` | `TestSNSMessageBodyFilterDelivery` skips bodies that do not match the nested filter |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_large_complex_payload` | `TestSNSFilterOperators` matches nested body paths used by large payloads |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyBody::test_filter_policy_ip_address_condition` | `TestSNSFilterOperators` matches `cidr` IPv4 conditions |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyConditions::test_validate_policy` | `TestSNSFilterPolicyConstraints` rejects nested lists, unknown operators, and dual operators |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyConditions::test_validate_policy_string_operators` | `TestSNSFilterOperators` matches prefix, suffix, and equals-ignore-case |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyConditions::test_validate_policy_numeric_operator` | `TestSNSFilterOperators` matches numeric ranges |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyConditions::test_validate_policy_exists_operator` | `TestSNSFilterOperators` matches exists |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyConditions::test_validate_policy_nested_anything_but_operator` | `TestSNSFilterOperators` matches anything-but |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyConditions::test_policy_complexity` | `TestSNSFilterPolicyConstraints` rejects 151-value clauses and six parent keys |
+| `test_sns_filter_policy.py::TestSNSFilterPolicyConditions::test_policy_complexity_with_or` | `TestSNSFilterPolicyConstraints` rejects combination counts over 150 |
 
 ## S3 baseline
 

@@ -1741,6 +1741,36 @@ func TestSNSPlatformEndpointSubscriptionDispatch(t *testing.T) {
 	}
 }
 
+func TestSNSPlatformEndpointPlatformPayloadSelection(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "platform-payloads"}).Output["TopicArn"])
+	delivered := map[string]string{}
+	for _, platform := range []string{"APNS", "GCM"} {
+		app := str(invokeSNS(t, p, id, "CreatePlatformApplication", map[string]any{
+			"Name": "platform-payload-" + platform, "Platform": platform,
+			"Attributes": map[string]any{"PlatformCredential": "secret"},
+		}).Output["PlatformApplicationArn"])
+		endpoint := str(invokeSNS(t, p, id, "CreatePlatformEndpoint", map[string]any{
+			"PlatformApplicationArn": app, "Token": "token-" + platform,
+		}).Output["EndpointArn"])
+		invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "application", "Endpoint": endpoint})
+		cancel := deps.Bus.Subscribe("sns:"+endpoint, func(_ context.Context, body []byte) { delivered[platform] = string(body) })
+		defer cancel()
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topic, "MessageStructure": "json",
+		"Message": `{"default":"fallback","APNS":"apple","GCM":"google"}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if delivered["APNS"] != "apple" || delivered["GCM"] != "google" {
+		t.Fatalf("platform payloads %#v", delivered)
+	}
+}
+
 func TestSNSPlatformEndpointDeletionCleansSubscriptions(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

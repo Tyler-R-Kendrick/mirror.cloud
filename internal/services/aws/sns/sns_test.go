@@ -662,6 +662,30 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	}
 }
 
+func TestSNSPartitionARNs(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-gov-west-1"}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "partition-topic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTopic := "arn:aws-us-gov:sns:us-gov-west-1:1:partition-topic"
+	if got := str(topic.Output["TopicArn"]); got != wantTopic {
+		t.Fatalf("topic ARN %q, want %q", got, wantTopic)
+	}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "partition-app", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := str(app.Output["PlatformApplicationArn"]); !strings.HasPrefix(got, "arn:aws-us-gov:sns:us-gov-west-1:1:app/") {
+		t.Fatalf("platform application ARN %q", got)
+	}
+}
+
 func TestTopicValidationAndPublishTargetCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

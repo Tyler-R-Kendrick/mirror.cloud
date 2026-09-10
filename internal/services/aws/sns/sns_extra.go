@@ -299,7 +299,7 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		if fault := validatePlatformApplication(name, plat, attrs); fault != nil {
 			return nil, fault
 		}
-		arn := "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":app/" + plat + "/" + name
+		arn := "arn:" + snsPartition(req.Identity.Region) + ":sns:" + req.Identity.Region + ":" + req.Identity.Account + ":app/" + plat + "/" + name
 		rec := map[string]any{"PlatformApplicationArn": arn, "Name": name, "Platform": plat, "Attributes": attrs}
 		b, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, b)

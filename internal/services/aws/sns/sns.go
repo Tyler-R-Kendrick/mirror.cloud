@@ -76,7 +76,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if strings.HasSuffix(name, ".fifo") != fifo {
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FifoTopic", HTTPStatus: 400, Fault: "client"}
 		}
-		arn := fmt.Sprintf("arn:aws:sns:%s:%s:%s", req.Identity.Region, req.Identity.Account, name)
+		arn := fmt.Sprintf("arn:%s:sns:%s:%s:%s", snsPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)
 		if existing, ok, _ := p.col(req, "topics").Get(ctx, name); ok {
 			var current map[string]any
 			_ = json.Unmarshal(existing, &current)
@@ -1495,6 +1495,21 @@ func validTopicName(name string) bool {
 		return len(name) >= 5 && len(name) <= 256 && strings.HasSuffix(name, ".fifo") && validTopicChars(strings.TrimSuffix(name, ".fifo"))
 	}
 	return validTopicChars(name)
+}
+
+func snsPartition(region string) string {
+	switch {
+	case strings.HasPrefix(region, "us-gov-"):
+		return "aws-us-gov"
+	case strings.HasPrefix(region, "cn-"):
+		return "aws-cn"
+	case strings.HasPrefix(region, "us-iso-"):
+		return "aws-iso"
+	case strings.HasPrefix(region, "us-isob-"):
+		return "aws-isob"
+	default:
+		return "aws"
+	}
 }
 
 func validSMSNumber(number string) bool {

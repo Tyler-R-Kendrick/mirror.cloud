@@ -18203,6 +18203,16 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSFirehoseSubscriptionPublishesNotification",
 		},
 		{
+			name: "sns-drop-lambda-delivery-feedback-log",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `p.recordLambdaDelivery(ctx, req, sub, messageID, err)
+	return err == nil`,
+			new:  `if false { p.recordLambdaDelivery(ctx, req, sub, messageID, err) }
+	return err == nil`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSLambdaSuccessFeedbackDeliveryLog",
+		},
+		{
 			name: "sns-accept-platform-endpoint-different-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "for key, value := range requestedAttrs {\n\t\t\t\t\tif key == \"Enabled\" && strings.EqualFold(str(existing[key]), str(value)) {",

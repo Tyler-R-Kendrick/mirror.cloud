@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 831 of 907 direct upstream test functions are explicitly traced (91.6%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,791 tests across 221 Go packages. The 2,602-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-eight new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. Two equivalent SNS mutants are excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,792 tests across 221 Go packages. The 2,602-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-eight new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. Two equivalent SNS mutants are excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 

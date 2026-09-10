@@ -8,6 +8,26 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## Railway baseline
+
+Authority: official Railway GraphQL v2 (`backboard.railway.com` `POST /graphql/v2`). There is no LocalStack Railway inventory; rows are operation → Mirror evidence, not a live `backboard.railway.com` differential. Deployments, variables, volumes, and custom domains are not in this denominator.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated Railway slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Core Railway GraphQL operations routed to emulation | 6 / 6 |
+| Live Railway probe | none (not required) |
+
+| Railway operation | Mirror evidence |
+|---|---|
+| `projectCreate` | Booted mutation returns `data.projectCreate`; atomic empty name `BAD_USER_INPUT`; BDD create; chaos `TestRailwayConcurrentProjectCreate`; mutant `railway-accept-empty-project-name` |
+| `projects` | Booted query lists under `data.projects.edges[].node`; characterization `list`; BDD lists after create |
+| `project` | Booted `project(id)` round-trips id/name; missing id is GraphQL `{errors}` with `extensions.code` `NOT_FOUND` and no `x-amzn-errortype`; mutant `railway-get-missing-project-as-data` |
+| `projectDelete` | Atomic delete then get is `NOT_FOUND`; `TestDeleteMissingProject` and booted `projectDelete` of missing id are GraphQL `{errors}`, not `data`; characterization `delete`/`del_miss`; mutant `railway-delete-missing-project-as-success` |
+| `serviceCreate` | Booted create then `service(id)` round-trips; characterization `service` |
+| `service` | Atomic get after create; missing service `NOT_FOUND`; characterization `get_svc`/`miss_svc` |
+| GraphQL faults vs AWS faults | restJson1 `Encode` wraps `{data:{...}}` with Relay `edges/node` lists; `EncodeFault` uses `{errors:[{message,extensions.code}]}` and omits `x-amzn-errortype`; mutant `railway-encode-aws-fault` |
+
 ## Hetzner baseline
 
 Authority: official Hetzner Cloud API v1 (`api.hetzner.cloud` `/v1/servers` and `/v1/ssh_keys`). There is no LocalStack Hetzner inventory; rows are operation → Mirror evidence, not a live `api.hetzner.cloud` differential. Volumes, load balancers, networks, server actions, and DNS are not in this denominator.

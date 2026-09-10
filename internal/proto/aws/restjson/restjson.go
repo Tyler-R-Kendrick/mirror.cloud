@@ -2,6 +2,7 @@
 package restjson
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -46,6 +47,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	}
 	if svc.ID == "hetzner.v1" {
 		return hetznerOp(svc, r), nil
+	}
+	if svc.ID == "railway.graphql" {
+		return railwayOp(svc, r), nil
 	}
 	// An X-Amz-Target names an operation outright, and an explicit statement
 	// beats one inferred from a path. No SDK sends it for a restJson1 service,
@@ -349,6 +353,44 @@ func opensearchOp(svc *model.Service, r *http.Request) *model.Operation {
 	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
 }
 
+func railwayOp(svc *model.Service, r *http.Request) *model.Operation {
+	name := railwayRoute(r)
+	if op := svc.OperationByName(name); op != nil {
+		return op
+	}
+	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+}
+
+func railwayRoute(r *http.Request) string {
+	if r.URL != nil && !strings.Contains(r.URL.Path, "/graphql/v2") {
+		return "Unknown"
+	}
+	if r.Body == nil {
+		return "Unknown"
+	}
+	b, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	in := map[string]any{}
+	_ = json.Unmarshal(b, &in)
+	q, _ := in["query"].(string)
+	switch {
+	case strings.Contains(q, "projectCreate"):
+		return "projectCreate"
+	case strings.Contains(q, "projectDelete"):
+		return "projectDelete"
+	case strings.Contains(q, "serviceCreate"):
+		return "serviceCreate"
+	case strings.Contains(q, "projects"):
+		return "projects"
+	case strings.Contains(q, "project"):
+		return "project"
+	case strings.Contains(q, "service"):
+		return "service"
+	default:
+		return "Unknown"
+	}
+}
+
 func hetznerOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := hetznerRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -622,6 +664,9 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if svc.ID == "hetzner.v1" {
 		return encodeHetzner(w, status, resp)
 	}
+	if svc.ID == "railway.graphql" {
+		return encodeRailway(w, status, resp)
+	}
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", "application/json")
 	}
@@ -662,6 +707,40 @@ func encodeCloudflare(w http.ResponseWriter, status int, resp *spi.Response) err
 		}
 	}
 	return json.NewEncoder(w).Encode(map[string]any{"success": true, "errors": []any{}, "messages": []any{}, "result": result})
+}
+
+func encodeRailway(w http.ResponseWriter, status int, resp *spi.Response) error {
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(status)
+	if resp.Output == nil {
+		return json.NewEncoder(w).Encode(map[string]any{"data": nil})
+	}
+	wrap, _ := resp.Output["_wrap"].(string)
+	if lst, ok := resp.Output["_list"]; ok {
+		items, _ := lst.([]any)
+		if items == nil {
+			items = []any{}
+		}
+		var edges []any
+		for _, item := range items {
+			edges = append(edges, map[string]any{"node": item})
+		}
+		if edges == nil {
+			edges = []any{}
+		}
+		if wrap == "" {
+			wrap = "projects"
+		}
+		return json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{wrap: map[string]any{"edges": edges}}})
+	}
+	if wrap != "" {
+		if rec, ok := resp.Output[wrap]; ok {
+			return json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{wrap: rec}})
+		}
+	}
+	return json.NewEncoder(w).Encode(map[string]any{"data": resp.Output})
 }
 
 func encodeHetzner(w http.ResponseWriter, status int, resp *spi.Response) error {
@@ -774,6 +853,10 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	if svc.ID == "hetzner.v1" {
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
+	}
+	if svc.ID == "railway.graphql" {
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"errors": []any{map[string]any{"message": f.Message, "extensions": map[string]any{"code": f.Code}}}})
 	}
 	w.Header().Set("x-amzn-errortype", f.Code)
 	w.WriteHeader(status)

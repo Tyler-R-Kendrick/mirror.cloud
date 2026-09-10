@@ -836,6 +836,18 @@
     ]
   },
   {
+    "ID": "railway.graphql",
+    "Protocol": "restJson1",
+    "Ops": [
+      "projectCreate",
+      "projects",
+      "project",
+      "projectDelete",
+      "serviceCreate",
+      "service"
+    ]
+  },
+  {
     "ID": "aws.kms",
     "Protocol": "awsJson1_1",
     "Ops": [

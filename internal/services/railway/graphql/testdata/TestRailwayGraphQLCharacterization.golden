@@ -1,0 +1,83 @@
+{
+  "create": {
+    "output": {
+      "_wrap": "projectCreate",
+      "projectCreate": {
+        "id": "7c589129",
+        "name": "web"
+      }
+    },
+    "status": 0
+  },
+  "del_miss": {
+    "error": "NOT_FOUND",
+    "message": "Project not found",
+    "status": 200
+  },
+  "delete": {
+    "output": {
+      "_wrap": "projectDelete",
+      "projectDelete": true
+    },
+    "status": 0
+  },
+  "empty": {
+    "error": "BAD_USER_INPUT",
+    "message": "project name is required",
+    "status": 200
+  },
+  "get": {
+    "output": {
+      "_wrap": "project",
+      "project": {
+        "id": "7c589129",
+        "name": "web"
+      }
+    },
+    "status": 0
+  },
+  "get_svc": {
+    "output": {
+      "_wrap": "service",
+      "service": {
+        "id": "5f59f223",
+        "name": "api",
+        "projectId": "7c589129"
+      }
+    },
+    "status": 0
+  },
+  "list": {
+    "output": {
+      "_list": [
+        {
+          "id": "7c589129",
+          "name": "web"
+        }
+      ],
+      "_wrap": "projects"
+    },
+    "status": 0
+  },
+  "miss_svc": {
+    "error": "NOT_FOUND",
+    "message": "Service not found",
+    "status": 200
+  },
+  "missing": {
+    "error": "NOT_FOUND",
+    "message": "Project not found",
+    "status": 200
+  },
+  "service": {
+    "output": {
+      "_wrap": "serviceCreate",
+      "serviceCreate": {
+        "id": "5f59f223",
+        "name": "api",
+        "projectId": "7c589129"
+      }
+    },
+    "status": 0
+  }
+}

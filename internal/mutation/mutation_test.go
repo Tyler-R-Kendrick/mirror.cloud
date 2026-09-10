@@ -21772,6 +21772,38 @@ var mutants = []mutant{
 		pkg:  "./internal/services/hetzner/v1",
 		run:  "TestDeleteMissingServerAndSSHKey",
 	},
+	{
+		name: "railway-accept-empty-project-name",
+		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
+		old:  "if name == \"\" {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"project name is required\", 200)",
+		new:  "if false {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"project name is required\", 200)",
+		pkg:  "./internal/services/railway/graphql",
+		run:  "TestProjectCreateRejectsEmptyName",
+	},
+	{
+		name: "railway-get-missing-project-as-data",
+		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
+		old:  "b, ok, _ := p.col(req, \"rwproj\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Project not found\", 200)",
+		new:  "b, ok, _ := p.col(req, \"rwproj\").Get(ctx, id)\n\tif false {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Project not found\", 200)",
+		pkg:  "./internal/services/railway/graphql",
+		run:  "TestProjectAndServiceLifecycle",
+	},
+	{
+		name: "railway-delete-missing-project-as-success",
+		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
+		old:  "got, err := p.project(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
+		new:  "got, err := p.project(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
+		pkg:  "./internal/services/railway/graphql",
+		run:  "TestDeleteMissingProject",
+	},
+	{
+		name: "railway-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if svc.ID == \"railway.graphql\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"errors\": []any{map[string]any{\"message\": f.Message, \"extensions\": map[string]any{\"code\": f.Code}}}})",
+		new:  "if false && svc.ID == \"railway.graphql\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"errors\": []any{map[string]any{\"message\": f.Message, \"extensions\": map[string]any{\"code\": f.Code}}}})",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

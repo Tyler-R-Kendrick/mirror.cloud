@@ -1415,6 +1415,22 @@ func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 	}
 }
 
+func TestSNSSQSSubscriptionAutoConfirmation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "auto-confirm"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "auto-confirm"}).Output["TopicArn"])
+	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:auto-confirm"})
+	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
+	if str(attrs["PendingConfirmation"]) != "false" {
+		t.Fatalf("SQS subscription remained pending: %#v", attrs)
+	}
+}
+
 func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

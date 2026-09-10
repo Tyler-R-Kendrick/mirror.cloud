@@ -962,6 +962,9 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if d < 0 {
 			d = 0
 		}
+		if next, ok := p.nextVisible(ctx, req, name, now); ok && next < d {
+			d = next
+		}
 		select {
 		case <-p.deps.Clock.After(d):
 		case <-wake:
@@ -970,6 +973,30 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
 	}
+}
+
+// nextVisible returns the shortest delay before a delayed message can be
+// considered by the next receive poll. Long polls must wake at that boundary,
+// not only when their overall wait deadline expires.
+func (p *Pack) nextVisible(ctx context.Context, req *spi.Request, name string, now time.Time) (time.Duration, bool) {
+	kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 0)
+	attrs := p.queueAttrs(ctx, req, name)
+	var next time.Duration
+	for _, kv := range kvs {
+		var message map[string]any
+		if json.Unmarshal(kv.Value, &message) != nil || messageExpired(attrs, message, now.UnixNano()) {
+			continue
+		}
+		at := int64(asFloat(message["visibleAt"]))
+		if at <= now.UnixNano() {
+			continue
+		}
+		delay := time.Unix(0, at).Sub(now)
+		if delay <= 0 || next == 0 || delay < next {
+			next = delay
+		}
+	}
+	return next, next > 0
 }
 
 func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now time.Time, max int) []map[string]any {

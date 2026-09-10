@@ -1450,6 +1450,33 @@ func TestSNSPlatformEndpointAttributesProjection(t *testing.T) {
 	}
 }
 
+func TestSNSPlatformEndpointCustomUserDataPrecedence(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "endpoint-custom-data", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformEndpoint", Input: map[string]any{
+		"PlatformApplicationArn": app.Output["PlatformApplicationArn"], "Token": "token",
+		"Attributes": map[string]any{"CustomUserData": "attribute"}, "CustomUserData": "parameter",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetEndpointAttributes", Input: map[string]any{"EndpointArn": endpoint.Output["EndpointArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := str(asMap(get.Output["Attributes"])["CustomUserData"]); got != "parameter" {
+		t.Fatalf("custom user data=%q", got)
+	}
+}
+
 func TestSNSPlatformEndpointListProjection(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

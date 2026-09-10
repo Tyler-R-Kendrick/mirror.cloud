@@ -18367,6 +18367,18 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformApplicationDeletionCleansSubscriptions",
 		},
 		{
+			name: "sns-ignore-platform-endpoint-custom-user-data-parameter",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old: `if customUserData != nil {
+			requestedAttrs["CustomUserData"] = customUserData
+		}`,
+			new: `if false {
+			requestedAttrs["CustomUserData"] = customUserData
+		}`,
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSPlatformEndpointCustomUserDataPrecedence",
+		},
+		{
 			name: "sns-publish-disabled-platform-endpoint",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if strings.EqualFold(str(endpoint["Enabled"]), "false") {`,

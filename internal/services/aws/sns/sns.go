@@ -76,6 +76,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if strings.HasSuffix(name, ".fifo") != fifo {
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FifoTopic", HTTPStatus: 400, Fault: "client"}
 		}
+		if fifo && attrs["ContentBasedDeduplication"] == nil {
+			attrs["ContentBasedDeduplication"] = "false"
+		}
 		arn := fmt.Sprintf("arn:%s:sns:%s:%s:%s", snsPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)
 		if existing, ok, _ := p.col(req, "topics").Get(ctx, name); ok {
 			var current map[string]any

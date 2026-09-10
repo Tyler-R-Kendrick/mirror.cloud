@@ -697,6 +697,22 @@ func TestSNSPartitionARNs(t *testing.T) {
 	}
 }
 
+func TestSNSFIFOAttributesDefault(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "fifo-defaults.fifo", "Attributes": map[string]any{"FifoTopic": "true"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": created.Output["TopicArn"]}})
+	if err != nil || str(asMap(attrs.Output["Attributes"])["ContentBasedDeduplication"]) != "false" {
+		t.Fatalf("FIFO attributes %#v err=%v", attrs, err)
+	}
+}
+
 func TestTopicValidationAndPublishTargetCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

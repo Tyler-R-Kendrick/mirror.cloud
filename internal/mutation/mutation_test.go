@@ -18311,6 +18311,24 @@ func TestMutantsAreKilled(t *testing.T) {
 			run: "TestSNSPlatformEndpointLifecycleValidation",
 		},
 		{
+			name: "sns-return-endpoint-attributes-for-missing-endpoint",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old: `default:
+		arn := str(req.Input["EndpointArn"])
+		b, ok, _ := col.Get(ctx, arn)
+		if !ok {
+			return nil, &spi.Fault{Code: "NotFound", HTTPStatus: 404, Fault: "client"}
+		}`,
+			new: `default:
+		arn := str(req.Input["EndpointArn"])
+		b, ok, _ := col.Get(ctx, arn)
+		if false {
+			return nil, &spi.Fault{Code: "NotFound", HTTPStatus: 404, Fault: "client"}
+		}`,
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSPlatformEndpointLifecycleValidation",
+		},
+		{
 			name: "sns-accept-empty-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old: `if len(attrs) == 0 {

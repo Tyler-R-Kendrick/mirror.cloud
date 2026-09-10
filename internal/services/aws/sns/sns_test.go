@@ -23,6 +23,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -485,6 +486,34 @@ func TestLambdaSubscriptionDelivery(t *testing.T) {
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": topic, "Message": "hello", "Subject": "warning"}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSNSLambdaSuccessFeedbackDeliveryLog(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, lp := New(deps), lambda.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "feedback", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte("def lambda_handler(event, context):\n return event\n"))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "feedback"}).Output["TopicArn"])
+	invokeSNS(t, p, id, "SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "LambdaSuccessFeedbackRoleArn", "AttributeValue": "arn:aws:iam::1:role/sns"})
+	invokeSNS(t, p, id, "SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "LambdaSuccessFeedbackSampleRate", "AttributeValue": "100"})
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "lambda", "Endpoint": "arn:aws:lambda:us-east-1:1:function:feedback"})
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": "logged"})
+	group := "sns/us-east-1/1/feedback"
+	logsPack := logs.New(deps)
+	response, err := logsPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetLogEvents", Input: map[string]any{"logGroupName": group, "logStreamName": "delivery"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := asSlice(response.Output["events"])
+	if len(events) != 1 || !strings.Contains(str(asMap(events[0])["message"]), `"messageId"`) || !strings.Contains(str(asMap(events[0])["message"]), `"statusCode":200`) {
+		t.Fatalf("feedback log %#v", events)
 	}
 }
 

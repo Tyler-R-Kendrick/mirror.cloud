@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 838 of 907 direct upstream test functions are explicitly traced (92.4%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,797 tests across 221 Go packages. The full 2,602-entry mutation inventory is green (`make test-mutation`, 2,898.6s); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The full 2,602-entry mutation inventory is green (`make test-mutation`, 2,898.6s); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -88,6 +88,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSubscriptionHttp::test_subscribe_external_http_endpoint_content_type` | `TestSNSHTTPDeliveryPolicy` verifies raw HTTP bodies, policy-selected content type, and SNS message-type headers |
 | `test_sns.py::TestSNSSubscriptionSQS::test_attribute_raw_subscribe` | `TestSNSSQSRawDeliveryPreservesMessageAttributes` verifies raw SQS delivery carries string and binary message attributes |
 | `test_sns.py::TestSNSSubscriptionSQS::test_message_attributes_not_missing` | `TestSNSSQSRawDeliveryPreservesMessageAttributes` verifies raw SQS delivery does not drop message attributes |
+| `test_sns.py::TestSNSSubscriptionSQS::test_publish_message_group_id` | `TestSNSStandardMessageGroupIDDelivery` verifies standard SNS-to-SQS delivery preserves fair-queue `MessageGroupId` metadata |
 | `test_sns.py::TestSNSSubscriptionSQSFifo::test_publish_to_fifo_topic_to_sqs_queue_no_content_dedup` | `TestSNSFIFOTopicToSQSWithoutQueueDeduplication` supplies SNS-generated deduplication IDs to FIFO queues without content-based deduplication |
 | `test_sns.py::TestSNSSubscriptionSQSFifo::test_publish_batch_messages_from_fifo_topic_to_fifo_queue` | `TestSNSPublishBatchToFIFOSQS` verifies per-entry FIFO batch validation and three-message SQS delivery |
 | `test_sns.py::TestSNSPublishCrud::test_publish_to_fifo_with_target_arn` | `TestSNSFIFOPublishValidationAndTopicDeduplication` verifies FIFO topics accept TargetArn aliases with structured messages and MessageGroupId |

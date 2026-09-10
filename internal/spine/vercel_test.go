@@ -73,6 +73,14 @@ func TestBootedServerVercelAPI(t *testing.T) {
 	if code != 200 || kv["result"] != "v" {
 		t.Fatalf("kv get %d %#v", code, kv)
 	}
+	code, kv = do(http.MethodPost, "/", `["DEL","k"]`, "id.kv.vercel-storage.com")
+	if code != 200 || kv["result"] != float64(1) {
+		t.Fatalf("kv del %d %#v", code, kv)
+	}
+	code, kv = do(http.MethodPost, "/", `["GET","k"]`, "id.kv.vercel-storage.com")
+	if code != 200 || kv["result"] != nil {
+		t.Fatalf("kv get after del %d %#v", code, kv)
+	}
 	code, missing := do(http.MethodGet, "/v9/projects/missing", "", "")
 	if code != 404 {
 		t.Fatalf("missing %d %#v", code, missing)

@@ -2,7 +2,6 @@ package restjson
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -26,7 +25,10 @@ func FuzzVercelRoute(f *testing.F) {
 		if err != nil || u.Host == "" {
 			return
 		}
-		req := httptest.NewRequest(method, u.String(), nil)
+		req, err := http.NewRequest(method, u.String(), nil)
+		if err != nil {
+			return
+		}
 		_, _ = (Codec{}).Route(&model.Service{ID: "vercel.api"}, req)
 	})
 }

@@ -41,6 +41,12 @@ func TestProjectDeploymentEnvAndKV(t *testing.T) {
 	if len(envs.Output["envs"].([]any)) != 1 {
 		t.Fatalf("envs %#v", envs.Output)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteProjectEnv", Input: map[string]any{"id": pid, "envId": env.Output["id"]}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(inv("ListProjectEnv", map[string]any{"id": pid}).Output["envs"].([]any)); n != 0 {
+		t.Fatalf("envs after delete %d", n)
+	}
 	dom := inv("AddProjectDomain", map[string]any{"id": pid, "name": "docs.example.test"})
 	if dom.Output["name"] != "docs.example.test" {
 		t.Fatalf("domain %#v", dom.Output)
@@ -48,6 +54,10 @@ func TestProjectDeploymentEnvAndKV(t *testing.T) {
 	dpl := inv("CreateDeployment", map[string]any{"name": "docs", "project": "docs"})
 	if dpl.Output["readyState"] != "READY" || dpl.Output["projectId"] != pid {
 		t.Fatalf("deploy %#v", dpl.Output)
+	}
+	gotDpl := inv("GetDeployment", map[string]any{"id": dpl.Output["id"]})
+	if gotDpl.Output["id"] != dpl.Output["id"] {
+		t.Fatalf("get deploy %#v", gotDpl.Output)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteDeployment", Input: map[string]any{"id": dpl.Output["id"]}}); err != nil {
 		t.Fatal(err)
@@ -59,6 +69,14 @@ func TestProjectDeploymentEnvAndKV(t *testing.T) {
 	get := inv("KvCommand", map[string]any{"_redis": []any{"GET", "k"}})
 	if get.Output["result"] != "v" {
 		t.Fatalf("get %#v", get.Output)
+	}
+	del := inv("KvCommand", map[string]any{"_redis": []any{"DEL", "k"}})
+	if del.Output["result"] != 1 {
+		t.Fatalf("del %#v", del.Output)
+	}
+	gone := inv("KvCommand", map[string]any{"_redis": []any{"GET", "k"}})
+	if gone.Output["result"] != nil {
+		t.Fatalf("get after del %#v", gone.Output)
 	}
 	missing, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetProject", Input: map[string]any{"id": "nope"}})
 	if err == nil || missing != nil {

@@ -18032,6 +18032,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformApplicationAttributesProjection",
 		},
 		{
+			name: "sns-leak-platform-endpoint-list-record",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `out = append(out, map[string]any{"EndpointArn": rec["EndpointArn"], "Attributes": endpointAttributes(rec)})`,
+			new:  `out = append(out, rec)`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformEndpointListProjection",
+		},
+		{
 			name: "sns-wrap-raw-http-subscription-body",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `body = payload`,

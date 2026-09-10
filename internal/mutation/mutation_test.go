@@ -18040,6 +18040,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformEndpointListProjection",
 		},
 		{
+			name: "sns-nest-platform-endpoint-under-application",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `strings.Replace(app, ":app/", ":endpoint/", 1) + "/" + p.deps.Rand.Hex(8)`,
+			new:  `app + "/endpoint/" + p.deps.Rand.Hex(8)`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformEndpointListProjection",
+		},
+		{
 			name: "sns-leak-subscription-list-record",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `subs = append(subs, subscriptionSummary(req, m))`,

@@ -1187,6 +1187,8 @@ func TestSNSFilterOperators(t *testing.T) {
 		{"equals-ignore-case", map[string]any{"n": []any{map[string]any{"equals-ignore-case": "PROD"}}}, map[string]any{"n": "prod"}, true},
 		{"nested-body", map[string]any{"detail": map[string]any{"type": []any{"order"}}}, map[string]any{"detail": map[string]any{"type": "order"}}, true},
 		{"nested-body-or", map[string]any{"$or": []any{map[string]any{"type": []any{"order"}}, map[string]any{"type": []any{"refund"}}}}, map[string]any{"type": "refund"}, true},
+		{"cidr-match", map[string]any{"ip": []any{map[string]any{"cidr": "10.0.0.0/24"}}}, map[string]any{"ip": "10.0.0.255"}, true},
+		{"cidr-miss", map[string]any{"ip": []any{map[string]any{"cidr": "10.0.0.0/24"}}}, map[string]any{"ip": "10.0.1.1"}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3507,5 +3509,179 @@ func TestSNSSetSubscriptionAttributesAfterUnsubscribe(t *testing.T) {
 	fault, ok := err.(*spi.Fault)
 	if !ok || fault.Code != "NotFound" {
 		t.Fatalf("set attributes after unsubscribe fault=%v", err)
+	}
+}
+
+func TestSNSFilterPolicyConstraints(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "filter-constraints"}).Output["TopicArn"])
+	subscribe := func(policy string, attrs map[string]any) error {
+		t.Helper()
+		if attrs == nil {
+			attrs = map[string]any{}
+		}
+		attrs["FilterPolicy"] = policy
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+			"TopicArn": topic, "Protocol": "sms", "Endpoint": "+15555550111", "Attributes": attrs,
+		}})
+		return err
+	}
+	values := make([]string, 151)
+	for i := range values {
+		values[i] = fmt.Sprintf("v%d", i)
+	}
+	tooMany, _ := json.Marshal(map[string]any{"key": values})
+	for _, policy := range []string{
+		`{"key":[["value"]]}`,
+		`{"key":[{"wrong-operator":true}]}`,
+		`{"key":[{"suffix":"a","prefix":"b"}]}`,
+		`{"key_a":"value_one"}`,
+		string(tooMany),
+		`{"key1":["a"],"key2":["b"],"key3":["c"],"key4":["d"],"key5":["e"],"key6":["f"]}`,
+		`{"object":{"key":[{"prefix":"auto-"}]}}`,
+	} {
+		if err := subscribe(policy, nil); err == nil {
+			t.Fatalf("accepted invalid filter policy %s", policy)
+		}
+	}
+	if err := subscribe(`{"object":{"key":[{"prefix":"auto-"}]}}`, map[string]any{"FilterPolicyScope": "MessageBody"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSNSFilterPolicyNumericSQSDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "numeric-filter"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "numeric-filter"}).Output["TopicArn"])
+	sub := str(invokeSNS(t, p, id, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:numeric-filter",
+	}).Output["SubscriptionArn"])
+	invokeSNS(t, p, id, "SetSubscriptionAttributes", map[string]any{
+		"SubscriptionArn": sub, "AttributeName": "FilterPolicy",
+		"AttributeValue": `{"attr1":[{"numeric":[">",0,"<=",100]}]}`,
+	})
+	invokeSNS(t, p, id, "Publish", map[string]any{
+		"TopicArn": topic, "Message": "in-range",
+		"MessageAttributes": map[string]any{"attr1": map[string]any{"DataType": "Number", "StringValue": "99"}},
+	})
+	invokeSNS(t, p, id, "Publish", map[string]any{
+		"TopicArn": topic, "Message": "out-of-range",
+		"MessageAttributes": map[string]any{"attr1": map[string]any{"DataType": "Number", "StringValue": "111"}},
+	})
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "numeric-filter"}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("numeric filter delivery=%#v err=%v", received, err)
+	}
+}
+
+func TestSNSLambdaSubscribeNotificationEnvelope(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, lp := New(deps), lambda.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "sns-lambda-envelope", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte("def lambda_handler(event, context):\n return event\n"))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "sns-lambda-envelope"}).Output["TopicArn"])
+	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "lambda", "Endpoint": "arn:aws:lambda:us-east-1:1:function:sns-lambda-envelope",
+	})
+	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
+	if str(attrs["PendingConfirmation"]) != "false" {
+		t.Fatalf("lambda subscription pending: %#v", attrs)
+	}
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Subject": "[Subject] Test subject", "Message": "Hello world."})
+	envelope := p.lambdaNotification(&spi.Request{Identity: id, Input: map[string]any{"Subject": "[Subject] Test subject", "TopicArn": topic}}, map[string]any{
+		"SubscriptionArn": sub.Output["SubscriptionArn"], "TopicArn": topic,
+	}, "Hello world.", "mid-1", nil)
+	records := asSlice(envelope["Records"])
+	if len(records) != 1 || str(asMap(records[0])["EventSource"]) != "aws:sns" {
+		t.Fatalf("lambda records %#v", envelope)
+	}
+	sns := asMap(asMap(records[0])["Sns"])
+	if str(sns["Type"]) != "Notification" || str(sns["Message"]) != "Hello world." || str(sns["Subject"]) != "[Subject] Test subject" || str(sns["SignatureVersion"]) != "1" || !validTestSNSNotificationSignature(sns) {
+		t.Fatalf("lambda sns envelope %#v", sns)
+	}
+}
+
+func TestSNSMultipleHTTPSubscriptions(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "multi-http"}).Output["TopicArn"])
+	tokens := make(chan string, 4)
+	var servers []*httptest.Server
+	var arns []string
+	for i := 0; i < 4; i++ {
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			var payload map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&payload)
+			if str(payload["Type"]) == "SubscriptionConfirmation" {
+				tokens <- str(payload["Token"])
+			}
+			writer.WriteHeader(http.StatusTooManyRequests)
+		}))
+		servers = append(servers, server)
+		arns = append(arns, str(invokeSNS(t, p, id, "Subscribe", map[string]any{
+			"TopicArn": topic, "Protocol": "http", "Endpoint": server.URL, "ReturnSubscriptionArn": true,
+		}).Output["SubscriptionArn"]))
+	}
+	defer func() {
+		for _, server := range servers {
+			server.Close()
+		}
+	}()
+	listed := invokeSNS(t, p, id, "ListSubscriptionsByTopic", map[string]any{"TopicArn": topic})
+	if len(asSlice(listed.Output["Subscriptions"])) != 4 {
+		t.Fatalf("subscriptions %#v", listed.Output)
+	}
+	confirmed := invokeSNS(t, p, id, "ConfirmSubscription", map[string]any{"TopicArn": topic, "Token": <-tokens})
+	if str(asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": confirmed.Output["SubscriptionArn"]}).Output["Attributes"])["PendingConfirmation"]) != "false" {
+		t.Fatalf("confirmed subscription remained pending %#v", confirmed.Output)
+	}
+	pending := 0
+	for _, arn := range arns {
+		attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": arn}).Output["Attributes"])
+		if str(attrs["PendingConfirmation"]) == "true" {
+			pending++
+		}
+	}
+	if pending != 3 {
+		t.Fatalf("pending=%d", pending)
+	}
+}
+
+func TestSNSHTTPNotificationSignature(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "http-signed"}).Output["TopicArn"])
+	got := make(chan map[string]any, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload map[string]any
+		_ = json.NewDecoder(request.Body).Decode(&payload)
+		got <- payload
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	invokeSNS(t, p, id, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "http", "Endpoint": server.URL, "ReturnSubscriptionArn": true,
+	})
+	confirmation := <-got
+	invokeSNS(t, p, id, "ConfirmSubscription", map[string]any{"TopicArn": topic, "Token": confirmation["Token"]})
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Subject": "signed", "Message": "hello"})
+	notification := <-got
+	if str(notification["Type"]) != "Notification" || str(notification["Message"]) != "hello" || str(notification["Subject"]) != "signed" || !validTestSNSNotificationSignature(notification) {
+		t.Fatalf("http notification %#v", notification)
 	}
 }

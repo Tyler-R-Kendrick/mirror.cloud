@@ -314,6 +314,22 @@ func TestSNSUnicodeMessageToSQS(t *testing.T) {
 	}
 }
 
+func TestSNSSMSSubscriptionAttributes(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "sms-subscription"}).Output["TopicArn"])
+	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sms", "Endpoint": "+123123123"})
+	arn := str(sub.Output["SubscriptionArn"])
+	if !validSubscriptionARN(arn) {
+		t.Fatalf("SMS subscription=%#v", sub.Output)
+	}
+	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": arn}).Output["Attributes"])
+	if attrs["Protocol"] != "sms" || attrs["Endpoint"] != "+123123123" || attrs["PendingConfirmation"] != "false" {
+		t.Fatalf("SMS subscription attributes=%#v", attrs)
+	}
+}
+
 func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

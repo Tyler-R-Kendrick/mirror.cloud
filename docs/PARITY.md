@@ -713,6 +713,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sq
 
 The ordinary local gate is green across 221 packages. The current 2,571-entry inventory has focused green shards for newly added mutants; a full four-shard rerun remains pending because the prior four-way harness exceeded its 35-minute bound. Serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
+Real-clock timestamps use a monotonic process anchor so wall-clock steps cannot extend delayed-message or visibility windows; the delayed long-poll characterization and 30-run HTTP behavior probe are green.
+
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|
 | `test_sqs.py::TestSqsProvider::test_list_queues` | ListQueues applies QueueNamePrefix and omits QueueUrls when no queue matches; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin both branches | Mapped; full race-clean |

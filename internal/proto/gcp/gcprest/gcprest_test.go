@@ -91,4 +91,12 @@ func TestGCPRESTDecodeEncodeAndFault(t *testing.T) {
 	if w.Code != http.StatusNotImplemented || w.Header().Get("x-mirror-not-implemented") != "gcp.storage.storage.objects.insert" || !strings.Contains(w.Body.String(), `"reason":"MirrorNotImplemented"`) {
 		t.Fatalf("fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
+
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(svc, &model.Operation{Name: "storage.objects.get"}, w, &spi.Fault{Code: "notFound", Message: "object o not found", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"reason":"notFound"`) || !strings.Contains(w.Body.String(), `"error"`) {
+		t.Fatalf("gcs 404 %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
 }

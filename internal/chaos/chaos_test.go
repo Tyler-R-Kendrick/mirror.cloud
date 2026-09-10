@@ -34,6 +34,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	cfapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	hsapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hostinger/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -7715,4 +7716,68 @@ func TestHostingerConcurrentDNSPutGet(t *testing.T) {
 	if err != nil || got.Output["_list"] == nil {
 		t.Fatalf("get after concurrent put %#v %v", got, err)
 	}
+}
+
+func TestGCSConcurrentDuplicateBuckets(t *testing.T) {
+	p := gcs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errCh := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "race"}})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	winners := 0
+	for err := range errCh {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.HTTPStatus != 409 || fault.Code != "conflict" {
+			t.Fatalf("concurrent create: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful creates = %d, want 1", winners)
+	}
+}
+
+func TestGCSConcurrentObjectPutGet(t *testing.T) {
+	p := gcs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "race"}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			body := []byte(fmt.Sprintf("%d", n))
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.insert", Input: map[string]any{"bucket": "race", "name": "k"}, Body: io.NopCloser(bytes.NewReader(body))}); err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.get", Input: map[string]any{"bucket": "race", "object": "k", "alt": "media"}})
+	if err != nil || got.Stream == nil {
+		t.Fatalf("get after concurrent put %#v %v", got, err)
+	}
+	_, _ = io.ReadAll(got.Stream)
+	_ = got.Stream.Close()
 }

@@ -21628,6 +21628,38 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
+	{
+		name: "gcs-accept-empty-bucket",
+		file: filepath.Join("internal", "services", "gcp", "gcs", "gcs.go"),
+		old:  "if name == \"\" {\n\t\treturn nil, fault(\"invalid\", \"bucket name required\", 400)",
+		new:  "if false {\n\t\treturn nil, fault(\"invalid\", \"bucket name required\", 400)",
+		pkg:  "./internal/services/gcp/gcs",
+		run:  "TestBucketInsertRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "gcs-accept-duplicate-bucket",
+		file: filepath.Join("internal", "services", "gcp", "gcs", "gcs.go"),
+		old:  `if _, exists, _ := p.col(req, "buckets").Get(ctx, name); exists {`,
+		new:  `if _, exists, _ := p.col(req, "buckets").Get(ctx, name); false {`,
+		pkg:  "./internal/services/gcp/gcs",
+		run:  "TestBucketInsertRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "gcs-get-missing-object-as-empty",
+		file: filepath.Join("internal", "services", "gcp", "gcs", "gcs.go"),
+		old:  "if !ok {\n\t\treturn objectRec{}, fault(\"notFound\", \"object \"+name+\" not found\", 404)",
+		new:  "if false {\n\t\treturn objectRec{}, fault(\"notFound\", \"object \"+name+\" not found\", 404)",
+		pkg:  "./internal/services/gcp/gcs",
+		run:  "TestMissingObjectAndBucket",
+	},
+	{
+		name: "gcs-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "gcp", "gcprest", "gcprest.go"),
+		old:  "w.Header().Set(\"Content-Type\", \"application/json\")\n\tw.WriteHeader(status)\n\treturn json.NewEncoder(w).Encode(map[string]any{\n\t\t\"error\": map[string]any{\"code\": status, \"message\": f.Message, \"errors\": []any{map[string]any{\"reason\": f.Code, \"message\": f.Message}}},\n\t})",
+		new:  "w.Header().Set(\"x-amzn-errortype\", f.Code)\n\tw.WriteHeader(status)\n\treturn json.NewEncoder(w).Encode(map[string]any{\"message\": f.Message, \"__type\": f.Code})",
+		pkg:  "./internal/proto/gcp/gcprest",
+		run:  "TestGCPRESTDecodeEncodeAndFault",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

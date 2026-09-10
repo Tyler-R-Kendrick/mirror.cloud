@@ -1,0 +1,155 @@
+{
+  "copy": {
+    "bucket": "snap",
+    "contentType": "application/octet-stream",
+    "etag": "5d41402abc4b2a76b9719d911017c592",
+    "generation": "395791637",
+    "id": "snap/o2/395791637",
+    "kind": "storage#object",
+    "md5Hash": "XUFAKrxLKna5cZ2REBfFkg==",
+    "mediaLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o2?alt=media",
+    "metageneration": "1",
+    "name": "o2",
+    "selfLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o2",
+    "size": "5",
+    "storageClass": "STANDARD",
+    "timeCreated": "1970-01-01T00:00:00Z",
+    "updated": "1970-01-01T00:00:00Z"
+  },
+  "create": {
+    "id": "snap",
+    "kind": "storage#bucket",
+    "location": "US",
+    "metageneration": "1",
+    "name": "snap",
+    "selfLink": "http://127.0.0.1:4566/storage/v1/b/snap",
+    "storageClass": "STANDARD",
+    "timeCreated": "1970-01-01T00:00:00Z",
+    "updated": "1970-01-01T00:00:00Z"
+  },
+  "delete": null,
+  "duplicate": {
+    "error": "conflict",
+    "message": "The requested bucket name is not available.",
+    "status": 409
+  },
+  "empty": {
+    "error": "invalid",
+    "message": "bucket name required",
+    "status": 400
+  },
+  "get": {
+    "id": "snap",
+    "kind": "storage#bucket",
+    "location": "US",
+    "metageneration": "1",
+    "name": "snap",
+    "selfLink": "http://127.0.0.1:4566/storage/v1/b/snap",
+    "storageClass": "STANDARD",
+    "timeCreated": "1970-01-01T00:00:00Z",
+    "updated": "1970-01-01T00:00:00Z"
+  },
+  "insert": {
+    "bucket": "snap",
+    "contentType": "application/octet-stream",
+    "etag": "5d41402abc4b2a76b9719d911017c592",
+    "generation": "526682617",
+    "id": "snap/o/526682617",
+    "kind": "storage#object",
+    "md5Hash": "XUFAKrxLKna5cZ2REBfFkg==",
+    "mediaLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o?alt=media",
+    "metageneration": "1",
+    "name": "o",
+    "selfLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o",
+    "size": "5",
+    "storageClass": "STANDARD",
+    "timeCreated": "1970-01-01T00:00:00Z",
+    "updated": "1970-01-01T00:00:00Z"
+  },
+  "list": {
+    "items": [
+      {
+        "id": "snap",
+        "kind": "storage#bucket",
+        "location": "US",
+        "metageneration": "1",
+        "name": "snap",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/snap",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    ],
+    "kind": "storage#buckets"
+  },
+  "media": {
+    "body": "hello",
+    "status": 200
+  },
+  "meta": {
+    "bucket": "snap",
+    "contentType": "application/octet-stream",
+    "etag": "5d41402abc4b2a76b9719d911017c592",
+    "generation": "526682617",
+    "id": "snap/o/526682617",
+    "kind": "storage#object",
+    "md5Hash": "XUFAKrxLKna5cZ2REBfFkg==",
+    "mediaLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o?alt=media",
+    "metageneration": "1",
+    "name": "o",
+    "selfLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o",
+    "size": "5",
+    "storageClass": "STANDARD",
+    "timeCreated": "1970-01-01T00:00:00Z",
+    "updated": "1970-01-01T00:00:00Z"
+  },
+  "missing": {
+    "error": "notFound",
+    "message": "object nope not found",
+    "status": 404
+  },
+  "nobucket": {
+    "error": "notFound",
+    "message": "bucket nope not found",
+    "status": 404
+  },
+  "objects": {
+    "items": [
+      {
+        "bucket": "snap",
+        "contentType": "application/octet-stream",
+        "etag": "5d41402abc4b2a76b9719d911017c592",
+        "generation": "526682617",
+        "id": "snap/o/526682617",
+        "kind": "storage#object",
+        "md5Hash": "XUFAKrxLKna5cZ2REBfFkg==",
+        "mediaLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o?alt=media",
+        "metageneration": "1",
+        "name": "o",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o",
+        "size": "5",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      },
+      {
+        "bucket": "snap",
+        "contentType": "application/octet-stream",
+        "etag": "5d41402abc4b2a76b9719d911017c592",
+        "generation": "395791637",
+        "id": "snap/o2/395791637",
+        "kind": "storage#object",
+        "md5Hash": "XUFAKrxLKna5cZ2REBfFkg==",
+        "mediaLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o2?alt=media",
+        "metageneration": "1",
+        "name": "o2",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/snap/o/o2",
+        "size": "5",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    ],
+    "kind": "storage#objects"
+  }
+}

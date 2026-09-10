@@ -19,6 +19,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `cloudflare.kv` | `restJson1` | 6 | 0 |
 | `hostinger.dns` | `restJson1` | 6 | 0 |
 | `azure.blobs` | `restXml` | 8 | 0 |
+| `digitalocean.v2` | `restJson1` | 8 | 0 |
 | `aws.kms` | `awsJson1_1` | 54 | 0 |
 | `aws.logs` | `awsJson1_1` | 118 | 0 |
 | `aws.events` | `awsJson1_1` | 57 | 0 |

@@ -1,0 +1,106 @@
+{
+  "create": {
+    "output": {
+      "_wrap": "droplet",
+      "droplet": {
+        "id": 526682617,
+        "image": "",
+        "name": "web",
+        "region": "nyc3",
+        "size": "s-1vcpu-1gb",
+        "status": "active"
+      }
+    },
+    "status": 0
+  },
+  "del_domain": {
+    "output": null,
+    "status": 204
+  },
+  "delete": {
+    "output": null,
+    "status": 204
+  },
+  "domain": {
+    "output": {
+      "_wrap": "domain",
+      "domain": {
+        "name": "snap.test",
+        "ttl": 1800
+      }
+    },
+    "status": 0
+  },
+  "domains": {
+    "output": {
+      "_list": [
+        {
+          "name": "snap.test",
+          "ttl": 1800
+        }
+      ],
+      "_wrap": "domains"
+    },
+    "status": 0
+  },
+  "duplicate": {
+    "error": "conflict",
+    "message": "name already exists",
+    "status": 409
+  },
+  "empty": {
+    "error": "unprocessable_entity",
+    "message": "domain name is required",
+    "status": 422
+  },
+  "get": {
+    "output": {
+      "_wrap": "droplet",
+      "droplet": {
+        "id": 526682617,
+        "image": "",
+        "name": "web",
+        "region": "nyc3",
+        "size": "s-1vcpu-1gb",
+        "status": "active"
+      }
+    },
+    "status": 0
+  },
+  "get_domain": {
+    "output": {
+      "_wrap": "domain",
+      "domain": {
+        "name": "snap.test",
+        "ttl": 1800
+      }
+    },
+    "status": 0
+  },
+  "list": {
+    "output": {
+      "_list": [
+        {
+          "id": 526682617,
+          "image": "",
+          "name": "web",
+          "region": "nyc3",
+          "size": "s-1vcpu-1gb",
+          "status": "active"
+        }
+      ],
+      "_wrap": "droplets"
+    },
+    "status": 0
+  },
+  "missing": {
+    "error": "not_found",
+    "message": "The resource you were accessing could not be found.",
+    "status": 404
+  },
+  "nodomain": {
+    "error": "not_found",
+    "message": "The resource you were accessing could not be found.",
+    "status": 404
+  }
+}

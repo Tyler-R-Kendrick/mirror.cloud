@@ -140,6 +140,16 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"hostinger.dns", http.MethodPut, "/api/dns/v1/zones/ex.test", "", "UpdateDNSRecords"},
 		{"hostinger.dns", http.MethodDelete, "/api/dns/v1/zones/ex.test", "", "DeleteDNSRecords"},
 		{"hostinger.dns", http.MethodGet, "/api/unknown", "", "Unknown"},
+
+		{"digitalocean.v2", http.MethodPost, "/v2/droplets", "", "CreateDroplet"},
+		{"digitalocean.v2", http.MethodGet, "/v2/droplets", "", "ListDroplets"},
+		{"digitalocean.v2", http.MethodGet, "/v2/droplets/1", "", "GetDroplet"},
+		{"digitalocean.v2", http.MethodDelete, "/v2/droplets/1", "", "DeleteDroplet"},
+		{"digitalocean.v2", http.MethodPost, "/v2/domains", "", "CreateDomain"},
+		{"digitalocean.v2", http.MethodGet, "/v2/domains", "", "ListDomains"},
+		{"digitalocean.v2", http.MethodGet, "/v2/domains/ex.test", "", "GetDomain"},
+		{"digitalocean.v2", http.MethodDelete, "/v2/domains/ex.test", "", "DeleteDomain"},
+		{"digitalocean.v2", http.MethodGet, "/v2/unknown", "", "Unknown"},
 	} {
 		request := httptest.NewRequest(test.method, test.path, nil)
 		if test.target != "" {
@@ -307,5 +317,35 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"correlation_id":"mirror"`) || !strings.Contains(w.Body.String(), `"message":"Domain not found"`) {
 		t.Fatalf("hs fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+
+	do := &model.Service{ID: "digitalocean.v2"}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(do, &model.Operation{Name: "ListDroplets"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"name": "web"}}, "_wrap": "droplets"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"droplets"`) || !strings.Contains(w.Body.String(), `"total":1`) || strings.Contains(w.Body.String(), `"_list"`) {
+		t.Fatalf("do list encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(do, &model.Operation{Name: "GetDomain"}, w, &spi.Response{Output: map[string]any{"_wrap": "domain", "domain": map[string]any{"name": "ex.test"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"domain"`) || !strings.Contains(w.Body.String(), `"ex.test"`) {
+		t.Fatalf("do encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(do, &model.Operation{Name: "DeleteDomain"}, w, &spi.Response{Status: 204}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 204 || w.Body.Len() != 0 {
+		t.Fatalf("do delete %d %q", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(do, &model.Operation{Name: "GetDroplet"}, w, &spi.Fault{Code: "not_found", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"id":"not_found"`) {
+		t.Fatalf("do fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 }

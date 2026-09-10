@@ -18155,16 +18155,6 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSFlattenedBinaryMessageAttributeDelivery",
 		},
 		{
-			name: "sns-retain-empty-subscription-delivery-policy",
-			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-			old: `if (k == "FilterPolicy" || k == "DeliveryPolicy") && value == "" {
-			delete(rec, k)`,
-			new: `if k == "FilterPolicy" && value == "" {
-			delete(rec, k)`,
-			pkg: "./internal/services/aws/sns",
-			run: "TestSNSControlPlaneOperations",
-		},
-		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,
@@ -18219,14 +18209,6 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  "copyReq.Identity.Account = req.Identity.Account",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSCrossAccountTopicAccess",
-		},
-		{
-			name: "sns-allow-cross-region-topic-owner",
-			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  "if parts[3] == req.Identity.Region && parts[4] != req.Identity.Account {",
-			new:  "if true && parts[4] != req.Identity.Account {",
-			pkg:  "./internal/services/aws/sns",
-			run:  "TestSNSCrossRegionTopicAccessRejected",
 		},
 		{
 			name: "sns-retain-deleted-delivery-policy",

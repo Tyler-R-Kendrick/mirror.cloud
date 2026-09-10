@@ -2713,6 +2713,24 @@ func TestSNSListSubscriptionsByTopicPagination(t *testing.T) {
 	}
 }
 
+func TestSNSUnknownSQSQueueSubscription(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "sns-unknown-sqs"}).Output["TopicArn"])
+	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:unknown-queue",
+	})
+	if !validSubscriptionARN(str(sub.Output["SubscriptionArn"])) {
+		t.Fatalf("unknown queue subscription=%#v", sub.Output)
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "unknown",
+	}}); err == nil {
+		t.Fatal("accepted malformed SQS endpoint")
+	}
+}
+
 func TestSNSHTTPSubscriptionRedrive(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

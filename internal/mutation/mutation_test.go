@@ -21756,6 +21756,22 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
+	{
+		name: "hetzner-delete-missing-server-as-success",
+		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
+		old:  "got, err := p.getServer(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
+		new:  "got, err := p.getServer(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
+		pkg:  "./internal/services/hetzner/v1",
+		run:  "TestDeleteMissingServerAndSSHKey",
+	},
+	{
+		name: "hetzner-delete-missing-ssh-key-as-success",
+		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
+		old:  "got, err := p.getSSHKey(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
+		new:  "got, err := p.getSSHKey(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
+		pkg:  "./internal/services/hetzner/v1",
+		run:  "TestDeleteMissingServerAndSSHKey",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

@@ -41,17 +41,20 @@ func TestHetznerV1Characterization(t *testing.T) {
 		}
 	}
 	golden.AssertJSON(t, map[string]any{
-		"create":    create,
-		"get":       inv("GetServer", map[string]any{"id": sid}),
-		"list":      inv("ListServers", nil),
-		"duplicate": inv("CreateServer", map[string]any{"name": "web"}),
-		"empty":     inv("CreateServer", map[string]any{}),
-		"delete":    inv("DeleteServer", map[string]any{"id": sid}),
-		"missing":   inv("GetServer", map[string]any{"id": sid}),
-		"ssh":       ssh,
-		"get_ssh":   inv("GetSSHKey", map[string]any{"id": kid}),
-		"keys":      inv("ListSSHKeys", nil),
-		"dup_fp":    inv("CreateSSHKey", map[string]any{"name": "other", "public_key": "ssh-ed25519 AAAA"}),
-		"nokey":     inv("GetSSHKey", map[string]any{"id": "missing"}),
+		"create":     create,
+		"get":        inv("GetServer", map[string]any{"id": sid}),
+		"list":       inv("ListServers", nil),
+		"duplicate":  inv("CreateServer", map[string]any{"name": "web"}),
+		"empty":      inv("CreateServer", map[string]any{}),
+		"delete":     inv("DeleteServer", map[string]any{"id": sid}),
+		"missing":    inv("GetServer", map[string]any{"id": sid}),
+		"ssh":        ssh,
+		"get_ssh":    inv("GetSSHKey", map[string]any{"id": kid}),
+		"keys":       inv("ListSSHKeys", nil),
+		"dup_fp":     inv("CreateSSHKey", map[string]any{"name": "other", "public_key": "ssh-ed25519 AAAA"}),
+		"del_ssh":    inv("DeleteSSHKey", map[string]any{"id": kid}),
+		"nokey":      inv("GetSSHKey", map[string]any{"id": kid}),
+		"del_miss_s": inv("DeleteServer", map[string]any{"id": "missing"}),
+		"del_miss_k": inv("DeleteSSHKey", map[string]any{"id": "missing"}),
 	})
 }

@@ -2069,6 +2069,28 @@ func TestSNSSubscriptionListProjection(t *testing.T) {
 	}
 }
 
+func TestSNSTopicNameConstraints(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": strings.Repeat("a", 256)}}); err != nil {
+		t.Fatalf("accepted max-length topic: %v", err)
+	}
+	for name, input := range map[string]map[string]any{
+		"empty":       {"Name": ""},
+		"too long":    {"Name": strings.Repeat("a", 257)},
+		"fifo suffix": {"Name": "test.fifo"},
+		"fifo flag":   {"Name": "test", "Attributes": map[string]any{"FifoTopic": "true"}},
+		"punctuation": {"Name": "bad:name"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateTopic", Input: input}); err == nil {
+				t.Fatalf("accepted invalid topic name: %#v", input)
+			}
+		})
+	}
+}
+
 func TestSNSSubscriptionAttributesARNValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

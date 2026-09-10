@@ -87,6 +87,11 @@ func TestSNSPublishTargetAndSubscriptionTimingCharacterization(t *testing.T) {
 		}
 		invokeSNSQueue(t, qp, id, "DeleteMessage", map[string]any{"QueueName": "publish-target", "ReceiptHandle": asMap(messages[0])["ReceiptHandle"]})
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TargetArn": "arn:aws:sns:us-east-1:1:endpoint/APNS/app/missing", "Message": "missing-endpoint",
+	}}); err == nil {
+		t.Fatal("publish to a missing platform endpoint succeeded")
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": "randomstring", "Message": "bad"}}); err == nil {
 		t.Fatal("accepted malformed topic ARN")
 	}

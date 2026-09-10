@@ -12,7 +12,11 @@ import (
 // Real is a wall-clock Clock. Advance returns an error.
 type Real struct{}
 
-func (Real) Now() time.Time                  { return time.Now() }
+var realEpoch = time.Now()
+
+// Anchor wall timestamps to the monotonic reading captured at process start;
+// NTP or VM clock steps must not lengthen an SQS delay or visibility timeout.
+func (Real) Now() time.Time                  { return realEpoch.Add(time.Since(realEpoch)) }
 func (Real) Since(t time.Time) time.Duration { return time.Since(t) }
 func (Real) Advance(time.Duration) error {
 	return errors.New("real clock cannot be advanced")

@@ -1,0 +1,74 @@
+{
+  "batch": {
+    "Responses": [
+      {
+        "TableName": "T"
+      },
+      {
+        "TableName": "T"
+      }
+    ]
+  },
+  "emptyParameters": {
+    "code": "ValidationException",
+    "message": "1 validation error detected: Value '[]' at 'parameters' failed to satisfy constraint: Member must have length greater than or equal to 1",
+    "status": 400
+  },
+  "missing": {
+    "Count": 3,
+    "Items": [
+      {
+        "Age": {
+          "N": "20"
+        },
+        "Username": {
+          "S": "user02"
+        }
+      },
+      {
+        "Username": {
+          "S": "user03"
+        }
+      },
+      {
+        "Username": {
+          "S": "user04"
+        }
+      }
+    ],
+    "ScannedCount": 4
+  },
+  "notMissing": {
+    "Count": 1,
+    "Items": [
+      {
+        "FirstName": {
+          "S": "Alice"
+        },
+        "Username": {
+          "S": "user01"
+        }
+      }
+    ],
+    "ScannedCount": 4
+  },
+  "transaction": {
+    "Responses": []
+  },
+  "user01": {
+    "FirstName": {
+      "S": "Alice"
+    },
+    "Username": {
+      "S": "user01"
+    }
+  },
+  "user02": {
+    "Age": {
+      "N": "20"
+    },
+    "Username": {
+      "S": "user02"
+    }
+  }
+}

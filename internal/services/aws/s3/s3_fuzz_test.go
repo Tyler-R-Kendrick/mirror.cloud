@@ -8,11 +8,15 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"hash/crc32"
 	"io"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -86,7 +90,7 @@ func FuzzStorageClassValidation(f *testing.F) {
 }
 
 func FuzzObjectKeyLength(f *testing.F) {
-	for _, key := range []string{"", "key", strings.Repeat("a", 1024), strings.Repeat("é", 512), strings.Repeat("a", 1025), strings.Repeat("é", 513)} {
+	for _, key := range []string{"", "key", "Ā0Ä", strings.Repeat("a", 1024), strings.Repeat("é", 512), strings.Repeat("a", 1025), strings.Repeat("é", 513)} {
 		f.Add(key)
 	}
 	f.Fuzz(func(t *testing.T, key string) {
@@ -96,6 +100,9 @@ func FuzzObjectKeyLength(f *testing.F) {
 		if len(key) <= 1024 {
 			if err != nil {
 				t.Fatalf("valid %d-byte key: %v", len(key), err)
+			}
+			if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "keys", "Key": key}, nil); string(readStream(t, got)) != "body" {
+				t.Fatalf("valid %d-byte key did not round trip", len(key))
 			}
 			return
 		}
@@ -140,13 +147,16 @@ func FuzzCreateBucketTags(f *testing.F) {
 	for _, seed := range []struct {
 		key, value string
 		duplicate  bool
-	}{{"team", "storage", false}, {"duplicate", "one", true}, {"aws:reserved", "value", false}, {"", "value", false}, {"unicode", "東京", false}} {
-		f.Add(seed.key, seed.value, seed.duplicate)
+		empty      bool
+	}{{"team", "storage", false, false}, {"duplicate", "one", true, false}, {"aws:reserved", "value", false, false}, {"", "value", false, false}, {"unicode", "東京", false, false}, {"", "", false, true}} {
+		f.Add(seed.key, seed.value, seed.duplicate, seed.empty)
 	}
-	f.Fuzz(func(t *testing.T, key, value string, duplicate bool) {
+	f.Fuzz(func(t *testing.T, key, value string, duplicate, empty bool) {
 		p := s3.New(spitest.Deps(t))
 		tags := []any{map[string]any{"Key": key, "Value": value}}
-		if duplicate {
+		if empty {
+			tags = []any{}
+		} else if duplicate {
 			tags = append(tags, map[string]any{"Key": key, "Value": "duplicate"})
 		}
 		input := map[string]any{"Bucket": "tagged-fuzz", "CreateBucketConfiguration": map[string]any{"Tags": tags}}
@@ -160,6 +170,13 @@ func FuzzCreateBucketTags(f *testing.F) {
 			}
 			return
 		}
+		if len(tags) == 0 {
+			if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-fuzz"}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+				t.Fatalf("empty create tags = %v", err)
+			}
+			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "tagged-fuzz"}, nil)
+			return
+		}
 		response := mustInvoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-fuzz"}, nil)
 		stored := response.Output["TagSet"].([]any)
 		if len(stored) != len(tags) || stored[0].(map[string]any)["Key"] != key || stored[0].(map[string]any)["Value"] != value {
@@ -167,6 +184,10 @@ func FuzzCreateBucketTags(f *testing.F) {
 		}
 		if _, err := invoke(t, p, "CreateBucket", input, nil); asFault(t, err).Code != "BucketAlreadyOwnedByYou" {
 			t.Fatalf("tagged recreation = %v", err)
+		}
+		mustInvoke(t, p, "PutBucketTagging", map[string]any{"Bucket": "tagged-fuzz", "TagSet": []any{}}, nil)
+		if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-fuzz"}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+			t.Fatalf("empty put tags = %v", err)
 		}
 	})
 }
@@ -187,7 +208,8 @@ func FuzzCreateBucketObjectOwnership(f *testing.F) {
 		_, err := invoke(t, p, "CreateBucket", input, nil)
 		valid := !set || ownership == "BucketOwnerPreferred" || ownership == "ObjectWriter" || ownership == "BucketOwnerEnforced"
 		if !valid {
-			if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Invalid x-amz-object-ownership header: "+ownership ||
+				fault.HTTPStatus != http.StatusBadRequest || len(fault.Fields) != 1 || fault.Fields["ArgumentName"] != "x-amz-object-ownership" {
 				t.Fatalf("ownership=%q: %#v", ownership, fault)
 			}
 			if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "ownership-fuzz"}, nil); asFault(t, err).Code != "NoSuchBucket" {
@@ -256,6 +278,12 @@ func FuzzPublicAccessBlock(f *testing.F) {
 	f.Fuzz(func(t *testing.T, mode uint8, flag bool, text string) {
 		p := s3.New(spitest.Deps(t))
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block-fuzz"}, nil)
+		defaults := asMapForTest(mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-fuzz"}, nil).Output["PublicAccessBlockConfiguration"])
+		for _, field := range []string{"BlockPublicAcls", "BlockPublicPolicy", "IgnorePublicAcls", "RestrictPublicBuckets"} {
+			if defaults[field] != true {
+				t.Fatalf("default %s = %#v", field, defaults[field])
+			}
+		}
 		baseline := map[string]any{"BlockPublicPolicy": true}
 		mustInvoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-fuzz", "PublicAccessBlockConfiguration": baseline}, nil)
 		var configuration any
@@ -459,6 +487,100 @@ func FuzzBucketCors(f *testing.F) {
 	})
 }
 
+func FuzzBucketCorsHTTP(f *testing.F) {
+	for _, seed := range []struct{ origin, method, headers string }{
+		{"https://app.example.test", "GET", ""},
+		{"https://app.example.test", "GET", "x-amz-request-payer,x-AMZ-meta-team"},
+		{"https://wrong.test", "GET", ""},
+		{"https://app.example.test/", "GET", ""},
+		{"https://app.example.test", "DELETE", ""},
+		{"https://app.example.test", "GET", "content-type"},
+		{"", "GET", ""},
+	} {
+		f.Add(seed.origin, seed.method, seed.headers)
+	}
+	f.Fuzz(func(t *testing.T, origin, method, requested string) {
+		if !utf8.ValidString(origin) || !utf8.ValidString(method) || !utf8.ValidString(requested) || len(origin)+len(method)+len(requested) > 512 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "cors-http-fuzz"}, nil)
+		rules := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"https://*.example.test"}, "AllowedHeaders": []any{"x-amz-*"}}}
+		mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "cors-http-fuzz", "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
+		request := httptest.NewRequest(http.MethodOptions, "https://cors-http-fuzz.s3.us-east-1.amazonaws.com/key", nil)
+		request.Header.Set("Origin", origin)
+		request.Header.Set("Access-Control-Request-Method", method)
+		request.Header.Set("Access-Control-Request-Headers", requested)
+		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+		if origin == "" {
+			if fault := asFault(t, err); fault.Code != "BadRequest" {
+				t.Fatalf("missing origin = %#v", fault)
+			}
+			return
+		}
+		originMatches := strings.HasPrefix(origin, "https://") && strings.HasSuffix(origin, ".example.test") && len(origin) >= len("https://")+len(".example.test")
+		headersMatch := true
+		for _, header := range strings.Split(requested, ",") {
+			header = strings.TrimSpace(header)
+			if header != "" && !strings.HasPrefix(strings.ToLower(header), "x-amz-") {
+				headersMatch = false
+			}
+		}
+		if originMatches && method == http.MethodGet && headersMatch {
+			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != origin {
+				t.Fatalf("matching request = %#v, %v", response, err)
+			}
+		} else if fault := asFault(t, err); fault.Code != "AccessForbidden" {
+			t.Fatalf("rejected request = %#v", fault)
+		}
+	})
+}
+
+func FuzzLocalStackCORSOrigins(f *testing.F) {
+	for mode := uint8(0); mode < 8; mode++ {
+		f.Add(mode, uint16(4566), "https://wrong.test")
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, portSeed uint16, arbitrary string) {
+		if !utf8.ValidString(arbitrary) || len(arbitrary) > 256 {
+			t.Skip()
+		}
+		port := strconv.Itoa(int(portSeed%65535) + 1)
+		origin := arbitrary
+		wantAllowed := true
+		switch mode % 8 {
+		case 0:
+			origin = "https://app.localstack.cloud"
+		case 1:
+			origin = "http://app.localstack.cloud"
+		case 2:
+			origin = "https://localhost"
+		case 3:
+			origin = "https://localhost.localstack.cloud"
+		case 4:
+			origin = "file://"
+		case 5:
+			origin = "http://localhost:" + port
+		case 6:
+			origin = "https://bucket.s3-website.localhost.localstack.cloud:" + port
+		case 7:
+			wantAllowed = false
+		}
+		p := s3.New(spitest.Deps(t))
+		request := httptest.NewRequest(http.MethodOptions, "https://missing.s3.us-east-1.amazonaws.com:"+port+"/key", nil)
+		request.Header.Set("Origin", origin)
+		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+		if wantAllowed {
+			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != origin || response.Headers.Get("Access-Control-Allow-Headers") == "" {
+				t.Fatalf("allowed default origin %q = %#v, %v", origin, response, err)
+			}
+		} else if arbitrary == "https://wrong.test" && err == nil {
+			t.Fatalf("known forbidden origin accepted: %#v", response)
+		} else if err == nil && response.Headers.Get("Access-Control-Allow-Origin") != origin {
+			t.Fatalf("arbitrary origin response = %#v", response)
+		}
+	})
+}
+
 func FuzzBucketWebsite(f *testing.F) {
 	for _, seed := range []struct {
 		mode     uint8
@@ -591,6 +713,12 @@ func FuzzBucketLifecycle(f *testing.F) {
 		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": prefix + "key"}, body)
 		if got := put.Headers.Get("x-amz-expiration"); got == "" {
 			t.Fatalf("mode=%d prefix=%q size=%d missing expiration", mode%5, prefix, sizeSeed)
+		}
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket["Bucket"], "Key": prefix + "m"}, nil).Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket["Bucket"], "Key": prefix + "m", "UploadId": uploadID, "PartNumber": 1}, body)
+		completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+		if got := completed.Headers.Get("x-amz-expiration"); got == "" {
+			t.Fatalf("mode=%d prefix=%q size=%d missing completion expiration", mode%5, prefix, sizeSeed)
 		}
 	})
 }
@@ -815,9 +943,18 @@ func FuzzACLConfigurations(f *testing.F) {
 		if !valid && asFault(t, err).Code != wantFault {
 			t.Fatalf("mode=%d value=%q fault=%v", mode, value, err)
 		}
-		grants := asSliceForTest(mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["Grants"])
+		acl := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket, "Key": key}, nil).Output
+		grants := asSliceForTest(acl["Grants"])
 		if valid && len(grants) == 0 || !valid && len(grants) != 2 {
 			t.Fatalf("stored ACL = %#v", grants)
+		}
+		if asMapForTest(acl["Owner"])["DisplayName"] != nil {
+			t.Fatalf("owner display name = %#v", acl["Owner"])
+		}
+		for _, grant := range grants {
+			if asMapForTest(asMapForTest(grant)["Grantee"])["DisplayName"] != nil {
+				t.Fatalf("grantee display name = %#v", grant)
+			}
 		}
 	})
 }
@@ -991,6 +1128,12 @@ func FuzzBucketVersioningState(f *testing.F) {
 			if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output["Status"]; got != status {
 				t.Fatalf("stored status %q = %v", status, got)
 			}
+			if status == "Enabled" {
+				versionID := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "format"}, nil).Headers.Get("x-amz-version-id")
+				if len(versionID) != 32 {
+					t.Fatalf("version id = %q", versionID)
+				}
+			}
 			return
 		}
 		want := "MalformedXML"
@@ -1045,6 +1188,38 @@ func FuzzObjectLockDefaultRetention(f *testing.F) {
 		}
 		if mode == "COMPLIANCE" && asFault(t, err).Code != "AccessDenied" {
 			t.Fatalf("compliance bypass: %v", err)
+		}
+	})
+}
+
+func FuzzObjectLockConfigurationValidation(f *testing.F) {
+	f.Add("GOVERNANCE", int8(1), int8(0), true, false)
+	f.Add("COMPLIANCE", int8(0), int8(1), false, true)
+	f.Add("INVALID", int8(1), int8(0), true, false)
+	f.Add("GOVERNANCE", int8(1), int8(1), true, true)
+	f.Fuzz(func(t *testing.T, mode string, days, years int8, includeDays, includeYears bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "lock-validation-fuzz", "ObjectLockEnabledForBucket": true}, nil)
+		retention := map[string]any{"Mode": mode}
+		if includeDays {
+			retention["Days"] = int(days)
+		}
+		if includeYears {
+			retention["Years"] = int(years)
+		}
+		_, err := invoke(t, p, "PutObjectLockConfiguration", map[string]any{"Bucket": "lock-validation-fuzz", "ObjectLockConfiguration": map[string]any{
+			"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": retention},
+		}}, nil)
+		validMode := mode == "GOVERNANCE" || mode == "COMPLIANCE"
+		validDuration := includeDays != includeYears && (includeDays && days > 0 || includeYears && years > 0)
+		if validMode && validDuration {
+			if err != nil {
+				t.Fatalf("valid configuration rejected: mode=%q days=%d years=%d include=(%t,%t): %v", mode, days, years, includeDays, includeYears, err)
+			}
+			return
+		}
+		if got := asFault(t, err); got.Code != "MalformedXML" || got.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("invalid configuration fault = %#v", got)
 		}
 	})
 }
@@ -1177,6 +1352,7 @@ func FuzzListBucketsPagination(f *testing.F) {
 		{0, "", "", "", false, false},
 		{10001, "", "", "", false, false},
 		{1, "", "!", "", true, false},
+		{1, "", "", "0", false, true},
 	} {
 		f.Add(seed.max, seed.prefix, seed.token, seed.region, seed.setToken, seed.setRegion)
 	}
@@ -1208,7 +1384,9 @@ func FuzzListBucketsPagination(f *testing.F) {
 			if bucket.id.Region != "us-east-1" {
 				input["LocationConstraint"] = bucket.id.Region
 			}
-			mustInvokeAs(t, p, bucket.id, "CreateBucket", input, nil)
+			if created := mustInvokeAs(t, p, bucket.id, "CreateBucket", input, nil); created.Output["BucketArn"] != "arn:aws:s3:::"+bucket.name {
+				t.Fatalf("create ARN = %#v", created.Output)
+			}
 		}
 
 		input := map[string]any{"MaxBuckets": max, "Prefix": prefix}
@@ -1237,6 +1415,10 @@ func FuzzListBucketsPagination(f *testing.F) {
 			after = string(decoded)
 		}
 		if err != nil {
+			fault := asFault(t, err)
+			if setRegion && fault.Code == "InvalidArgument" && fault.Message == fmt.Sprintf("Argument value %s is not a valid AWS Region", region) && fault.Fields["ArgumentName"] == "bucket-region" {
+				return
+			}
 			t.Fatal(err)
 		}
 
@@ -1259,13 +1441,875 @@ func FuzzListBucketsPagination(f *testing.F) {
 		}
 		for i, item := range items {
 			got := item.(map[string]any)
-			if got["Name"] != want[i].name || got["BucketRegion"] != want[i].region {
+			if got["Name"] != want[i].name || got["BucketArn"] != "arn:aws:s3:::"+want[i].name || got["BucketRegion"] != want[i].region {
 				t.Fatalf("bucket %d = %#v want=%#v", i, got, want[i])
 			}
 		}
 		gotToken, _ := page.Output["ContinuationToken"].(string)
 		if gotToken != wantToken {
 			t.Fatalf("token = %q want %q", gotToken, wantToken)
+		}
+	})
+}
+
+func FuzzListObjectsPagination(f *testing.F) {
+	for _, seed := range []struct {
+		v2, fetchOwner bool
+		max            uint8
+		marker         string
+	}{{false, false, 0, ""}, {false, true, 1, "folder/a/"}, {true, false, 2, "folder/a/"}, {true, true, 3, "folder/b"}} {
+		f.Add(seed.v2, seed.fetchOwner, seed.max, seed.marker)
+	}
+	f.Fuzz(func(t *testing.T, v2, fetchOwner bool, maxSeed uint8, marker string) {
+		if !utf8.ValidString(marker) || len(marker) > 128 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-fuzz", "LocationConstraint": "us-west-2"}, nil)
+		body := []byte("content")
+		sum := sha256.Sum256(body)
+		for _, key := range []string{"folder/a/one", "folder/a/two", "folder/b value+", "folder/c"} {
+			input := map[string]any{"Bucket": "list-fuzz", "Key": key}
+			if key == "folder/b value+" {
+				input["ChecksumSHA256"] = base64.StdEncoding.EncodeToString(sum[:])
+			}
+			mustInvoke(t, p, "PutObject", input, body)
+		}
+		requestedMaxKeys := int(maxSeed % 4)
+		maxKeys := requestedMaxKeys
+		if maxKeys == 0 {
+			maxKeys = 1000
+		}
+		operation := "ListObjects"
+		input := map[string]any{"Bucket": "list-fuzz", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": requestedMaxKeys, "Marker": marker, "EncodingType": "url"}
+		if v2 {
+			operation = "ListObjectsV2"
+			delete(input, "Marker")
+			if marker != "" {
+				input["ContinuationToken"] = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").EncodeToString([]byte(marker))
+			}
+			input["FetchOwner"] = fetchOwner
+		}
+		page := mustInvoke(t, p, operation, input, nil).Output
+		if page["BucketRegion"] != "us-west-2" {
+			t.Fatalf("%s BucketRegion = %#v", operation, page["BucketRegion"])
+		}
+		all := []string{"folder/a/", "folder/b value+", "folder/c"}
+		var want []string
+		for _, value := range all {
+			if value > marker || v2 && value == marker {
+				want = append(want, value)
+			}
+		}
+		truncated := len(want) > maxKeys
+		next := ""
+		if truncated {
+			if v2 {
+				next = want[maxKeys]
+			} else {
+				next = want[maxKeys-1]
+			}
+			want = want[:maxKeys]
+		}
+		var got []string
+		for _, value := range asSliceForTest(page["CommonPrefixes"]) {
+			got = append(got, asMapForTest(value)["Prefix"].(string))
+		}
+		for _, value := range asSliceForTest(page["Contents"]) {
+			row := asMapForTest(value)
+			got = append(got, row["Key"].(string))
+			if checksummed := row["Key"] == "folder/b%20value%2B"; checksummed != reflect.DeepEqual(row["ChecksumAlgorithm"], []any{"SHA256"}) || checksummed != (row["ChecksumType"] == "FULL_OBJECT") {
+				t.Fatalf("%s checksum metadata = %#v", operation, row)
+			}
+			owner := asMapForTest(row["Owner"])
+			if wantOwner := !v2 || fetchOwner; (owner["ID"] == "123456789012") != wantOwner || owner["DisplayName"] != nil {
+				t.Fatalf("%s fetchOwner=%v owner=%#v", operation, fetchOwner, owner)
+			}
+		}
+		encode := func(value string) string {
+			return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(value), "+", "%20"), "%2F", "/")
+		}
+		wantEncoded := make([]string, len(want))
+		for i, value := range want {
+			wantEncoded[i] = encode(value)
+		}
+		if strings.Join(got, "\x00") != strings.Join(wantEncoded, "\x00") || page["MaxKeys"] != maxKeys || page["IsTruncated"] != truncated || page["KeyCount"] != len(want) {
+			t.Fatalf("%s marker=%q max=%d page=%#v want=%v", operation, marker, maxKeys, page, want)
+		}
+		if truncated {
+			field := "NextMarker"
+			if v2 {
+				field = "NextContinuationToken"
+			}
+			wantToken := next
+			if v2 {
+				wantToken = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").EncodeToString([]byte(next))
+			} else {
+				wantToken = encode(next)
+			}
+			if page[field] != wantToken {
+				t.Fatalf("%s = %q want %q", field, page[field], wantToken)
+			}
+		}
+	})
+}
+
+func FuzzListEncodingType(f *testing.F) {
+	for _, seed := range []struct {
+		operation uint8
+		encoding  string
+		provided  bool
+	}{{0, "url", true}, {1, "value", true}, {2, "", true}, {3, "URL", true}, {0, "", false}} {
+		f.Add(seed.operation, seed.encoding, seed.provided)
+	}
+	f.Fuzz(func(t *testing.T, operationSeed uint8, encoding string, provided bool) {
+		if !utf8.ValidString(encoding) || len(encoding) > 128 {
+			t.Skip()
+		}
+		operations := []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding-fuzz"}, nil)
+		input := map[string]any{"Bucket": "list-encoding-fuzz"}
+		if provided {
+			input["EncodingType"] = encoding
+		}
+		_, err := invoke(t, p, operations[int(operationSeed)%len(operations)], input, nil)
+		if !provided || encoding == "url" {
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.Message != "Invalid Encoding Method specified in Request" || fault.Fields["ArgumentName"] != "encoding-type" || fault.Fields["ArgumentValue"] != encoding {
+			t.Fatalf("encoding %q fault = %#v", encoding, fault)
+		}
+	})
+}
+
+func FuzzListObjectVersionsPagination(f *testing.F) {
+	for _, seed := range []struct {
+		max, start uint8
+		deleted    bool
+	}{{0, 0, false}, {2, 1, true}, {3, 2, true}, {5, 4, false}} {
+		f.Add(seed.max, seed.start, seed.deleted)
+	}
+	f.Fuzz(func(t *testing.T, maxSeed, startSeed uint8, deleted bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-list-fuzz", "Status": "Enabled"}, nil)
+		body := []byte("body")
+		sum := sha256.Sum256(body)
+		for i := range 5 {
+			input := map[string]any{"Bucket": "version-list-fuzz", "Key": "prefix/key"}
+			if i == 2 {
+				input["ChecksumSHA256"] = base64.StdEncoding.EncodeToString(sum[:])
+			}
+			mustInvoke(t, p, "PutObject", input, body)
+		}
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-fuzz", "Key": "url/k ey+"}, body)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-fuzz", "Key": "url/k!ey+"}, body)
+		all := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list-fuzz", "Prefix": "prefix/"}, nil).Output["Versions"])
+		start, requestedMaxKeys := int(startSeed)%len(all), int(maxSeed%6)
+		maxKeys := requestedMaxKeys
+		if maxKeys == 0 {
+			maxKeys = 1000
+		}
+		input := map[string]any{"Bucket": "version-list-fuzz", "Prefix": "prefix/", "MaxKeys": requestedMaxKeys}
+		if start > 0 {
+			input["KeyMarker"] = "prefix/key"
+			input["VersionIdMarker"] = asMapForTest(all[start-1])["VersionId"]
+			if deleted {
+				mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "version-list-fuzz", "Key": "prefix/key", "VersionId": input["VersionIdMarker"]}, nil)
+			}
+		}
+		page := mustInvoke(t, p, "ListObjectVersions", input, nil).Output
+		got := asSliceForTest(page["Versions"])
+		end := min(start+maxKeys, len(all))
+		if len(got) != end-start || page["MaxKeys"] != maxKeys || page["IsTruncated"] != (end < len(all)) {
+			t.Fatalf("start=%d max=%d page=%#v", start, maxKeys, page)
+		}
+		for index := range got {
+			gotRow, wantRow := asMapForTest(got[index]), asMapForTest(all[start+index])
+			if gotRow["VersionId"] != wantRow["VersionId"] || !reflect.DeepEqual(gotRow["ChecksumAlgorithm"], wantRow["ChecksumAlgorithm"]) || gotRow["ChecksumType"] != wantRow["ChecksumType"] {
+				t.Fatalf("version %d = %#v want %#v", index, got[index], all[start+index])
+			}
+		}
+		if end < len(all) && (page["NextKeyMarker"] != "prefix/key" || page["NextVersionIdMarker"] != asMapForTest(all[end-1])["VersionId"]) {
+			t.Fatalf("next markers = %#v", page)
+		}
+		encoded := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list-fuzz", "Prefix": "url/", "MaxKeys": 1, "EncodingType": "url"}, nil).Output
+		if rows := encoded["Versions"].([]any); len(rows) != 1 || asMapForTest(rows[0])["Key"] != "url/k%20ey%2B" || encoded["NextVersionIdMarker"] == nil {
+			t.Fatalf("encoded versions = %#v", encoded)
+		}
+		next := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list-fuzz", "Prefix": "url/", "MaxKeys": 1, "EncodingType": "url", "KeyMarker": encoded["NextKeyMarker"], "VersionIdMarker": encoded["NextVersionIdMarker"]}, nil).Output
+		if rows := next["Versions"].([]any); len(rows) != 1 || asMapForTest(rows[0])["Key"] != "url/k%21ey%2B" || next["KeyMarker"] != "url/k%20ey%2B" {
+			t.Fatalf("next encoded version page = %#v", next)
+		}
+	})
+}
+
+func FuzzGetObjectAttributesStorageClass(f *testing.F) {
+	for _, attribute := range []string{"StorageClass", "storage_class", "ETag", "ETag, StorageClass"} {
+		f.Add(attribute)
+	}
+	f.Fuzz(func(t *testing.T, attribute string) {
+		if len(attribute) > 64 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "storage-attributes-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "storage-attributes-fuzz", "Key": "key"}, []byte("body"))
+		output := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "storage-attributes-fuzz", "Key": "key", "ObjectAttributes": attribute}, nil).Output
+		requested := false
+		for _, value := range strings.Split(attribute, ",") {
+			requested = requested || strings.EqualFold(strings.ReplaceAll(strings.TrimSpace(value), "_", ""), "StorageClass")
+		}
+		if got, present := output["StorageClass"]; requested != present || present && got != "STANDARD" {
+			t.Fatalf("attribute %q output = %#v", attribute, output)
+		}
+	})
+}
+
+func FuzzMissingBucketFaults(f *testing.F) {
+	for operation := uint8(0); operation < 3; operation++ {
+		f.Add(operation, uint64(operation+1))
+	}
+	f.Fuzz(func(t *testing.T, operation uint8, suffix uint64) {
+		operations := []string{"GetObject", "DeleteBucket", "GetBucketNotificationConfiguration"}
+		bucket := fmt.Sprintf("missing-%x", suffix)
+		_, err := invoke(t, s3.New(spitest.Deps(t)), operations[int(operation)%len(operations)], map[string]any{"Bucket": bucket, "Key": "foobar"}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.Message != "The specified bucket does not exist" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != bucket {
+			t.Fatalf("missing bucket %q = %#v", bucket, fault)
+		}
+	})
+}
+
+func FuzzGetObjectAttributesPartMarkers(f *testing.F) {
+	for _, marker := range []uint8{0, 1, 2, 255} {
+		f.Add(marker)
+	}
+	f.Fuzz(func(t *testing.T, marker uint8) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "object-parts-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "object-parts-fuzz", "Key": "key", "ChecksumAlgorithm": "CRC32"}, nil)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": created.Output["UploadId"], "PartNumber": 1}, []byte("body"))
+		mustInvoke(t, p, "CompleteMultipartUpload", completeInput(created.Output["UploadId"].(string), completedPartWithChecksum(1, part, "ChecksumCRC32", "x-amz-checksum-crc32")), nil)
+		output := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "object-parts-fuzz", "Key": "key", "ObjectAttributes": []string{"ObjectParts"}, "PartNumberMarker": int(marker), "MaxParts": 1}, nil).Output
+		objectParts := asMapForTest(output["ObjectParts"])
+		wantNext, wantParts := "0", 0
+		if marker == 0 {
+			wantNext, wantParts = "1", 1
+		}
+		if objectParts["NextPartNumberMarker"] != wantNext || len(asSliceForTest(objectParts["Parts"])) != wantParts {
+			t.Fatalf("marker %d object parts = %#v", marker, objectParts)
+		}
+	})
+}
+
+func FuzzListMultipartUploadsMarkers(f *testing.F) {
+	for _, seed := range []struct {
+		max, start uint8
+		invalid    bool
+	}{{0, 0, false}, {2, 1, false}, {5, 4, false}, {1, 2, true}} {
+		f.Add(seed.max, seed.start, seed.invalid)
+	}
+	f.Fuzz(func(t *testing.T, maxSeed, startSeed uint8, invalid bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-list-fuzz"}, nil)
+		for range 5 {
+			mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-fuzz", "Key": "prefix/key", "ChecksumAlgorithm": "CRC64NVME"}, nil)
+		}
+		all := asSliceForTest(mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-fuzz", "Prefix": "prefix/"}, nil).Output["Uploads"])
+		start, requestedMaxUploads := int(startSeed)%len(all), int(maxSeed%6)
+		maxUploads := requestedMaxUploads
+		if maxUploads == 0 {
+			maxUploads = 1000
+		}
+		input := map[string]any{"Bucket": "multipart-list-fuzz", "Prefix": "prefix/", "MaxUploads": requestedMaxUploads}
+		if start > 0 {
+			input["KeyMarker"] = "prefix/key"
+			input["UploadIdMarker"] = asMapForTest(all[start-1])["UploadId"]
+		}
+		if invalid {
+			input["KeyMarker"] = "wrong"
+			input["UploadIdMarker"] = asMapForTest(all[start])["UploadId"]
+			_, err := invoke(t, p, "ListMultipartUploads", input, nil)
+			fault := asFault(t, err)
+			if fault.Code != "InvalidArgument" || fault.Message != "Invalid uploadId marker" || fault.Fields["ArgumentName"] != "upload-id-marker" {
+				t.Fatalf("invalid marker fault = %#v", fault)
+			}
+			return
+		}
+		page := mustInvoke(t, p, "ListMultipartUploads", input, nil).Output
+		got := asSliceForTest(page["Uploads"])
+		end := min(start+maxUploads, len(all))
+		if len(got) != end-start || page["MaxUploads"] != maxUploads || page["IsTruncated"] != (end < len(all)) {
+			t.Fatalf("start=%d max=%d page=%#v", start, maxUploads, page)
+		}
+		for index := range got {
+			row := asMapForTest(got[index])
+			if row["UploadId"] != asMapForTest(all[start+index])["UploadId"] || row["ChecksumAlgorithm"] != "CRC64NVME" || row["ChecksumType"] != "FULL_OBJECT" || asMapForTest(row["Initiator"])["DisplayName"] != "webfile" {
+				t.Fatalf("upload %d = %#v want %#v", index, got[index], all[start+index])
+			}
+		}
+		if len(got) > 0 && (page["NextKeyMarker"] != "prefix/key" || page["NextUploadIdMarker"] != asMapForTest(got[len(got)-1])["UploadId"]) {
+			t.Fatalf("next markers = %#v", page)
+		}
+	})
+}
+
+func FuzzListPartsPagination(f *testing.F) {
+	for _, seed := range []struct {
+		max, marker uint8
+		zero        bool
+	}{{1, 0, false}, {2, 1, false}, {3, 7, false}, {0, 9, true}} {
+		f.Add(seed.max, seed.marker, seed.zero)
+	}
+	f.Fuzz(func(t *testing.T, maxSeed, markerSeed uint8, zero bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "parts-list-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "parts-list-fuzz", "Key": "key"}, nil).Output["UploadId"]
+		for _, number := range []int{1, 3, 7} {
+			mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "parts-list-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": number}, []byte("part"))
+		}
+		marker, maxParts := int(markerSeed%10), int(maxSeed%3)+1
+		if zero {
+			maxParts = 0
+		}
+		input := map[string]any{"Bucket": "parts-list-fuzz", "Key": "key", "UploadId": uploadID, "PartNumberMarker": marker, "MaxParts": maxParts}
+		var page map[string]any
+		if zero {
+			request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/parts-list-fuzz/key?uploadId="+url.QueryEscape(fmt.Sprint(uploadID))+"&part-number-marker="+strconv.Itoa(marker)+"&max-parts=0", nil)
+			response, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "ListParts", Input: input, HTTP: request})
+			if err != nil {
+				t.Fatal(err)
+			}
+			page = response.Output
+		} else {
+			page = mustInvoke(t, p, "ListParts", input, nil).Output
+		}
+		want := []int{}
+		for _, number := range []int{1, 3, 7} {
+			if number > marker {
+				want = append(want, number)
+			}
+		}
+		limit := maxParts
+		if limit == 0 {
+			limit = 1000
+		}
+		truncated := len(want) > limit
+		if truncated {
+			want = want[:limit]
+		}
+		got := asSliceForTest(page["Parts"])
+		next := 0
+		if len(want) > 0 {
+			next = want[len(want)-1]
+		}
+		if len(got) != len(want) || page["IsTruncated"] != truncated || page["NextPartNumberMarker"] != next || page["MaxParts"] != limit || asMapForTest(page["Initiator"])["DisplayName"] != "webfile" {
+			t.Fatalf("marker=%d max=%d page=%#v want=%v", marker, maxParts, page, want)
+		}
+		for index := range got {
+			if asMapForTest(got[index])["PartNumber"] != want[index] {
+				t.Fatalf("part %d = %#v want %d", index, got[index], want[index])
+			}
+		}
+	})
+}
+
+func FuzzNoSuchUploadFaults(f *testing.F) {
+	f.Add(uint8(0), "missing", false)
+	f.Add(uint8(3), "", true)
+	f.Fuzz(func(t *testing.T, operationSeed uint8, uploadID string, wrongKey bool) {
+		if !utf8.ValidString(uploadID) || len(uploadID) > 128 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-fault-fuzz"}, nil)
+		validID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-fault-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		key := "key"
+		if wrongKey {
+			uploadID, key = validID, "wrong"
+		} else {
+			uploadID += "-missing"
+		}
+		operations := []string{"UploadPart", "CompleteMultipartUpload", "ListParts", "AbortMultipartUpload"}
+		operation := operations[int(operationSeed)%len(operations)]
+		input := map[string]any{"Bucket": "multipart-fault-fuzz", "Key": key, "UploadId": uploadID, "PartNumber": 1}
+		if operation == "CompleteMultipartUpload" {
+			input["MultipartUpload"] = map[string]any{"Parts": []any{}}
+		}
+		_, err := invoke(t, p, operation, input, []byte("part"))
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchUpload" || fault.Message != "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed." || fault.Fields["UploadId"] != uploadID {
+			t.Fatalf("%s fault = %#v", operation, fault)
+		}
+	})
+}
+
+func FuzzMultipartPartNumberFaults(f *testing.F) {
+	f.Add(0, false)
+	f.Add(1, false)
+	f.Add(10000, false)
+	f.Add(10001, true)
+	f.Fuzz(func(t *testing.T, number int, missing bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "part-number-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "part-number-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		if missing {
+			uploadID = "missing"
+		}
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "part-number-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": number}, []byte("part"))
+		if missing {
+			if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != uploadID {
+				t.Fatalf("missing upload fault = %#v", fault)
+			}
+			return
+		}
+		if number < 1 || number > 10000 {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Part number must be an integer between 1 and 10000, inclusive" || fault.Fields["ArgumentName"] != "partNumber" || fault.Fields["ArgumentValue"] != number {
+				t.Fatalf("part number %d fault = %#v", number, fault)
+			}
+		} else if err != nil {
+			t.Fatalf("valid part number %d: %v", number, err)
+		}
+	})
+}
+
+func FuzzMultipartCompletionFaults(f *testing.F) {
+	f.Add(9, `"missing"`, false)
+	f.Add(0, "", true)
+	f.Add(10001, "wrong", false)
+	f.Fuzz(func(t *testing.T, number int, etag string, empty bool) {
+		if !utf8.ValidString(etag) || len(etag) > 128 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "completion-fault-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "completion-fault-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		input := completeInput(uploadID)
+		if !empty {
+			input = completeInput(uploadID, map[string]any{"PartNumber": number, "ETag": etag})
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if empty {
+			if fault.Code != "InvalidRequest" || fault.Message != "You must specify at least one part" {
+				t.Fatalf("empty completion fault = %#v", fault)
+			}
+		} else if fault.Code != "InvalidPart" || fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != strings.Trim(strings.TrimSpace(etag), `"`) || fault.Fields["PartNumber"] != strconv.Itoa(number) || fault.Fields["UploadId"] != uploadID {
+			t.Fatalf("missing part %d %q fault = %#v", number, etag, fault)
+		}
+	})
+}
+
+func FuzzCompleteMultipartChecksumTypeFault(f *testing.F) {
+	f.Add([]byte("part"), false)
+	f.Add([]byte("part"), true)
+	f.Fuzz(func(t *testing.T, body []byte, composite bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "complete-checksum-type-fuzz"}, nil)
+		selected, requested := "FULL_OBJECT", "COMPOSITE"
+		if composite {
+			selected, requested = requested, selected
+		}
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "complete-checksum-type-fuzz", "Key": "key", "ChecksumAlgorithm": "CRC32", "ChecksumType": selected}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "complete-checksum-type-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, body)
+		input := completeInput(uploadID, completedPart(1, part))
+		input["ChecksumType"] = requested
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		want := "The upload was created using the " + selected + " checksum mode. The complete request must use the same checksum mode."
+		if fault.Code != "InvalidRequest" || fault.Message != want || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("checksum type %s -> %s fault = %#v", selected, requested, fault)
+		}
+	})
+}
+
+func FuzzCompleteMultipartPreconditionFaults(f *testing.F) {
+	f.Add([]byte("part"), uint8(0))
+	f.Add([]byte("part"), uint8(1))
+	f.Add([]byte("part"), uint8(2))
+	f.Fuzz(func(t *testing.T, body []byte, mode uint8) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "complete-precondition-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "complete-precondition-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "complete-precondition-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, body)
+		input := completeInput(uploadID, completedPart(1, part))
+		header, detail := "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"
+		switch mode % 3 {
+		case 0:
+			input["IfMatch"], input["IfNoneMatch"] = `"etag"`, "*"
+			header, detail = "If-Match,If-None-Match", "Multiple conditional request headers present in the request"
+		case 1:
+			input["IfNoneMatch"] = `"etag"`
+		case 2:
+			input["IfMatch"] = "*"
+			header, detail = "If-Match", "We don't accept the provided value of If-Match header for this API"
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != header || fault.Fields["additionalMessage"] != detail {
+			t.Fatalf("mode %d fault = %#v", mode%3, fault)
+		}
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "complete-precondition-fuzz", "Key": "key", "UploadId": uploadID}, nil)
+		if parts, _ := listed.Output["Parts"].([]any); len(parts) != 1 {
+			t.Fatalf("mode %d parts = %#v", mode%3, listed.Output["Parts"])
+		}
+	})
+}
+
+func FuzzWritePreconditionFaults(f *testing.F) {
+	for mode := uint8(0); mode < 3; mode++ {
+		f.Add([]byte("new"), mode, false)
+		f.Add([]byte("new"), mode, true)
+	}
+	f.Fuzz(func(t *testing.T, body []byte, mode uint8, copyObject bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-precondition-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-precondition-fuzz", "Key": "source"}, []byte("source"))
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-precondition-fuzz", "Key": "destination"}, []byte("old"))
+		operation := "PutObject"
+		input := map[string]any{"Bucket": "write-precondition-fuzz", "Key": "destination"}
+		if copyObject {
+			operation = "CopyObject"
+			input["CopySource"] = "write-precondition-fuzz/source"
+		}
+		header, detail := "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"
+		switch mode % 3 {
+		case 0:
+			input["IfMatch"], input["IfNoneMatch"] = `"etag"`, "*"
+			header, detail = "If-Match,If-None-Match", "Multiple conditional request headers present in the request"
+		case 1:
+			input["IfNoneMatch"] = `"etag"`
+		case 2:
+			input["IfMatch"] = "*"
+			header, detail = "If-Match", "We don't accept the provided value of If-Match header for this API"
+		}
+		_, err := invoke(t, p, operation, input, body)
+		fault := asFault(t, err)
+		if fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != header || fault.Fields["additionalMessage"] != detail {
+			t.Fatalf("%s mode %d fault = %#v", operation, mode%3, fault)
+		}
+		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-precondition-fuzz", "Key": "destination"}, nil))); got != "old" {
+			t.Fatalf("%s mode %d stored %q", operation, mode%3, got)
+		}
+	})
+}
+
+func FuzzWriteConditionFaultDetails(f *testing.F) {
+	for mode := uint8(0); mode < 3; mode++ {
+		f.Add([]byte("new"), mode, false)
+		f.Add([]byte("new"), mode, true)
+	}
+	f.Fuzz(func(t *testing.T, body []byte, mode uint8, copyObject bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-condition-detail-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-condition-detail-fuzz", "Key": "source"}, []byte("source"))
+		operation := "PutObject"
+		input := map[string]any{"Bucket": "write-condition-detail-fuzz", "Key": "destination"}
+		if copyObject {
+			operation = "CopyObject"
+			input["CopySource"] = "write-condition-detail-fuzz/source"
+		}
+		code, message, field, detail, status, existing := "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-Match", http.StatusPreconditionFailed, true
+		switch mode % 3 {
+		case 0:
+			input["IfMatch"] = `"missing"`
+			code, message, field, detail, status, existing = "NoSuchKey", "The specified key does not exist.", "Key", "destination", http.StatusNotFound, false
+		case 1:
+			input["IfMatch"] = `"wrong"`
+		case 2:
+			input["IfNoneMatch"] = "*"
+			detail = "If-None-Match"
+		}
+		if existing {
+			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-condition-detail-fuzz", "Key": "destination"}, []byte("old"))
+		}
+		_, err := invoke(t, p, operation, input, body)
+		fault := asFault(t, err)
+		if fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fields[field] != detail {
+			t.Fatalf("%s mode %d fault = %#v", operation, mode%3, fault)
+		}
+		if existing {
+			if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-condition-detail-fuzz", "Key": "destination"}, nil))); got != "old" {
+				t.Fatalf("%s mode %d stored %q", operation, mode%3, got)
+			}
+		}
+	})
+}
+
+func FuzzWriteIfMatchRequiresSingleETag(f *testing.F) {
+	f.Add("wrong", []byte("new"), false)
+	f.Add("other", []byte("new"), true)
+	f.Fuzz(func(t *testing.T, decoy string, body []byte, copyObject bool) {
+		if len(decoy)+len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-if-match-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-if-match-fuzz", "Key": "source"}, []byte("source"))
+		seed := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-if-match-fuzz", "Key": "destination"}, []byte("old"))
+		operation := "PutObject"
+		input := map[string]any{"Bucket": "write-if-match-fuzz", "Key": "destination", "IfMatch": `"` + base64.RawURLEncoding.EncodeToString([]byte(decoy)) + `", ` + seed.Headers.Get("ETag")}
+		if copyObject {
+			operation = "CopyObject"
+			input["CopySource"] = "write-if-match-fuzz/source"
+		}
+		_, err := invoke(t, p, operation, input, body)
+		fault := asFault(t, err)
+		if fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match" {
+			t.Fatalf("%s list fault = %#v", operation, fault)
+		}
+		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-if-match-fuzz", "Key": "destination"}, nil))); got != "old" {
+			t.Fatalf("%s list stored %q", operation, got)
+		}
+	})
+}
+
+func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
+	for mode := uint8(0); mode < 6; mode++ {
+		f.Add([]byte("part"), mode)
+	}
+	f.Fuzz(func(t *testing.T, body []byte, mode uint8) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		mode %= 6
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		const bucket, key = "complete-conditional-fuzz", "key"
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		put := func(value []byte) string {
+			return mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, value).Headers.Get("ETag")
+		}
+		seedETag := ""
+		if mode == 1 || mode == 3 || mode == 4 || mode == 5 {
+			seedETag = put([]byte("old"))
+		}
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, body)
+		input := completeInput(uploadID, completedPart(1, part))
+		code, message, status, condition, conflictKey := "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, "If-Match", ""
+		switch mode {
+		case 0:
+			input["IfMatch"] = `"missing"`
+			code, message, status, condition, conflictKey = "NoSuchKey", "The specified key does not exist.", http.StatusNotFound, "", key
+		case 1:
+			input["IfMatch"] = `"wrong"`
+		case 2:
+			put([]byte("created"))
+			input["IfNoneMatch"], condition = "*", "If-None-Match"
+		case 3:
+			mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": key}, nil)
+			input["IfNoneMatch"] = "*"
+			code, message, status, condition, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, "If-None-Match", key
+		case 4:
+			_ = deps.Clock.Advance(2 * time.Second)
+			input["IfMatch"] = put([]byte("changed"))
+			code, message, status, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, key
+		case 5:
+			input["IfMatch"] = `"wrong", ` + seedETag
+			input["MultipartUpload"] = map[string]any{}
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fault != "client" || condition != "" && fault.Fields["Condition"] != condition || conflictKey != "" && fault.Fields["Key"] != conflictKey {
+			t.Fatalf("mode %d fault = %#v", mode, fault)
+		}
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID}, nil)
+		if parts, _ := listed.Output["Parts"].([]any); len(parts) != 1 {
+			t.Fatalf("mode %d parts = %#v", mode, listed.Output["Parts"])
+		}
+		if mode == 5 {
+			if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key}, nil))); got != "old" {
+				t.Fatalf("If-Match list stored %q", got)
+			}
+		}
+	})
+}
+
+func FuzzUploadPartContentMD5(f *testing.F) {
+	f.Add([]byte("part"), "!", false)
+	f.Add([]byte("part"), "AAAAAAAAAAAAAAAAAAAAAA==", false)
+	sum := md5.Sum([]byte("part"))
+	f.Add([]byte("part"), base64.StdEncoding.EncodeToString(sum[:]), false)
+	f.Add([]byte("part"), "", false)
+	f.Add([]byte("part"), "!", true)
+	f.Fuzz(func(t *testing.T, body []byte, digest string, missing bool) {
+		if len(body) > 4096 || len(digest) > 128 || !utf8.ValidString(digest) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-md5-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-md5-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		if missing {
+			uploadID = "missing"
+		}
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": digest}, body)
+		if missing {
+			if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != uploadID {
+				t.Fatalf("missing upload fault = %#v", fault)
+			}
+			return
+		}
+		if digest == "" {
+			if err != nil {
+				t.Fatalf("empty digest: %v", err)
+			}
+			return
+		}
+		decoded, decodeErr := base64.StdEncoding.DecodeString(digest)
+		sum := md5.Sum(body)
+		calculated := base64.StdEncoding.EncodeToString(sum[:])
+		if decodeErr != nil || len(decoded) != md5.Size {
+			if fault := asFault(t, err); fault.Code != "InvalidDigest" || fault.Message != "The Content-MD5 you specified was invalid." || fault.Fields["Content_MD5"] != digest {
+				t.Fatalf("malformed digest %q fault = %#v", digest, fault)
+			}
+		} else if digest != calculated {
+			if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The Content-MD5 you specified did not match what we received." || fault.Fields["ExpectedDigest"] != digest || fault.Fields["CalculatedDigest"] != calculated {
+				t.Fatalf("mismatched digest %q fault = %#v", digest, fault)
+			}
+		} else if err != nil {
+			t.Fatalf("valid digest %q: %v", digest, err)
+		}
+	})
+}
+
+func FuzzUploadPartChecksumFaults(f *testing.F) {
+	body := []byte("part")
+	sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+	f.Add(body, "!", uint8(0))
+	f.Add(body, "AAAAAA==", uint8(0))
+	f.Add(body, base64.StdEncoding.EncodeToString(sum), uint8(0))
+	f.Add(body, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", uint8(1))
+	f.Add(body, "", uint8(2))
+	f.Fuzz(func(t *testing.T, body []byte, value string, mode uint8) {
+		if len(body) > 4096 || len(value) > 128 || !utf8.ValidString(value) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-checksum-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-checksum-fuzz", "Key": "key", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+		input := map[string]any{"Bucket": "upload-part-checksum-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": 1}
+		switch mode % 3 {
+		case 0:
+			input["ChecksumCRC32"] = value
+		case 1:
+			input["ChecksumSHA256"] = value
+		case 2:
+			input["ChecksumAlgorithm"] = "SHA256"
+		}
+		_, err := invoke(t, p, "UploadPart", input, body)
+		if mode%3 == 2 || mode%3 == 1 && value != "" {
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256" {
+				t.Fatalf("algorithm mismatch fault = %#v", fault)
+			}
+			return
+		}
+		if value == "" {
+			if err != nil {
+				t.Fatalf("empty checksum: %v", err)
+			}
+			return
+		}
+		decoded, decodeErr := base64.StdEncoding.DecodeString(value)
+		calculatedBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(calculatedBytes, crc32.ChecksumIEEE(body))
+		calculated := base64.StdEncoding.EncodeToString(calculatedBytes)
+		if decodeErr != nil || len(decoded) != len(calculatedBytes) {
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "Value for x-amz-checksum-crc32 header is invalid." {
+				t.Fatalf("malformed checksum %q fault = %#v", value, fault)
+			}
+		} else if value != calculated {
+			if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The CRC32 you specified did not match the calculated checksum." {
+				t.Fatalf("mismatched checksum %q fault = %#v", value, fault)
+			}
+		} else if err != nil {
+			t.Fatalf("valid checksum %q: %v", value, err)
+		}
+	})
+}
+
+func FuzzUploadPartSSECustomerKeyFaults(f *testing.F) {
+	f.Add([]byte("part"), []byte("different-key"), uint8(0))
+	f.Add([]byte("part"), []byte("different-key"), uint8(1))
+	f.Add([]byte("part"), []byte("different-key"), uint8(2))
+	f.Add([]byte("part"), []byte("different-key"), uint8(3))
+	f.Fuzz(func(t *testing.T, body, seed []byte, mode uint8) {
+		if len(body)+len(seed) > 8192 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-sse-c-fuzz"}, nil)
+		customerKey := bytes.Repeat([]byte{'a'}, 32)
+		customerDigest := md5.Sum(customerKey)
+		encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(customerKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(customerDigest[:])}
+		key := "encrypted"
+		create := map[string]any{"Bucket": "upload-part-sse-c-fuzz", "Key": key}
+		if mode%4 != 1 {
+			for name, value := range encryption {
+				create[name] = value
+			}
+		} else {
+			key = "plain"
+			create["Key"] = key
+		}
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", create, nil).Output["UploadId"].(string)
+		input := map[string]any{"Bucket": "upload-part-sse-c-fuzz", "Key": key, "UploadId": uploadID, "PartNumber": 1}
+		if mode%4 != 0 {
+			provided := encryption
+			if mode%4 == 2 {
+				wrong := sha256.Sum256(seed)
+				if bytes.Equal(wrong[:], customerKey) {
+					wrong[0] ^= 0xff
+				}
+				digest := md5.Sum(wrong[:])
+				provided = map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(wrong[:]), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+			}
+			for name, value := range provided {
+				input[name] = value
+			}
+		}
+		_, err := invoke(t, p, "UploadPart", input, body)
+		switch mode % 4 {
+		case 0, 1:
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters." {
+				t.Fatalf("missing or unexpected encryption fault = %#v", fault)
+			}
+		case 2:
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The provided encryption parameters did not match the ones used originally." {
+				t.Fatalf("mismatched encryption fault = %#v", fault)
+			}
+		case 3:
+			if err != nil {
+				t.Fatalf("matching encryption: %v", err)
+			}
+		}
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "upload-part-sse-c-fuzz", "Key": key, "UploadId": uploadID}, nil)
+		want := 0
+		if mode%4 == 3 {
+			want = 1
+		}
+		if got := len(listed.Output["Parts"].([]any)); got != want {
+			t.Fatalf("stored parts = %d, want %d", got, want)
 		}
 	})
 }
@@ -1295,6 +2339,181 @@ func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 		if got := string(readStream(t, restored)); got != want {
 			t.Fatalf("deleted=%d body=%q want=%q", index, got, want)
 		}
+	})
+}
+
+func FuzzDeleteObjectMissingKeyVersionIsIdempotent(f *testing.F) {
+	f.Add("Enabled", "missing-version")
+	f.Add("Suspended", "null")
+	f.Add("Suspended", "missing-version")
+	f.Fuzz(func(t *testing.T, status, version string) {
+		if status != "Enabled" && status != "Suspended" {
+			t.Skip()
+		}
+		if version == "" || len(version) > 1024 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "missing-version-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "missing-version-fuzz", "Status": status}, nil)
+		deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "missing-version-fuzz", "Key": "missing", "VersionId": version}, nil)
+		if deleted.Status != http.StatusNoContent || deleted.Headers.Get("x-amz-version-id") != "" || deleted.Headers.Get("x-amz-delete-marker") != "" {
+			t.Fatalf("delete response = %#v", deleted)
+		}
+		listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "missing-version-fuzz"}, nil).Output
+		if len(asSliceForTest(listed["Versions"])) != 0 || len(asSliceForTest(listed["DeleteMarkers"])) != 0 {
+			t.Fatalf("missing-key delete created state: %#v", listed)
+		}
+	})
+}
+
+func FuzzDeleteObjectUnversionedMissingKeyVersions(f *testing.F) {
+	f.Add("null")
+	f.Add("missing-version")
+	f.Add("0")
+	f.Fuzz(func(t *testing.T, version string) {
+		if version == "" || len(version) > 1024 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned-delete-fuzz"}, nil)
+		response, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "unversioned-delete-fuzz", "Key": "missing", "VersionId": version}, nil)
+		if version == "null" {
+			if err != nil || response.Status != http.StatusNoContent || len(response.Headers) != 0 {
+				t.Fatalf("null version response = %#v, %v", response, err)
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if response != nil || fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "versionId" || fault.Fields["ArgumentValue"] != version {
+			t.Fatalf("version %q response = %#v, fault = %#v", version, response, fault)
+		}
+	})
+}
+
+func FuzzGetObjectUnversionedVersions(f *testing.F) {
+	f.Add("null", "body")
+	f.Add("missing-version", "content")
+	f.Fuzz(func(t *testing.T, version, body string) {
+		if version == "" || len(version) > 1024 || len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned-read-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unversioned-read-fuzz", "Key": "key"}, []byte(body))
+		response, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "unversioned-read-fuzz", "Key": "key", "VersionId": version}, nil)
+		if version == "null" {
+			if err != nil || string(readStream(t, response)) != body || response.Headers.Get("x-amz-version-id") != "" {
+				t.Fatalf("null version response = %#v, %v", response, err)
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if response != nil || fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "versionId" || fault.Fields["ArgumentValue"] != version {
+			t.Fatalf("version %q response = %#v, fault = %#v", version, response, fault)
+		}
+	})
+}
+
+func FuzzObjectByteRangeFaultDetails(f *testing.F) {
+	f.Add("bytes=-0")
+	f.Add("bytes=10-")
+	f.Add("bytes=0--1")
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 256 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "range-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "range-fuzz", "Key": "key"}, []byte("0123456789"))
+		response, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "range-fuzz", "Key": "key", "Range": value}, nil)
+		if err == nil {
+			if body := readStream(t, response); len(body) > 10 {
+				t.Fatalf("range %q returned %d bytes", value, len(body))
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if fault.Code != "InvalidRange" || fault.Fields["ActualObjectSize"] != "10" || fault.Fields["RangeRequested"] != value || fault.Headers.Get("Content-Range") != "bytes */10" {
+			t.Fatalf("range %q fault = %#v", value, fault)
+		}
+	})
+}
+
+func FuzzSuspendedNullVersionReplacement(f *testing.F) {
+	f.Add("null", uint8(1), false)
+	f.Add("replacement", uint8(8), true)
+	f.Fuzz(func(t *testing.T, body string, writes uint8, deleteCurrent bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "suspended-version-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "suspended-version-fuzz", "Status": "Enabled"}, nil)
+		enabled := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "suspended-version-fuzz", "Key": "key"}, []byte("enabled"))
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "suspended-version-fuzz", "Status": "Suspended"}, nil)
+		for range 1 + int(writes%8) {
+			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "suspended-version-fuzz", "Key": "key"}, []byte(body))
+		}
+		listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "suspended-version-fuzz"}, nil).Output
+		versions := asSliceForTest(listed["Versions"])
+		if len(versions) != 2 || asMapForTest(versions[0])["VersionId"] != "null" || asMapForTest(versions[1])["VersionId"] != enabled.Headers.Get("x-amz-version-id") {
+			t.Fatalf("suspended versions = %#v", listed)
+		}
+		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "suspended-version-fuzz", "Key": "key", "VersionId": "null"}, nil))); got != body {
+			t.Fatalf("null body = %q, want %q", got, body)
+		}
+		if deleteCurrent {
+			mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "suspended-version-fuzz", "Key": "key"}, nil)
+			listed = mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "suspended-version-fuzz"}, nil).Output
+			if markers := asSliceForTest(listed["DeleteMarkers"]); len(markers) != 1 || asMapForTest(markers[0])["VersionId"] != "null" {
+				t.Fatalf("null marker = %#v", listed)
+			}
+		}
+	})
+}
+
+func FuzzDeleteObjectDirectoryPreconditions(f *testing.F) {
+	f.Add(uint8(0), "etag")
+	f.Add(uint8(1), "4")
+	f.Add(uint8(3), "Sun, 06 Nov 1994 08:49:37 GMT")
+	f.Add(uint8(6), "combined")
+	f.Fuzz(func(t *testing.T, selected uint8, value string) {
+		if len(value) > 1024 {
+			t.Skip()
+		}
+		selected = 1 + selected%7
+		if value == "" {
+			value = "value"
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "delete-precondition-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "delete-precondition-fuzz", "Key": "key"}, []byte("body"))
+		request := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/delete-precondition-fuzz/key", nil)
+		expected := ""
+		for index, header := range []string{"If-Match", "x-amz-if-match-size", "x-amz-if-match-last-modified-time"} {
+			if selected&(1<<index) != 0 {
+				request.Header.Set(header, value)
+				if index > 0 {
+					expected = header
+				}
+			}
+		}
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "DeleteObject", Input: map[string]any{"Bucket": "delete-precondition-fuzz", "Key": "key"}, HTTP: request})
+		if expected == "" && (value == "*" || strings.Trim(strings.TrimSpace(value), `"`) == "841a2d689ad86bd1611447453c22c6fc") {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "delete-precondition-fuzz", "Key": "key"}, nil); err == nil {
+				t.Fatal("matching conditional delete left object")
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if expected == "" && (fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match") || expected != "" && (fault.Code != "NotImplemented" || fault.Fields["Header"] != expected) {
+			t.Fatalf("selected=%d fault=%#v", selected, fault)
+		}
+		mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "delete-precondition-fuzz", "Key": "key"}, nil)
 	})
 }
 
@@ -1575,6 +2794,31 @@ func FuzzPostObjectTagging(f *testing.F) {
 	})
 }
 
+func FuzzObjectTaggingDeleteMarker(f *testing.F) {
+	for operation := range 3 {
+		f.Add(operation, false)
+		f.Add(operation, true)
+	}
+	f.Fuzz(func(t *testing.T, choice int, explicit bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "tag-marker-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "tag-marker-fuzz", "Status": "Enabled"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "tag-marker-fuzz", "Key": "object"}, []byte("body"))
+		marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "tag-marker-fuzz", "Key": "object"}, nil).Headers.Get("x-amz-version-id")
+		operations := []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"}
+		operation := operations[(choice%len(operations)+len(operations))%len(operations)]
+		input := map[string]any{"Bucket": "tag-marker-fuzz", "Key": "object", "TagSet": []any{}}
+		if explicit {
+			input["VersionId"] = marker
+		}
+		_, err := invoke(t, p, operation, input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "MethodNotAllowed" || fault.Fields["Method"] != strings.ToUpper(strings.TrimSuffix(operation, "ObjectTagging")) || fault.Fields["ResourceType"] != "DeleteMarker" {
+			t.Fatalf("%s explicit=%t: %#v", operation, explicit, fault)
+		}
+	})
+}
+
 func FuzzPostObjectExpires(f *testing.F) {
 	f.Add("Thu, 27 Aug 2026 12:00:00 GMT")
 	f.Add("tomorrow")
@@ -1651,11 +2895,12 @@ func FuzzPostObjectChecksums(f *testing.F) {
 }
 
 func FuzzObjectServerSideEncryption(f *testing.F) {
-	f.Add(uint8(0), false, "body")
-	f.Add(uint8(1), true, "kms")
-	f.Add(uint8(2), false, "dsse")
-	f.Add(uint8(3), true, "invalid")
-	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body string) {
+	f.Add(uint8(0), true, "body", false)
+	f.Add(uint8(1), true, "kms", false)
+	f.Add(uint8(1), true, "managed", true)
+	f.Add(uint8(2), false, "dsse", false)
+	f.Add(uint8(3), true, "invalid", false)
+	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body string, managed bool) {
 		if len(body) > 4096 {
 			t.Skip()
 		}
@@ -1666,7 +2911,7 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "encryption-fuzz"}, nil)
 		input := map[string]any{"Bucket": "encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
 		keyID := "arn:aws:kms:us-east-1:123456789012:key/fuzz"
-		if algorithm == "aws:kms" {
+		if algorithm == "aws:kms" && !managed {
 			spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
 			input["SSEKMSKeyId"] = keyID
 		}
@@ -1687,8 +2932,25 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || string(readStream(t, get)) != body {
 			t.Fatalf("stored encryption headers=%v", get.Headers)
 		}
-		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
-			t.Fatalf("stored kms headers=%v", get.Headers)
+		if algorithm == "aws:kms" {
+			gotKey := get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id")
+			if !managed && gotKey != keyID || managed && !strings.HasPrefix(gotKey, "arn:aws:kms:us-east-1:123456789012:key/") || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+				t.Fatalf("stored kms headers=%v", get.Headers)
+			}
+		} else if get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "" {
+			t.Fatalf("non-KMS bucket key header=%v", get.Headers)
+		}
+		copyInput := map[string]any{"Bucket": "encryption-fuzz", "Key": "copied", "CopySource": "encryption-fuzz/object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
+		if key, ok := input["SSEKMSKeyId"]; ok {
+			copyInput["SSEKMSKeyId"] = key
+		}
+		copied := mustInvoke(t, p, "CopyObject", copyInput, nil)
+		copiedGet := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "encryption-fuzz", "Key": "copied"}, nil)
+		if copied.Headers.Get("x-amz-server-side-encryption") != algorithm || copiedGet.Headers.Get("x-amz-server-side-encryption") != algorithm || string(readStream(t, copiedGet)) != body {
+			t.Fatalf("copied encryption response=%v stored=%v", copied.Headers, copiedGet.Headers)
+		}
+		if algorithm == "aws:kms" && bucketKey && copiedGet.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("copied kms bucket key headers=%v", copiedGet.Headers)
 		}
 	})
 }
@@ -1698,7 +2960,7 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 		f.Add(uint8(index), value, index%2 == 0)
 	}
 	f.Fuzz(func(t *testing.T, fieldIndex uint8, value string, queryName bool) {
-		if value == "" || len(value) > 256 || !utf8.ValidString(value) || strings.ContainsAny(value, "\r\n") {
+		if value == "" || len(value) > 256 || !utf8.ValidString(value) || strings.ContainsAny(value, "\r\n") || strings.IndexFunc(value, func(r rune) bool { return r > 0xff }) >= 0 {
 			t.Skip()
 		}
 		fields := []struct{ input, query, header string }{
@@ -1731,12 +2993,31 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 	})
 }
 
+func FuzzObjectSystemMetadata(f *testing.F) {
+	f.Add("no-cache", "de", `attachment; filename="foo.jpg"`, "abc123")
+	f.Add("ÄMÄZÕÑ S3", "de", `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`, "")
+	f.Fuzz(func(t *testing.T, cacheControl, language, disposition, body string) {
+		if len(cacheControl) > 256 || len(language) > 256 || len(disposition) > 256 || len(body) > 4096 || !utf8.ValidString(cacheControl) || !utf8.ValidString(language) || !utf8.ValidString(disposition) || !utf8.ValidString(body) || strings.IndexFunc(cacheControl+language+disposition, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "metadata-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "metadata-fuzz", "Key": "object", "CacheControl": cacheControl, "ContentLanguage": language, "ContentDisposition": disposition}, []byte(body))
+		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "metadata-fuzz", "Key": "object"}, nil)
+		if stored := string(readStream(t, got)); stored != body || got.Headers.Get("Cache-Control") != cacheControl || got.Headers.Get("Content-Language") != language || got.Headers.Get("Content-Disposition") != disposition {
+			t.Fatalf("body=%q headers=%v", stored, got.Headers)
+		}
+	})
+}
+
 func FuzzUserMetadataRFC2047(f *testing.F) {
-	for _, value := range []string{"S3", "—_é_2?.pdf", "\x00\x01\x02\x03", "�������"} {
-		f.Add(value)
+	for _, seed := range []struct{ key, value string }{{"value", "S3"}, {"TEST_META_1", "—_é_2?.pdf"}, {"__meta_2", "\x00\x01\x02\x03"}, {"value", "�������"}} {
+		f.Add(seed.key, seed.value)
 	}
-	f.Fuzz(func(t *testing.T, suffix string) {
-		if len(suffix) > 256 || !utf8.ValidString(suffix) {
+	f.Fuzz(func(t *testing.T, key, suffix string) {
+		if key == "" || len(key) > 64 || len(suffix) > 256 || !utf8.ValidString(suffix) || strings.IndexFunc(key, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-')
+		}) >= 0 {
 			t.Skip()
 		}
 		value := "Ä" + suffix
@@ -1744,10 +3025,10 @@ func FuzzUserMetadataRFC2047(f *testing.F) {
 		p := s3.New(deps)
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "rfc2047-fuzz"}, nil)
 		mustInvoke(t, p, "PutObject", map[string]any{
-			"Bucket": "rfc2047-fuzz", "Key": "object", "Metadata": map[string]any{"value": mime.BEncoding.Encode("UTF-8", value)},
+			"Bucket": "rfc2047-fuzz", "Key": "object", "Metadata": map[string]any{key: mime.BEncoding.Encode("UTF-8", value)},
 		}, []byte("body"))
 		response := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "rfc2047-fuzz", "Key": "object"}, nil)
-		wire := response.Headers.Get("x-amz-meta-value")
+		wire := response.Headers.Get("x-amz-meta-" + strings.ToLower(key))
 		decoded, err := new(mime.WordDecoder).DecodeHeader(wire)
 		if err != nil || decoded != value {
 			t.Fatalf("metadata %q decoded to %q from %q: %v", value, decoded, wire, err)
@@ -1856,12 +3137,12 @@ func FuzzObjectSSECustomerKey(f *testing.F) {
 }
 
 func FuzzMultipartServerSideEncryption(f *testing.F) {
-	f.Add(uint8(0), false, "body")
-	f.Add(uint8(1), true, "kms")
-	f.Add(uint8(2), false, "dsse")
-	f.Add(uint8(3), true, "invalid")
-	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body string) {
-		if len(body) > 4096 {
+	f.Add(uint8(0), false, "body", "plain")
+	f.Add(uint8(1), true, "kms", "metadata")
+	f.Add(uint8(2), false, "dsse", "\x00\xff")
+	f.Add(uint8(3), true, "invalid", "ignored")
+	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body, metadata string) {
+		if len(body) > 4096 || len(metadata) > 512 {
 			t.Skip()
 		}
 		algorithms := []string{"AES256", "aws:kms", "aws:kms:dsse", "invalid"}
@@ -1869,7 +3150,8 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 		deps := spitest.Deps(t)
 		p := s3.New(deps)
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption-fuzz"}, nil)
-		input := map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
+		metadataValue := base64.RawStdEncoding.EncodeToString([]byte(metadata))
+		input := map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ChecksumAlgorithm": "CRC64NVME", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey, "ContentType": "application/octet-stream", "Metadata": map[string]any{"Case": metadataValue}, "WebsiteRedirectLocation": "/multipart"}
 		keyID := "arn:aws:kms:us-east-1:123456789012:key/multipart-fuzz"
 		if algorithm == "aws:kms" {
 			spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
@@ -1896,12 +3178,183 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 		if completed.Headers.Get("x-amz-server-side-encryption") != algorithm {
 			t.Fatalf("complete headers=%v", completed.Headers)
 		}
-		get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object"}, nil)
-		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || string(readStream(t, get)) != body {
+		kms := strings.HasPrefix(algorithm, "aws:kms")
+		if kms && (completed.Headers.Get("x-amz-checksum-crc64nvme") != "" || completed.Headers.Get("x-amz-checksum-type") != "" || completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil) {
+			t.Fatalf("KMS completion checksum response headers=%v output=%#v", completed.Headers, completed.Output)
+		}
+		get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
+		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || get.Headers.Get("x-amz-checksum-crc64nvme") == "" || get.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" || get.Headers.Get("Content-Type") != "application/octet-stream" || get.Headers.Get("x-amz-meta-case") != metadataValue || get.Headers.Get("x-amz-website-redirect-location") != "/multipart" || string(readStream(t, get)) != body {
 			t.Fatalf("stored multipart headers=%v", get.Headers)
 		}
 		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
 			t.Fatalf("stored kms headers=%v", get.Headers)
+		}
+	})
+}
+
+func FuzzMultipartWithoutChecksum(f *testing.F) {
+	f.Add("plain", false)
+	f.Add("checked part", true)
+	f.Fuzz(func(t *testing.T, body string, checksumPart bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-no-checksum-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-no-checksum-fuzz", "Key": "object"}, nil)
+		if created.Output["ChecksumAlgorithm"] != nil || created.Output["ChecksumType"] != nil {
+			t.Fatalf("create = %#v", created.Output)
+		}
+		uploadID := created.Output["UploadId"].(string)
+		partInput := map[string]any{"Bucket": "multipart-no-checksum-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}
+		if checksumPart {
+			sum := make([]byte, 4)
+			binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE([]byte(body)))
+			partInput["ChecksumAlgorithm"], partInput["ChecksumCRC32"] = "CRC32", base64.StdEncoding.EncodeToString(sum)
+		}
+		part := mustInvoke(t, p, "UploadPart", partInput, []byte(body))
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "multipart-no-checksum-fuzz", "Key": "object", "UploadId": uploadID}, nil)
+		if listed.Output["ChecksumAlgorithm"] != nil || listed.Output["ChecksumType"] != nil || listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"] != nil {
+			t.Fatalf("list = %#v", listed.Output)
+		}
+		completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+		if completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil {
+			t.Fatalf("complete = %#v", completed.Output)
+		}
+		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multipart-no-checksum-fuzz", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
+		if got.Headers.Get("x-amz-checksum-crc32") != "" || got.Headers.Get("x-amz-checksum-crc64nvme") != "" || string(readStream(t, got)) != body {
+			t.Fatalf("get headers=%v", got.Headers)
+		}
+	})
+}
+
+func FuzzCompositeMultipartPartChecksumRequired(f *testing.F) {
+	f.Add("plain", false)
+	f.Add("alternate", true)
+	f.Fuzz(func(t *testing.T, body string, alternate bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-composite-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-composite-fuzz", "Key": "object", "ChecksumAlgorithm": "CRC32"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-composite-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		completed := completedPart(1, part).(map[string]any)
+		wantCode := "InvalidRequest"
+		wantMessage := "The upload was created using a crc32 checksum. The complete request must include the checksum for each part. It was missing for part 1 in the request."
+		if alternate {
+			completed["ChecksumSHA256"] = "AA=="
+			wantCode, wantMessage = "BadDigest", "The sha256 you specified for part 1 did not match what we received."
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completed), nil)
+		if fault := asFault(t, err); fault.Code != wantCode || fault.Message != wantMessage || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("alternate=%t fault=%#v", alternate, fault)
+		}
+	})
+}
+
+func FuzzMultipartObjectSize(f *testing.F) {
+	f.Add("sized", int64(0))
+	f.Add("sized", int64(4))
+	f.Add("", int64(-1))
+	f.Fuzz(func(t *testing.T, body string, advertised int64) {
+		if len(body) > 4096 || advertised < -4096 || advertised > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-size-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-size-fuzz", "Key": "object"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-size-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		input := completeInput(uploadID, completedPart(1, part))
+		input["MpuObjectSize"] = strconv.FormatInt(advertised, 10)
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		if advertised == 0 || advertised == int64(len(body)) {
+			if err != nil {
+				t.Fatalf("size=%d body=%d: %v", advertised, len(body), err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != fmt.Sprintf("The provided 'x-amz-mp-object-size' header value %d does not match what was computed: %d", advertised, len(body)) || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("size=%d body=%d fault=%#v", advertised, len(body), fault)
+		}
+	})
+}
+
+func FuzzCompositeAggregateChecksumIgnored(f *testing.F) {
+	f.Add("body", "AA==")
+	f.Add("", "wrong")
+	f.Fuzz(func(t *testing.T, body, aggregate string) {
+		if len(body) > 4096 || len(aggregate) > 256 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-aggregate-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-aggregate-fuzz", "Key": "object", "ChecksumAlgorithm": "CRC32"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-aggregate-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		input := completeInput(uploadID, completedPartWithChecksum(1, part, "ChecksumCRC32", "x-amz-checksum-crc32"))
+		input["ChecksumCRC32"] = aggregate
+		completed := mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+		if !strings.HasSuffix(fmt.Sprint(completed.Output["ChecksumCRC32"]), "-1") || completed.Output["ChecksumType"] != "COMPOSITE" {
+			t.Fatalf("aggregate=%q output=%#v", aggregate, completed.Output)
+		}
+	})
+}
+
+func FuzzAlternateMultipartChecksum(f *testing.F) {
+	f.Add("body", "AAAAAA==")
+	f.Add("", "wrong")
+	f.Add("body", "")
+	f.Fuzz(func(t *testing.T, body, alternate string) {
+		if len(body) > 4096 || len(alternate) > 256 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-alternate-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-alternate-fuzz", "Key": "object", "ChecksumAlgorithm": "SHA256"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-alternate-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		input := completeInput(uploadID, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256"))
+		input["ChecksumCRC32"] = alternate
+		completed, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		if alternate == "" {
+			if err != nil || completed.Output["ChecksumType"] != "COMPOSITE" {
+				t.Fatalf("empty alternate: output=%#v err=%v", completed, err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The sha256 you specified did not match the calculated checksum." || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("alternate=%q fault=%#v", alternate, fault)
+		}
+	})
+}
+
+func FuzzFullObjectChecksumType(f *testing.F) {
+	f.Add("body", false)
+	f.Add("", true)
+	f.Fuzz(func(t *testing.T, body string, explicit bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-full-type-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-full-type-fuzz", "Key": "object", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-full-type-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		input := completeInput(uploadID, completedPart(1, part))
+		input["ChecksumCRC32"] = part.Headers.Get("x-amz-checksum-crc32")
+		if explicit {
+			input["ChecksumType"] = "FULL_OBJECT"
+			if completed := mustInvoke(t, p, "CompleteMultipartUpload", input, nil); completed.Output["ChecksumType"] != "FULL_OBJECT" {
+				t.Fatalf("explicit output=%#v", completed.Output)
+			}
+			return
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The crc32 you specified did not match the calculated checksum." {
+			t.Fatalf("implicit fault=%#v", fault)
 		}
 	})
 }
@@ -2012,6 +3465,220 @@ func FuzzCopyObjectSSECustomerKeys(f *testing.F) {
 		}
 		if got := mustInvoke(t, p, "GetObject", read, nil); string(readStream(t, got)) != body {
 			t.Fatal("copied customer body mismatch")
+		}
+	})
+}
+
+func FuzzCopyObjectChecksums(f *testing.F) {
+	f.Add(uint8(0), []byte("inherit"))
+	f.Add(uint8(1), []byte("crc32"))
+	f.Add(uint8(2), []byte("crc32c"))
+	f.Fuzz(func(t *testing.T, mode uint8, body []byte) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-checksum-fuzz"}, nil)
+		sourceSum := sha256.Sum256(body)
+		sourceChecksum := base64.StdEncoding.EncodeToString(sourceSum[:])
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-checksum-fuzz", "Key": "source", "ChecksumSHA256": sourceChecksum}, body)
+
+		input := map[string]any{"Bucket": "copy-checksum-fuzz", "Key": "destination", "CopySource": "copy-checksum-fuzz/source"}
+		output, header, expected := "ChecksumSHA256", "x-amz-checksum-sha256", sourceChecksum
+		switch mode % 3 {
+		case 1:
+			input["ChecksumAlgorithm"], output, header = "CRC32", "ChecksumCRC32", "x-amz-checksum-crc32"
+			sum := make([]byte, 4)
+			binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+			expected = base64.StdEncoding.EncodeToString(sum)
+		case 2:
+			input["ChecksumAlgorithm"], output, header = "CRC32C", "ChecksumCRC32C", "x-amz-checksum-crc32c"
+			sum := make([]byte, 4)
+			binary.BigEndian.PutUint32(sum, crc32.Checksum(body, crc32.MakeTable(crc32.Castagnoli)))
+			expected = base64.StdEncoding.EncodeToString(sum)
+		}
+		copied := mustInvoke(t, p, "CopyObject", input, nil)
+		modifiedValue, ok := copied.Output["LastModified"].(string)
+		modified, modifiedErr := time.Parse(time.RFC3339, modifiedValue)
+		if copied.Output[output] != expected || copied.Output["ChecksumType"] != "FULL_OBJECT" || !ok || modifiedErr != nil {
+			t.Fatalf("copy output = %#v", copied.Output)
+		}
+		head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "copy-checksum-fuzz", "Key": "destination", "ChecksumMode": "ENABLED"}, nil)
+		stored, storedErr := http.ParseTime(head.Headers.Get("Last-Modified"))
+		if storedErr != nil || !modified.Equal(stored) || head.Headers.Get(header) != expected || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+			t.Fatalf("copy headers = %v", head.Headers)
+		}
+	})
+}
+
+func FuzzCopySourcePreconditions(f *testing.F) {
+	for mode := uint8(0); mode < 7; mode++ {
+		f.Add(mode, uint16(mode+1))
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, secondsSeed uint16) {
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-condition-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "copy-condition-fuzz", "Status": "Enabled"}, nil)
+		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-condition-fuzz", "Key": "source"}, []byte("source"))
+		seconds := int(secondsSeed%60) + 1
+		_ = deps.Clock.Advance(time.Duration(seconds) * time.Second)
+		modified := time.Unix(0, 0).UTC()
+		readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "copy-condition-fuzz", "Key": "source", "IfModifiedSince": modified.Add(time.Duration(seconds+1) * time.Second).Format(http.TimeFormat)}, nil))
+		conditions := map[string]any{}
+		wantSuccess := false
+		faultCondition := ""
+		switch mode % 7 {
+		case 0:
+			conditions["CopySourceIfMatch"] = `"wrong", ` + put.Headers.Get("ETag")
+			faultCondition = "x-amz-copy-source-If-Match"
+		case 1:
+			conditions["CopySourceIfModifiedSince"] = modified.Add(time.Duration(seconds+1) * time.Second).Format(http.TimeFormat)
+			wantSuccess = true
+		case 2:
+			conditions["CopySourceIfNoneMatch"] = `"wrong"`
+			conditions["CopySourceIfModifiedSince"] = modified.Format(http.TimeFormat)
+			faultCondition = "x-amz-copy-source-If-Modified-Since"
+		case 3:
+			conditions["CopySourceIfMatch"] = put.Headers.Get("ETag")
+			conditions["CopySourceIfNoneMatch"] = put.Headers.Get("ETag")
+			conditions["CopySourceIfModifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+			conditions["CopySourceIfUnmodifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+			wantSuccess = true
+		case 4:
+			conditions["CopySourceIfUnmodifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+			faultCondition = "x-amz-copy-source-If-Unmodified-Since"
+		case 5:
+			conditions["CopySourceIfNoneMatch"] = put.Headers.Get("ETag")
+			faultCondition = "x-amz-copy-source-If-None-Match"
+		case 6:
+			conditions["CopySourceIfModifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+			wantSuccess = true
+		}
+		for _, operation := range []string{"CopyObject", "UploadPartCopy"} {
+			input := map[string]any{"Bucket": "copy-condition-fuzz", "Key": "destination-" + strings.ToLower(operation), "CopySource": "copy-condition-fuzz/source"}
+			if operation == "UploadPartCopy" {
+				created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "copy-condition-fuzz", "Key": input["Key"]}, nil)
+				input["UploadId"], input["PartNumber"] = created.Output["UploadId"], 1
+			}
+			for key, value := range conditions {
+				input[key] = value
+			}
+			_, err := invoke(t, p, operation, input, nil)
+			if wantSuccess && err != nil {
+				t.Fatalf("%s mode %d: %v", operation, mode%7, err)
+			}
+			if !wantSuccess {
+				fault := asFault(t, err)
+				if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.Fields["Condition"] != faultCondition {
+					t.Fatalf("%s mode %d: %#v", operation, mode%7, fault)
+				}
+			}
+		}
+	})
+}
+
+func FuzzCopySourceEncoding(f *testing.F) {
+	for _, key := range []string{"#key-with-hash-prefix", "file%2Fname", "test@key/", "test key/", "test+key", "a/%F0%9F%98%80/", "a/😀/"} {
+		f.Add(key, "body")
+	}
+	f.Fuzz(func(t *testing.T, key, body string) {
+		if key == "" || len(key) > 256 || len(body) > 4096 || !utf8.ValidString(key+body) || strings.ContainsRune(key, 0) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		for _, bucket := range []string{"copy-source-fuzz", "copy-source-fuzz-destination"} {
+			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		}
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-source-fuzz", "Key": key}, []byte(body))
+		mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "copy-source-fuzz-destination", "Key": "copy", "CopySource": url.QueryEscape("copy-source-fuzz/" + key)}, nil)
+		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "copy-source-fuzz-destination", "Key": "copy"}, nil))); got != body {
+			t.Fatalf("copy %q body = %q, want %q", key, got, body)
+		}
+	})
+}
+
+func FuzzInvalidCopySourceFormat(f *testing.F) {
+	for _, source := range []string{"wrongformat", "bucket", "%2F", "😀"} {
+		f.Add(source)
+	}
+	f.Fuzz(func(t *testing.T, source string) {
+		if len(source) > 256 || !utf8.ValidString(source) {
+			t.Skip()
+		}
+		source = url.PathEscape(strings.ReplaceAll(source, "/", ""))
+		if source == "" {
+			source = "wrongformat"
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "invalid-copy-source"}, nil)
+		_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "invalid-copy-source", "Key": "copy", "CopySource": source}, nil)
+		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("copy source %q fault = %#v", source, fault)
+		}
+	})
+}
+
+func FuzzMultipartObjectLocation(f *testing.F) {
+	for _, key := range []string{"object", "test-unicode_—_file", "test key/", "a/😀/"} {
+		f.Add(key, "body")
+	}
+	f.Fuzz(func(t *testing.T, key, body string) {
+		if key == "" || len(key) > 256 || len(body) > 4096 || !utf8.ValidString(key+body) || strings.ContainsRune(key, 0) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		input := map[string]any{"Bucket": "multipart-location-fuzz", "Key": key}
+		mustInvoke(t, p, "CreateBucket", input, nil)
+		upload := mustInvoke(t, p, "CreateMultipartUpload", input, nil)
+		partInput := maps.Clone(input)
+		partInput["UploadId"], partInput["PartNumber"] = upload.Output["UploadId"], 1
+		part := mustInvoke(t, p, "UploadPart", partInput, []byte(body))
+		complete := maps.Clone(input)
+		complete["UploadId"], complete["MultipartUpload"] = upload.Output["UploadId"], map[string]any{"Parts": []any{completedPart(1, part)}}
+		location := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil).Output["Location"].(string)
+		parsed, err := url.Parse(location)
+		if err != nil || parsed.Host != "multipart-location-fuzz.s3.amazonaws.com" || parsed.Path != "/"+key {
+			t.Fatalf("multipart location for %q = %q: %v", key, location, err)
+		}
+	})
+}
+
+func FuzzUploadPartCopyRangeBounds(f *testing.F) {
+	f.Add([]byte("0123456789"), uint16(0), uint16(8), uint8(0))
+	f.Add([]byte("x"), uint16(4), uint16(9), uint8(1))
+	f.Add([]byte("xy"), uint16(0), uint16(7), uint8(2))
+	f.Fuzz(func(t *testing.T, body []byte, startSeed, endSeed uint16, mode uint8) {
+		if len(body) == 0 {
+			body = []byte{0}
+		} else if len(body) > 4096 {
+			body = body[:4096]
+		}
+		start, end, wantCode := 0, 0, ""
+		switch mode % 3 {
+		case 0:
+			start = int(startSeed) % len(body)
+			end = start + int(endSeed)%(len(body)-start)
+		case 1:
+			start = len(body) + int(startSeed)%1024
+			end, wantCode = start+int(endSeed)%1024, "InvalidRequest"
+		case 2:
+			start = int(startSeed) % len(body)
+			end, wantCode = len(body)+int(endSeed)%1024, "InvalidArgument"
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-range-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-range-fuzz", "Key": "source"}, body)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "copy-range-fuzz", "Key": "destination"}, nil)
+		_, err := invoke(t, p, "UploadPartCopy", map[string]any{
+			"Bucket": "copy-range-fuzz", "Key": "destination", "UploadId": created.Output["UploadId"], "PartNumber": 1,
+			"CopySource": "copy-range-fuzz/source", "CopySourceRange": fmt.Sprintf("bytes=%d-%d", start, end),
+		}, nil)
+		if wantCode == "" && err != nil {
+			t.Fatal(err)
+		}
+		if wantCode != "" && asFault(t, err).Code != wantCode {
+			t.Fatalf("mode %d range %d-%d: %v", mode%3, start, end, err)
 		}
 	})
 }

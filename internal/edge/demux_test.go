@@ -96,3 +96,39 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		t.Fatalf("unknown target demuxed to %s", service.ID)
 	}
 }
+
+func TestDemuxSQSQueueURLsWithQueryActions(t *testing.T) {
+	server := &Server{bundle: catalog.Bundle()}
+	for _, path := range []string{"/000000000000/q", "/queue/eu-west-1/000000000000/q"} {
+		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path+"?Action=GetQueueAttributes", nil)
+		service := server.demux(req)
+		if service == nil || service.ID != "aws.sqs" {
+			t.Fatalf("demux %s = %#v, want aws.sqs", path, service)
+		}
+	}
+	for _, host := range []string{"queue.localhost.localstack.cloud", "eu-west-1.queue.localhost.localstack.cloud"} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+host+"/?Action=GetQueueAttributes", nil)
+		service := server.demux(req)
+		if service == nil || service.ID != "aws.sqs" {
+			t.Fatalf("demux %s = %#v, want aws.sqs", host, service)
+		}
+	}
+}
+
+func TestDemuxSNSConfirmationURL(t *testing.T) {
+	server := &Server{bundle: catalog.Bundle()}
+	for _, topicARN := range []string{
+		"arn:aws:sns:us-east-1:123456789012:topic",
+		"arn:aws-us-gov:sns:us-gov-west-1:123456789012:topic",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://localhost/?Action=ConfirmSubscription&TopicArn="+topicARN+"&Token=token", nil)
+		if service := server.demux(req); service == nil || service.ID != "aws.sns" {
+			t.Fatalf("SNS confirmation URL demux %s = %#v", topicARN, service)
+		}
+		subscriptionARN := topicARN + ":subscription"
+		req = httptest.NewRequest(http.MethodGet, "http://localhost/?Action=Unsubscribe&SubscriptionArn="+subscriptionARN, nil)
+		if service := server.demux(req); service == nil || service.ID != "aws.sns" {
+			t.Fatalf("SNS unsubscribe URL demux %s = %#v", subscriptionARN, service)
+		}
+	}
+}

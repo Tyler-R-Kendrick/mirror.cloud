@@ -1,0 +1,9 @@
+{
+  "failed": {
+    "Code": "InvalidMessageContents",
+    "Id": "9",
+    "Message": "The message contains characters outside the allowed set.",
+    "SenderFault": true
+  },
+  "successful": 9
+}

@@ -6,21 +6,33 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -31,11 +43,1752 @@ type failBlobs struct {
 	failKey string
 }
 
+type failAfterReader struct {
+	io.Reader
+}
+
+type observedChaosClock struct {
+	spi.Clock
+	after chan time.Duration
+}
+
+func (c *observedChaosClock) After(delay time.Duration) <-chan time.Time {
+	c.after <- delay
+	return c.Clock.After(delay)
+}
+
+func TestConcurrentDynamoDBTableCreatesHaveOneWinner(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTable", Input: map[string]any{"TableName": "T"}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	winners := 0
+	for err := range errs {
+		if err == nil {
+			winners++
+		} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceInUseException" {
+			t.Fatalf("unexpected create fault %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("create winners %d", winners)
+	}
+}
+
+func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	call("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
+	call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": "-1"}}})
+	counts := make(chan int, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			counts <- call("ExpireItems", nil).Output["ExpiredItems"].(int)
+		}()
+	}
+	wg.Wait()
+	close(counts)
+	total := 0
+	for count := range counts {
+		total += count
+	}
+	if total != 1 {
+		t.Fatalf("concurrent expiration count %d", total)
+	}
+}
+
+func TestConcurrentDynamoDBPartiQLTransactions(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "Username", "KeyType": "HASH"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			user := "user-" + strconv.Itoa(index)
+			_, err := call("ExecuteTransaction", map[string]any{"TransactStatements": []any{map[string]any{"Statement": "INSERT INTO T VALUE {'Username': '" + user + "'}"}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := call("Scan", map[string]any{"TableName": "T"})
+	if err != nil || items.Output["Count"] != 32 {
+		t.Fatalf("concurrent PartiQL transactions: %#v %v", items, err)
+	}
+}
+
+func TestConcurrentDynamoDBNoOpUpdatesEmitOneStreamRecord(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	created, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("UpdateItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}, "UpdateExpression": "SET value = :v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"N": "2"}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	arn := created.Output["TableDescription"].(map[string]any)["LatestStreamArn"]
+	iterator, err := call("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := call("GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
+	if err != nil || len(records.Output["Records"].([]any)) != 2 {
+		t.Fatalf("duplicate no-op stream records: %#v %v", records, err)
+	}
+}
+
+func TestConcurrentDynamoDBKinesisDestinationKeepsEveryRecord(t *testing.T) {
+	deps := spitest.Deps(t)
+	ddb := dynamodb.New(deps)
+	kin := kinesis.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(pack spi.BehaviorPack, operation string, input map[string]any) (*spi.Response, error) {
+		return pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call(kin, "CreateStream", map[string]any{"StreamName": "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call(ddb, "CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call(ddb, "EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call(ddb, "PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"N": strconv.Itoa(index)}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	iterator, err := call(kin, "GetShardIterator", map[string]any{"StreamName": "s", "ShardIteratorType": "TRIM_HORIZON"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := call(kin, "GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
+	if err != nil || len(records.Output["Records"].([]any)) != 32 {
+		t.Fatalf("concurrent destination records: %#v %v", records, err)
+	}
+	keys := map[string]bool{}
+	for _, raw := range records.Output["Records"].([]any) {
+		data, _ := base64.StdEncoding.DecodeString(raw.(map[string]any)["Data"].(string))
+		var event map[string]any
+		if json.Unmarshal(data, &event) != nil || event["eventName"] != "INSERT" {
+			t.Fatalf("destination event: %s", data)
+		}
+		key := event["dynamodb"].(map[string]any)["Keys"].(map[string]any)["id"].(map[string]any)["N"].(string)
+		keys[key] = true
+	}
+	if len(keys) != 32 {
+		t.Fatalf("unique destination keys: %d", len(keys))
+	}
+}
+
+func TestConcurrentDynamoDBGlobalTableKeepsEveryItem(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	call := func(region, operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: region}, Operation: operation, Input: input})
+	}
+	if _, err := call("ap-south-1", "CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("ap-south-1", "UpdateTable", map[string]any{"TableName": "T", "ReplicaUpdates": []any{map[string]any{"Create": map[string]any{"RegionName": "us-east-1"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			region := "ap-south-1"
+			if index%2 == 1 {
+				region = "us-east-1"
+			}
+			_, err := call(region, "PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"N": strconv.Itoa(index)}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, region := range []string{"ap-south-1", "us-east-1"} {
+		response, err := call(region, "Scan", map[string]any{"TableName": "T"})
+		if err != nil || len(response.Output["Items"].([]any)) != 32 {
+			t.Fatalf("%s replicated items: %#v %v", region, response, err)
+		}
+	}
+}
+
+func TestConcurrentSQSQueueListingsKeepEveryQueue(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prefix := "other-"
+			if index%2 == 0 {
+				prefix = "wanted-"
+			}
+			_, err := call("CreateQueue", map[string]any{"QueueName": fmt.Sprintf("%s%02d", prefix, index)})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	next := ""
+	for {
+		response, err := call("ListQueues", map[string]any{"QueueNamePrefix": "wanted-", "MaxResults": 7, "NextToken": next})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, raw := range response.Output["QueueUrls"].([]any) {
+			url := raw.(string)
+			if seen[url] {
+				t.Fatalf("duplicate queue %s", url)
+			}
+			seen[url] = true
+		}
+		next, _ = response.Output["NextToken"].(string)
+		if next == "" {
+			break
+		}
+	}
+	if len(seen) != 32 {
+		t.Fatalf("listed %d wanted queues", len(seen))
+	}
+}
+
+func TestConcurrentSQSQueueMetadataRemainsIsolated(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for index := range 32 {
+		name := fmt.Sprintf("metadata-%02d", index)
+		if _, err := call("CreateQueue", map[string]any{"QueueName": name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			name := fmt.Sprintf("metadata-%02d", index)
+			response, err := call("GetQueueAttributes", map[string]any{"QueueName": name, "AttributeNames": []any{"QueueArn", "CreatedTimestamp", "VisibilityTimeout"}})
+			if err == nil {
+				attrs := response.Output["Attributes"].(map[string]any)
+				if len(attrs) != 3 || attrs["QueueArn"] != "arn:aws:sqs:us-east-1:000000000000:"+name || attrs["CreatedTimestamp"] == "" || attrs["VisibilityTimeout"] != "30" {
+					err = fmt.Errorf("%s metadata %#v", name, attrs)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConcurrentSQSAdvertiseURLsRemainConsistent(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-advertised-%d", index)
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, AdvertiseURL: "https://external.example/sqs/", Operation: "CreateQueue", Input: map[string]any{"QueueName": name}})
+			if err != nil || response.Output["QueueUrl"] != "https://external.example/sqs/000000000000/"+name {
+				errs <- fmt.Errorf("queue %s response %#v error %v", name, response, err)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSQueueRecreationCannotBypassDeletionWindow(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "deleted"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("DeleteQueue", map[string]any{"QueueName": "deleted"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("CreateQueue", map[string]any{"QueueName": "deleted"})
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != "AWS.SimpleQueueService.QueueDeletedRecently" {
+				errs <- fmt.Errorf("recreate fault %#v", err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := deps.Clock.Advance(time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "deleted"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "roundtrip"}); err != nil {
+		t.Fatal(err)
+	}
+	var digests sync.Map
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := fmt.Sprintf("message-%02d", index)
+			if index == 0 {
+				body = `"&quot;&quot;` + "\r"
+			}
+			response, err := call("SendMessage", map[string]any{"QueueName": "roundtrip", "MessageBody": body})
+			if err == nil {
+				digests.Store(response.Output["MessageId"], response.Output["MD5OfMessageBody"])
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	received := 0
+	encoded := false
+	for received < 64 {
+		response, err := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "MaxNumberOfMessages": 10, "MessageSystemAttributeNames": []any{"All"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages := response.Output["Messages"].([]any)
+		if len(messages) == 0 {
+			t.Fatalf("received %d messages", received)
+		}
+		for _, raw := range messages {
+			message := raw.(map[string]any)
+			encoded = encoded || message["Body"] == `"&quot;&quot;`+"\r"
+			want, ok := digests.Load(message["MessageId"])
+			attributes := message["Attributes"].(map[string]any)
+			sent, sentErr := strconv.ParseInt(attributes["SentTimestamp"].(string), 10, 64)
+			first, firstErr := strconv.ParseInt(attributes["ApproximateFirstReceiveTimestamp"].(string), 10, 64)
+			if !ok || message["MD5OfBody"] != want || sentErr != nil || firstErr != nil || first < sent {
+				t.Fatalf("message digest %#v want %v", message, want)
+			}
+			received++
+		}
+	}
+	if !encoded {
+		t.Fatal("encoded message missing")
+	}
+}
+
+func TestConcurrentSQSEmptyMessagesAreRejected(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "empty-body"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := fmt.Sprintf("message-%02d", index)
+			if index%2 == 0 {
+				body = ""
+			}
+			_, err := call("SendMessage", map[string]any{"QueueName": "empty-body", "MessageBody": body})
+			if body == "" {
+				fault, _ := err.(*spi.Fault)
+				if fault == nil || fault.Code != "MissingParameter" {
+					errs <- fmt.Errorf("empty message fault %#v", err)
+					return
+				}
+				errs <- nil
+				return
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	received := 0
+	for received < 32 {
+		response, err := call("ReceiveMessage", map[string]any{"QueueName": "empty-body", "MaxNumberOfMessages": 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages := response.Output["Messages"].([]any)
+		if len(messages) == 0 {
+			t.Fatalf("received %d messages", received)
+		}
+		received += len(messages)
+	}
+}
+
+func TestConcurrentSQSReceiveBatchLimitsAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "max-messages"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			max := 10
+			if index%2 == 0 {
+				max = 11
+			}
+			_, err := call("ReceiveMessage", map[string]any{"QueueName": "max-messages", "MaxNumberOfMessages": max})
+			if max == 11 {
+				fault, _ := err.(*spi.Fault)
+				if fault == nil || fault.Code != "InvalidParameterValue" {
+					errs <- fmt.Errorf("max messages fault %#v", err)
+					return
+				}
+				errs <- nil
+				return
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConcurrentSQSEmptyReceivesOmitMessages(t *testing.T) {
+	deps := spitest.Deps(t)
+	deps.Clock = clock.Real{}
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "empty-receive"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("ReceiveMessage", map[string]any{"QueueName": "empty-receive", "WaitTimeSeconds": index % 2})
+			if err == nil {
+				if _, ok := response.Output["Messages"]; ok {
+					err = fmt.Errorf("empty receive %#v", response.Output)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConcurrentSQSReceiveWaitTimeLimitsAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "wait-time"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 63)
+	var wg sync.WaitGroup
+	for index := range 63 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			wait := []int{-1, 0, 21}[index%3]
+			response, err := call("ReceiveMessage", map[string]any{"QueueName": "wait-time", "WaitTimeSeconds": wait})
+			if wait == 0 {
+				if err == nil && response.Output["Messages"] == nil {
+					errs <- nil
+					return
+				}
+				errs <- fmt.Errorf("wait=0 response %#v error %v", response, err)
+				return
+			}
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != "InvalidParameterValue" {
+				errs <- fmt.Errorf("wait=%d fault %#v", wait, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConcurrentSQSQueueReceiveWaitAttributeIsStable(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	after := make(chan time.Duration, 16)
+	deps.Clock = &observedChaosClock{Clock: clk, after: after}
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-queue-wait", "Attributes": map[string]any{"ReceiveMessageWaitTimeSeconds": "1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-queue-wait"}})
+			if err != nil || response.Output["Messages"] != nil {
+				errs <- fmt.Errorf("queue wait response %#v error %v", response, err)
+			}
+		}()
+	}
+	for range 16 {
+		if delay := <-after; delay != time.Second {
+			t.Fatalf("queue wait delay %v", delay)
+		}
+	}
+	if err := clk.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSMessagesRemainQueueScoped(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for index := range 32 {
+		if _, err := call("CreateQueue", map[string]any{"QueueName": fmt.Sprintf("isolated-%02d", index)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("SendMessage", map[string]any{"QueueName": fmt.Sprintf("isolated-%02d", index), "MessageBody": fmt.Sprintf("message-%02d", index)})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("ReceiveMessage", map[string]any{"QueueName": fmt.Sprintf("isolated-%02d", index)})
+			if err == nil {
+				messages, _ := response.Output["Messages"].([]any)
+				if len(messages) != 1 || messages[0].(map[string]any)["Body"] != fmt.Sprintf("message-%02d", index) {
+					err = fmt.Errorf("queue %d response %#v", index, response.Output)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConcurrentSQSSendMessageBatchesRemainAtomic(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch", "Entries": []any{
+				map[string]any{"Id": fmt.Sprintf("%d-0", index), "MessageBody": fmt.Sprintf("message-%d-0", index)},
+				map[string]any{"Id": fmt.Sprintf("%d-1", index), "MessageBody": fmt.Sprintf("message-%d-1", index)},
+			}}})
+			errs <- err
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	for len(seen) < 32 {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "batch", "MaxNumberOfMessages": 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, _ := response.Output["Messages"].([]any)
+		if len(messages) == 0 {
+			t.Fatalf("received %d batch messages", len(seen))
+		}
+		for _, raw := range messages {
+			seen[raw.(map[string]any)["Body"].(string)] = true
+		}
+	}
+	if len(seen) != 32 {
+		t.Fatalf("received %d batch messages", len(seen))
+	}
+}
+
+func TestConcurrentSQSEmptyMessageBatchesAreRejected(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "empty-batch", "Entries": []any{}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "AWS.SimpleQueueService.EmptyBatchRequest" {
+			t.Fatalf("empty batch error %#v", err)
+		}
+	}
+}
+
+func TestConcurrentSQSMessageSizeLimitsRemainStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "maximum", "MessageBody": strings.Repeat("a", 1025)}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidParameterValue" {
+			t.Fatalf("size error %#v", err)
+		}
+	}
+}
+
+func TestConcurrentSQSBatchSizeLimitsRemainStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-size"}}); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Repeat("a", (1<<20)-8)
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-size", "Entries": []any{
+				map[string]any{"Id": fmt.Sprintf("%d-1", index), "MessageBody": body, "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}},
+				map[string]any{"Id": fmt.Sprintf("%d-2", index), "MessageBody": "a"},
+			}}})
+			errs <- err
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "AWS.SimpleQueueService.BatchRequestTooLong" {
+			t.Fatalf("batch size error %#v", err)
+		}
+	}
+}
+
+func TestConcurrentSQSBatchPerEntrySizeLimitsRemainStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-entry-maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := []any{
+		map[string]any{"Id": "valid", "MessageBody": strings.Repeat("a", 1024)},
+		map[string]any{"Id": "oversized", "MessageBody": strings.Repeat("a", 1025)},
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-entry-maximum", "Entries": entries}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			successful, _ := response.Output["Successful"].([]any)
+			failed, _ := response.Output["Failed"].([]any)
+			if len(successful) != 1 || len(failed) != 1 {
+				errs <- fmt.Errorf("batch per-entry size response %#v", response.Output)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSPublishGetDeleteMessageBatchesRemainConsistent(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-publish-get-delete-%d", index)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+				errs <- err
+				return
+			}
+			entries := []any{
+				map[string]any{"Id": "message-0", "MessageBody": "body-0"},
+				map[string]any{"Id": "message-1", "MessageBody": "body-1"},
+				map[string]any{"Id": "message-2", "MessageBody": "body-2"},
+			}
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": name, "Entries": entries}}); err != nil {
+				errs <- err
+				return
+			}
+			received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 10}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			messages, _ := received.Output["Messages"].([]any)
+			if len(messages) != len(entries) {
+				errs <- fmt.Errorf("received %d messages from %s", len(messages), name)
+				return
+			}
+			deleteEntries := make([]any, len(messages))
+			for i, raw := range messages {
+				message := raw.(map[string]any)
+				deleteEntries[i] = map[string]any{"Id": message["MessageId"], "ReceiptHandle": message["ReceiptHandle"]}
+			}
+			deleted, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": name, "Entries": deleteEntries}})
+			if err != nil || len(deleted.Output["Successful"].([]any)) != len(entries) {
+				errs <- fmt.Errorf("deleted batch %#v error %v", deleted, err)
+				return
+			}
+			remaining, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 10}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if messages, _ := remaining.Output["Messages"].([]any); len(messages) != 0 {
+				errs <- fmt.Errorf("queue %s retained %d messages", name, len(messages))
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSRedrivePolicyClearingIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-redrive-policy"}}); err != nil {
+		t.Fatal(err)
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:dlq","maxReceiveCount":"42"}`
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy, "Policy": policy}}}); err != nil {
+				errs <- err
+				return
+			}
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": "", "Policy": ""}}}); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes, _ := response.Output["Attributes"].(map[string]any)
+	if _, present := attributes["RedrivePolicy"]; present {
+		t.Fatalf("redrive policy remained %#v", response.Output)
+	}
+	if _, present := attributes["Policy"]; present {
+		t.Fatalf("redrive policy remained %#v", response.Output)
+	}
+}
+
+func TestConcurrentSQSRedrivePolicyValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	policies := []string{`not-json`, `{"maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"dummy","maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:dlq","maxReceiveCount":"invalid"}`}
+	errs := make(chan error, len(policies)*8)
+	var wg sync.WaitGroup
+	for index, policy := range policies {
+		for attempt := range 8 {
+			wg.Add(1)
+			go func(index, attempt int, policy string) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": fmt.Sprintf("chaos-redrive-invalid-%d-%d", index, attempt), "Attributes": map[string]any{"RedrivePolicy": policy}}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" {
+					errs <- fmt.Errorf("policy %q error %#v", policy, err)
+				}
+			}(index, attempt, policy)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSListDeadLetterSourceQueuesIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dead-letter"}}); err != nil {
+		t.Fatal(err)
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-dead-letter","maxReceiveCount":"42"}`
+	for _, name := range []string{"chaos-source-a", "chaos-source-b"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDeadLetterSourceQueues", Input: map[string]any{"QueueName": "chaos-dead-letter"}})
+			if err != nil || len(response.Output["QueueUrls"].([]any)) != 2 {
+				errs <- fmt.Errorf("dead-letter sources %#v error %v", response, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSDeadLetterMaxReceiveCountIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-max-receive-dlq"}}); err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-max-receive-source-%d", index)
+			policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-max-receive-dlq","maxReceiveCount":"1"}`
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"RedrivePolicy": policy, "VisibilityTimeout": "0"}}}); err != nil {
+				errCh <- err
+				return
+			}
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "poison"}}); err != nil {
+				errCh <- err
+				return
+			}
+			for range 2 {
+				if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "VisibilityTimeout": 0}}); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-max-receive-dlq", "MaxNumberOfMessages": 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messages, _ := response.Output["Messages"].([]any); len(messages) != 10 {
+		t.Fatalf("dead-letter batch %#v", response.Output)
+	}
+	response, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-max-receive-dlq", "MaxNumberOfMessages": 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messages, _ := response.Output["Messages"].([]any); len(messages) != 6 {
+		t.Fatalf("remaining dead-letter messages %#v", response.Output)
+	}
+}
+
+func TestConcurrentSQSFIFOSequenceNumbersAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-sequence.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	sequences := make(chan int, 16)
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-sequence.fifo", "MessageBody": "message", "MessageGroupId": "group", "MessageDeduplicationId": fmt.Sprintf("dedup-%d", index)}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			sequence, err := strconv.Atoi(fmt.Sprint(response.Output["SequenceNumber"]))
+			if err != nil || sequence < 1 || sequence > 16 {
+				errs <- fmt.Errorf("sequence %#v", response.Output)
+				return
+			}
+			sequences <- sequence
+		}(index)
+	}
+	wg.Wait()
+	close(sequences)
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	seen := map[int]bool{}
+	for sequence := range sequences {
+		if seen[sequence] {
+			t.Fatalf("duplicate sequence %d", sequence)
+		}
+		seen[sequence] = true
+	}
+	if len(seen) != 16 {
+		t.Fatalf("sequence set %#v", seen)
+	}
+}
+
+func TestConcurrentSQSFIFODeduplicationScopeIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dedup-scope.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-dedup-scope.fifo", "MessageBody": fmt.Sprintf("message-%d", index), "MessageGroupId": fmt.Sprintf("group-%d", index), "MessageDeduplicationId": "same-dedup"}})
+			if err != nil {
+				errs <- err
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-dedup-scope.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messages, _ := response.Output["Messages"].([]any); len(messages) != 10 {
+		t.Fatalf("dedup scope first receive %#v", response.Output)
+	}
+}
+
+func TestConcurrentSQSSetFifoAttributeValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-standard-attribute"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-attribute.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 8 {
+		for _, test := range []struct {
+			name, value string
+			valid       bool
+		}{{"chaos-standard-attribute", "true", false}, {"chaos-standard-attribute", "false", false}, {"chaos-fifo-attribute.fifo", "true", true}, {"chaos-fifo-attribute.fifo", "false", false}} {
+			wg.Add(1)
+			go func(test struct {
+				name, value string
+				valid       bool
+			}) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": test.name, "Attributes": map[string]any{"FifoQueue": test.value}}})
+				if test.valid && err != nil {
+					errs <- err
+				} else if !test.valid {
+					fault, ok := err.(*spi.Fault)
+					if !ok || fault.Code != "InvalidAttributeName" {
+						errs <- fmt.Errorf("%s=%s error %#v", test.name, test.value, err)
+					}
+				}
+			}(test)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSMessageAttributeDigestsRemainStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-attribute-digest-%d", index)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+				errs <- err
+				return
+			}
+			attrs := map[string]any{"binary": map[string]any{"DataType": "Binary", "BinaryValue": base64.StdEncoding.EncodeToString([]byte{byte(index), 1, 2})}, "string": map[string]any{"DataType": "String", "StringValue": fmt.Sprintf("value-%d", index)}}
+			httpRequest := httptest.NewRequest("POST", "http://queue", nil)
+			httpRequest.Header.Set("X-Amzn-Trace-Id", fmt.Sprintf("trace-%d", index))
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, HTTP: httpRequest, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message", "MessageAttributes": attrs}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			digest, _ := response.Output["MD5OfMessageAttributes"].(string)
+			if systemDigest, _ := response.Output["MD5OfMessageSystemAttributes"].(string); systemDigest == "" {
+				errs <- fmt.Errorf("attribute system digest queue=%s output=%#v", name, response.Output)
+				return
+			}
+			received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MessageAttributeNames": []any{"All"}}})
+			var receivedDigest string
+			if err == nil {
+				if messages, ok := received.Output["Messages"].([]any); ok && len(messages) == 1 {
+					receivedDigest, _ = messages[0].(map[string]any)["MD5OfMessageAttributes"].(string)
+				}
+			}
+			if err != nil || receivedDigest != digest {
+				var output map[string]any
+				if received != nil {
+					output = received.Output
+				}
+				errs <- fmt.Errorf("attribute digest queue=%s sent=%s received=%#v error=%v", name, digest, output, err)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSMessageAttributeValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-attribute-validation"}}); err != nil {
+		t.Fatal(err)
+	}
+	cases := []map[string]any{
+		{"ErrorDetails": map[string]any{"DataType": "String", "StringValue": ""}},
+		{"aWs.Invalid": map[string]any{"DataType": "String", "StringValue": "value"}},
+		{"Invalid!attr": map[string]any{"DataType": "String", "StringValue": "value"}},
+		{"Attribute_name": map[string]any{"DataType": "Invalid", "StringValue": "value"}},
+	}
+	errs := make(chan error, len(cases)*8)
+	var wg sync.WaitGroup
+	for range 8 {
+		for _, attrs := range cases {
+			wg.Add(1)
+			go func(attrs map[string]any) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-attribute-validation", "MessageBody": "test", "MessageAttributes": attrs}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" {
+					errs <- fmt.Errorf("attributes %#v error %#v", attrs, err)
+				}
+			}(attrs)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "group"}}); err != nil {
+		t.Fatal(err)
+	}
+	values := []string{"", strings.Repeat("a", 129), "group 123"}
+	errs := make(chan error, len(values)*8)
+	var wg sync.WaitGroup
+	for range 8 {
+		for _, group := range values {
+			wg.Add(1)
+			go func(group string) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "group", "MessageBody": "message", "MessageGroupId": group}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "MessageGroupId can only include alphanumeric and punctuation characters") {
+					errs <- fmt.Errorf("group %q error %#v", group, err)
+					return
+				}
+				errs <- nil
+			}(group)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConcurrentSQSQueueTagUpdatesRemainReadable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "tags"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TagQueue", Input: map[string]any{"QueueName": "tags", "Tags": map[string]any{fmt.Sprintf("tag-%d", index): "value"}}})
+			errs <- err
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListQueueTags", Input: map[string]any{"QueueName": "tags"}})
+	if err != nil || len(response.Output["Tags"].(map[string]any)) == 0 {
+		t.Fatalf("tagged response %#v error %v", response, err)
+	}
+}
+
+func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	created, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "KEYS_ONLY"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := "a"
+			if index%2 == 1 {
+				key = "b"
+			}
+			_, err := call("TransactWriteItems", map[string]any{"ClientRequestToken": "shared", "TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": key}}}}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	successes, mismatches := 0, 0
+	for err := range errs {
+		if err == nil {
+			successes++
+		} else if fault, ok := err.(*spi.Fault); ok && fault.Code == "IdempotentParameterMismatchException" {
+			mismatches++
+		} else {
+			t.Fatalf("unexpected transaction fault %v", err)
+		}
+	}
+	items, err := call("Scan", map[string]any{"TableName": "T"})
+	if err != nil || successes != 16 || mismatches != 16 || items.Output["Count"] != 1 {
+		t.Fatalf("concurrent transaction arbitration: successes=%d mismatches=%d items=%#v err=%v", successes, mismatches, items, err)
+	}
+	arn := created.Output["TableDescription"].(map[string]any)["LatestStreamArn"]
+	iterator, err := call("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := call("GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
+	if err != nil || len(records.Output["Records"].([]any)) != 1 {
+		t.Fatalf("concurrent transaction stream records: %#v %v", records, err)
+	}
+}
+
+func TestConcurrentDynamoDBBatchWritesRemainReadable(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := strconv.Itoa(index)
+			_, err := call("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": key}}}}}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := make([]any, 32)
+	for index := range keys {
+		keys[index] = map[string]any{"id": map[string]any{"S": strconv.Itoa(index)}}
+	}
+	response, err := call("BatchGetItem", map[string]any{"RequestItems": map[string]any{"T": map[string]any{"Keys": keys}}})
+	if err != nil || len(response.Output["Responses"].(map[string]any)["T"].([]any)) != 32 || len(response.Output["UnprocessedKeys"].(map[string]any)) != 0 {
+		t.Fatalf("concurrent batch result: %#v %v", response, err)
+	}
+}
+
+func TestConcurrentDynamoDBTableMetadataUpdatesRemainWhole(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	_, err := call("CreateTable", map[string]any{
+		"TableName": "T", "BillingMode": "PAY_PER_REQUEST",
+		"GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value"}},
+		"SSESpecification":       map[string]any{"Enabled": true, "KMSMasterKeyId": "key-id"},
+		"WarmThroughput":         map[string]any{"ReadUnitsPerSecond": 1, "WriteUnitsPerSecond": 1001},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("UpdateTable", map[string]any{"TableName": "T", "WarmThroughput": map[string]any{"ReadUnitsPerSecond": index, "WriteUnitsPerSecond": index + 1000}})
+			if err == nil && response.Output["TableDescription"].(map[string]any)["TableStatus"] != "UPDATING" {
+				err = errors.New("update status was not UPDATING")
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	described, err := call("DescribeTable", map[string]any{"TableName": "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := described.Output["Table"].(map[string]any)
+	warm := table["WarmThroughput"].(map[string]any)
+	read := int(warm["ReadUnitsPerSecond"].(float64))
+	write := int(warm["WriteUnitsPerSecond"].(float64))
+	if write != read+1000 || warm["Status"] != "ACTIVE" || table["SSEDescription"] == nil || table["BillingModeSummary"] == nil || len(table["GlobalSecondaryIndexes"].([]any)) != 1 {
+		t.Fatalf("torn table metadata %#v", table)
+	}
+}
+
+func TestConcurrentDynamoDBDefaultSSEUsesOneKMSKey(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := dynamodb.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	arns := make(chan string, 32)
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTable", Input: map[string]any{"TableName": "T" + strconv.Itoa(index), "SSESpecification": map[string]any{"Enabled": true}}})
+			if err == nil {
+				arns <- response.Output["TableDescription"].(map[string]any)["SSEDescription"].(map[string]any)["KMSMasterKeyArn"].(string)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(arns)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	shared := ""
+	for arn := range arns {
+		if shared == "" {
+			shared = arn
+		} else if arn != shared {
+			t.Fatalf("multiple default KMS keys: %q and %q", shared, arn)
+		}
+	}
+	listed, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "ListKeys", Input: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Output["Keys"].([]any)) != 1 {
+		t.Fatalf("default KMS keys %#v", listed)
+	}
+}
+
+func TestConcurrentDynamoDBBackupsRemainConsistent(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := dynamodb.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateTable", map[string]any{"TableName": "T"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "DescribeContributorInsights"
+			input := map[string]any{"TableName": "T"}
+			if index%2 == 0 {
+				operation = "UpdateContinuousBackups"
+				input["PointInTimeRecoverySpecification"] = map[string]any{"PointInTimeRecoveryEnabled": true}
+			}
+			response, err := call(operation, input)
+			if err == nil && operation == "DescribeContributorInsights" && response.Output["ContributorInsightsStatus"] != "DISABLED" {
+				err = errors.New("contributor insights were not disabled")
+			}
+			if err == nil && operation == "UpdateContinuousBackups" {
+				recovery := response.Output["ContinuousBackupsDescription"].(map[string]any)["PointInTimeRecoveryDescription"].(map[string]any)
+				if recovery["PointInTimeRecoveryStatus"] != "ENABLED" || recovery["EarliestRestorableDateTime"] != int64(0) || recovery["LatestRestorableDateTime"] != int64(3600) {
+					err = fmt.Errorf("inconsistent recovery window %#v", recovery)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	described, err := call("DescribeContinuousBackups", map[string]any{"TableName": "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := described.Output["ContinuousBackupsDescription"].(map[string]any)["PointInTimeRecoveryDescription"].(map[string]any)
+	if recovery["PointInTimeRecoveryStatus"] != "ENABLED" || recovery["EarliestRestorableDateTime"] != float64(0) || recovery["LatestRestorableDateTime"] != int64(3600) || recovery["RecoveryPeriodInDays"] != float64(35) {
+		t.Fatalf("stored recovery window %#v", recovery)
+	}
+}
+
+func TestConcurrentDynamoDBLocalhostRegionsShareTables(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.dynamodb"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	call := func(region, operation, payload string) (int, []byte, error) {
+		request, _ := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(payload))
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/"+region+"/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+		request.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		request.Header.Set("X-Amz-Target", "DynamoDB_20120810."+operation)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		return response.StatusCode, body, err
+	}
+	if status, body, err := call("us-east-1", "CreateTable", `{"TableName":"T"}`); err != nil || status != http.StatusOK {
+		t.Fatalf("create table: %d %s %v", status, body, err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			region := "us-east-1"
+			if index%2 == 0 {
+				region = "localhost"
+			}
+			status, body, err := call(region, "DescribeTable", `{"TableName":"T"}`)
+			if err == nil && (status != http.StatusOK || !bytes.Contains(body, []byte(`"TableArn":"arn:aws:dynamodb:us-east-1:000000000000:table/T"`))) {
+				err = fmt.Errorf("%s describe: %d %s", region, status, body)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func (r failAfterReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == io.EOF {
+		return 0, errors.New("injected read failure")
+	}
+	return n, err
+}
+
+func (failAfterReader) Close() error { return nil }
+
 func (f failBlobs) Put(ctx context.Context, key string, r io.Reader) (spi.BlobInfo, error) {
 	if f.fail || f.failKey != "" && strings.Contains(key, f.failKey) {
 		return spi.BlobInfo{}, errors.New("injected blob failure")
 	}
 	return f.BlobStore.Put(ctx, key, r)
+}
+
+func TestConcurrentStateStartsDoNotDropHalfCommittedWaits(t *testing.T) {
+	p := states.New(spitest.Deps(t))
+	defer func() { _ = p.Close() }()
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStateMachine", Input: map[string]any{
+		"name": "concurrent-waits", "definition": `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":0,"End":true}}}`, "roleArn": "arn:aws:iam::000000000000:role/states",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	machineARN := created.Output["stateMachineArn"]
+	arns := make(chan string, 32)
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartExecution", Input: map[string]any{"stateMachineArn": machineARN, "name": fmt.Sprintf("run-%d", i)}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			arns <- started.Output["executionArn"].(string)
+		}()
+	}
+	wg.Wait()
+	close(arns)
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for arn := range arns {
+		for {
+			described, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeExecution", Input: map[string]any{"executionArn": arn}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if described.Output["status"] == "SUCCEEDED" {
+				break
+			}
+			select {
+			case <-deadline:
+				t.Fatalf("execution %s remained %#v", arn, described.Output)
+			default:
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
 }
 
 func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
@@ -70,6 +1823,1851 @@ func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
 	}
 	if _, err := call("GetObject", map[string]any{"Bucket": "destination", "Key": "key"}, nil); err == nil {
 		t.Fatal("failed version replication left a partial current object")
+	}
+}
+
+func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "copy-conditions"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "copy-conditions", "Status": "Enabled"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	put, err := call("PutObject", map[string]any{"Bucket": "copy-conditions", "Key": "source"}, []byte("source"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = deps.Clock.Advance(2 * time.Second)
+	etag := put.Headers.Get("ETag")
+	past := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
+	modified := time.Unix(0, 0).UTC().Format(http.TimeFormat)
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "copy-conditions", "Key": fmt.Sprintf("destination-%d", i), "CopySource": "copy-conditions/source"}
+			wantSuccess := i%4 < 2
+			switch i % 4 {
+			case 0:
+				input["CopySourceIfModifiedSince"] = future
+			case 1:
+				input["CopySourceIfMatch"], input["CopySourceIfNoneMatch"] = etag, etag
+				input["CopySourceIfModifiedSince"], input["CopySourceIfUnmodifiedSince"] = past, past
+			case 2:
+				input["CopySourceIfMatch"] = `"wrong", ` + etag
+			case 3:
+				input["CopySourceIfNoneMatch"] = `"wrong"`
+				input["CopySourceIfModifiedSince"] = modified
+			}
+			response, err := call("CopyObject", input, nil)
+			if wantSuccess {
+				if err != nil || response.Headers.Get("ETag") != etag {
+					errs <- fmt.Errorf("copy %d = %#v, %v", i, response, err)
+				}
+				return
+			}
+			fault, _ := err.(*spi.Fault)
+			condition := "x-amz-copy-source-If-Match"
+			if i%4 == 3 {
+				condition = "x-amz-copy-source-If-Modified-Since"
+			}
+			if fault == nil || fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.Fields["Condition"] != condition {
+				errs <- fmt.Errorf("rejected copy %d = %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for i := range 32 {
+		response, err := call("GetObject", map[string]any{"Bucket": "copy-conditions", "Key": fmt.Sprintf("destination-%d", i), "IfModifiedSince": future}, nil)
+		if i%4 < 2 {
+			if err != nil {
+				t.Fatalf("get copied %d: %v", i, err)
+			}
+			body, _ := io.ReadAll(response.Stream)
+			_ = response.Stream.Close()
+			if string(body) != "source" {
+				t.Fatalf("copied %d body %q", i, body)
+			}
+		} else if err == nil {
+			t.Fatalf("rejected copy %d persisted", i)
+		}
+	}
+	errs = make(chan error, 32)
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("multipart-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "copy-conditions", "Key": key}, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			input := map[string]any{"Bucket": "copy-conditions", "Key": key, "UploadId": created.Output["UploadId"], "PartNumber": 1, "CopySource": "copy-conditions/source"}
+			wantSuccess := i%4 < 2
+			switch i % 4 {
+			case 0:
+				input["CopySourceIfModifiedSince"] = future
+			case 1:
+				input["CopySourceIfMatch"], input["CopySourceIfNoneMatch"] = etag, etag
+				input["CopySourceIfModifiedSince"], input["CopySourceIfUnmodifiedSince"] = past, past
+			case 2:
+				input["CopySourceIfMatch"] = `"wrong", ` + etag
+			case 3:
+				input["CopySourceIfNoneMatch"] = `"wrong"`
+				input["CopySourceIfModifiedSince"] = modified
+			}
+			response, err := call("UploadPartCopy", input, nil)
+			listed, listErr := call("ListParts", map[string]any{"Bucket": "copy-conditions", "Key": key, "UploadId": created.Output["UploadId"]}, nil)
+			var parts []any
+			if listed != nil {
+				parts, _ = listed.Output["Parts"].([]any)
+			}
+			if wantSuccess {
+				if err != nil || listErr != nil || response.Headers.Get("ETag") != etag || len(parts) != 1 {
+					errs <- fmt.Errorf("multipart copy %d = %#v, parts %#v, %v, %v", i, response, parts, err, listErr)
+				}
+				return
+			}
+			fault, _ := err.(*spi.Fault)
+			condition := "x-amz-copy-source-If-Match"
+			if i%4 == 3 {
+				condition = "x-amz-copy-source-If-Modified-Since"
+			}
+			if fault == nil || fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != condition || listErr != nil || len(parts) != 0 {
+				errs <- fmt.Errorf("rejected multipart copy %d = %v, parts %#v, %v", i, err, parts, listErr)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentCopyObjectChecksumsRemainDeterministic(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	keyID := "arn:aws:kms:us-east-1:000000000000:key/copy-chaos"
+	spitest.SeedKMSKey(t, deps, id, keyID, "Enabled")
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "copy-checksum-chaos"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("checksum-source")
+	sum := crc32.ChecksumIEEE(body)
+	checksum := base64.StdEncoding.EncodeToString([]byte{byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum)})
+	if _, err := call("PutObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": "source", "ChecksumCRC32": checksum}, body); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("destination-%d", i)
+			copied, err := call("CopyObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": key, "CopySource": "copy-checksum-chaos/source", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
+			if err == nil && (copied.Output["ChecksumCRC32"] != checksum || copied.Output["ChecksumType"] != "FULL_OBJECT" || copied.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || copied.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || copied.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
+				err = fmt.Errorf("copy %d = %#v", i, copied.Output)
+			}
+			var modified time.Time
+			if err == nil {
+				var modifiedErr error
+				modified, modifiedErr = time.Parse(time.RFC3339, fmt.Sprint(copied.Output["LastModified"]))
+				if modifiedErr != nil {
+					err = fmt.Errorf("copy time %d = %#v: %v", i, copied.Output["LastModified"], modifiedErr)
+				}
+			}
+			if err == nil {
+				head, headErr := call("HeadObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": key, "ChecksumMode": "ENABLED"}, nil)
+				if headErr != nil {
+					err = fmt.Errorf("head %d = %#v, %v", i, head, headErr)
+				} else if stored, storedErr := http.ParseTime(head.Headers.Get("Last-Modified")); storedErr != nil || !modified.Equal(stored) || head.Headers.Get("x-amz-checksum-crc32") != checksum || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" || head.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || head.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || head.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+					err = fmt.Errorf("head %d = %#v", i, head)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentS3OwnerIdentitiesRemainDeterministic(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	asMap := func(value any) map[string]any { result, _ := value.(map[string]any); return result }
+	asSlice := func(value any) []any { result, _ := value.([]any); return result }
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "owner-identity-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "owner-identity-chaos", "Key": "listed"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var err error
+			switch i % 5 {
+			case 0:
+				listed, callErr := call("ListBuckets", nil)
+				err = callErr
+				if err == nil && asMap(listed.Output["Owner"])["DisplayName"] != nil {
+					err = fmt.Errorf("list owner %d = %#v", i, listed.Output["Owner"])
+				}
+			case 1:
+				acl, callErr := call("GetBucketAcl", map[string]any{"Bucket": "owner-identity-chaos"})
+				err = callErr
+				if err == nil {
+					grant := asMap(asSlice(acl.Output["Grants"])[0])
+					if asMap(acl.Output["Owner"])["DisplayName"] != nil || asMap(grant["Grantee"])["DisplayName"] != nil {
+						err = fmt.Errorf("ACL owner %d = %#v", i, acl.Output)
+					}
+				}
+			case 2:
+				key := fmt.Sprintf("multipart-%d", i)
+				created, callErr := call("CreateMultipartUpload", map[string]any{"Bucket": "owner-identity-chaos", "Key": key})
+				err = callErr
+				if err == nil {
+					parts, listErr := call("ListParts", map[string]any{"Bucket": "owner-identity-chaos", "Key": key, "UploadId": created.Output["UploadId"]})
+					if listErr != nil || asMap(parts.Output["Initiator"])["DisplayName"] != "webfile" || asMap(parts.Output["Owner"])["DisplayName"] != nil {
+						err = fmt.Errorf("multipart owner %d = %#v, %v", i, parts, listErr)
+					}
+				}
+			case 3, 4:
+				operation := "ListObjects"
+				input := map[string]any{"Bucket": "owner-identity-chaos"}
+				if i%5 == 4 {
+					operation, input["FetchOwner"] = "ListObjectsV2", true
+				}
+				listed, callErr := call(operation, input)
+				err = callErr
+				if err == nil {
+					owner := asMap(asMap(asSlice(listed.Output["Contents"])[0])["Owner"])
+					if owner["ID"] != id.Account || owner["DisplayName"] != nil {
+						err = fmt.Errorf("object owner %d = %#v", i, owner)
+					}
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "list-pagination", "LocationConstraint": "us-west-2"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("content")
+	sum := crc32.ChecksumIEEE(body)
+	checksum := base64.StdEncoding.EncodeToString([]byte{byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum)})
+	for _, key := range []string{"folder/a/one", "folder/b ase+", "folder/base"} {
+		input := map[string]any{"Bucket": "list-pagination", "Key": key}
+		if key == "folder/base" {
+			input["ChecksumCRC32"] = checksum
+		}
+		if _, err := call("PutObject", input, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				_, err := call("PutObject", map[string]any{"Bucket": "list-pagination", "Key": fmt.Sprintf("folder/item-%02d", i)}, []byte("content"))
+				errs <- err
+				return
+			}
+			operation := "ListObjects"
+			input := map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 5, "Marker": "folder/a/", "EncodingType": "url"}
+			tokenField := "NextMarker"
+			v2 := false
+			if i%4 == 3 {
+				operation = "ListObjectsV2"
+				delete(input, "Marker")
+				input["ContinuationToken"] = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").EncodeToString([]byte("folder/b ase+"))
+				tokenField = "NextContinuationToken"
+				v2 = true
+			}
+			response, err := call(operation, input, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if response.Output["BucketRegion"] != "us-west-2" {
+				errs <- fmt.Errorf("%s region: %#v", operation, response.Output)
+				return
+			}
+			var values []string
+			for _, value := range response.Output["CommonPrefixes"].([]any) {
+				values = append(values, value.(map[string]any)["Prefix"].(string))
+			}
+			encodedSpecial := false
+			for _, value := range response.Output["Contents"].([]any) {
+				content := value.(map[string]any)
+				values = append(values, content["Key"].(string))
+				encodedSpecial = encodedSpecial || content["Key"] == "folder/b%20ase%2B"
+				if content["Key"] == "folder/base" && (!reflect.DeepEqual(content["ChecksumAlgorithm"], []any{"CRC32"}) || content["ChecksumType"] != "FULL_OBJECT") {
+					errs <- fmt.Errorf("%s checksum: %#v", operation, content)
+					return
+				}
+			}
+			if !encodedSpecial {
+				errs <- fmt.Errorf("%s URL encoding: %#v", operation, response.Output)
+				return
+			}
+			if len(values) != response.Output["KeyCount"] || len(values) > 5 {
+				errs <- fmt.Errorf("%s count: %#v", operation, response.Output)
+				return
+			}
+			for index, value := range values {
+				if value <= "folder/a/" || index > 0 && value <= values[index-1] {
+					errs <- fmt.Errorf("%s order: %v", operation, values)
+					return
+				}
+			}
+			if response.Output["IsTruncated"] == true && len(values) > 0 {
+				if !v2 && response.Output[tokenField] != values[len(values)-1] {
+					errs <- fmt.Errorf("%s token: %#v", operation, response.Output)
+					return
+				}
+				if v2 {
+					decoded, decodeErr := base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").DecodeString(response.Output[tokenField].(string))
+					if decodeErr != nil || string(decoded) <= values[len(values)-1] {
+						errs <- fmt.Errorf("%s opaque token: %#v", operation, response.Output)
+						return
+					}
+				}
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for _, tc := range []struct{ operation, collection string }{{"ListObjects", "Contents"}, {"ListObjectsV2", "Contents"}, {"ListObjectVersions", "Versions"}} {
+		response, err := call(tc.operation, map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "MaxKeys": 0}, nil)
+		if rows := response.Output[tc.collection].([]any); err != nil || response.Output["MaxKeys"] != 1000 || len(rows) == 0 {
+			t.Fatalf("%s zero max page = %#v, err=%v", tc.operation, response, err)
+		}
+	}
+}
+
+func TestConcurrentListEncodingValidationRemainsDeterministic(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "list-encoding-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	operations := []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			valid := i/len(operations)%2 == 0
+			encoding := "value"
+			if valid {
+				encoding = "url"
+			}
+			_, err := call(operations[i%len(operations)], map[string]any{"Bucket": "list-encoding-chaos", "EncodingType": encoding})
+			if valid {
+				errs <- err
+				return
+			}
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "InvalidArgument" || fault.Message != "Invalid Encoding Method specified in Request" || fault.Fields["ArgumentValue"] != encoding {
+				errs <- fmt.Errorf("invalid %s encoding: %v", operations[i%len(operations)], err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "version-list-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "version-list-chaos", "Status": "Enabled"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	initialSum := crc32.ChecksumIEEE([]byte("initial"))
+	initialChecksum := base64.StdEncoding.EncodeToString([]byte{byte(initialSum >> 24), byte(initialSum >> 16), byte(initialSum >> 8), byte(initialSum)})
+	if _, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "prefix/key", "ChecksumCRC32": initialChecksum}, "initial"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "url/k ey+"}, "encoded"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "url/k!ey+"}, "encoded"); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			switch i % 4 {
+			case 0:
+				_, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "prefix/key"}, fmt.Sprintf("version-%d", i))
+				errs <- err
+			case 1, 3:
+				response, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/", "MaxKeys": 3}, "")
+				versions := []any(nil)
+				if response != nil {
+					versions, _ = response.Output["Versions"].([]any)
+				}
+				if err != nil || len(versions) == 0 || len(versions) > 3 || versions[0].(map[string]any)["IsLatest"] != true || response.Output["IsTruncated"] == true && (response.Output["NextKeyMarker"] != "prefix/key" || response.Output["NextVersionIdMarker"] == nil) {
+					errs <- fmt.Errorf("version page = %#v, err=%v", response, err)
+					return
+				}
+				errs <- nil
+			case 2:
+				_, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "VersionIdMarker": "orphan"}, "")
+				var fault *spi.Fault
+				if !errors.As(err, &fault) || fault.Code != "InvalidArgument" {
+					errs <- fmt.Errorf("orphan marker = %v", err)
+					return
+				}
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	response, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/"}, "")
+	versions := response.Output["Versions"].([]any)
+	checksummed := 0
+	for _, value := range versions {
+		row := value.(map[string]any)
+		if reflect.DeepEqual(row["ChecksumAlgorithm"], []any{"CRC32"}) && row["ChecksumType"] == "FULL_OBJECT" {
+			checksummed++
+		}
+	}
+	if err != nil || len(versions) != 17 || checksummed != 1 {
+		t.Fatalf("final versions = %#v, err=%v", response, err)
+	}
+	first, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/", "MaxKeys": 1}, "")
+	if err != nil || first.Output["NextVersionIdMarker"] == nil {
+		t.Fatalf("deleted marker first page = %#v, err=%v", first, err)
+	}
+	if _, err := call("DeleteObject", map[string]any{"Bucket": "version-list-chaos", "Key": first.Output["NextKeyMarker"], "VersionId": first.Output["NextVersionIdMarker"]}, ""); err != nil {
+		t.Fatal(err)
+	}
+	resumeErrs := make(chan error, 16)
+	var resumeWG sync.WaitGroup
+	for range cap(resumeErrs) {
+		resumeWG.Add(1)
+		go func() {
+			defer resumeWG.Done()
+			page, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/", "KeyMarker": first.Output["NextKeyMarker"], "VersionIdMarker": first.Output["NextVersionIdMarker"]}, "")
+			if err != nil || len(page.Output["Versions"].([]any)) != 16 {
+				resumeErrs <- fmt.Errorf("deleted marker page = %#v, err=%v", page, err)
+				return
+			}
+			resumeErrs <- nil
+		}()
+	}
+	resumeWG.Wait()
+	close(resumeErrs)
+	for err := range resumeErrs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	encoded, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "url/", "MaxKeys": 1, "EncodingType": "url"}, "")
+	if rows := encoded.Output["Versions"].([]any); err != nil || len(rows) != 1 || rows[0].(map[string]any)["Key"] != "url/k%20ey%2B" || encoded.Output["NextVersionIdMarker"] == nil {
+		t.Fatalf("encoded versions = %#v, err=%v", encoded, err)
+	}
+	next, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "url/", "MaxKeys": 1, "EncodingType": "url", "KeyMarker": encoded.Output["NextKeyMarker"], "VersionIdMarker": encoded.Output["NextVersionIdMarker"]}, "")
+	if rows := next.Output["Versions"].([]any); err != nil || len(rows) != 1 || rows[0].(map[string]any)["Key"] != "url/k%21ey%2B" || next.Output["KeyMarker"] != "url/k%20ey%2B" {
+		t.Fatalf("next encoded version page = %#v, err=%v", next, err)
+	}
+}
+
+func TestConcurrentSuspendedWritesKeepOneNullVersion(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "suspended-version-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "suspended-version-chaos", "Status": "Enabled"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := call("PutObject", map[string]any{"Bucket": "suspended-version-chaos", "Key": "key"}, "enabled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "suspended-version-chaos", "Status": "Suspended"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("PutObject", map[string]any{"Bucket": "suspended-version-chaos", "Key": "key"}, fmt.Sprintf("null-%d", i))
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := call("ListObjectVersions", map[string]any{"Bucket": "suspended-version-chaos"}, "")
+	versions := listed.Output["Versions"].([]any)
+	if err != nil || len(versions) != 2 || versions[0].(map[string]any)["VersionId"] != "null" || versions[1].(map[string]any)["VersionId"] != enabled.Headers.Get("x-amz-version-id") {
+		t.Fatalf("suspended versions = %#v, err=%v", listed, err)
+	}
+}
+
+func TestConcurrentListMultipartUploadsRemainsPageable(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "multipart-list-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-chaos", "Key": "prefix/key", "ChecksumAlgorithm": "CRC64NVME"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := created.Output["UploadId"]
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			switch i % 4 {
+			case 0:
+				_, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-chaos", "Key": "prefix/key", "ChecksumAlgorithm": "CRC64NVME"})
+				errs <- err
+			case 1:
+				response, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "Prefix": "prefix/", "MaxUploads": 3})
+				if err != nil {
+					errs <- err
+					return
+				}
+				uploads := response.Output["Uploads"].([]any)
+				if len(uploads) == 0 {
+					errs <- fmt.Errorf("empty multipart page = %#v", response.Output)
+					return
+				}
+				first := uploads[0].(map[string]any)
+				if len(uploads) > 3 || response.Output["NextKeyMarker"] != "prefix/key" || response.Output["NextUploadIdMarker"] != uploads[len(uploads)-1].(map[string]any)["UploadId"] || first["ChecksumAlgorithm"] != "CRC64NVME" || first["ChecksumType"] != "FULL_OBJECT" || first["Initiator"].(map[string]any)["DisplayName"] != "webfile" {
+					errs <- fmt.Errorf("multipart page = %#v", response.Output)
+					return
+				}
+				errs <- nil
+			case 2:
+				_, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "KeyMarker": "prefix/key", "UploadIdMarker": marker, "MaxUploads": 3})
+				errs <- err
+			case 3:
+				_, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "KeyMarker": "wrong", "UploadIdMarker": marker})
+				var fault *spi.Fault
+				if !errors.As(err, &fault) || fault.Code != "InvalidArgument" || fault.Message != "Invalid uploadId marker" {
+					errs <- fmt.Errorf("mismatched marker = %v", err)
+					return
+				}
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	response, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "Prefix": "prefix/"})
+	if uploads := response.Output["Uploads"].([]any); err != nil || len(uploads) != 17 {
+		t.Fatalf("final multipart uploads = %#v, err=%v", response, err)
+	}
+	response, err = call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "Prefix": "prefix/", "MaxUploads": 0})
+	if uploads := response.Output["Uploads"].([]any); err != nil || response.Output["MaxUploads"] != 1000 || len(uploads) != 17 {
+		t.Fatalf("zero max multipart uploads = %#v, err=%v", response, err)
+	}
+}
+
+func TestConcurrentListPartsRemainsPageable(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "parts-list-chaos"}, "")
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "ChecksumAlgorithm": "CRC64NVME"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"]
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				_, err := call("UploadPart", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": i/2 + 1}, "part")
+				errs <- err
+				return
+			}
+			response, err := call("ListParts", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID, "MaxParts": 5}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			parts := response.Output["Parts"].([]any)
+			for index, part := range parts {
+				if index > 0 && part.(map[string]any)["PartNumber"].(int) <= parts[index-1].(map[string]any)["PartNumber"].(int) {
+					errs <- fmt.Errorf("unordered parts: %#v", response.Output)
+					return
+				}
+			}
+			if len(parts) == 0 && response.Output["NextPartNumberMarker"] != 0 || len(parts) > 0 && response.Output["NextPartNumberMarker"] != parts[len(parts)-1].(map[string]any)["PartNumber"] || response.Output["ChecksumAlgorithm"] != "CRC64NVME" || response.Output["ChecksumType"] != "FULL_OBJECT" || response.Output["Initiator"].(map[string]any)["DisplayName"] != "webfile" {
+				errs <- fmt.Errorf("parts marker: %#v", response.Output)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	response, err := call("ListParts", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID}, "")
+	if err != nil || len(response.Output["Parts"].([]any)) != 32 || response.Output["NextPartNumberMarker"] != 32 {
+		t.Fatalf("final parts = %#v, err=%v", response, err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/parts-list-chaos/key?uploadId="+fmt.Sprint(uploadID)+"&max-parts=0", nil)
+	response, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListParts", Input: map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID}, HTTP: request})
+	if err != nil || response.Output["MaxParts"] != 1000 || len(response.Output["Parts"].([]any)) != 32 {
+		t.Fatalf("zero max parts = %#v, err=%v", response, err)
+	}
+}
+
+func TestConcurrentChecksumFreeMultipartUploadsRemainPlain(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-no-checksum-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, body := fmt.Sprintf("object-%d", i), fmt.Sprintf("part-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			partInput := map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}
+			if i%2 == 0 {
+				sum := crc32.ChecksumIEEE([]byte(body))
+				partInput["ChecksumAlgorithm"] = "CRC32"
+				partInput["ChecksumCRC32"] = base64.StdEncoding.EncodeToString([]byte{byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum)})
+			}
+			part, err := call("UploadPart", partInput, body)
+			if err != nil {
+				errs <- err
+				return
+			}
+			listed, err := call("ListParts", map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key, "UploadId": uploadID}, "")
+			if err == nil && (listed.Output["ChecksumAlgorithm"] != nil || listed.Output["ChecksumType"] != nil || listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"] != nil) {
+				err = fmt.Errorf("list %d = %#v", i, listed.Output)
+			}
+			if err != nil {
+				errs <- err
+				return
+			}
+			completed, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key, "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}, "")
+			if err == nil && (completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil) {
+				err = fmt.Errorf("complete %d = %#v", i, completed.Output)
+			}
+			if err != nil {
+				errs <- err
+				return
+			}
+			got, err := call("GetObject", map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key, "ChecksumMode": "ENABLED"}, "")
+			if err == nil {
+				payload, readErr := io.ReadAll(got.Stream)
+				if readErr != nil || string(payload) != body || got.Headers.Get("x-amz-checksum-crc32") != "" || got.Headers.Get("x-amz-checksum-crc64nvme") != "" {
+					err = fmt.Errorf("get %d body=%q headers=%v read=%v", i, payload, got.Headers, readErr)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentCompositeMultipartUploadsRequirePartChecksums(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-composite-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("object-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-composite-chaos", "Key": key, "ChecksumAlgorithm": "CRC32"}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "multipart-composite-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, key)
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, err = call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-composite-chaos", "Key": key, "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}, "")
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest || !strings.Contains(fault.Message, "missing for part 1") {
+				errs <- fmt.Errorf("completion %d: %#v", i, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentCompositeAggregateChecksumsAreIgnored(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-aggregate-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("object-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-aggregate-chaos", "Key": key, "ChecksumAlgorithm": "CRC32"}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "multipart-aggregate-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, key)
+			if err != nil {
+				errs <- err
+				return
+			}
+			completed, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-aggregate-chaos", "Key": key, "UploadId": uploadID, "ChecksumCRC32": "AA==", "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag"), "ChecksumCRC32": part.Headers.Get("x-amz-checksum-crc32")}}}}, "")
+			if err == nil && (completed.Output["ChecksumCRC32"] == "AA==" || completed.Output["ChecksumType"] != "COMPOSITE") {
+				err = fmt.Errorf("completion %d: %#v", i, completed.Output)
+			}
+			if err == nil {
+				attributes, attrErr := call("GetObjectAttributes", map[string]any{"Bucket": "multipart-aggregate-chaos", "Key": key, "ObjectAttributes": []string{"ObjectParts"}, "PartNumberMarker": 10}, "")
+				if attrErr != nil || attributes.Output["ObjectParts"].(map[string]any)["NextPartNumberMarker"] != "0" {
+					err = fmt.Errorf("empty attributes %d: %#v, %v", i, attributes, attrErr)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentAlternateMultipartChecksumsAreRejected(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-alternate-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("object-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-alternate-chaos", "Key": key, "ChecksumAlgorithm": "SHA256"}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "multipart-alternate-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, key)
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, err = call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-alternate-chaos", "Key": key, "UploadId": uploadID, "ChecksumCRC32": "AAAAAA==", "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag"), "ChecksumSHA256": part.Headers.Get("x-amz-checksum-sha256")}}}}, "")
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "BadDigest" || fault.Message != "The sha256 you specified did not match the calculated checksum." || fault.HTTPStatus != http.StatusBadRequest {
+				errs <- fmt.Errorf("completion %d: %#v", i, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentFullObjectChecksumTypesAreRequired(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-full-type-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("object-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-full-type-chaos", "Key": key, "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "multipart-full-type-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, key)
+			if err != nil {
+				errs <- err
+				return
+			}
+			input := map[string]any{"Bucket": "multipart-full-type-chaos", "Key": key, "UploadId": uploadID, "ChecksumCRC32": part.Headers.Get("x-amz-checksum-crc32"), "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}
+			_, err = call("CompleteMultipartUpload", input, "")
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "BadDigest" || fault.Message != "The crc32 you specified did not match the calculated checksum." {
+				errs <- fmt.Errorf("implicit completion %d: %#v", i, err)
+				return
+			}
+			input["ChecksumType"] = "FULL_OBJECT"
+			_, err = call("CompleteMultipartUpload", input, "")
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentMultipartObjectSizesRemainConsistent(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-size-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, body := fmt.Sprintf("object-%d", i), fmt.Sprintf("part-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-size-chaos", "Key": key}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "multipart-size-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, body)
+			if err != nil {
+				errs <- err
+				return
+			}
+			size := "0"
+			if i%2 != 0 {
+				size = strconv.Itoa(len(body) + 1)
+			}
+			_, err = call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-size-chaos", "Key": key, "UploadId": uploadID, "MpuObjectSize": size, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}, "")
+			if i%2 == 0 && err == nil {
+				errs <- nil
+				return
+			}
+			fault, ok := err.(*spi.Fault)
+			if i%2 == 0 || !ok || fault.Code != "InvalidRequest" || fault.Message != fmt.Sprintf("The provided 'x-amz-mp-object-size' header value %d does not match what was computed: %d", len(body)+1, len(body)) {
+				errs <- fmt.Errorf("completion %d: %#v", i, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentMissingMultipartUploadsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) error {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: io.NopCloser(strings.NewReader("part"))})
+		return err
+	}
+	if err := call("CreateBucket", map[string]any{"Bucket": "multipart-fault-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	operations := []string{"UploadPart", "CompleteMultipartUpload", "ListParts", "AbortMultipartUpload"}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			uploadID := fmt.Sprintf("missing-%d", i)
+			operation := operations[i%len(operations)]
+			input := map[string]any{"Bucket": "multipart-fault-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": 1}
+			if operation == "CompleteMultipartUpload" {
+				input["MultipartUpload"] = map[string]any{"Parts": []any{}}
+			}
+			var fault *spi.Fault
+			if err := call(operation, input); !errors.As(err, &fault) || fault.Code != "NoSuchUpload" || fault.Message != "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed." || fault.Fields["UploadId"] != uploadID {
+				errs <- fmt.Errorf("%s fault = %v", operation, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentMultipartPartNumberFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(input map[string]any) error {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UploadPart", Input: input, Body: io.NopCloser(strings.NewReader("part"))})
+		return err
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "part-number-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateMultipartUpload", Input: map[string]any{"Bucket": "part-number-chaos", "Key": "key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	numbers := []int{-1, 0, 10001}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			number := numbers[i%len(numbers)]
+			id := uploadID
+			missing := i%2 == 0
+			if missing {
+				id = fmt.Sprintf("missing-%d", i)
+			}
+			var fault *spi.Fault
+			if err := call(map[string]any{"Bucket": "part-number-chaos", "Key": "key", "UploadId": id, "PartNumber": number}); !errors.As(err, &fault) {
+				errs <- fmt.Errorf("part number %d fault = %v", number, err)
+			} else if missing && (fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != id) {
+				errs <- fmt.Errorf("missing upload fault = %#v", fault)
+			} else if !missing && (fault.Code != "InvalidArgument" || fault.Message != "Part number must be an integer between 1 and 10000, inclusive" || fault.Fields["ArgumentName"] != "partNumber" || fault.Fields["ArgumentValue"] != number) {
+				errs <- fmt.Errorf("part number %d fault = %#v", number, fault)
+			} else {
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentMultipartCompletionFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "completion-fault-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateMultipartUpload", Input: map[string]any{"Bucket": "completion-fault-chaos", "Key": "key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			parts := []any{}
+			if i%2 != 0 {
+				parts = []any{map[string]any{"PartNumber": i + 1, "ETag": fmt.Sprintf("missing-%d", i)}}
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CompleteMultipartUpload", Input: map[string]any{"Bucket": "completion-fault-chaos", "Key": "key", "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": parts}}})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) {
+				errs <- fmt.Errorf("completion fault = %v", err)
+			} else if i%2 == 0 && (fault.Code != "InvalidRequest" || fault.Message != "You must specify at least one part") {
+				errs <- fmt.Errorf("empty completion fault = %#v", fault)
+			} else if i%2 != 0 && (fault.Code != "InvalidPart" || fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != fmt.Sprintf("missing-%d", i) || fault.Fields["PartNumber"] != strconv.Itoa(i+1) || fault.Fields["UploadId"] != uploadID) {
+				errs <- fmt.Errorf("missing part fault = %#v", fault)
+			} else {
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentCompleteMultipartChecksumTypeFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "complete-checksum-type-chaos"}, "")
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-checksum-type-chaos", "Key": "key", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	part, err := call("UploadPart", map[string]any{"Bucket": "complete-checksum-type-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, "part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "complete-checksum-type-chaos", "Key": "key", "UploadId": uploadID, "ChecksumType": "COMPOSITE", "MultipartUpload": manifest}, "")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "InvalidRequest" || fault.Message != "The upload was created using the FULL_OBJECT checksum mode. The complete request must use the same checksum mode." {
+				errs <- fmt.Errorf("checksum type fault = %#v", fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	listed, err := call("ListParts", map[string]any{"Bucket": "complete-checksum-type-chaos", "Key": "key", "UploadId": uploadID}, "")
+	if err != nil || len(listed.Output["Parts"].([]any)) != 1 {
+		t.Fatalf("rejected completions changed upload = %#v, err=%v", listed, err)
+	}
+}
+
+func TestConcurrentCompleteMultipartPreconditionFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "complete-precondition-chaos"}, "")
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-precondition-chaos", "Key": "key"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	part, err := call("UploadPart", map[string]any{"Bucket": "complete-precondition-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, "part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "complete-precondition-chaos", "Key": "key", "UploadId": uploadID, "MultipartUpload": manifest}
+			header, detail := "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"
+			switch i % 3 {
+			case 0:
+				input["IfMatch"], input["IfNoneMatch"] = `"etag"`, "*"
+				header, detail = "If-Match,If-None-Match", "Multiple conditional request headers present in the request"
+			case 1:
+				input["IfNoneMatch"] = `"etag"`
+			case 2:
+				input["IfMatch"] = "*"
+				header, detail = "If-Match", "We don't accept the provided value of If-Match header for this API"
+			}
+			_, err := call("CompleteMultipartUpload", input, "")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != header || fault.Fields["additionalMessage"] != detail {
+				errs <- fmt.Errorf("precondition fault = %#v", fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	listed, err := call("ListParts", map[string]any{"Bucket": "complete-precondition-chaos", "Key": "key", "UploadId": uploadID}, "")
+	if err != nil || len(listed.Output["Parts"].([]any)) != 1 {
+		t.Fatalf("rejected completions changed upload = %#v, err=%v", listed, err)
+	}
+}
+
+func TestConcurrentWritePreconditionFaultsNeverMutateObject(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "write-precondition-chaos"}, "")
+	_, _ = call("PutObject", map[string]any{"Bucket": "write-precondition-chaos", "Key": "source"}, "source")
+	_, _ = call("PutObject", map[string]any{"Bucket": "write-precondition-chaos", "Key": "destination"}, "old")
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "PutObject"
+			input := map[string]any{"Bucket": "write-precondition-chaos", "Key": "destination"}
+			if i%2 != 0 {
+				operation = "CopyObject"
+				input["CopySource"] = "write-precondition-chaos/source"
+			}
+			header, detail := "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"
+			switch i % 3 {
+			case 0:
+				input["IfMatch"], input["IfNoneMatch"] = `"etag"`, "*"
+				header, detail = "If-Match,If-None-Match", "Multiple conditional request headers present in the request"
+			case 1:
+				input["IfNoneMatch"] = `"etag"`
+			case 2:
+				input["IfMatch"] = "*"
+				header, detail = "If-Match", "We don't accept the provided value of If-Match header for this API"
+			}
+			_, err := call(operation, input, "new")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != header || fault.Fields["additionalMessage"] != detail {
+				errs <- fmt.Errorf("%s precondition fault = %#v", operation, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	got, err := call("GetObject", map[string]any{"Bucket": "write-precondition-chaos", "Key": "destination"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Stream)
+	if string(body) != "old" {
+		t.Fatalf("rejected writes stored %q", body)
+	}
+}
+
+func TestConcurrentWriteConditionFaultDetailsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "write-condition-detail-chaos"}, "")
+	_, _ = call("PutObject", map[string]any{"Bucket": "write-condition-detail-chaos", "Key": "source"}, "source")
+	for _, key := range []string{"wrong", "none"} {
+		_, _ = call("PutObject", map[string]any{"Bucket": "write-condition-detail-chaos", "Key": key}, "old")
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "PutObject"
+			if i%2 != 0 {
+				operation = "CopyObject"
+			}
+			input := map[string]any{"Bucket": "write-condition-detail-chaos"}
+			code, message, field, detail, status := "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-Match", http.StatusPreconditionFailed
+			switch i % 3 {
+			case 0:
+				input["Key"], input["IfMatch"] = "missing", `"missing"`
+				code, message, field, detail, status = "NoSuchKey", "The specified key does not exist.", "Key", "missing", http.StatusNotFound
+			case 1:
+				input["Key"], input["IfMatch"] = "wrong", `"wrong"`
+			case 2:
+				input["Key"], input["IfNoneMatch"] = "none", "*"
+				detail = "If-None-Match"
+			}
+			if operation == "CopyObject" {
+				input["CopySource"] = "write-condition-detail-chaos/source"
+			}
+			_, err := call(operation, input, "new")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fields[field] != detail {
+				errs <- fmt.Errorf("%s case %d fault = %#v", operation, i%3, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for _, key := range []string{"wrong", "none"} {
+		got, err := call("GetObject", map[string]any{"Bucket": "write-condition-detail-chaos", "Key": key}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(got.Stream)
+		if string(body) != "old" {
+			t.Fatalf("%s changed to %q", key, body)
+		}
+	}
+}
+
+func TestConcurrentWriteIfMatchListsNeverMutateObjects(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "write-if-match-chaos"}, "")
+	_, _ = call("PutObject", map[string]any{"Bucket": "write-if-match-chaos", "Key": "source"}, "source")
+	etags := map[string]string{}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		seed, err := call("PutObject", map[string]any{"Bucket": "write-if-match-chaos", "Key": operation}, "old")
+		if err != nil {
+			t.Fatal(err)
+		}
+		etags[operation] = seed.Headers.Get("ETag")
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "PutObject"
+			if i%2 != 0 {
+				operation = "CopyObject"
+			}
+			input := map[string]any{"Bucket": "write-if-match-chaos", "Key": operation, "IfMatch": fmt.Sprintf(`"wrong-%d", %s`, i, etags[operation])}
+			if operation == "CopyObject" {
+				input["CopySource"] = "write-if-match-chaos/source"
+			}
+			_, err := call(operation, input, "new")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match" {
+				errs <- fmt.Errorf("%s list fault = %#v", operation, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		got, err := call("GetObject", map[string]any{"Bucket": "write-if-match-chaos", "Key": operation}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(got.Stream)
+		if string(body) != "old" {
+			t.Fatalf("%s changed to %q", operation, body)
+		}
+	}
+}
+
+func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "complete-conditional-chaos"}, "")
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, mode := fmt.Sprintf("key-%d", i), i%6
+			put := func(body string) (string, error) {
+				response, err := call("PutObject", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, body)
+				if err != nil {
+					return "", err
+				}
+				return response.Headers.Get("ETag"), nil
+			}
+			seedETag := ""
+			var err error
+			if mode == 1 || mode == 3 || mode == 4 || mode == 5 {
+				if seedETag, err = put("old"); err != nil {
+					errs <- err
+					return
+				}
+			}
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, "part")
+			if err != nil {
+				errs <- err
+				return
+			}
+			input := map[string]any{"Bucket": "complete-conditional-chaos", "Key": key, "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}
+			code, message, status, condition, conflictKey := "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, "If-Match", ""
+			switch mode {
+			case 0:
+				input["IfMatch"] = `"missing"`
+				code, message, status, condition, conflictKey = "NoSuchKey", "The specified key does not exist.", http.StatusNotFound, "", key
+			case 1:
+				input["IfMatch"] = `"wrong"`
+			case 2:
+				_, err = put("created")
+				input["IfNoneMatch"], condition = "*", "If-None-Match"
+			case 3:
+				_, err = call("DeleteObject", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, "")
+				input["IfNoneMatch"] = "*"
+				code, message, status, condition, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, "If-None-Match", key
+			case 4:
+				_ = deps.Clock.Advance(2 * time.Second)
+				input["IfMatch"], err = put("changed")
+				code, message, status, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, key
+			case 5:
+				input["IfMatch"] = `"wrong", ` + seedETag
+				input["MultipartUpload"] = map[string]any{}
+			}
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, err = call("CompleteMultipartUpload", input, "")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fault != "client" || condition != "" && fault.Fields["Condition"] != condition || conflictKey != "" && fault.Fields["Key"] != conflictKey {
+				errs <- fmt.Errorf("mode %d fault = %#v", mode, fault)
+				return
+			}
+			listed, err := call("ListParts", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key, "UploadId": uploadID}, "")
+			if err != nil || len(listed.Output["Parts"].([]any)) != 1 {
+				errs <- fmt.Errorf("mode %d rejected completion changed upload = %#v, err=%v", mode, listed, err)
+				return
+			}
+			if mode == 5 {
+				got, err := call("GetObject", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, "")
+				if err != nil {
+					errs <- err
+					return
+				}
+				body, _ := io.ReadAll(got.Stream)
+				if string(body) != "old" {
+					errs <- fmt.Errorf("If-Match list changed object to %q", body)
+					return
+				}
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentUploadPartContentMD5FaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "upload-part-md5-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateMultipartUpload", Input: map[string]any{"Bucket": "upload-part-md5-chaos", "Key": "key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := []byte(fmt.Sprintf("part-%d", i))
+			digest := "!"
+			if i%2 != 0 {
+				digest = "AAAAAAAAAAAAAAAAAAAAAA=="
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UploadPart", Input: map[string]any{"Bucket": "upload-part-md5-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": i + 1, "ContentMD5": digest}, Body: io.NopCloser(bytes.NewReader(body))})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) {
+				errs <- fmt.Errorf("digest fault = %v", err)
+			} else if i%2 == 0 && (fault.Code != "InvalidDigest" || fault.Message != "The Content-MD5 you specified was invalid." || fault.Fields["Content_MD5"] != digest) {
+				errs <- fmt.Errorf("malformed digest fault = %#v", fault)
+			} else if i%2 != 0 {
+				sum := md5.Sum(body)
+				calculated := base64.StdEncoding.EncodeToString(sum[:])
+				if fault.Code != "BadDigest" || fault.Message != "The Content-MD5 you specified did not match what we received." || fault.Fields["ExpectedDigest"] != digest || fault.Fields["CalculatedDigest"] != calculated {
+					errs <- fmt.Errorf("mismatched digest fault = %#v", fault)
+				} else {
+					errs <- nil
+				}
+			} else {
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListParts", Input: map[string]any{"Bucket": "upload-part-md5-chaos", "Key": "key", "UploadId": uploadID}})
+	if err != nil || len(listed.Output["Parts"].([]any)) != 0 {
+		t.Fatalf("rejected digests stored parts = %#v, err=%v", listed, err)
+	}
+}
+
+func TestConcurrentUploadPartChecksumFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "upload-part-checksum-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateMultipartUpload", Input: map[string]any{"Bucket": "upload-part-checksum-chaos", "Key": "key", "ChecksumAlgorithm": "CRC32"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "upload-part-checksum-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": i + 1}
+			wantCode, wantMessage := "InvalidRequest", "Value for x-amz-checksum-crc32 header is invalid."
+			switch i % 3 {
+			case 0:
+				input["ChecksumCRC32"] = "!"
+			case 1:
+				input["ChecksumCRC32"] = base64.StdEncoding.EncodeToString(make([]byte, crc32.Size))
+				wantCode, wantMessage = "BadDigest", "The CRC32 you specified did not match the calculated checksum."
+			case 2:
+				input["ChecksumSHA256"] = base64.StdEncoding.EncodeToString(make([]byte, 32))
+				wantMessage = "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256"
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UploadPart", Input: input, Body: io.NopCloser(strings.NewReader(fmt.Sprintf("part-%d", i)))})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != wantCode || fault.Message != wantMessage {
+				errs <- fmt.Errorf("checksum fault %d = %#v", i, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListParts", Input: map[string]any{"Bucket": "upload-part-checksum-chaos", "Key": "key", "UploadId": uploadID}})
+	if err != nil || len(listed.Output["Parts"].([]any)) != 0 {
+		t.Fatalf("rejected checksums stored parts = %#v, err=%v", listed, err)
+	}
+}
+
+func TestConcurrentUploadPartSSECustomerKeyFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: io.NopCloser(strings.NewReader("part"))})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "upload-part-sse-c-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	key := bytes.Repeat([]byte{'a'}, 32)
+	digest := md5.Sum(key)
+	encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(key), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+	create := map[string]any{"Bucket": "upload-part-sse-c-chaos", "Key": "encrypted"}
+	for name, value := range encryption {
+		create[name] = value
+	}
+	encrypted, err := call("CreateMultipartUpload", create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := call("CreateMultipartUpload", map[string]any{"Bucket": "upload-part-sse-c-chaos", "Key": "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherKey := bytes.Repeat([]byte{'b'}, 32)
+	otherDigest := md5.Sum(otherKey)
+	wrongEncryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(otherKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(otherDigest[:])}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, uploadID := "encrypted", encrypted.Output["UploadId"]
+			input := map[string]any{"Bucket": "upload-part-sse-c-chaos", "Key": key, "UploadId": uploadID, "PartNumber": i + 1}
+			want := "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."
+			if i%3 == 1 {
+				input["Key"], input["UploadId"] = "plain", plain.Output["UploadId"]
+				for name, value := range encryption {
+					input[name] = value
+				}
+			} else if i%3 == 2 {
+				for name, value := range wrongEncryption {
+					input[name] = value
+				}
+				want = "The provided encryption parameters did not match the ones used originally."
+			}
+			_, err := call("UploadPart", input)
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "InvalidRequest" || fault.Message != want {
+				errs <- fmt.Errorf("SSE-C fault %d = %#v", i, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for key, uploadID := range map[string]any{"encrypted": encrypted.Output["UploadId"], "plain": plain.Output["UploadId"]} {
+		listed, err := call("ListParts", map[string]any{"Bucket": "upload-part-sse-c-chaos", "Key": key, "UploadId": uploadID})
+		if err != nil || len(listed.Output["Parts"].([]any)) != 0 {
+			t.Fatalf("rejected SSE-C requests stored parts = %#v, err=%v", listed, err)
+		}
+	}
+}
+
+func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "read-failures"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("object-%d", i)
+			var body io.ReadCloser = io.NopCloser(strings.NewReader("complete"))
+			if i%2 != 0 {
+				body = failAfterReader{Reader: strings.NewReader("partial")}
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "read-failures", "Key": key}, Body: body})
+			if i%2 == 0 && err != nil || i%2 != 0 && err == nil {
+				errs <- fmt.Errorf("put %d: %v", i, err)
+				return
+			}
+			get, getErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "read-failures", "Key": key}})
+			if i%2 != 0 {
+				if getErr == nil {
+					errs <- fmt.Errorf("failed put %d left object", i)
+				}
+				return
+			}
+			if getErr != nil {
+				errs <- fmt.Errorf("get %d: %v", i, getErr)
+				return
+			}
+			data, _ := io.ReadAll(get.Stream)
+			_ = get.Stream.Close()
+			if string(data) != "complete" {
+				errs <- fmt.Errorf("get %d body %q", i, data)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 
@@ -120,6 +3718,212 @@ func TestConcurrentS3ResponseIDsRemainDistinct(t *testing.T) {
 	}
 	if len(seen) != 64 {
 		t.Fatalf("unique request IDs = %d, want 64", len(seen))
+	}
+}
+
+func TestConcurrentSigV4AUnsignedTrailersDoNotCrossContaminate(t *testing.T) {
+	deps := spitest.Deps(t)
+	if err := deps.Clock.Advance(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Sub(deps.Clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	cfg.S3ValidatePresignedSignatures = true
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/v4a-unsigned", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			extension := ""
+			want := http.StatusOK
+			if i%2 != 0 {
+				extension = ";chunk-signature=unexpected"
+				want = http.StatusForbidden
+			}
+			raw := "5" + extension + "\r\nhello\r\n0\r\nx-amz-checksum-crc32c:mnG7TA==\r\n\r\n"
+			request := httptest.NewRequest(http.MethodPut, "/v4a-unsigned/object", strings.NewReader(raw))
+			request.Host = "s3.localhost.localstack.cloud:4566"
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+			request.Header.Set("X-Amz-Date", "20990101T000000Z")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			request.Header.Set("X-Amz-Region-Set", "us-east-1")
+			request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+			request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set;x-amz-trailer,Signature=304402201f09d982734f868ab87f6e305473f7ef74a6882095dbf5d0f0b97bede169993402204a4c59017095e2ffaf861e04fc6c73b5d1c9b0d8c041b7fd2acb05d0a4c356f3")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != want {
+				errs <- fmt.Errorf("request %d status %d, want %d", i, recorder.Code, want)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentMalformedAWSChunksDoNotCrossContaminate(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-errors", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			raw := "5\r\nhello\r\n0\r\n\r\n"
+			want := http.StatusOK
+			if i%2 != 0 {
+				raw = "5\r\nhello\r\n"
+				want = http.StatusForbidden
+			}
+			request := httptest.NewRequest(http.MethodPut, "/chunk-errors/object", strings.NewReader(raw))
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != want {
+				errs <- fmt.Errorf("request %d status %d, want %d", i, recorder.Code, want)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentAWSChunkedContentEncodingsDoNotCrossContaminate(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-encodings", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			encoding, want := "aws-chunked", ""
+			if i%2 != 0 {
+				encoding, want = "gzip, aws-chunked", "gzip"
+			}
+			path := fmt.Sprintf("/chunk-encodings/object-%d", i)
+			request := httptest.NewRequest(http.MethodPut, path, strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+			request.Header.Set("Content-Encoding", encoding)
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			put := httptest.NewRecorder()
+			handler.ServeHTTP(put, request)
+			if put.Code != http.StatusOK {
+				errs <- fmt.Errorf("put %d: %d %s", i, put.Code, put.Body.String())
+				return
+			}
+			get := httptest.NewRecorder()
+			handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, path, nil))
+			if get.Code != http.StatusOK || get.Body.String() != "hello" || get.Header().Get("Content-Encoding") != want {
+				errs <- fmt.Errorf("get %d: %d encoding=%q body=%q", i, get.Code, get.Header().Get("Content-Encoding"), get.Body.String())
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentCancelledChunkedPartsDoNotCrossContaminate(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-parts", nil))
+	started := httptest.NewRecorder()
+	handler.ServeHTTP(started, httptest.NewRequest(http.MethodPost, "/chunk-parts/object?uploads", nil))
+	var upload struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if created.Code != http.StatusOK || started.Code != http.StatusOK || xml.Unmarshal(started.Body.Bytes(), &upload) != nil || upload.UploadID == "" {
+		t.Fatalf("setup: bucket=%d upload=%d %s", created.Code, started.Code, started.Body.String())
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			raw, want := "a;chunk-signature=first\r\nHello Blob\r\n0;chunk-signature=last\r\n", http.StatusOK
+			if i%2 != 0 {
+				raw, want = "\r\nHello Blob\r\n0;chunk-signature=invalid\r\n", http.StatusInternalServerError
+			}
+			path := fmt.Sprintf("/chunk-parts/object?partNumber=%d&uploadId=%s", i+1, upload.UploadID)
+			request := httptest.NewRequest(http.MethodPut, path, strings.NewReader(raw))
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "10")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != want {
+				errs <- fmt.Errorf("part %d: %d, want %d", i+1, recorder.Code, want)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	listed := httptest.NewRecorder()
+	handler.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/chunk-parts/object?uploadId="+upload.UploadID, nil))
+	var parts struct {
+		Parts []struct{} `xml:"Part"`
+	}
+	if listed.Code != http.StatusOK || xml.Unmarshal(listed.Body.Bytes(), &parts) != nil || len(parts.Parts) != 32 {
+		t.Fatalf("parts: %d count=%d body=%s", listed.Code, len(parts.Parts), listed.Body.String())
 	}
 }
 
@@ -212,7 +4016,7 @@ func TestRejectedReplicationConfigurationPreservesCurrent(t *testing.T) {
 	}
 }
 
-func TestConcurrentPutsSameKey(t *testing.T) {
+func TestConcurrentPutsAndGetsSameKey(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
 	ctx := context.Background()
@@ -221,20 +4025,46 @@ func TestConcurrentPutsSameKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}, Body: io.NopCloser(bytes.NewReader(bytes.Repeat([]byte{0}, 16)))}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
 	var wg sync.WaitGroup
 	for i := 0; i < 32; i++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			body := bytes.Repeat([]byte{byte(n)}, 16)
-			_, _ = p.Invoke(ctx, &spi.Request{
-				Identity: id, Operation: "PutObject",
-				Input: map[string]any{"Bucket": "bucket", "Key": "k"},
-				Body:  io.NopCloser(bytes.NewReader(body)),
-			})
+			input := map[string]any{"Bucket": "bucket", "Key": "k"}
+			if n%2 == 0 {
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: input, Body: io.NopCloser(bytes.NewReader(bytes.Repeat([]byte{byte(n)}, 16)))})
+				errs <- err
+				return
+			}
+			want := 16
+			if n%4 == 3 {
+				input["Range"] = "bytes=4-7"
+				want = 4
+			}
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: input})
+			if err != nil {
+				errs <- err
+				return
+			}
+			body, err := io.ReadAll(response.Stream)
+			_ = response.Stream.Close()
+			if err == nil && (len(body) != want || !bytes.Equal(body, bytes.Repeat(body[:1], want))) {
+				err = fmt.Errorf("read %d body = %x", n, body)
+			}
+			errs <- err
 		}(i)
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}})
 	if err != nil {
 		t.Fatal(err)
@@ -243,6 +4073,104 @@ func TestConcurrentPutsSameKey(t *testing.T) {
 		t.Fatal("missing body after concurrent puts")
 	}
 	_ = got.Stream.Close()
+}
+
+func TestConcurrentSpecialKeyCopies(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: io.NopCloser(strings.NewReader(body))})
+	}
+	for _, bucket := range []string{"special-key-chaos", "special-key-copy-chaos"} {
+		if _, err := call("CreateBucket", map[string]any{"Bucket": bucket}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, body := fmt.Sprintf("key %d+%%2F/😀", i), fmt.Sprintf("body-%d", i)
+			if _, err := call("PutObject", map[string]any{"Bucket": "special-key-chaos", "Key": key}, body); err != nil {
+				errs <- err
+				return
+			}
+			destination := fmt.Sprintf("copy-%d", i)
+			if _, err := call("CopyObject", map[string]any{"Bucket": "special-key-copy-chaos", "Key": destination, "CopySource": url.QueryEscape("special-key-chaos/" + key)}, ""); err != nil {
+				errs <- err
+				return
+			}
+			response, err := call("GetObject", map[string]any{"Bucket": "special-key-copy-chaos", "Key": destination}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			got, _ := io.ReadAll(response.Stream)
+			if string(got) != body {
+				errs <- fmt.Errorf("copy %d body = %q", i, got)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentUnicodeMultipartLocations(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: io.NopCloser(strings.NewReader(body))})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "multipart-location-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "multipart-location-chaos", "Key": fmt.Sprintf("test-unicode_—_file-%d", i)}
+			upload, err := call("CreateMultipartUpload", input, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			partInput := maps.Clone(input)
+			partInput["UploadId"], partInput["PartNumber"] = upload.Output["UploadId"], 1
+			part, err := call("UploadPart", partInput, "body")
+			if err != nil {
+				errs <- err
+				return
+			}
+			complete := maps.Clone(input)
+			complete["UploadId"], complete["MultipartUpload"] = upload.Output["UploadId"], map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}
+			response, err := call("CompleteMultipartUpload", complete, "")
+			if err != nil || !strings.Contains(response.Output["Location"].(string), "test-unicode_%E2%80%94_file-") {
+				errs <- fmt.Errorf("complete %d: %#v %v", i, response, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
 }
 
 func TestConcurrentArchiveRestoresConverge(t *testing.T) {
@@ -337,6 +4265,75 @@ func TestConcurrentInvalidWritesLeaveNoObject(t *testing.T) {
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "classes", "Key": "object", "StorageClass": "STANDARD_IA"}, Body: io.NopCloser(bytes.NewReader([]byte("good")))}); err != nil {
 		t.Fatalf("valid write after invalid load: %v", err)
+	}
+}
+
+func TestConcurrentStandardStorageAttributesRemainVisible(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "standard-attributes-chaos"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "standard-attributes-chaos", "Key": "key"}, []byte("body")); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("GetObjectAttributes", map[string]any{"Bucket": "standard-attributes-chaos", "Key": "key", "ObjectAttributes": []string{"StorageClass"}}, nil)
+			if err == nil && response.Output["StorageClass"] != "STANDARD" {
+				err = fmt.Errorf("storage class = %#v", response.Output)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentMissingBucketFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	operations := []string{"GetObject", "DeleteBucket", "GetBucketNotificationConfiguration"}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			bucket := fmt.Sprintf("missing-%d", i)
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operations[i%len(operations)], Input: map[string]any{"Bucket": bucket, "Key": "foobar"}})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "NoSuchBucket" || fault.Message != "The specified bucket does not exist" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != bucket {
+				errs <- fmt.Errorf("missing bucket %d: %#v", i, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
 	}
 }
 
@@ -496,6 +4493,129 @@ func TestConcurrentNonEmptyBucketDeletesAreRejected(t *testing.T) {
 	}
 }
 
+func TestConcurrentDeletePreconditionsNeverMutateObject(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "delete-precondition-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "delete-precondition-chaos", "Key": "key"}, "body"); err != nil {
+		t.Fatal(err)
+	}
+	headers := []struct{ name, value string }{{"If-Match", `"wrong"`}, {"x-amz-if-match-size", "4"}, {"x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT"}}
+	errs := make(chan error, 48)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			header := headers[i%len(headers)]
+			request := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/delete-precondition-chaos/key", nil)
+			request.Header.Set(header.name, header.value)
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteObject", Input: map[string]any{"Bucket": "delete-precondition-chaos", "Key": "key"}, HTTP: request})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || header.name == "If-Match" && (fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match") || header.name != "If-Match" && (fault.Code != "NotImplemented" || fault.Fields["Header"] != header.name) {
+				errs <- fmt.Errorf("%s fault = %v", header.name, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := call("HeadObject", map[string]any{"Bucket": "delete-precondition-chaos", "Key": "key"}, ""); err != nil {
+		t.Fatalf("object changed: %v", err)
+	}
+}
+
+func TestConcurrentMissingKeyVersionDeletesAreIdempotent(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "missing-version-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "missing-version-chaos", "Status": "Suspended"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			version := "null"
+			if i%2 == 0 {
+				version = fmt.Sprintf("missing-%d", i)
+			}
+			response, err := call("DeleteObject", map[string]any{"Bucket": "missing-version-chaos", "Key": "missing", "VersionId": version})
+			if err != nil || response.Status != http.StatusNoContent || len(response.Headers) != 0 {
+				errs <- fmt.Errorf("version %q: %#v, %v", version, response, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentUnversionedMissingKeyDeletesValidateVersions(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "unversioned-delete-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			version := fmt.Sprintf("missing-%d", i)
+			response, err := call("DeleteObject", map[string]any{"Bucket": "unversioned-delete-chaos", "Key": "missing", "VersionId": version})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || response != nil || fault.Code != "InvalidArgument" || fault.Fields["ArgumentValue"] != version {
+				errs <- fmt.Errorf("version %q: %#v, %v", version, response, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentBucketCreationHasOneOwner(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
@@ -583,7 +4703,13 @@ func TestConcurrentCrossRegionBucketsPaginateWithoutAccountLeaks(t *testing.T) {
 			if region != "us-east-1" {
 				input["LocationConstraint"] = region
 			}
-			_, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: region}, Operation: "CreateBucket", Input: input})
+			created, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: region}, Operation: "CreateBucket", Input: input})
+			if err == nil && created.Output["BucketArn"] != "arn:aws:s3:::"+input["Bucket"].(string) {
+				err = fmt.Errorf("create ARN: %#v", created.Output)
+			}
+			if err == nil && region == "us-east-1" {
+				_, err = p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: region}, Operation: "CreateBucket", Input: input})
+			}
 			errs <- err
 		}(i)
 	}
@@ -610,7 +4736,7 @@ func TestConcurrentCrossRegionBucketsPaginateWithoutAccountLeaks(t *testing.T) {
 		for _, item := range page.Output["Buckets"].([]any) {
 			bucket := item.(map[string]any)
 			name, region := bucket["Name"].(string), bucket["BucketRegion"].(string)
-			if !strings.HasPrefix(name, "list-a-") || (region != "us-east-1" && region != "us-west-2") || seen[name] {
+			if !strings.HasPrefix(name, "list-a-") || bucket["BucketArn"] != "arn:aws:s3:::"+name || (region != "us-east-1" && region != "us-west-2") || seen[name] {
 				t.Fatalf("leaked or duplicate bucket: %#v", bucket)
 			}
 			seen[name] = true
@@ -734,6 +4860,78 @@ func TestConcurrentCreateBucketTagsRemainAtomic(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(response.Output["TagSet"], valid) {
 		t.Fatalf("persisted create tags = %#v %v", response, err)
 	}
+	clearErrors := make(chan error, 32)
+	for range cap(clearErrors) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketTagging", Input: map[string]any{"Bucket": "atomic-create-tags", "TagSet": []any{}}})
+			clearErrors <- err
+		}()
+	}
+	wg.Wait()
+	close(clearErrors)
+	for err := range clearErrors {
+		if err != nil {
+			t.Fatalf("concurrent tag clear: %v", err)
+		}
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketTagging", Input: map[string]any{"Bucket": "atomic-create-tags"}})
+	var fault *spi.Fault
+	if !errors.As(err, &fault) || fault.Code != "NoSuchTagSet" {
+		t.Fatalf("tags after concurrent clear = %v", err)
+	}
+}
+
+func TestConcurrentDeleteMarkerTaggingRejected(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "tag-marker-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "tag-marker-chaos", "Status": "Enabled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "tag-marker-chaos", "Key": "object"}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := call("DeleteObject", map[string]any{"Bucket": "tag-marker-chaos", "Key": "object"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := deleted.Headers.Get("x-amz-version-id")
+	errs := make(chan error, 48)
+	var wg sync.WaitGroup
+	operations := []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"}
+	for n := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := operations[n%len(operations)]
+			input := map[string]any{"Bucket": "tag-marker-chaos", "Key": "object", "TagSet": []any{}}
+			if n%2 != 0 {
+				input["VersionId"] = marker
+			}
+			_, err := call(operation, input)
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "MethodNotAllowed" || fault.Fields["Method"] != strings.ToUpper(strings.TrimSuffix(operation, "ObjectTagging")) {
+				errs <- fmt.Errorf("%s: %w", operation, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestConcurrentCreateBucketOwnershipRemainsAtomic(t *testing.T) {
@@ -774,6 +4972,9 @@ func TestConcurrentCreateBucketOwnershipRemainsAtomic(t *testing.T) {
 		valid := result.ownership != "invalid"
 		if !errors.As(result.err, &fault) || valid && fault.Code != "BucketAlreadyOwnedByYou" || !valid && fault.Code != "InvalidArgument" && fault.Code != "BucketAlreadyOwnedByYou" {
 			t.Fatalf("concurrent create ownership=%s: %v", result.ownership, result.err)
+		}
+		if !valid && fault.Code == "InvalidArgument" && (fault.Message != "Invalid x-amz-object-ownership header: invalid" || len(fault.Fields) != 1 || fault.Fields["ArgumentName"] != "x-amz-object-ownership") {
+			t.Fatalf("concurrent invalid ownership fault = %#v", fault)
 		}
 	}
 	if successes != 1 {
@@ -847,6 +5048,15 @@ func TestConcurrentPublicAccessBlockRemainsValid(t *testing.T) {
 	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "public-access-block-chaos"}}); err != nil {
 		t.Fatal(err)
+	}
+	defaults, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetPublicAccessBlock", Input: map[string]any{"Bucket": "public-access-block-chaos"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for field, value := range defaults.Output["PublicAccessBlockConfiguration"].(map[string]any) {
+		if value != true {
+			t.Fatalf("default public access block %s = %#v", field, value)
+		}
 	}
 	errs := make(chan error, 32)
 	var wg sync.WaitGroup
@@ -1030,6 +5240,7 @@ func TestConcurrentBucketCorsRemainsValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	errs := make(chan error, 32)
+	preflightErrs := make(chan error, 32)
 	var wg sync.WaitGroup
 	for i := 0; i < cap(errs); i++ {
 		wg.Add(1)
@@ -1043,9 +5254,27 @@ func TestConcurrentBucketCorsRemainsValid(t *testing.T) {
 			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketCors", Input: map[string]any{"Bucket": "cors-chaos", "CORSConfiguration": map[string]any{"CORSRules": rules}}})
 			errs <- err
 		}(i)
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			request := httptest.NewRequest(http.MethodOptions, "https://cors-chaos.s3.us-east-1.amazonaws.com/key", nil)
+			request.Header.Set("Origin", "https://app.localstack.cloud")
+			request.Header.Set("Access-Control-Request-Method", []string{"GET", "HEAD"}[n%2])
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{}, HTTP: request})
+			if fault, ok := err.(*spi.Fault); ok && fault.Code == "AccessForbidden" {
+				preflightErrs <- nil
+				return
+			}
+			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "*" && response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
+				preflightErrs <- fmt.Errorf("concurrent preflight = %#v, %w", response, err)
+				return
+			}
+			preflightErrs <- nil
+		}(i)
 	}
 	wg.Wait()
 	close(errs)
+	close(preflightErrs)
 	successes := 0
 	for err := range errs {
 		if err == nil {
@@ -1060,6 +5289,11 @@ func TestConcurrentBucketCorsRemainsValid(t *testing.T) {
 	if successes != 16 {
 		t.Fatalf("successful CORS puts = %d, want 16", successes)
 	}
+	for err := range preflightErrs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketCors", Input: map[string]any{"Bucket": "cors-chaos"}})
 	rules, _ := response.Output["CORSRules"].([]any)
 	var methods []any
@@ -1068,6 +5302,41 @@ func TestConcurrentBucketCorsRemainsValid(t *testing.T) {
 	}
 	if err != nil || len(rules) != 1 || len(methods) != 1 || methods[0] != "GET" && methods[0] != "HEAD" {
 		t.Fatalf("persisted concurrent CORS = %#v, err=%v", response, err)
+	}
+	transitionErrs := make(chan error, 32)
+	for i := 0; i < cap(transitionErrs); i++ {
+		wg.Add(1)
+		go func(deleteConfiguration bool) {
+			defer wg.Done()
+			if deleteConfiguration {
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteBucketCors", Input: map[string]any{"Bucket": "cors-chaos"}})
+				transitionErrs <- err
+				return
+			}
+			request := httptest.NewRequest(http.MethodOptions, "https://cors-chaos.s3.us-east-1.amazonaws.com/key", nil)
+			request.Header.Set("Origin", "https://app.localstack.cloud")
+			request.Header.Set("Access-Control-Request-Method", methods[0].(string))
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{}, HTTP: request})
+			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") == "" {
+				transitionErrs <- fmt.Errorf("CORS delete transition = %#v, %w", response, err)
+				return
+			}
+			transitionErrs <- nil
+		}(i%2 == 0)
+	}
+	wg.Wait()
+	close(transitionErrs)
+	for err := range transitionErrs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := httptest.NewRequest(http.MethodOptions, "https://cors-chaos.s3.us-east-1.amazonaws.com/key", nil)
+	request.Header.Set("Origin", "https://app.localstack.cloud")
+	request.Header.Set("Access-Control-Request-Method", methods[0].(string))
+	response, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{}, HTTP: request})
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
+		t.Fatalf("final preflight = %#v, err=%v", response, err)
 	}
 }
 
@@ -1196,6 +5465,68 @@ func TestConcurrentBucketLifecycleRemainsValid(t *testing.T) {
 	rules, _ := response.Output["Rules"].([]any)
 	if err != nil || len(rules) != 1 || !strings.HasPrefix(rules[0].(map[string]any)["ID"].(string), "rule-") {
 		t.Fatalf("persisted concurrent lifecycle = %#v, err=%v", response, err)
+	}
+}
+
+func TestConcurrentMultipartCompletionsPreserveLifecycleExpiration(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "complete-expiration-chaos"}, "")
+	rules := []any{map[string]any{"ID": "expire", "Filter": map[string]any{"Prefix": "expire/"}, "Status": "Enabled", "Expiration": map[string]any{"Days": 1}}}
+	if _, err := call("PutBucketLifecycleConfiguration", map[string]any{"Bucket": "complete-expiration-chaos", "LifecycleConfiguration": map[string]any{"Rules": rules}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("keep/%d", i)
+			if i%2 == 0 {
+				key = fmt.Sprintf("expire/%d", i)
+			}
+			metadata, redirect := fmt.Sprintf("team-%d", i), fmt.Sprintf("/%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key, "ContentType": "text/plain", "Metadata": map[string]any{"Team": metadata}, "WebsiteRedirectLocation": redirect}, "")
+			if err != nil {
+				errCh <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, "part")
+			if err != nil {
+				errCh <- err
+				return
+			}
+			completed, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key, "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}, "")
+			if err == nil && (completed.Headers.Get("x-amz-expiration") != "") != (i%2 == 0) {
+				err = fmt.Errorf("key %q expiration = %q", key, completed.Headers.Get("x-amz-expiration"))
+			}
+			if err == nil {
+				head, headErr := call("HeadObject", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key}, "")
+				if headErr != nil {
+					err = headErr
+				} else if head.Headers.Get("Content-Type") != "text/plain" || head.Headers.Get("x-amz-meta-team") != metadata || head.Headers.Get("x-amz-website-redirect-location") != redirect {
+					err = fmt.Errorf("key %q metadata = %v", key, head.Headers)
+				}
+			}
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Error(err)
+		}
 	}
 }
 
@@ -1663,6 +5994,47 @@ func TestConcurrentKMSKeyValidation(t *testing.T) {
 	}
 }
 
+func TestConcurrentManagedS3KMSKeyCreation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "managed-kms-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan string, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "managed-kms-chaos", "Key": fmt.Sprintf("key-%d", i), "ServerSideEncryption": "aws:kms"}, Body: io.NopCloser(strings.NewReader("body"))})
+			if err != nil {
+				results <- "error: " + err.Error()
+				return
+			}
+			results <- response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id")
+		}()
+	}
+	wg.Wait()
+	close(results)
+	managed := ""
+	for result := range results {
+		if !strings.HasPrefix(result, "arn:aws:kms:us-east-1:000000000000:key/") {
+			t.Fatalf("managed key = %q", result)
+		}
+		if managed == "" {
+			managed = result
+		} else if result != managed {
+			t.Fatalf("managed keys differ: %q != %q", result, managed)
+		}
+	}
+	keys, _, err := deps.Store.Scope(id.Account, id.Region).Collection("kms").List(ctx, "", "", 0)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("managed key records = %d, %v", len(keys), err)
+	}
+}
+
 func TestConcurrentGetObjectResponseOverrides(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
@@ -1734,7 +6106,11 @@ func TestConcurrentUserMetadataRFC2047(t *testing.T) {
 			defer wg.Done()
 			key := fmt.Sprintf("key-%d", i)
 			value := fmt.Sprintf("Ä-%d", i)
-			if _, err := call("PutObject", map[string]any{"Bucket": "rfc2047-chaos", "Key": key, "Metadata": map[string]any{"value": value}}, "body"); err != nil {
+			cacheControl, disposition := "no-cache", `attachment; filename="foo.jpg"`
+			if i%2 == 0 {
+				cacheControl, disposition = "ÄMÄZÕÑ S3", `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`
+			}
+			if _, err := call("PutObject", map[string]any{"Bucket": "rfc2047-chaos", "Key": key, "CacheControl": cacheControl, "ContentLanguage": "de", "ContentDisposition": disposition, "Metadata": map[string]any{"value": value, "TEST_META_1": "foo", "__meta_2": "bar"}}, "body"); err != nil {
 				errs <- err
 				return
 			}
@@ -1744,7 +6120,7 @@ func TestConcurrentUserMetadataRFC2047(t *testing.T) {
 				errs <- err
 				return
 			}
-			if got := response.Headers.Get("x-amz-meta-value"); got != want {
+			if got := response.Headers.Get("x-amz-meta-value"); got != want || response.Headers.Get("x-amz-meta-test_meta_1") != "foo" || response.Headers.Get("x-amz-meta-__meta_2") != "bar" || response.Headers.Get("Cache-Control") != cacheControl || response.Headers.Get("Content-Language") != "de" || response.Headers.Get("Content-Disposition") != disposition {
 				errs <- fmt.Errorf("metadata %d: %q", i, got)
 			}
 		}()
@@ -1773,7 +6149,7 @@ func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)
 	keyID := "arn:aws:kms:us-east-1:000000000000:key/multipart-chaos"
 	spitest.SeedKMSKey(t, deps, id, keyID, "Enabled")
-	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ChecksumAlgorithm": "CRC64NVME", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1792,8 +6168,61 @@ func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	}
 	blobs.fail = false
 	completed, err := call("CompleteMultipartUpload", complete, nil)
-	if err != nil || completed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || completed.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+	if err != nil || completed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || completed.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || completed.Headers.Get("x-amz-checksum-crc64nvme") != "" || completed.Headers.Get("x-amz-checksum-type") != "" || completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil {
 		t.Fatalf("recovered completion: %#v %v", completed, err)
+	}
+	head, err := call("HeadObject", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
+	if err != nil || head.Headers.Get("x-amz-checksum-crc64nvme") == "" || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("recovered checksum metadata: %#v %v", head, err)
+	}
+}
+
+func TestConcurrentInvalidObjectLockBypassLeavesObjectIntact(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "object-lock-bypass"}, nil)
+	_, _ = call("PutObject", map[string]any{"Bucket": "object-lock-bypass", "Key": "key"}, []byte("body"))
+
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "DeleteObject"
+			input := map[string]any{"Bucket": "object-lock-bypass", "Key": "key", "BypassGovernanceRetention": i%2 == 0}
+			if i%2 == 1 {
+				operation = "DeleteObjects"
+				input = map[string]any{"Bucket": "object-lock-bypass", "Objects": []any{map[string]any{"Key": "key"}}, "BypassGovernanceRetention": false}
+			}
+			_, err := call(operation, input, nil)
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidArgument" {
+				errs <- fmt.Errorf("%s: %v", operation, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	got, err := call("GetObject", map[string]any{"Bucket": "object-lock-bypass", "Key": "key"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Stream)
+	_ = got.Stream.Close()
+	if string(body) != "body" {
+		t.Fatalf("object after invalid bypass storm = %q", body)
 	}
 }
 
@@ -1912,5 +6341,1191 @@ func TestBusSubscriberPanicIsolated(t *testing.T) {
 	}()
 	if !panicked {
 		t.Fatal("expected subscriber panic to propagate (current contract)")
+	}
+}
+
+func TestConcurrentSQSFIFODeduplicationValidationIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "chaos-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-dedup.fifo", "MessageBody": "valid", "MessageGroupId": "group-1", "MessageDeduplicationId": strings.Repeat("a", 128)}}); err != nil {
+		t.Fatal("valid deduplication id", err)
+	}
+	values := []string{"", strings.Repeat("a", 129), "group 123"}
+	errs := make(chan error, len(values)*8)
+	var wg sync.WaitGroup
+	for range 8 {
+		for _, value := range values {
+			wg.Add(1)
+			go func(value string) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+					"QueueName": "chaos-dedup.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "MessageDeduplicationId": value,
+				}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "MessageDeduplicationId can only include alphanumeric and punctuation characters") {
+					errs <- fmt.Errorf("deduplication id %q error %#v", value, err)
+				}
+			}(value)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSInvalidBatchEntryIDsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-batch-id"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-invalid-batch-id", "Entries": []any{map[string]any{"Id": "message:invalid", "MessageBody": "message"}}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
+				errs <- fmt.Errorf("invalid batch id error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSInvalidReceiptHandlesAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-receipt"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibility", Input: map[string]any{"QueueName": "chaos-invalid-receipt", "ReceiptHandle": "garbage", "VisibilityTimeout": 60}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "ReceiptHandleIsInvalid" {
+				errs <- fmt.Errorf("invalid receipt handle error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSTooManyBatchEntriesIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-too-many-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]any, 20)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "MessageBody": "message"}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-too-many-batch", "Entries": entries}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.TooManyEntriesInBatchRequest" || !strings.Contains(fault.Message, "You have sent 20.") {
+				errs <- fmt.Errorf("too many entries error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSDeleteMessageBatchInvalidEntryIDsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-delete-invalid-batch-id"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "chaos-delete-invalid-batch-id", "Entries": []any{map[string]any{"Id": "message:invalid", "ReceiptHandle": "handle"}}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
+				errs <- fmt.Errorf("invalid delete batch id error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSDeleteMessageBatchTooManyEntriesIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-delete-too-many-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]any, 20)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "ReceiptHandle": "handle"}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "chaos-delete-too-many-batch", "Entries": entries}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.TooManyEntriesInBatchRequest" || !strings.Contains(fault.Message, "You have sent 20.") {
+				errs <- fmt.Errorf("too many delete batch entries error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSMessageAttributeFiltersAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-attribute-filters", "Attributes": map[string]any{"VisibilityTimeout": "0"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-attribute-filters", "MessageBody": "message", "MessageAttributes": map[string]any{"Help.Me": map[string]any{"DataType": "String", "StringValue": "Me"}, "Hello": map[string]any{"DataType": "String", "StringValue": "There"}, "General": map[string]any{"DataType": "String", "StringValue": "Kenobi"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	filters := []struct {
+		values []any
+		want   int
+	}{{[]any{}, 0}, {[]any{"Hello"}, 1}, {[]any{"Hel.*"}, 2}, {[]any{"*"}, 3}}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-attribute-filters", "MessageAttributeNames": filters[index%len(filters)].values}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			attrs := response.Output["Messages"].([]any)[0].(map[string]any)["MessageAttributes"].(map[string]any)
+			if len(attrs) != filters[index%len(filters)].want {
+				errs <- fmt.Errorf("filter %#v attrs %#v", filters[index%len(filters)].values, attrs)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSInvalidMessageContentsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-contents"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-invalid-contents", "MessageBody": "invalid-\x00"}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidMessageContents" {
+				errs <- fmt.Errorf("invalid contents error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSSendMessageBatchInvalidContentsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-invalid-contents"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-batch-invalid-contents", "Entries": []any{
+				map[string]any{"Id": "1", "MessageBody": "valid"},
+				map[string]any{"Id": "2", "MessageBody": "invalid-\x00"},
+			}}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			failed := response.Output["Failed"].([]any)
+			if len(response.Output["Successful"].([]any)) != 1 || len(failed) != 1 || failed[0].(map[string]any)["Code"] != "InvalidMessageContents" {
+				errs <- fmt.Errorf("batch invalid contents response %#v", response.Output)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSMessageRetentionIsStable(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-retention", "Attributes": map[string]any{"MessageRetentionPeriod": "1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-retention", "MessageBody": "expires"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clk.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-retention", "WaitTimeSeconds": 0}})
+			if err != nil || response.Output["Messages"] != nil {
+				errs <- fmt.Errorf("retention response %#v error %v", response, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSSuccessivePurgesAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-purge"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PurgeQueue", Input: map[string]any{"QueueName": "chaos-purge"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PurgeQueue", Input: map[string]any{"QueueName": "chaos-purge"}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.PurgeQueueInProgress" || fault.HTTPStatus != 403 {
+				errs <- fmt.Errorf("purge error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSMessageStateMetricsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "chaos-states"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []map[string]any{{"QueueName": "chaos-states", "MessageBody": "visible"}, {"QueueName": "chaos-states", "MessageBody": "delayed", "DelaySeconds": 2}} {
+		if _, err := call("SendMessage", input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("GetQueueAttributes", map[string]any{"QueueName": "chaos-states", "AttributeNames": []any{"ApproximateNumberOfMessages", "ApproximateNumberOfMessagesDelayed", "ApproximateNumberOfMessagesNotVisible"}})
+			attrs := map[string]any{}
+			if response != nil {
+				attrs, _ = response.Output["Attributes"].(map[string]any)
+			}
+			if err != nil || attrs["ApproximateNumberOfMessages"] != "1" || attrs["ApproximateNumberOfMessagesDelayed"] != "1" || attrs["ApproximateNumberOfMessagesNotVisible"] != "0" {
+				errs <- fmt.Errorf("metrics %#v error %v", attrs, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSReceiptsRemainValid(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for index := range 16 {
+		name := fmt.Sprintf("chaos-rotate-%d", index)
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-rotate-%d", index)
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "VisibilityTimeout": 0}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			messages, _ := response.Output["Messages"].([]any)
+			handle := ""
+			if len(messages) == 1 {
+				handle, _ = messages[0].(map[string]any)["ReceiptHandle"].(string)
+			}
+			if len(messages) != 1 || len(handle) != 64 {
+				errs <- fmt.Errorf("invalid receipt response %#v", response.Output)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSFIFOExpiredDeletesAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	handles := make([]string, 16)
+	for index := range handles {
+		name := fmt.Sprintf("chaos-expired-%d.fifo", index)
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message", "MessageGroupId": "group"}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		handles[index] = response.Output["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"].(string)
+	}
+	errs := make(chan error, len(handles))
+	var wg sync.WaitGroup
+	for index, handle := range handles {
+		wg.Add(1)
+		go func(index int, handle string) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": fmt.Sprintf("chaos-expired-%d.fifo", index), "ReceiptHandle": handle}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "receipt handle has expired") {
+				errs <- fmt.Errorf("expired delete %d: %#v", index, err)
+			}
+		}(index, handle)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSFIFOMessageGroupReuseIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "MessageBody": "first", "MessageGroupId": "g1"}}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo"}})
+	if err != nil || len(first.Output["Messages"].([]any)) != 1 {
+		t.Fatalf("first receive %#v error %v", first, err)
+	}
+	message := first.Output["Messages"].([]any)[0].(map[string]any)
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "ReceiptHandle": message["ReceiptHandle"]}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, sendErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "MessageBody": fmt.Sprintf("second-%d", index), "MessageGroupId": "g1", "MessageDeduplicationId": fmt.Sprintf("dedup-%d", index)}})
+			if sendErr != nil {
+				errs <- sendErr
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0}})
+	if err != nil || len(response.Output["Messages"].([]any)) == 0 {
+		t.Fatalf("reused group receive %#v error %v", response, err)
+	}
+}
+
+func TestConcurrentSQSFIFOPartialGroupVisibilityIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-partial-%d.fifo", index)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "30"}}}); err != nil {
+				errs <- err
+				return
+			}
+			for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g1-m2", "g1"}, {"g2-m1", "g2"}} {
+				if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": message.body, "MessageGroupId": message.group}}); err != nil {
+					errs <- err
+					return
+				}
+			}
+			first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 2}})
+			if err != nil || len(first.Output["Messages"].([]any)) != 2 {
+				errs <- fmt.Errorf("first %d %#v error %v", index, first, err)
+				return
+			}
+			firstMessage := first.Output["Messages"].([]any)[0].(map[string]any)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibility", Input: map[string]any{"QueueName": name, "ReceiptHandle": firstMessage["ReceiptHandle"], "VisibilityTimeout": 0}}); err != nil {
+				errs <- err
+				return
+			}
+			second, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 3}})
+			if err != nil || len(second.Output["Messages"].([]any)) != 2 {
+				errs <- fmt.Errorf("second %d %#v error %v", index, second, err)
+				return
+			}
+			messages := second.Output["Messages"].([]any)
+			if messages[0].(map[string]any)["Body"] != "g2-m1" || messages[1].(map[string]any)["Body"] != "g1-m1" {
+				errs <- fmt.Errorf("ordering %d %#v", index, second.Output)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSFIFOPerMessageDelaysAreRejected(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-invalid-delay.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "DelaySeconds": 2}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "not valid for this queue type") {
+				errs <- fmt.Errorf("FIFO per-message delay error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSChangeMessageVisibilityBatchTooManyEntriesIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-visibility-too-many"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]any, 20)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "ReceiptHandle": "handle", "VisibilityTimeout": 123}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibilityBatch", Input: map[string]any{"QueueName": "chaos-visibility-too-many", "Entries": entries}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.TooManyEntriesInBatchRequest" || !strings.Contains(fault.Message, "You have sent 20.") {
+				errs <- fmt.Errorf("visibility too many entries error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-missing-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-batch-missing-dedup.fifo", "Entries": []any{map[string]any{"Id": "message-1", "MessageBody": "message", "MessageGroupId": "group-1"}}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "ContentBasedDeduplication enabled") {
+				errs <- fmt.Errorf("missing deduplication id error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSFIFOBatchMissingMessageGroupIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-missing-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := []any{
+		map[string]any{"Id": "message-1", "MessageBody": "message-1", "MessageGroupId": "group-1", "MessageDeduplicationId": "dedup-1"},
+		map[string]any{"Id": "message-2", "MessageBody": "message-2", "MessageDeduplicationId": "dedup-2"},
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-batch-missing-group.fifo", "Entries": entries}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "MissingParameter" || fault.Message != "MessageGroupId" {
+				errs <- fmt.Errorf("missing message group id error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "chaos-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "DelaySeconds": "2"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+				"QueueName": "chaos-delay.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": fmt.Sprintf("group-%d", i), "DelaySeconds": 0,
+			}})
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	before, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-delay.fifo", "MaxNumberOfMessages": 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := before.Output["Messages"]; ok {
+		t.Fatalf("messages visible before delay %#v", before.Output)
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	after, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-delay.fifo", "MaxNumberOfMessages": 10}})
+	if err != nil || len(after.Output["Messages"].([]any)) != 8 {
+		t.Fatalf("after delay %#v error %v", after.Output, err)
+	}
+}
+
+func TestConcurrentSQSFIFOMessageAttributesAreRetained(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": fmt.Sprintf("group-%d", i), "MessageDeduplicationId": fmt.Sprintf("dedup-%d", i), "MessageAttributes": map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": fmt.Sprintf("value-%d", i)}}}})
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "MaxNumberOfMessages": 10, "MessageAttributeNames": []any{"All"}}})
+	if err != nil || len(response.Output["Messages"].([]any)) != 8 {
+		t.Fatalf("receive %#v error %v", response.Output, err)
+	}
+	for _, raw := range response.Output["Messages"].([]any) {
+		message, _ := raw.(map[string]any)
+		messageAttributes, _ := message["MessageAttributes"].(map[string]any)
+		kind, _ := messageAttributes["kind"].(map[string]any)
+		if kind["StringValue"] == nil {
+			t.Fatalf("missing message attributes %#v", raw)
+		}
+	}
+}
+
+func TestConcurrentSQSFIFOApproximateCountExcludesInFlight(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": fmt.Sprintf("group-%d", i)}})
+		}(i)
+	}
+	wg.Wait()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "MaxNumberOfMessages": 4}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "AttributeNames": []any{"ApproximateNumberOfMessages"}}})
+	if err != nil || response.Output["Attributes"].(map[string]any)["ApproximateNumberOfMessages"] != "4" {
+		t.Fatalf("count %#v error %v", response.Output, err)
+	}
+}
+
+func TestConcurrentSQSFIFOContentBasedDeduplicationStrategyIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "Attributes": map[string]any{"FifoQueue": "true", "SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}}})
+		}()
+	}
+	wg.Wait()
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "AttributeNames": []any{"All"}}})
+	if err != nil || response.Output["Attributes"].(map[string]any)["ContentBasedDeduplication"] != "false" || response.Output["Attributes"].(map[string]any)["SqsManagedSseEnabled"] != "true" {
+		t.Fatalf("attributes %#v error %v", response.Output, err)
+	}
+}
+
+func TestConcurrentSQSFIFOQueueNameValidationIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	cases := []struct {
+		name, message string
+		attrs         map[string]any
+	}{
+		{name: "chaos-missing-attribute.fifo", message: "FifoQueue must be specified as true"},
+		{name: "chaos-false-attribute.fifo", attrs: map[string]any{"FifoQueue": "false"}, message: "FifoQueue must be specified as true"},
+		{name: "chaos-standard-with-fifo", attrs: map[string]any{"FifoQueue": "true"}, message: "Queue name must end in .fifo for FIFO queues"},
+		{name: "chaos-queue-with-slash/name", message: "Queue name must be 1 to 80 characters"},
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(cases)*8)
+	for _, tc := range cases {
+		for range 8 {
+			wg.Add(1)
+			go func(tc struct {
+				name, message string
+				attrs         map[string]any
+			}) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": tc.name, "Attributes": tc.attrs}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, tc.message) {
+					errs <- fmt.Errorf("%s validation error %#v", tc.name, err)
+				}
+			}(tc)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSFIFOGroupDeletionOrderingIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	name := "chaos-delete-order.fifo"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g2-m1", "g2"}, {"g1-m2", "g1"}, {"g2-m2", "g2"}, {"g1-m3", "g1"}} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": message.body, "MessageGroupId": message.group}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 2}})
+	if err != nil || len(first.Output["Messages"].([]any)) != 2 {
+		t.Fatalf("first %#v error %v", first, err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, raw := range first.Output["Messages"].([]any) {
+		message := raw.(map[string]any)
+		wg.Add(1)
+		go func(handle any) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": name, "ReceiptHandle": handle}})
+			if err != nil {
+				errs <- err
+			}
+		}(message["ReceiptHandle"])
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	remaining, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 10}})
+	if err != nil || len(remaining.Output["Messages"].([]any)) != 3 || remaining.Output["Messages"].([]any)[0].(map[string]any)["Body"] != "g2-m1" {
+		t.Fatalf("remaining %#v error %v", remaining.Output, err)
+	}
+}
+
+func TestConcurrentSQSDeleteMessageBatchEmptyIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-delete-empty-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "chaos-delete-empty-batch", "Entries": []any{}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.EmptyBatchRequest" {
+				errs <- fmt.Errorf("empty delete batch error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSSSEMutualExclusionIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	name := "chaos-sse-exclusive"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"KmsMasterKeyId": "testKeyId", "SqsManagedSseEnabled": "true"}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidAttributeName" {
+				errs <- fmt.Errorf("SSE conflict error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs, _ := response.Output["Attributes"].(map[string]any)
+	if _, ok := attrs["KmsMasterKeyId"]; ok {
+		t.Fatalf("conflicting KMS attribute persisted %#v", attrs)
+	}
+	if managed, ok := attrs["SqsManagedSseEnabled"]; !ok || managed != "true" {
+		t.Fatalf("default SQS-managed attribute changed %#v", attrs)
+	}
+}
+
+func TestConcurrentSQSQueueArnPartitionsAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	regions := []string{"us-east-1", "us-gov-west-1", "cn-north-1"}
+	errs := make(chan error, len(regions)*8)
+	var wg sync.WaitGroup
+	for _, region := range regions {
+		for attempt := range 8 {
+			wg.Add(1)
+			go func(region string, attempt int) {
+				defer wg.Done()
+				id := spi.Identity{Account: "000000000000", Region: region}
+				name := fmt.Sprintf("chaos-arn-%d", attempt)
+				if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+					errs <- err
+					return
+				}
+				response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"QueueArn"}}})
+				expectedPartition := "aws"
+				if strings.HasPrefix(region, "us-gov-") {
+					expectedPartition = "aws-us-gov"
+				} else if strings.HasPrefix(region, "cn-") {
+					expectedPartition = "aws-cn"
+				}
+				arn, _ := response.Output["Attributes"].(map[string]any)["QueueArn"].(string)
+				if err != nil || !strings.HasPrefix(arn, "arn:"+expectedPartition+":sqs:"+region+":") {
+					errs <- fmt.Errorf("region=%s response=%#v error=%v", region, response, err)
+				}
+			}(region, attempt)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSQueueAttributeUpdatesAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	name := "chaos-attribute-update"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+		t.Fatal(err)
+	}
+	attrs := map[string]any{"MaximumMessageSize": "2048", "VisibilityTimeout": "69", "DelaySeconds": "420"}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": attrs}}); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := response.Output["Attributes"].(map[string]any)
+	for key, want := range attrs {
+		if got[key] != want {
+			t.Fatalf("attribute %s=%v want %v output=%#v", key, got[key], want, response.Output)
+		}
+	}
+}
+
+func TestConcurrentSQSMessageMoveTaskValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, name := range []string{"chaos-move-plain", "chaos-move-destination", "chaos-move-dlq", "chaos-move-source"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-move-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-move-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-move-plain", "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:chaos-move-destination"}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" {
+				errs <- fmt.Errorf("source validation %#v", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-move-dlq", "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:missing"}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "ResourceNotFoundException" {
+				errs <- fmt.Errorf("destination validation %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSMessageMoveTaskWorkflowIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, name := range []string{"chaos-workflow-source", "chaos-workflow-dlq", "chaos-workflow-destination"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-workflow-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-workflow-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-workflow-dlq", "MessageBody": "workflow"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-workflow-dlq", "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:chaos-workflow-destination"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListMessageMoveTasks", Input: map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-workflow-dlq"}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			results, ok := response.Output["Results"].([]any)
+			if !ok || len(results) != 1 || results[0].(map[string]any)["Status"] != "COMPLETED" {
+				errs <- fmt.Errorf("workflow list %#v", response.Output)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSMessageMoveTaskStartsAllowOneActiveTask(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, name := range []string{"chaos-start-source", "chaos-start-dlq", "chaos-start-destination"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-start-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-start-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-start-dlq", "MessageBody": "start"}}); err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-start-dlq", "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:chaos-start-destination", "MaxNumberOfMessagesPerSecond": 1}
+	errs := make(chan error, 16)
+	handles := make(chan string, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: input})
+			if err == nil {
+				handle, _ := response.Output["TaskHandle"].(string)
+				handles <- handle
+				return
+			}
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" {
+				errs <- fmt.Errorf("duplicate start %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	close(handles)
+	for err := range errs {
+		t.Error(err)
+	}
+	var handle string
+	for candidate := range handles {
+		if handle == "" {
+			handle = candidate
+		}
+	}
+	if handle == "" {
+		t.Fatal("no active move task")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CancelMessageMoveTask", Input: map[string]any{"TaskHandle": handle}}); err != nil {
+		t.Fatal(err)
 	}
 }

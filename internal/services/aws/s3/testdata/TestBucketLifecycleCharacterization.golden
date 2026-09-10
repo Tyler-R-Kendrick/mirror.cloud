@@ -36,6 +36,7 @@
     "status": 400
   },
   "object": {
+    "completeExpiration": "expiry-date=\"Sun, 04 Jan 1970 00:00:00 GMT\", rule-id=\"expire\"",
     "headExpiration": "expiry-date=\"Sun, 04 Jan 1970 00:00:00 GMT\", rule-id=\"expire\"",
     "putExpiration": "expiry-date=\"Sun, 04 Jan 1970 00:00:00 GMT\", rule-id=\"expire\""
   },

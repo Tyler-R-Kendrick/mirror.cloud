@@ -1,6 +1,7 @@
 {
   "invalid bucket": "NoSuchBucket",
   "invalid tags": "InvalidTag",
+  "reserved tag message": "User-defined tag keys can't start with \"aws:\". This prefix is reserved for system tags. Remove \"aws:\" from your tag keys and try again.",
   "tagged recreation": "BucketAlreadyOwnedByYou",
   "tags": [
     {

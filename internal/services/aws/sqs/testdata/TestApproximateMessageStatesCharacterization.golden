@@ -1,0 +1,44 @@
+{
+  "inFlight": {
+    "ApproximateNumberOfMessages": "0",
+    "ApproximateNumberOfMessagesDelayed": "2",
+    "ApproximateNumberOfMessagesNotVisible": "1",
+    "CreatedTimestamp": "0",
+    "DelaySeconds": "0",
+    "LastModifiedTimestamp": "0",
+    "MaximumMessageSize": "1048576",
+    "MessageRetentionPeriod": "345600",
+    "QueueArn": "arn:aws:sqs:us-east-1:123456789012:states",
+    "ReceiveMessageWaitTimeSeconds": "0",
+    "SqsManagedSseEnabled": "true",
+    "VisibilityTimeout": "30"
+  },
+  "initial": {
+    "ApproximateNumberOfMessages": "1",
+    "ApproximateNumberOfMessagesDelayed": "2",
+    "ApproximateNumberOfMessagesNotVisible": "0",
+    "CreatedTimestamp": "0",
+    "DelaySeconds": "0",
+    "LastModifiedTimestamp": "0",
+    "MaximumMessageSize": "1048576",
+    "MessageRetentionPeriod": "345600",
+    "QueueArn": "arn:aws:sqs:us-east-1:123456789012:states",
+    "ReceiveMessageWaitTimeSeconds": "0",
+    "SqsManagedSseEnabled": "true",
+    "VisibilityTimeout": "30"
+  },
+  "released": {
+    "ApproximateNumberOfMessages": "2",
+    "ApproximateNumberOfMessagesDelayed": "0",
+    "ApproximateNumberOfMessagesNotVisible": "1",
+    "CreatedTimestamp": "0",
+    "DelaySeconds": "0",
+    "LastModifiedTimestamp": "0",
+    "MaximumMessageSize": "1048576",
+    "MessageRetentionPeriod": "345600",
+    "QueueArn": "arn:aws:sqs:us-east-1:123456789012:states",
+    "ReceiveMessageWaitTimeSeconds": "0",
+    "SqsManagedSseEnabled": "true",
+    "VisibilityTimeout": "30"
+  }
+}

@@ -90,6 +90,319 @@ func TestBootedServerSQSJSONAndQuery(t *testing.T) {
 	}
 }
 
+func TestBootedServerSQSQueryTags(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-tags"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	call := func(form url.Values) []byte {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		if res.StatusCode >= 300 {
+			t.Fatalf("query %v: %d %s", form.Get("Action"), res.StatusCode, body)
+		}
+		return body
+	}
+	call(url.Values{"Action": {"CreateQueue"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}, "Tag.1.Key": {"first"}, "Tag.1.Value": {"one"}})
+	call(url.Values{"Action": {"TagQueue"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}, "Tags.member.1.Key": {"second"}, "Tags.member.1.Value": {"two"}})
+	body := call(url.Values{"Action": {"ListQueueTags"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}})
+	if !strings.Contains(string(body), "<first>one</first>") || !strings.Contains(string(body), "<second>two</second>") {
+		t.Fatalf("query tags response %s", body)
+	}
+}
+
+func TestBootedServerSQSJSONOnQueueURL(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-json-queue-url"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	request := func(target, endpoint, body string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "AmazonSQS."+target)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	create := request("CreateQueue", ts.URL+"/", `{"QueueName":"json-url"}`)
+	defer create.Body.Close()
+	var created map[string]any
+	if err := json.NewDecoder(create.Body).Decode(&created); err != nil || create.StatusCode >= 300 {
+		t.Fatalf("create queue: %d %#v %v", create.StatusCode, created, err)
+	}
+	queueURL := str(created["QueueUrl"])
+	parsed, err := url.Parse(queueURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receive := request("ReceiveMessage", ts.URL+parsed.Path, `{"QueueUrl":"`+queueURL+`","WaitTimeSeconds":1}`)
+	defer receive.Body.Close()
+	if receive.StatusCode != http.StatusOK || receive.Header.Get("Content-Type") != "application/x-amz-json-1.0" {
+		raw, _ := io.ReadAll(receive.Body)
+		t.Fatalf("receive on queue URL: %d %s %q", receive.StatusCode, raw, receive.Header.Get("Content-Type"))
+	}
+}
+
+func TestBootedServerSQSPathEndpointStrategy(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-path-strategy"
+	cfg.AdvertiseURL = "http://localhost:4566"
+	cfg.SQSEndpointStrategy = "path"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueName":"path-q"}`))
+	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	req.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/eu-north-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil || res.StatusCode >= 300 {
+		t.Fatalf("create: %d %#v %v", res.StatusCode, body, err)
+	}
+	if got := str(body["QueueUrl"]); got != "http://localhost.localstack.cloud:4566/queue/eu-north-1/000000000000/path-q" {
+		t.Fatalf("path strategy URL %q", got)
+	}
+	get, _ := http.NewRequest(http.MethodGet, ts.URL+"/queue/eu-north-1/000000000000/path-q", nil)
+	getRes, err := http.DefaultClient.Do(get)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer getRes.Body.Close()
+	getBody, _ := io.ReadAll(getRes.Body)
+	if getRes.StatusCode != http.StatusNotFound || !strings.Contains(string(getBody), "UnknownOperationException") {
+		t.Fatalf("path no-action request: %d %s", getRes.StatusCode, getBody)
+	}
+}
+
+func TestBootedServerSQSQueryQueueURLOverride(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-url-override"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	create := func(name string) string {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueName":"`+name+`"}`))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil || res.StatusCode >= 300 {
+			t.Fatalf("create %s: %d %#v %v", name, res.StatusCode, body, err)
+		}
+		return str(body["QueueUrl"])
+	}
+	first, second := create("query-first"), create("query-second")
+	parsed, err := url.Parse(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+parsed.Path+"?Action=GetQueueAttributes&QueueUrl="+url.QueryEscape(second)+"&AttributeName.1=QueueArn", nil)
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), "query-second") || strings.Contains(string(body), "query-first") {
+		t.Fatalf("queue URL override: %d %s", res.StatusCode, body)
+	}
+}
+
+func TestBootedServerSQSQuerySendReceiveQueueURLs(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-send-receive"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	create := func(name string) string {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueName":"`+name+`"}`))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil || res.StatusCode >= 300 {
+			t.Fatalf("create %s: %d %#v %v", name, res.StatusCode, body, err)
+		}
+		parsed, err := url.Parse(str(body["QueueUrl"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed.Path
+	}
+	query := func(path string, values url.Values) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path+"?"+values.Encode(), nil)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(body)
+	}
+	queue1, queue2 := create("query-lifecycle-1"), create("query-lifecycle-2")
+	if code, body := query(queue1, url.Values{"Action": {"SendMessage"}, "MessageBody": {"foobar"}}); code != http.StatusOK {
+		t.Fatalf("query send: %d %s", code, body)
+	}
+	if code, body := query(queue2, url.Values{"Action": {"ReceiveMessage"}}); code != http.StatusOK || !strings.Contains(strings.ReplaceAll(body, " />", "/>"), "<ReceiveMessageResult/>") || strings.Contains(body, "foobar") {
+		t.Fatalf("empty query receive: %d %s", code, body)
+	}
+	if code, body := query(queue1, url.Values{"Action": {"ReceiveMessage"}}); code != http.StatusOK || !strings.Contains(body, "<Body>foobar</Body>") || !strings.Contains(body, "<MD5OfBody>") {
+		t.Fatalf("query receive: %d %s", code, body)
+	}
+}
+
+func TestBootedServerSQSQueryDeletedQueue(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-deleted"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	jsonCall := func(op, body string) map[string]any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "AmazonSQS."+op)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var out map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil || res.StatusCode >= 300 {
+			t.Fatalf("%s: %d %#v %v", op, res.StatusCode, out, err)
+		}
+		return out
+	}
+	queueURL := str(jsonCall("CreateQueue", `{"QueueName":"query-deleted"}`)["QueueUrl"])
+	jsonCall("DeleteQueue", `{"QueueUrl":"`+queueURL+`"}`)
+	parsed, err := url.Parse(queueURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+parsed.Path+"?Action=GetQueueAttributes&AttributeName.1=QueueArn", nil)
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "<Code>AWS.SimpleQueueService.NonExistentQueue</Code>") || !strings.Contains(string(body), "<Message>The specified queue does not exist for this wsdl version") {
+		t.Fatalf("deleted query queue: %d %s", res.StatusCode, body)
+	}
+}
+
+func TestBootedServerSQSQueryFIFOMissingParameters(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-fifo-validation"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueName":"query-validation.fifo","Attributes":{"FifoQueue":"true"}}`))
+	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	req.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil || res.StatusCode >= 300 {
+		res.Body.Close()
+		t.Fatalf("create fifo: %d %#v %v", res.StatusCode, created, err)
+	}
+	res.Body.Close()
+	parsed, err := url.Parse(str(created["QueueUrl"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := func(values url.Values) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+parsed.Path+"?"+values.Encode(), nil)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(body)
+	}
+	if code, body := query(url.Values{"Action": {"SendMessage"}, "MessageBody": {"body"}, "MessageGroupId": {"group"}}); code != http.StatusBadRequest || !strings.Contains(body, "<Code>InvalidParameterValue</Code>") {
+		t.Fatalf("missing fifo deduplication id: %d %s", code, body)
+	}
+	if code, body := query(url.Values{"Action": {"SendMessage"}, "MessageBody": {"body"}, "MessageDeduplicationId": {"dedup"}}); code != http.StatusBadRequest || !strings.Contains(body, "<Code>MissingParameter</Code>") {
+		t.Fatalf("missing fifo group id: %d %s", code, body)
+	}
+}
+
 func TestBootedServerSQSSection48(t *testing.T) {
 	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()
@@ -121,18 +434,86 @@ func TestBootedServerSQSSection48(t *testing.T) {
 		}
 		return out
 	}
-	jsonCall("CreateQueue", `{"QueueName":"dlq"}`)
+	dlqOut := jsonCall("CreateQueue", `{"QueueName":"dlq"}`)
 	jsonCall("CreateQueue", `{"QueueName":"q","Attributes":{"VisibilityTimeout":"0","RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:dlq\",\"maxReceiveCount\":\"1\"}"}}`)
 	urlOut := jsonCall("GetQueueUrl", `{"QueueName":"q"}`)
 	if urlOut["QueueUrl"] == nil {
 		t.Fatalf("get url %v", urlOut)
 	}
+	queueURL, err := url.Parse(str(urlOut["QueueUrl"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueEndpoint := ts.URL + queueURL.Path
+	for _, action := range []string{"FooBar", "CreateQueue", "ListQueues"} {
+		queryReq, _ := http.NewRequest(http.MethodGet, queueEndpoint+"?Action="+action, nil)
+		queryReq.Header.Set("Authorization", auth)
+		queryRes, err := http.DefaultClient.Do(queryReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		queryBody, _ := io.ReadAll(queryRes.Body)
+		queryRes.Body.Close()
+		if queryRes.StatusCode != http.StatusBadRequest || !strings.Contains(string(queryBody), "<Code>InvalidAction</Code>") || !strings.Contains(string(queryBody), "The action "+action+" is not valid for this endpoint.") {
+			t.Fatalf("query invalid action %s: %d %s", action, queryRes.StatusCode, queryBody)
+		}
+	}
+	missingParamReq, _ := http.NewRequest(http.MethodGet, queueEndpoint+"?Action=SendMessage", nil)
+	missingParamReq.Header.Set("Authorization", auth)
+	missingParamRes, err := http.DefaultClient.Do(missingParamReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingParamBody, _ := io.ReadAll(missingParamRes.Body)
+	missingParamRes.Body.Close()
+	if missingParamRes.StatusCode != http.StatusBadRequest || !strings.Contains(string(missingParamBody), "<Code>MissingParameter</Code>") || !strings.Contains(string(missingParamBody), "The request must contain the parameter MessageBody.") {
+		t.Fatalf("query missing parameter: %d %s", missingParamRes.StatusCode, missingParamBody)
+	}
+	dlqURL, err := url.Parse(str(dlqOut["QueueUrl"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthReq, _ := http.NewRequest(http.MethodGet, ts.URL+dlqURL.Path+"?Action=GetQueueAttributes&AttributeName.1=All", nil)
+	unauthRes, err := http.DefaultClient.Do(unauthReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthBody, _ := io.ReadAll(unauthRes.Body)
+	unauthRes.Body.Close()
+	if unauthRes.StatusCode != http.StatusOK || !strings.Contains(string(unauthBody), "<GetQueueAttributesResponse") || !strings.Contains(string(unauthBody), "<Name>VisibilityTimeout</Name><Value>30") {
+		t.Fatalf("query without auth params: %d %s", unauthRes.StatusCode, unauthBody)
+	}
+	missingNameReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueUrl":"http://queue/000000000000/q"}`))
+	missingNameReq.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	missingNameReq.Header.Set("X-Amz-Target", "AmazonSQS.GetQueueUrl")
+	missingNameReq.Header.Set("Authorization", auth)
+	missingNameRes, err := http.DefaultClient.Do(missingNameReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingNameRes.Body.Close()
+	if missingNameRes.StatusCode < 300 {
+		t.Fatalf("GetQueueUrl accepted QueueUrl without QueueName: %d", missingNameRes.StatusCode)
+	}
 	listed := jsonCall("ListQueues", `{}`)
 	if len(asSlice(listed["QueueUrls"])) == 0 {
 		t.Fatalf("list %v", listed)
 	}
+	queryListReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/?Action=ListQueues&Version=2012-11-05", nil)
+	queryListReq.Header.Set("Authorization", auth)
+	queryListReq.Header.Set("Accept", "application/json")
+	queryListRes, err := http.DefaultClient.Do(queryListReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryListBody, _ := io.ReadAll(queryListRes.Body)
+	queryListRes.Body.Close()
+	var queryList map[string]any
+	if json.Unmarshal(queryListBody, &queryList) != nil || queryListRes.StatusCode != http.StatusOK || queryList["ListQueuesResponse"] == nil {
+		t.Fatalf("query JSON list %d %s", queryListRes.StatusCode, queryListBody)
+	}
 	jsonCall("SetQueueAttributes", `{"QueueName":"q","Attributes":{"DelaySeconds":"0"}}`)
-	attrs := jsonCall("GetQueueAttributes", `{"QueueName":"q"}`)
+	attrs := jsonCall("GetQueueAttributes", `{"QueueName":"q","AttributeNames":["DelaySeconds","VisibilityTimeout"]}`)
 	if asM(attrs["Attributes"])["DelaySeconds"] == nil && asM(attrs["Attributes"])["VisibilityTimeout"] == nil {
 		t.Fatalf("attrs %v", attrs)
 	}
@@ -167,13 +548,24 @@ func TestBootedServerSQSSection48(t *testing.T) {
 		t.Fatalf("purge left %v", empty)
 	}
 
-	jsonCall("CreateQueue", `{"QueueName":"f.fifo","Attributes":{"ContentBasedDeduplication":"true"}}`)
+	jsonCall("CreateQueue", `{"QueueName":"f.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`)
 	jsonCall("SendMessage", `{"QueueName":"f.fifo","MessageBody":"g1a","MessageGroupId":"g1","MessageDeduplicationId":"d1"}`)
 	jsonCall("SendMessage", `{"QueueName":"f.fifo","MessageBody":"g1a","MessageGroupId":"g1","MessageDeduplicationId":"d1"}`)
 	jsonCall("SendMessage", `{"QueueName":"f.fifo","MessageBody":"g2a","MessageGroupId":"g2","MessageDeduplicationId":"d2"}`)
 	fifo := jsonCall("ReceiveMessage", `{"QueueName":"f.fifo","MaxNumberOfMessages":10,"WaitTimeSeconds":0,"VisibilityTimeout":0}`)
 	if len(asSlice(fifo["Messages"])) != 2 {
 		t.Fatalf("fifo %v", fifo)
+	}
+	fifoReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/000000000000/f.fifo?Action=GetQueueAttributes&AttributeName.1=All", nil)
+	fifoReq.Header.Set("Authorization", auth)
+	fifoRes, err := http.DefaultClient.Do(fifoReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fifoBody, _ := io.ReadAll(fifoRes.Body)
+	fifoRes.Body.Close()
+	if fifoRes.StatusCode != http.StatusOK || !strings.Contains(string(fifoBody), "<Name>FifoQueue</Name><Value>true</Value>") || !strings.Contains(string(fifoBody), "f.fifo") {
+		t.Fatalf("fifo query attributes %d %s", fifoRes.StatusCode, fifoBody)
 	}
 
 	jsonCall("CreateQueue", `{"QueueName":"src","Attributes":{"RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:dlq\",\"maxReceiveCount\":\"1\"}","VisibilityTimeout":"0"}}`)
@@ -190,12 +582,12 @@ func TestBootedServerSQSSection48(t *testing.T) {
 		t.Fatalf("dlq sources %v", srcs)
 	}
 	jsonCall("AddPermission", `{"QueueName":"src","Label":"allow-send","AWSAccountIds":["111111111111"],"Actions":["SendMessage"]}`)
-	pol := jsonCall("GetQueueAttributes", `{"QueueName":"src"}`)
+	pol := jsonCall("GetQueueAttributes", `{"QueueName":"src","AttributeNames":["Policy"]}`)
 	if !strings.Contains(fmtJSON(pol["Attributes"]), "allow-send") {
 		t.Fatalf("policy %v", pol)
 	}
 	jsonCall("RemovePermission", `{"QueueName":"src","Label":"allow-send"}`)
-	pol2 := jsonCall("GetQueueAttributes", `{"QueueName":"src"}`)
+	pol2 := jsonCall("GetQueueAttributes", `{"QueueName":"src","AttributeNames":["Policy"]}`)
 	if strings.Contains(fmtJSON(pol2["Attributes"]), "allow-send") {
 		t.Fatalf("policy still labeled %v", pol2)
 	}
@@ -254,6 +646,90 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("query create fidelity %q", h.Get("x-mirror-fidelity"))
 	}
+	getReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=GetQueueAttributes&AttributeName.1=All", nil)
+	getReq.Header.Set("Authorization", auth)
+	getRes, err := http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ := io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || !strings.Contains(string(getBody), "<Name>QueueArn</Name>") || !strings.Contains(string(getBody), "<Name>VisibilityTimeout</Name>") {
+		t.Fatalf("query URL attributes %d %s", getRes.StatusCode, getBody)
+	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=GetQueueAttributes&AttributeName.1=QueueArn", nil)
+	getReq.Header.Set("Authorization", auth)
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || !strings.Contains(string(getBody), "<Name>QueueArn</Name>") || strings.Contains(string(getBody), "<Name>VisibilityTimeout</Name>") {
+		t.Fatalf("query URL selected attributes %d %s", getRes.StatusCode, getBody)
+	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=GetQueueAttributes&AttributeName.1=All", nil)
+	getReq.Header.Set("Authorization", auth)
+	getReq.Header.Set("Accept", "application/json")
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || getRes.Header.Get("Content-Type") != "application/json" || !strings.Contains(string(getBody), `"GetQueueAttributesResponse"`) || !strings.Contains(string(getBody), `"Name":"QueueArn"`) {
+		t.Fatalf("query JSON attributes %d %q %s", getRes.StatusCode, getRes.Header.Get("Content-Type"), getBody)
+	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq", nil)
+	getReq.Header.Set("Authorization", auth)
+	getReq.Header.Set("Accept", "application/json")
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusNotFound || !strings.Contains(string(getBody), "<UnknownOperationException") {
+		t.Fatalf("query URL missing action %d %s", getRes.StatusCode, getBody)
+	}
+	if code, body, _ := queryCall(url.Values{"Action": {"CreateQueue"}, "Version": {"2012-11-05"}, "QueueName": {"queryq2"}}); code != http.StatusOK {
+		t.Fatalf("query second create %d %s", code, body)
+	}
+	for _, tc := range []struct {
+		name, want, reject string
+	}{
+		{"queryq", "queryq", ""},
+		{"queryq2", "queryq2", "queryq"},
+	} {
+		getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=GetQueueUrl&QueueName="+tc.name+"&QueueOwnerAWSAccountId=000000000000", nil)
+		getReq.Header.Set("Authorization", auth)
+		getRes, err = http.DefaultClient.Do(getReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		getBody, _ = io.ReadAll(getRes.Body)
+		getRes.Body.Close()
+		if getRes.StatusCode != http.StatusOK || !strings.Contains(string(getBody), "/"+tc.want+"</") || (tc.reject != "" && strings.Contains(string(getBody), "/"+tc.reject+"</")) {
+			t.Fatalf("query URL lookup %s %d %s", tc.name, getRes.StatusCode, getBody)
+		}
+	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq2?Action=DeleteQueue", nil)
+	getReq.Header.Set("Authorization", auth)
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || !strings.Contains(string(getBody), "<DeleteQueueResponse") {
+		t.Fatalf("query URL delete %d %s", getRes.StatusCode, getBody)
+	}
+	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"missing-query-queue"}, "AttributeName.1": {"All"}}); code != http.StatusBadRequest || !strings.Contains(body, "AWS.SimpleQueueService.NonExistentQueue") || !strings.Contains(body, "for this wsdl version") {
+		t.Fatalf("query missing queue %d %s", code, body)
+	}
+	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "AttributeName.1": {"Foobar"}}); code != http.StatusBadRequest || !strings.Contains(body, "InvalidAttributeName") || !strings.Contains(body, "Unknown Attribute Foobar.") {
+		t.Fatalf("query invalid attribute %d %s", code, body)
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"SendMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "MessageBody": {"hello-query-wire"}}); code >= 300 {
 		t.Fatalf("query send %d %s", code, body)
 	}
@@ -267,8 +743,23 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if !strings.Contains(qrecv, "hello-query-wire") {
 		t.Fatalf("query recv body %s", qrecv)
 	}
-	if code, body, _ := queryCall(url.Values{"Action": {"DeleteMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "ReceiptHandle": {"nope"}}); code >= 300 {
-		t.Fatalf("query delete %d %s", code, body)
+	if code, body, _ := queryCall(url.Values{"Action": {"SendMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "MessageBody": {"json-query-wire"}}); code >= 300 {
+		t.Fatalf("query JSON seed %d %s", code, body)
+	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=ReceiveMessage&VisibilityTimeout=0", nil)
+	getReq.Header.Set("Authorization", auth)
+	getReq.Header.Set("Accept", "application/json")
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || getRes.Header.Get("Content-Type") != "application/json" || !strings.Contains(string(getBody), `"ReceiveMessageResponse"`) || !strings.Contains(string(getBody), `"Message":{"Body":"`) {
+		t.Fatalf("query JSON receive %d %q %s", getRes.StatusCode, getRes.Header.Get("Content-Type"), getBody)
+	}
+	if code, body, _ := queryCall(url.Values{"Action": {"DeleteMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "ReceiptHandle": {"nope"}}); code != http.StatusBadRequest || !strings.Contains(body, "ReceiptHandleIsInvalid") {
+		t.Fatalf("query delete validation %d %s", code, body)
 	}
 	if code, body, _ := queryCall(url.Values{"Action": {"ReceiveMessage"}, "Version": {"2012-11-05"}, "QueueName": {"f.fifo"}, "WaitTimeSeconds": {"0"}}); code >= 300 {
 		t.Fatalf("query fifo recv %d %s", code, body)
@@ -314,7 +805,7 @@ polled:
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("query AddPermission fidelity %q", h.Get("x-mirror-fidelity"))
 	}
-	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"permq"}}); code >= 300 || !strings.Contains(body, "qlabel") {
+	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"permq"}, "AttributeName.1": {"Policy"}}); code >= 300 || !strings.Contains(body, "qlabel") {
 		t.Fatalf("query policy %d %s", code, body)
 	}
 	if code, body, _ := queryCall(url.Values{"Action": {"RemovePermission"}, "Version": {"2012-11-05"}, "QueueName": {"permq"}, "Label": {"qlabel"}}); code >= 300 {

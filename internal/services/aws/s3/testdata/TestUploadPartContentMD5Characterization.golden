@@ -1,0 +1,24 @@
+{
+  "malformed": {
+    "code": "InvalidDigest",
+    "fields": {
+      "Content_MD5": "!"
+    },
+    "message": "The Content-MD5 you specified was invalid."
+  },
+  "mismatch": {
+    "code": "BadDigest",
+    "fields": {
+      "CalculatedDigest": "FkELmuUHX4wTWsdUfClZbg==",
+      "ExpectedDigest": "AAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    "message": "The Content-MD5 you specified did not match what we received."
+  },
+  "missing-upload": {
+    "code": "NoSuchUpload",
+    "fields": {
+      "UploadId": "missing"
+    },
+    "message": "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed."
+  }
+}

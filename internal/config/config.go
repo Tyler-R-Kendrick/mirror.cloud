@@ -21,7 +21,9 @@ type Config struct {
 	Tiers                         map[string]model.Tier
 	DefaultRegion                 string
 	DefaultAccount                string
+	SQSEndpointStrategy           string
 	S3ValidatePresignedSignatures bool
+	S3AllowNonstandardRegions     bool
 	TLSCert                       string
 	TLSKey                        string
 	ProxyMode                     string
@@ -33,13 +35,14 @@ type Config struct {
 // Default returns the documented defaults.
 func Default() Config {
 	return Config{
-		Bind:           "127.0.0.1:4566",
-		Seed:           "mirror",
-		DefaultRegion:  "us-east-1",
-		DefaultAccount: "000000000000",
-		Tiers:          map[string]model.Tier{},
-		ProxyMode:      "off",
-		CassetteDir:    ".mirror/cassettes",
+		Bind:                "127.0.0.1:4566",
+		Seed:                "mirror",
+		DefaultRegion:       "us-east-1",
+		DefaultAccount:      "000000000000",
+		SQSEndpointStrategy: "off",
+		Tiers:               map[string]model.Tier{},
+		ProxyMode:           "off",
+		CassetteDir:         ".mirror/cassettes",
 	}
 }
 
@@ -66,8 +69,14 @@ func FromEnv(c Config) Config {
 	if v := os.Getenv("MIRROR_DEFAULT_ACCOUNT"); v != "" {
 		c.DefaultAccount = v
 	}
+	if v := os.Getenv("MIRROR_SQS_ENDPOINT_STRATEGY"); v != "" {
+		c.SQSEndpointStrategy = v
+	}
 	if v := os.Getenv("MIRROR_S3_VALIDATE_PRESIGNED_SIGNATURES"); v == "1" || strings.EqualFold(v, "true") {
 		c.S3ValidatePresignedSignatures = true
+	}
+	if v := os.Getenv("MIRROR_S3_ALLOW_NONSTANDARD_REGIONS"); v == "1" || strings.EqualFold(v, "true") {
+		c.S3AllowNonstandardRegions = true
 	}
 	if v := os.Getenv("MIRROR_PROXY_MODE"); v != "" {
 		c.ProxyMode = v
@@ -99,7 +108,9 @@ func FromFile(c Config, path string) Config {
 		Strict                        bool              `json:"strict"`
 		DefaultRegion                 string            `json:"region"`
 		DefaultAccount                string            `json:"account"`
+		SQSEndpointStrategy           string            `json:"sqs_endpoint_strategy"`
 		S3ValidatePresignedSignatures bool              `json:"s3_validate_presigned_signatures"`
+		S3AllowNonstandardRegions     bool              `json:"s3_allow_nonstandard_regions"`
 		Services                      []string          `json:"services"`
 		Tiers                         map[string]string `json:"tiers"`
 	}
@@ -127,8 +138,14 @@ func FromFile(c Config, path string) Config {
 	if f.DefaultAccount != "" {
 		c.DefaultAccount = f.DefaultAccount
 	}
+	if f.SQSEndpointStrategy != "" {
+		c.SQSEndpointStrategy = f.SQSEndpointStrategy
+	}
 	if f.S3ValidatePresignedSignatures {
 		c.S3ValidatePresignedSignatures = true
+	}
+	if f.S3AllowNonstandardRegions {
+		c.S3AllowNonstandardRegions = true
 	}
 	if len(f.Services) > 0 {
 		c.Services = f.Services

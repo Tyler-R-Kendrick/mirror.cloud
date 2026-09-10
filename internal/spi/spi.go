@@ -39,6 +39,7 @@ type Request struct {
 	// must prefer Input and treat this as an escape hatch.
 	HTTP                 *http.Request
 	S3ValidateSignatures bool
+	AdvertiseURL         string
 }
 
 // Response is one operation result. Exactly one of Output or Stream is set
@@ -100,15 +101,17 @@ func NotImplemented(serviceID, operation, requiredTier string) *Fault {
 
 // Deps is the dependency bundle every behavior pack receives at construction.
 type Deps struct {
-	Store      Store
-	Blobs      BlobStore
-	Bus        Bus
-	Clock      Clock
-	Rand       Rand
-	Journal    Journal
-	Model      *model.Bundle
-	Authorizer Authorizer
-	Compute    ComputeProvider
+	Store                     Store
+	Blobs                     BlobStore
+	Bus                       Bus
+	Clock                     Clock
+	Rand                      Rand
+	Journal                   Journal
+	Model                     *model.Bundle
+	Authorizer                Authorizer
+	Compute                   ComputeProvider
+	S3AllowNonstandardRegions bool
+	SQSEndpointStrategy       string
 }
 
 // Store is account+region namespaced structured state.
@@ -123,7 +126,11 @@ type Store interface {
 // Scope is one account+region namespace.
 type Scope interface {
 	Collection(name string) Collection
+	Txn(ctx context.Context, fn func(ScopeTx) error) error
 }
+
+// ScopeTx is an atomic mutation spanning collections in one account and region.
+type ScopeTx interface{ Collection(name string) Tx }
 
 // Collection is a named key-value collection inside a Scope.
 type Collection interface {

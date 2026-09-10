@@ -1,0 +1,6 @@
+{
+  "Code": "InvalidParameterValue",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "Value 11 for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and 10, if provided."
+}

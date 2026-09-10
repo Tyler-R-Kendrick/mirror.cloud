@@ -1,0 +1,17 @@
+{
+  "chunked only": {
+    "body": "hello",
+    "content_encoding": "",
+    "status": 200
+  },
+  "content after chunk": {
+    "body": "hello",
+    "content_encoding": "br",
+    "status": 200
+  },
+  "content before chunk": {
+    "body": "hello",
+    "content_encoding": "gzip",
+    "status": 200
+  }
+}

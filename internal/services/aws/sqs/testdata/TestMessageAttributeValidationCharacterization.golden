@@ -1,0 +1,43 @@
+{
+  "control-value": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The message attribute is invalid."
+  },
+  "empty-custom-type": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The message attribute is invalid."
+  },
+  "empty-string": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The message attribute is invalid."
+  },
+  "illegal-name": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The message attribute is invalid."
+  },
+  "invalid-type": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The message attribute is invalid."
+  },
+  "reserved-prefix": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The message attribute is invalid."
+  },
+  "valid": {
+    "MD5OfMessageAttributes": "96b0459bec5e29f397071c2ac6d52e81",
+    "MD5OfMessageBody": "098f6bcd4621d373cade4e832627b4f6",
+    "MessageId": "7c5891299f6489f8"
+  }
+}

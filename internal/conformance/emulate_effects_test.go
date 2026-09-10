@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
@@ -136,7 +138,8 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 	})
 
 	t.Run("sqs", func(t *testing.T) {
-		p := sqs.New(spitest.Deps(t))
+		deps := spitest.Deps(t)
+		p := sqs.New(deps)
 		seen := map[string]bool{}
 		inv := func(op string, in map[string]any) *spi.Response {
 			return call(t, p, ctx, id, seen, op, in, nil, "")
@@ -159,6 +162,9 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("UntagQueue", map[string]any{"QueueName": "q", "TagKeys": []any{"k"}})
 		inv("PurgeQueue", map[string]any{"QueueName": "q"})
 		inv("DeleteQueue", map[string]any{"QueueName": "q"})
+		if err := deps.Clock.Advance(time.Minute); err != nil {
+			t.Fatal(err)
+		}
 		inv("CreateQueue", map[string]any{"QueueName": "q"})
 		fat := map[string]any{
 			"QueueName": "q", "QueueUrl": "http://q", "TaskHandle": "t1",
@@ -174,7 +180,8 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 	})
 
 	t.Run("dynamodb", func(t *testing.T) {
-		p := dynamodb.New(spitest.Deps(t))
+		deps := spitest.Deps(t)
+		p := dynamodb.New(deps)
 		seen := map[string]bool{}
 		inv := func(op string, in map[string]any) *spi.Response {
 			return call(t, p, ctx, id, seen, op, in, nil, "")
@@ -186,9 +193,8 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("BatchGetItem", map[string]any{"RequestItems": map[string]any{"T": map[string]any{"Keys": []any{map[string]any{"id": map[string]any{"S": "2"}}}}}})
 		inv("TransactWriteItems", map[string]any{"TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "3"}}}}}})
 		tg := inv("TransactGetItems", map[string]any{"TransactItems": []any{map[string]any{"Get": map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "3"}}}}}})
-		resp, _ := tg.Output["Responses"].(map[string]any)
-		items, _ := resp["T"].([]any)
-		if len(items) == 0 {
+		responses := asSlice(tg.Output["Responses"])
+		if len(responses) != 1 || asMap(asMap(responses[0])["Item"])["id"] == nil {
 			t.Fatalf("transact get empty %v", tg.Output)
 		}
 		q := inv("Query", map[string]any{
@@ -211,14 +217,20 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		bArn := str(asMap(bak.Output["BackupDetails"])["BackupArn"])
 		inv("RestoreTableFromBackup", map[string]any{"BackupArn": bArn, "TargetTableName": "Tr"})
 		inv("DeleteBackup", map[string]any{"BackupArn": bArn})
-		inv("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": "arn:k"})
-		inv("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": "arn:k"})
+		if _, err := kinesis.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "s"}}); err != nil {
+			t.Fatal(err)
+		}
+		streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+		inv("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
+		inv("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}})
+		inv("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
 		inv("DeleteItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "1"}}})
+		inv("CreateTable", map[string]any{"TableName": "gone"})
 		inv("DeleteTable", map[string]any{"TableName": "gone"})
 		fat := map[string]any{"TableName": "T", "GlobalTableName": "GT", "ExportArn": "arn:e", "ImportArn": "arn:i",
 			"Statement": "SELECT * FROM T", "ReplicationGroup": []any{map[string]any{"RegionName": "us-east-1"}},
 			"ContributorInsightsAction": "ENABLE", "S3Bucket": "bucket", "SourceTableName": "T", "TargetTableName": "Tpitr",
-			"TableCreationParameters": map[string]any{"TableName": "Timp"}, "StreamArn": "arn:k"}
+			"TableCreationParameters": map[string]any{"TableName": "Timp"}, "StreamArn": streamARN}
 		for _, op := range p.Operations() {
 			if isWriteOp(op) && !seen[op] {
 				inv(op, fat)
@@ -238,12 +250,18 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv(snsP, "SetTopicAttributes", map[string]any{"TopicArn": arn, "AttributeName": "DisplayName", "AttributeValue": "n"})
 		inv(snsP, "Publish", map[string]any{"TopicArn": arn, "Message": "hi"})
 		inv(snsP, "PublishBatch", map[string]any{"TopicArn": arn, "Message": "hi"})
-		sub := inv(snsP, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "q"})
+		sub := inv(snsP, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:000000000000:q"})
 		inv(snsP, "ConfirmSubscription", map[string]any{"Token": "tok"})
 		inv(snsP, "TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{}})
 		inv(snsP, "UntagResource", map[string]any{"ResourceArn": arn})
 		inv(snsP, "Unsubscribe", map[string]any{"SubscriptionArn": str(sub.Output["SubscriptionArn"])})
 		inv(snsP, "DeleteTopic", map[string]any{"TopicArn": arn})
+		// Recreate the resources used by the remaining write-operation sweep. The
+		// sweep is intended to verify successful state changes, while real SNS
+		// operations correctly reject deleted topics and subscriptions.
+		created = inv(snsP, "CreateTopic", map[string]any{"Name": "t"})
+		arn = str(created.Output["TopicArn"])
+		sub = inv(snsP, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:000000000000:q"})
 		fatSNS := map[string]any{
 			"Name": "t", "TopicArn": arn, "PhoneNumber": "+15555550100", "EndpointArn": "arn:e",
 			"Label": "allow", "AWSAccountIds": []any{"111111111111"}, "ActionName": []any{"Publish"},
@@ -253,8 +271,30 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 			"Attributes": map[string]any{"Enabled": "true"}, "DataProtectionPolicy": `{"Name":"p"}`,
 		}
 		for _, op := range snsP.Operations() {
+			// DeletePlatformApplication precedes endpoint creation in the operation
+			// inventory; recreate the fixture app before the endpoint sweep reaches it.
+			if op == "CreatePlatformEndpoint" {
+				inv(snsP, "CreatePlatformApplication", map[string]any{"Name": "t", "Platform": "GCM"})
+				endpoint := inv(snsP, "CreatePlatformEndpoint", map[string]any{"PlatformApplicationArn": fatSNS["PlatformApplicationArn"], "Token": "tok"})
+				fatSNS["EndpointArn"] = str(endpoint.Output["EndpointArn"])
+			}
 			if isWriteOp(op) && !seen[op] {
-				inv(snsP, op, fatSNS)
+				input := fatSNS
+				if op == "CreatePlatformApplication" {
+					input = map[string]any{}
+					for key, value := range fatSNS {
+						input[key] = value
+					}
+					input["Attributes"] = map[string]any{"PlatformCredential": "credential"}
+				}
+				if op == "SetSMSAttributes" {
+					input = map[string]any{}
+					for key, value := range fatSNS {
+						input[key] = value
+					}
+					input["Attributes"] = map[string]any{"DefaultSenderID": "Mirror"}
+				}
+				inv(snsP, op, input)
 			}
 		}
 		assertWritesCovered(t, snsP.Operations(), seen)

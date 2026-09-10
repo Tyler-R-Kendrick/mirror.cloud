@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"os/exec"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -87,6 +89,131 @@ func mustInvoke(t *testing.T, p *s3.Pack, op string, in map[string]any, body []b
 	return resp
 }
 
+var errInjectedRead = errors.New("injected read failure")
+
+type failingReadCloser struct {
+	sent bool
+}
+
+func (r *failingReadCloser) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, errInjectedRead
+	}
+	r.sent = true
+	return copy(p, "partial"), nil
+}
+
+func (*failingReadCloser) Close() error { return nil }
+
+type failingReadSeekCloser struct {
+	io.ReadSeekCloser
+	sent bool
+}
+
+func (r *failingReadSeekCloser) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, errInjectedRead
+	}
+	r.sent = true
+	return r.ReadSeekCloser.Read(p[:min(len(p), 3)])
+}
+
+type failingReadBlobs struct {
+	spi.BlobStore
+	fail bool
+}
+
+func (b *failingReadBlobs) Get(ctx context.Context, key string) (io.ReadSeekCloser, spi.BlobInfo, error) {
+	r, info, err := b.BlobStore.Get(ctx, key)
+	if err != nil || !b.fail {
+		return r, info, err
+	}
+	return &failingReadSeekCloser{ReadSeekCloser: r}, info, nil
+}
+
+func TestBodyReadErrorsDoNotCommitPartialWrites(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "reads"}, nil)
+	request := func(operation string, input map[string]any) error {
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: operation, Input: input, Identity: ident(), Body: &failingReadCloser{}})
+		return err
+	}
+	if err := request("PutObject", map[string]any{"Bucket": "reads", "Key": "object"}); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("put error = %v", err)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "reads", "Key": "object"}, nil); err == nil {
+		t.Fatal("failed PutObject committed partial data")
+	}
+	upload := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "reads", "Key": "multipart"}, nil).Output["UploadId"]
+	partInput := map[string]any{"Bucket": "reads", "Key": "multipart", "UploadId": upload, "PartNumber": 1}
+	if err := request("UploadPart", partInput); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("part error = %v", err)
+	}
+	parts := mustInvoke(t, p, "ListParts", partInput, nil).Output["Parts"]
+	if listed, _ := parts.([]any); len(listed) != 0 {
+		t.Fatalf("failed UploadPart committed partial data: %#v", listed)
+	}
+}
+
+func TestBlobReadErrorsDoNotReturnOrCopyPartialData(t *testing.T) {
+	deps := spitest.Deps(t)
+	blobs := &failingReadBlobs{BlobStore: deps.Blobs}
+	deps.Blobs = blobs
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "reads"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "reads", "Key": "source"}, []byte("complete body"))
+	blobs.fail = true
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "reads", "Key": "source"}, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("get error = %v", err)
+	}
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "reads", "Key": "copy", "CopySource": "reads/source"}, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("copy error = %v", err)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "reads", "Key": "copy"}, nil); err == nil {
+		t.Fatal("failed CopyObject committed partial data")
+	}
+	upload := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "reads", "Key": "multipart-copy"}, nil).Output["UploadId"]
+	partInput := map[string]any{"Bucket": "reads", "Key": "multipart-copy", "UploadId": upload, "PartNumber": 1, "CopySource": "reads/source", "CopySourceRange": "bytes=0-2"}
+	if _, err := invoke(t, p, "UploadPartCopy", partInput, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("part copy error = %v", err)
+	}
+	if listed, _ := mustInvoke(t, p, "ListParts", partInput, nil).Output["Parts"].([]any); len(listed) != 0 {
+		t.Fatalf("failed UploadPartCopy committed partial data: %#v", listed)
+	}
+}
+
+func TestExtraBodyReadErrorsDoNotCommitPartialData(t *testing.T) {
+	deps := spitest.Deps(t)
+	blobs := &failingReadBlobs{BlobStore: deps.Blobs}
+	deps.Blobs = blobs
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "reads"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "reads", "Key": "source"}, []byte("id,name\n1,Ada\n"))
+	blobs.fail = true
+	if _, err := invoke(t, p, "SelectObjectContent", map[string]any{"Bucket": "reads", "Key": "source", "Expression": "SELECT * FROM S3Object"}, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("select error = %v", err)
+	}
+
+	failedWrite := func(operation string, input map[string]any) error {
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: operation, Input: input, Identity: ident(), Body: &failingReadCloser{}})
+		return err
+	}
+	if err := failedWrite("WriteGetObjectResponse", map[string]any{"RequestRoute": "route", "RequestToken": "token"}); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("write response error = %v", err)
+	}
+	ctx := context.Background()
+	scope := deps.Store.Scope(ident().Account, ident().Region)
+	if _, ok, err := scope.Collection("wgor").Get(ctx, "route/token"); err != nil || ok {
+		t.Fatalf("failed response write persisted: ok=%v err=%v", ok, err)
+	}
+	if err := failedWrite("CreateBucketMetadataConfiguration", map[string]any{"Bucket": "reads"}); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("metadata error = %v", err)
+	}
+	if _, ok, err := scope.Collection("bktcfg").Get(ctx, "reads/metadata"); err != nil || ok {
+		t.Fatalf("failed metadata write persisted: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestCreateSessionRegistersTemporaryCredential(t *testing.T) {
 	deps := spitest.Deps(t)
 	response, err := invoke(t, s3.New(deps), "CreateSession", map[string]any{"Bucket": "directory-bucket"}, nil)
@@ -125,6 +252,12 @@ func readStream(t *testing.T, resp *spi.Response) []byte {
 
 func completedPart(number int, response *spi.Response) any {
 	return map[string]any{"PartNumber": number, "ETag": response.Headers.Get("ETag")}
+}
+
+func completedPartWithChecksum(number int, response *spi.Response, input, header string) any {
+	part := completedPart(number, response).(map[string]any)
+	part[input] = response.Headers.Get(header)
+	return part
 }
 
 func completeInput(uploadID string, parts ...any) map[string]any {
@@ -222,6 +355,16 @@ func TestCreateBucketTags(t *testing.T) {
 	if recreate.Code != "BucketAlreadyOwnedByYou" {
 		t.Fatalf("tagged recreation = %v", err)
 	}
+	for _, test := range []struct {
+		name string
+		tags any
+	}{{"empty-tagged-bucket", []any{}}, {"nil-tagged-bucket", nil}} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": test.name, "CreateBucketConfiguration": map[string]any{"Tags": test.tags}}, nil)
+		if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": test.name}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+			t.Fatalf("%s tags = %v", test.name, err)
+		}
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": test.name}, nil)
+	}
 	invalid := map[string]any{"Bucket": "invalid-tagged-bucket", "CreateBucketConfiguration": map[string]any{"Tags": []any{
 		map[string]any{"Key": "duplicate", "Value": "one"}, map[string]any{"Key": "duplicate", "Value": "two"},
 	}}}
@@ -235,6 +378,14 @@ func TestCreateBucketTags(t *testing.T) {
 	if invalidBucket.Code != "NoSuchBucket" {
 		t.Fatalf("invalid tags reserved bucket = %v", err)
 	}
+	reserved := map[string]any{"Bucket": "reserved-tagged-bucket", "CreateBucketConfiguration": map[string]any{"Tags": []any{
+		map[string]any{"Key": "aws:team", "Value": "storage"},
+	}}}
+	_, err = invoke(t, p, "CreateBucket", reserved, nil)
+	reservedTag := asFault(t, err)
+	if reservedTag.Code != "InvalidTag" || reservedTag.Message != `User-defined tag keys can't start with "aws:". This prefix is reserved for system tags. Remove "aws:" from your tag keys and try again.` || reservedTag.Fields != nil {
+		t.Fatalf("reserved create tag = %#v", reservedTag)
+	}
 	identity := ident()
 	accountRegional := "tagged-" + identity.Account + "-" + identity.Region + "-an"
 	mustInvokeAs(t, p, identity, "CreateBucket", map[string]any{
@@ -245,8 +396,22 @@ func TestCreateBucketTags(t *testing.T) {
 	}
 	golden.AssertJSON(t, map[string]any{
 		"tags": response.Output["TagSet"], "tagged recreation": recreate.Code,
-		"invalid tags": invalidTags.Code, "invalid bucket": invalidBucket.Code,
+		"invalid tags": invalidTags.Code, "invalid bucket": invalidBucket.Code, "reserved tag message": reservedTag.Message,
 	})
+}
+
+func TestMissingBucketFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	got := map[string]any{}
+	for _, operation := range []string{"GetObject", "DeleteBucket", "GetBucketNotificationConfiguration"} {
+		_, err := invoke(t, p, operation, map[string]any{"Bucket": "does-not-exist", "Key": "foobar"}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.Message != "The specified bucket does not exist" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "does-not-exist" {
+			t.Fatalf("%s missing bucket = %#v", operation, fault)
+		}
+		got[operation] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "bucketName": fault.Fields["BucketName"]}
+	}
+	golden.AssertJSON(t, got)
 }
 
 func TestBucketNotificationConfiguration(t *testing.T) {
@@ -296,7 +461,13 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 		{"missing events", "MalformedXML", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue"}}}},
 		{"wrong arn service", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sns:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"missing destination", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"invalid topic ARN", "InvalidArgument", map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "invalid-topic", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing topic", "InvalidArgument", map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "arn:aws:sns:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"invalid lambda ARN", "InvalidArgument", map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "invalid-lambda", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing lambda", "InvalidArgument", map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing filter name and value", "MalformedXML", notificationWithFilter(map[string]any{})},
 		{"missing filter value", "MalformedXML", notificationWithFilter(map[string]any{"Name": "prefix"})},
+		{"missing filter name", "MalformedXML", notificationWithFilter(map[string]any{"Value": "test"})},
 		{"invalid filter name", "InvalidArgument", notificationWithFilter(map[string]any{"Name": "contains", "Value": "x"})},
 		{"unknown field", "MalformedXML", map[string]any{"UnknownConfigurations": []any{}}},
 	}
@@ -316,10 +487,54 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 	if preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; !reflect.DeepEqual(preserved, got) {
 		t.Fatalf("invalid replacement = %#v", preserved)
 	}
+	emptyFilter := notificationWithFilter(map[string]any{"Name": "suffix", "Value": ""})
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": emptyFilter, "SkipDestinationValidation": true}, nil)
+	storedFilter := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output
+	queue = asMapForTest(asSliceForTest(storedFilter["QueueConfigurations"])[0])
+	key := asMapForTest(asMapForTest(queue["Filter"])["Key"])
+	rule := asMapForTest(asSliceForTest(key["FilterRules"])[0])
+	if rule["Name"] != "Suffix" || rule["Value"] != "" {
+		t.Fatalf("empty filter = %#v", storedFilter)
+	}
 	skipped := map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skipped, "SkipDestinationValidation": true}, nil)
 	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["QueueConfigurations"])) != 1 {
 		t.Fatalf("skipped destination validation = %#v", stored)
+	}
+	invalidLambda := map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "invalid-lambda", "Events": []any{"s3:ObjectCreated:*"}}}}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": invalidLambda, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid skipped lambda ARN = %v", err)
+	}
+	skippedLambda := map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skippedLambda, "SkipDestinationValidation": true}, nil)
+	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["LambdaFunctionConfigurations"])) != 1 {
+		t.Fatalf("skipped lambda validation = %#v", stored)
+	}
+	invalidTopic := map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "invalid-topic", "Events": []any{"s3:ObjectCreated:*"}}}}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": invalidTopic, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid skipped topic ARN = %v", err)
+	}
+	invalidQueue := map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "invalid-queue", "Events": []any{"s3:ObjectCreated:*"}}}}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": invalidQueue, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid skipped queue ARN = %v", err)
+	}
+	multipleInvalidQueues := map[string]any{"QueueConfigurations": []any{
+		map[string]any{"QueueArn": "invalid-queue-1", "Events": []any{"s3:ObjectCreated:*"}},
+		map[string]any{"QueueArn": "invalid-queue-2", "Events": []any{"s3:ObjectRemoved:*"}},
+	}}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": multipleInvalidQueues}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("multiple invalid queue ARNs = %v", err)
+	}
+	skippedTopic := map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "arn:aws:sns:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skippedTopic, "SkipDestinationValidation": true}, nil)
+	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["TopicConfigurations"])) != 1 {
+		t.Fatalf("skipped topic validation = %#v", stored)
+	}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": "missing-bucket", "NotificationConfiguration": skippedTopic, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "NoSuchBucket" {
+		t.Fatalf("missing bucket notification = %v", err)
+	}
+	if _, err := invoke(t, p, "GetBucketNotificationConfiguration", map[string]any{"Bucket": "missing-bucket"}, nil); asFault(t, err).Code != "NoSuchBucket" {
+		t.Fatalf("missing bucket notification read = %v", err)
 	}
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
 	if cleared := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(cleared) != 0 {
@@ -343,8 +558,14 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 	for _, key := range []string{"images/photo.jpg", "images/photo.png", "docs/photo.jpg"} {
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": key}, []byte(key))
 	}
+	const trace = "Root=1-3152b799-8954dae64eda91bc9a23a7e8;Parent=7fa8c0f79203be72;Sampled=1"
+	httpRequest := httptest.NewRequest(http.MethodPut, "http://s3.test/notification-delivery/images/traced.jpg", strings.NewReader("traced"))
+	httpRequest.Header.Set("X-Amzn-Trace-Id", trace)
+	if _, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PutObject", Input: map[string]any{"Bucket": input["Bucket"], "Key": "images/traced.jpg"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest}); err != nil {
+		t.Fatal(err)
+	}
 	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
-	if err != nil || len(messages) != 3 {
+	if err != nil || len(messages) != 4 {
 		t.Fatalf("filtered notifications = %#v, err=%v", messages, err)
 	}
 	found := false
@@ -358,6 +579,17 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("notification messages = %#v", messages)
+	}
+	received, err := sqs.New(deps).Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "queue", "MaxNumberOfMessages": 10, "AttributeNames": []any{"AWSTraceHeader"}, "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	traceFound := false
+	for _, message := range asSliceForTest(received.Output["Messages"]) {
+		traceFound = traceFound || asMapForTest(asMapForTest(message)["Attributes"])["AWSTraceHeader"] == trace
+	}
+	if !traceFound {
+		t.Fatalf("trace attributes = %#v", received.Output)
 	}
 }
 
@@ -373,13 +605,15 @@ func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
 		"Bucket": bucket,
 		"NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{
 			"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue",
-			"Events":   []any{"s3:ObjectRemoved:*", "s3:ObjectTagging:*"},
+			"Events":   []any{"s3:ObjectCreated:Put", "s3:ObjectRemoved:*", "s3:ObjectTagging:*"},
 		}}},
 	}, nil)
 
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "plain"}, []byte("plain"))
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "plain"}, nil)
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "missing"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "batch"}, []byte("batch"))
+	mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": bucket, "Delete": map[string]any{"Objects": []any{map[string]any{"Key": "batch"}, map[string]any{"Key": "batch-missing-1"}, map[string]any{"Key": "batch-missing-2"}}, "Quiet": true}}, nil)
 
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
 	version := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "versioned"}, []byte("versioned")).Headers.Get("x-amz-version-id")
@@ -408,9 +642,14 @@ func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
 			continue
 		}
 		record := asMapForTest(asSliceForTest(payload["Records"])[0])
-		events[record["eventName"].(string)]++
+		event := record["eventName"].(string)
+		object := asMapForTest(asMapForTest(record["s3"])["object"])
+		if event == "ObjectCreated:Put" && object["key"] == "versioned" && object["versionId"] != version {
+			t.Fatalf("versioned notification = %#v", record)
+		}
+		events[event]++
 	}
-	want := map[string]int{"ObjectRemoved:Delete": 2, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
+	want := map[string]int{"ObjectCreated:Put": 4, "ObjectRemoved:Delete": 5, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("notification events = %#v, want %#v", events, want)
 	}
@@ -424,7 +663,7 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 	ctx := context.Background()
 	id := ident()
 	path := t.TempDir() + "/event.json"
-	source := "import json\n\ndef lambda_handler(event, context):\n    open(" + strconv.Quote(path) + ", 'w').write(json.dumps(event))\n"
+	source := "import json\n\ndef lambda_handler(event, context):\n    open(" + strconv.Quote(path) + ", 'a').write(json.dumps(event) + '\\n')\n"
 	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
 		"FunctionName": "handler", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(source))},
@@ -438,21 +677,41 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
 		"Bucket": bucket,
 		"NotificationConfiguration": map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{
-			"LambdaFunctionArn": arn, "Events": []any{"s3:ObjectCreated:Put"},
+			"LambdaFunctionArn": arn, "Events": []any{"s3:ObjectCreated:*"},
 		}}},
 	}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	_ = writer.WriteField("key", "posted")
+	file, err := writer.CreateFormFile("file", "posted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.Write([]byte("posted"))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/"+bucket, &form)
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	if _, err := p.Invoke(ctx, &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": bucket}, Identity: id, Body: httpRequest.Body, HTTP: httpRequest}); err != nil {
+		t.Fatal(err)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatal(err)
+	events := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			t.Fatal(err)
+		}
+		record := asMapForTest(asSliceForTest(payload["Records"])[0])
+		events[record["eventName"].(string)] = asMapForTest(asMapForTest(record["s3"])["object"])["key"].(string)
 	}
-	record := asMapForTest(asSliceForTest(payload["Records"])[0])
-	if record["eventName"] != "ObjectCreated:Put" || asMapForTest(asMapForTest(record["s3"])["object"])["key"] != "created" {
-		t.Fatalf("lambda notification = %#v", payload)
+	if !reflect.DeepEqual(events, map[string]string{"ObjectCreated:Put": "created", "ObjectCreated:Post": "posted"}) {
+		t.Fatalf("lambda notifications = %#v", events)
 	}
 }
 
@@ -471,7 +730,7 @@ func TestBucketNotificationTopicDelivery(t *testing.T) {
 	invokePack(queuePack, "CreateQueue", map[string]any{"QueueName": "subscriber"})
 	topicARN := invokePack(topicPack, "CreateTopic", map[string]any{"Name": "object-events"}).Output["TopicArn"].(string)
 	invokePack(topicPack, "Subscribe", map[string]any{
-		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:123456789012:subscriber", "RawMessageDelivery": "true",
+		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:123456789012:subscriber",
 	})
 
 	p := s3.New(deps)
@@ -480,20 +739,43 @@ func TestBucketNotificationTopicDelivery(t *testing.T) {
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
 		"Bucket": bucket,
 		"NotificationConfiguration": map[string]any{"TopicConfigurations": []any{map[string]any{
-			"TopicArn": topicARN, "Events": []any{"s3:ObjectCreated:Put"},
+			"Id": "id123", "TopicArn": topicARN, "Events": []any{"s3:ObjectCreated:*"},
+			"Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "Prefix", "Value": "testupload/"}}}},
 		}}},
 	}, nil)
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "test/ignored"}, []byte("ignored"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "testupload/created"}, []byte("first event"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "testupload/created"}, []byte("second event"))
 	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "subscriber", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
-	if len(messages) != 2 {
+	if len(messages) != 3 {
 		t.Fatalf("topic notification = %#v", messages)
 	}
-	found := false
+	events := map[int]string{}
 	for _, message := range messages {
-		found = found || strings.Contains(asMapForTest(message)["Body"].(string), `"eventName":"ObjectCreated:Put"`)
+		var envelope map[string]any
+		if err := json.Unmarshal([]byte(asMapForTest(message)["Body"].(string)), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		body := envelope["Message"].(string)
+		if envelope["Type"] != "Notification" || envelope["TopicArn"] != topicARN || envelope["Subject"] != "Amazon S3 Notification" {
+			t.Fatalf("SNS envelope = %#v", envelope)
+		}
+		if strings.Contains(body, `"s3:TestEvent"`) {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatal(err)
+		}
+		record := asMapForTest(asSliceForTest(payload["Records"])[0])
+		object := asMapForTest(asMapForTest(record["s3"])["object"])
+		if record["eventSource"] != "aws:s3" || record["eventName"] != "ObjectCreated:Put" || asMapForTest(asMapForTest(record["s3"])["bucket"])["name"] != bucket || object["key"] != "testupload/created" {
+			t.Fatalf("S3 topic event = %#v", record)
+		}
+		events[int(object["size"].(float64))] = object["key"].(string)
 	}
-	if !found {
-		t.Fatalf("topic notification = %#v", messages)
+	if !reflect.DeepEqual(events, map[int]string{len("first event"): "testupload/created", len("second event"): "testupload/created"}) {
+		t.Fatalf("topic notification events = %#v", events)
 	}
 }
 
@@ -511,7 +793,7 @@ func TestBucketNotificationEventBridgeDelivery(t *testing.T) {
 		return response
 	}
 	invokePack(queuePack, "CreateQueue", map[string]any{"QueueName": "events"})
-	invokePack(eventPack, "PutRule", map[string]any{"Name": "s3", "EventPattern": `{"source":["aws.s3"],"detail-type":["Object Created"]}`})
+	invokePack(eventPack, "PutRule", map[string]any{"Name": "s3", "EventPattern": `{"source":["aws.s3"],"detail-type":["Object Created","Object Deleted","Object ACL Updated","Object Restore Initiated","Object Restore Completed"]}`})
 	invokePack(eventPack, "PutTargets", map[string]any{"Rule": "s3", "Targets": []any{map[string]any{
 		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:123456789012:events",
 	}}})
@@ -522,19 +804,62 @@ func TestBucketNotificationEventBridgeDelivery(t *testing.T) {
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
 		"Bucket": bucket, "NotificationConfiguration": map[string]any{"EventBridgeConfiguration": map[string]any{}},
 	}, nil)
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+	created := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	mustInvoke(t, p, "PutObjectAcl", map[string]any{"Bucket": bucket, "Key": "created", "ACL": "public-read"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "archived", "StorageClass": "GLACIER"}, []byte("archive"))
+	mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": bucket, "Key": "archived", "Days": 1}, nil)
+	mustInvokeAs(t, p, spi.Identity{Account: id.Account, Region: "us-west-2"}, "PutObject", map[string]any{"Bucket": bucket, "Key": "cross-region"}, []byte("regional"))
+	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "created"}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "created", "VersionId": created.Headers.Get("x-amz-version-id")}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Suspended"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("null-version"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "created", "VersionId": marker.Headers.Get("x-amz-version-id")}, nil)
 
 	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "events", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
-	if len(messages) != 1 {
+	if len(messages) != 10 {
 		t.Fatalf("eventbridge messages = %#v", messages)
 	}
-	var event map[string]any
-	if err := json.Unmarshal([]byte(asMapForTest(messages[0])["Body"].(string)), &event); err != nil {
-		t.Fatal(err)
+	byType := map[string][]map[string]any{}
+	for _, message := range messages {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(asMapForTest(message)["Body"].(string)), &event); err != nil {
+			t.Fatal(err)
+		}
+		detail := asMapForTest(event["detail"])
+		if event["source"] != "aws.s3" || event["region"] != id.Region || asMapForTest(detail["bucket"])["name"] != bucket {
+			t.Fatalf("eventbridge notification = %#v", event)
+		}
+		byType[event["detail-type"].(string)] = append(byType[event["detail-type"].(string)], detail)
 	}
-	detail := asMapForTest(event["detail"])
-	if event["source"] != "aws.s3" || event["detail-type"] != "Object Created" || asMapForTest(detail["bucket"])["name"] != bucket || asMapForTest(detail["object"])["key"] != "created" {
-		t.Fatalf("eventbridge notification = %#v", event)
+	if len(byType["Object Created"]) != 4 || len(byType["Object Deleted"]) != 3 || len(byType["Object ACL Updated"]) != 1 || len(byType["Object Restore Initiated"]) != 1 || len(byType["Object Restore Completed"]) != 1 {
+		t.Fatalf("eventbridge event types = %#v", byType)
+	}
+	createdKeys := map[string]bool{}
+	for _, detail := range byType["Object Created"] {
+		object := asMapForTest(detail["object"])
+		createdKeys[object["key"].(string)] = true
+		if object["key"] == "created" && object["version-id"] != created.Headers.Get("x-amz-version-id") {
+			if object["version-id"] != nil {
+				t.Fatalf("created version = %#v", detail)
+			}
+		}
+	}
+	if !createdKeys["created"] || !createdKeys["archived"] || !createdKeys["cross-region"] {
+		t.Fatalf("created keys = %#v", createdKeys)
+	}
+	deletionTypes := map[string]bool{}
+	for _, detail := range byType["Object Deleted"] {
+		deletionTypes[detail["deletion-type"].(string)] = true
+	}
+	if !deletionTypes["Delete Marker Created"] || !deletionTypes["Permanently Deleted"] {
+		t.Fatalf("deletion types = %#v", deletionTypes)
+	}
+	if object := asMapForTest(byType["Object ACL Updated"][0]["object"]); object["key"] != "created" || object["size"] != nil || object["sequencer"] != nil {
+		t.Fatalf("ACL event = %#v", byType["Object ACL Updated"][0])
+	}
+	if byType["Object Restore Completed"][0]["restore-expiry-time"] == "" || byType["Object Restore Completed"][0]["source-ip-address"] != nil {
+		t.Fatalf("restore completed event = %#v", byType["Object Restore Completed"][0])
 	}
 }
 
@@ -619,15 +944,21 @@ func TestCreateBucketObjectOwnership(t *testing.T) {
 	}
 	assertOwnership("bucketownerpreferred", "BucketOwnerPreferred")
 
-	_, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": "invalid-ownership", "ObjectOwnership": ""}, nil)
-	fault := asFault(t, err)
-	if fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "x-amz-object-ownership" {
-		t.Fatalf("invalid ownership = %#v", fault)
+	invalidOwnership := map[string]any{}
+	for i, ownership := range []string{"RandomValue", ""} {
+		bucket := fmt.Sprintf("invalid-ownership-%d", i)
+		_, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket, "ObjectOwnership": ownership}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.Message != "Invalid x-amz-object-ownership header: "+ownership || fault.HTTPStatus != http.StatusBadRequest ||
+			len(fault.Fields) != 1 || fault.Fields["ArgumentName"] != "x-amz-object-ownership" {
+			t.Fatalf("invalid ownership %q = %#v", ownership, fault)
+		}
+		invalidOwnership[fmt.Sprintf("%q", ownership)] = map[string]any{"code": fault.Code, "message": fault.Message, "argument": fault.Fields["ArgumentName"]}
+		if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": bucket}, nil); asFault(t, err).Code != "NoSuchBucket" {
+			t.Fatalf("invalid ownership %q reserved bucket: %v", ownership, err)
+		}
 	}
-	characterization["invalid"] = fault.Code
-	if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "invalid-ownership"}, nil); asFault(t, err).Code != "NoSuchBucket" {
-		t.Fatalf("invalid ownership reserved bucket: %v", err)
-	}
+	characterization["invalid"] = invalidOwnership
 
 	id := ident()
 	regional := "owned-" + id.Account + "-" + id.Region + "-an"
@@ -684,15 +1015,19 @@ func TestBucketOwnershipControls(t *testing.T) {
 func TestPublicAccessBlock(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block"}, nil)
+	defaultConfiguration := map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": true, "IgnorePublicAcls": true, "RestrictPublicBuckets": true}
+	if got := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil).Output["PublicAccessBlockConfiguration"]; !reflect.DeepEqual(got, defaultConfiguration) {
+		t.Fatalf("default configuration = %#v", got)
+	}
 	put := func(configuration any) error {
 		_, err := invoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block", "PublicAccessBlockConfiguration": configuration}, nil)
 		return err
 	}
-	if err := put(map[string]any{"BlockPublicAcls": true}); err != nil {
+	if err := put(map[string]any{"BlockPublicAcls": false, "BlockPublicPolicy": false, "IgnorePublicAcls": false}); err != nil {
 		t.Fatal(err)
 	}
 	response := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
-	want := map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
+	want := map[string]any{"BlockPublicAcls": false, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
 	if got := response.Output["PublicAccessBlockConfiguration"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("configuration = %#v", got)
 	}
@@ -705,10 +1040,17 @@ func TestPublicAccessBlock(t *testing.T) {
 	if got := response.Output["PublicAccessBlockConfiguration"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("invalid put replaced configuration = %#v", got)
 	}
-	mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
-	mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
-	if _, err := invoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil); asFault(t, err).Code != "NoSuchPublicAccessBlockConfiguration" {
-		t.Fatalf("get deleted configuration: %v", err)
+	if response := mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil); response.Status != http.StatusNoContent {
+		t.Fatalf("delete status = %d", response.Status)
+	}
+	if response := mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil); response.Status != http.StatusNoContent {
+		t.Fatalf("idempotent delete status = %d", response.Status)
+	}
+	_, err := invoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
+	missing := asFault(t, err)
+	if missing.Code != "NoSuchPublicAccessBlockConfiguration" || missing.Message != "The public access block configuration was not found" ||
+		missing.HTTPStatus != http.StatusNotFound || missing.Fields["BucketName"] != "public-access-block" {
+		t.Fatalf("get deleted configuration: %#v", missing)
 	}
 }
 
@@ -755,7 +1097,7 @@ func TestBucketAccelerateConfiguration(t *testing.T) {
 			t.Fatalf("status %q response=%#v got=%q", status, response, get())
 		}
 	}
-	for _, status := range []string{"", "Invalid"} {
+	for _, status := range []string{"enabled", "random"} {
 		_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate", "AccelerateConfiguration": map[string]any{"Status": status}}, nil)
 		if fault := asFault(t, err); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("status %q fault=%#v", status, fault)
@@ -765,8 +1107,8 @@ func TestBucketAccelerateConfiguration(t *testing.T) {
 		t.Fatalf("invalid put replaced status = %q", got)
 	}
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate.with.period"}, nil)
-	_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate.with.period", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+	_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate.with.period", "AccelerateConfiguration": map[string]any{"Status": "random"}}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "S3 Transfer Acceleration is not supported for buckets with periods (.) in their names" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("period bucket fault=%#v", fault)
 	}
 }
@@ -835,6 +1177,11 @@ func TestBucketCors(t *testing.T) {
 		map[string]any{"AllowedMethods": []any{"GET", "HEAD"}, "AllowedOrigins": []any{"https://example.test"}, "AllowedHeaders": []any{"*"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": float64(300), "ID": "read"},
 		map[string]any{"AllowedMethods": []any{"PUT", "POST", "DELETE"}, "AllowedOrigins": []any{"*"}},
 	}
+	emptyOrigin := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{""}}}
+	mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "cors", "CORSConfiguration": map[string]any{"CORSRules": emptyOrigin}}, nil)
+	if got := mustInvoke(t, p, "GetBucketCors", input, nil).Output["CORSRules"]; !reflect.DeepEqual(got, emptyOrigin) {
+		t.Fatalf("empty CORS origin = %#v", got)
+	}
 	mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "cors", "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
 	if got := mustInvoke(t, p, "GetBucketCors", input, nil).Output["CORSRules"]; !reflect.DeepEqual(got, rules) {
 		t.Fatalf("CORS rules = %#v", got)
@@ -873,6 +1220,126 @@ func TestBucketCors(t *testing.T) {
 	_, err = invoke(t, p, "GetBucketCors", input, nil)
 	if fault := asFault(t, err); fault.Code != "NoSuchCORSConfiguration" {
 		t.Fatalf("deleted CORS fault = %#v", fault)
+	}
+}
+
+func TestBucketCorsHTTP(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "cors-http"}, nil)
+	rules := []any{map[string]any{
+		"AllowedMethods": []any{"GET", "PUT"}, "AllowedOrigins": []any{"https://*.example.test"},
+		"AllowedHeaders": []any{"x-amz-*"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": float64(300),
+	}}
+	mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "cors-http", "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "cors-http", "Key": "key"}, []byte("body"))
+
+	request := httptest.NewRequest(http.MethodOptions, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)
+	request.Header.Set("Origin", "https://app.example.test")
+	request.Header.Set("Access-Control-Request-Method", "GET")
+	request.Header.Set("Access-Control-Request-Headers", "x-amz-request-payer,x-AMZ-meta-team")
+	response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+	if err != nil || response.Status != http.StatusOK || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.example.test" || response.Headers.Get("Access-Control-Allow-Credentials") != "true" || response.Headers.Get("Access-Control-Allow-Headers") != "x-amz-request-payer, x-amz-meta-team" || response.Headers.Get("Access-Control-Expose-Headers") != "ETag" || response.Headers.Get("Access-Control-Max-Age") != "300" || response.Headers.Get("Vary") == "" {
+		t.Fatalf("matching preflight = %#v, %v", response, err)
+	}
+	request.Header.Set("Origin", "https://.example.test")
+	request.Header.Set("Access-Control-Request-Headers", " ")
+	response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://.example.test" || response.Headers.Get("Access-Control-Allow-Headers") != "" {
+		t.Fatalf("empty requested header = %#v, %v", response, err)
+	}
+
+	for _, rejected := range []struct{ name, origin, method, headers string }{
+		{"method", "https://app.example.test", "DELETE", ""},
+		{"origin", "https://wrong.test", "GET", ""},
+		{"partial origin", "https://app.example.test/", "GET", ""},
+		{"header", "https://app.example.test", "GET", "content-type"},
+	} {
+		t.Run(rejected.name, func(t *testing.T) {
+			request.Header.Set("Origin", rejected.origin)
+			request.Header.Set("Access-Control-Request-Method", rejected.method)
+			request.Header.Set("Access-Control-Request-Headers", rejected.headers)
+			_, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+			if fault := asFault(t, err); fault.Code != "AccessForbidden" || fault.HTTPStatus != http.StatusForbidden || fault.Fields["Method"] != rejected.method || fault.Fields["ResourceType"] != "OBJECT" {
+				t.Fatalf("rejected preflight = %#v", fault)
+			}
+		})
+	}
+
+	noOrigin := httptest.NewRequest(http.MethodOptions, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)
+	_, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: noOrigin})
+	if fault := asFault(t, err); fault.Code != "BadRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing origin = %#v", fault)
+	}
+
+	unconfigured := s3.New(spitest.Deps(t))
+	mustInvoke(t, unconfigured, "CreateBucket", map[string]any{"Bucket": "cors-none"}, nil)
+	mustInvoke(t, unconfigured, "PutObject", map[string]any{"Bucket": "cors-none", "Key": "key"}, []byte("body"))
+	noConfig := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com/key", nil)
+	noConfig.Header.Set("Origin", "https://app.example.test")
+	_, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: noConfig})
+	if fault := asFault(t, err); fault.Code != "AccessForbidden" || fault.Message != "CORSResponse: CORS is not enabled for this bucket." || fault.Fields["Method"] != http.MethodOptions {
+		t.Fatalf("unconfigured preflight = %#v", fault)
+	}
+	noConfig.Header.Set("Origin", "https://app.localstack.cloud")
+	noConfig.Header.Set("Access-Control-Request-Private-Network", "true")
+	response, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: noConfig})
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" || response.Headers.Get("Access-Control-Allow-Methods") != "HEAD,GET,PUT,POST,DELETE,OPTIONS,PATCH" || response.Headers.Get("Access-Control-Allow-Private-Network") != "true" || response.Headers.Get("Vary") != "Origin" {
+		t.Fatalf("LocalStack default preflight = %#v, %v", response, err)
+	}
+	for _, origin := range []string{"http://app.localstack.cloud", "https://localhost", "https://localhost.localstack.cloud", "file://", "http://localhost:4566", "https://localhost.localstack.cloud:4566", "http://bucket.s3-website.localhost.localstack.cloud:4566", "http://distribution.cloudfront.localhost:4566"} {
+		request := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com:4566/key", nil)
+		request.Header.Set("Origin", origin)
+		response, err := unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+		if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != origin {
+			t.Errorf("LocalStack default origin %q = %#v, %v", origin, response, err)
+		}
+	}
+	for _, origin := range []string{"http://localhost:9999", "http://bucket.s3-website.evil.test:4566", "http://distribution.cloudfront.evil.test:4566"} {
+		forbidden := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com:4566/key", nil)
+		forbidden.Header.Set("Origin", origin)
+		_, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: forbidden})
+		if fault := asFault(t, err); fault.Code != "AccessForbidden" {
+			t.Errorf("forbidden default origin %q = %#v", origin, fault)
+		}
+	}
+	for origin, want := range map[string]string{"https://unconfigured.example": "", "https://app.localstack.cloud": "https://app.localstack.cloud"} {
+		request := httptest.NewRequest(http.MethodGet, "https://cors-none.s3.us-east-1.amazonaws.com/key", nil)
+		request.Header.Set("Origin", origin)
+		response, err := unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+		if err != nil {
+			t.Errorf("unconfigured GET origin %q = %#v, %v", origin, response, err)
+			continue
+		}
+		if response.Headers.Get("Access-Control-Allow-Origin") != want {
+			t.Errorf("unconfigured GET origin %q = %#v", origin, response)
+		}
+		if response.Stream != nil {
+			_ = response.Stream.Close()
+		}
+	}
+	for name, target := range map[string]struct {
+		operation string
+		input     map[string]any
+	}{"list buckets": {"ListBuckets", map[string]any{}}, "missing bucket": {"GetObject", map[string]any{"Bucket": "missing", "Key": "key"}}} {
+		request := httptest.NewRequest(http.MethodOptions, "https://s3.us-east-1.amazonaws.com/", nil)
+		request.Header.Set("Origin", "https://app.localstack.cloud")
+		response, err := unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: target.operation, Input: target.input, Identity: ident(), HTTP: request})
+		if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
+			t.Errorf("LocalStack default %s = %#v, %v", name, response, err)
+		}
+	}
+	list := httptest.NewRequest(http.MethodGet, "https://s3.us-east-1.amazonaws.com/", nil)
+	list.Header.Set("Origin", "https://app.localstack.cloud")
+	response, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListBuckets", Input: map[string]any{}, Identity: ident(), HTTP: list})
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
+		t.Fatalf("LocalStack default ListBuckets GET = %#v, %v", response, err)
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)
+	get.Header.Set("Origin", "https://app.example.test")
+	response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: get})
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.example.test" || response.Headers.Get("Access-Control-Allow-Methods") != "GET, PUT" {
+		t.Fatalf("matching actual request = %#v, %v", response, err)
 	}
 }
 
@@ -1128,13 +1595,14 @@ func TestBucketPolicyConfiguration(t *testing.T) {
 	input := map[string]any{"Bucket": "policy"}
 	mustInvoke(t, p, "CreateBucket", input, nil)
 	_, err := invoke(t, p, "GetBucketPolicy", input, nil)
-	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "policy" {
+	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" || fault.Message != "The bucket policy does not exist" ||
+		fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "policy" {
 		t.Fatalf("default policy fault = %#v", fault)
 	}
 
 	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy/*"}]}`
 	put := mustInvoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": "policy", "Policy": policy}, nil)
-	if put.Status != http.StatusOK || len(put.Output) != 0 {
+	if put.Status != http.StatusNoContent || len(put.Output) != 0 {
 		t.Fatalf("put policy = %#v", put)
 	}
 	if got := mustInvoke(t, p, "GetBucketPolicy", input, nil).Output["Policy"]; got != policy {
@@ -1162,10 +1630,13 @@ func TestBucketPolicyConfiguration(t *testing.T) {
 		})
 	}
 	for range 2 {
-		mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
+		if deleted := mustInvoke(t, p, "DeleteBucketPolicy", input, nil); deleted.Status != http.StatusNoContent {
+			t.Fatalf("delete policy = %#v", deleted)
+		}
 	}
 	_, err = invoke(t, p, "GetBucketPolicy", input, nil)
-	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" {
+	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" || fault.Message != "The bucket policy does not exist" ||
+		fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "policy" {
 		t.Fatalf("deleted policy fault = %#v", fault)
 	}
 }
@@ -1189,6 +1660,12 @@ func TestBucketLifecycleExpirationHeaders(t *testing.T) {
 	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "images/a.jpg", "Tagging": "class=temporary"}, []byte("photo"))
 	if got := put.Headers.Get("x-amz-expiration"); got != expected {
 		t.Fatalf("put expiration = %q", got)
+	}
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket["Bucket"], "Key": "images/multipart.jpg", "Tagging": "class=temporary"}, nil).Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket["Bucket"], "Key": "images/multipart.jpg", "UploadId": uploadID, "PartNumber": 1}, []byte("photo"))
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+	if got := completed.Headers.Get("x-amz-expiration"); got != expected {
+		t.Fatalf("complete expiration = %q", got)
 	}
 	copy := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "images/copied.jpg", "CopySource": "lifecycle-expiration/images/a.jpg"}, nil)
 	if got := copy.Headers.Get("x-amz-expiration"); got != "" {
@@ -1349,6 +1826,62 @@ func TestNamedBucketConfigurations(t *testing.T) {
 	})
 }
 
+func TestBucketMetricsConfigurationCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "metrics-characterization"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+	configuration := map[string]any{"Id": "metrics", "Filter": map[string]any{"Prefix": "logs/"}}
+	put := mustInvoke(t, p, "PutBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics", "MetricsConfiguration": configuration}, nil)
+	configured := mustInvoke(t, p, "GetBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+	configuration["Filter"] = map[string]any{"Prefix": "logs/new-prefix"}
+	overwrite := mustInvoke(t, p, "PutBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics", "MetricsConfiguration": configuration}, nil)
+	overwritten := mustInvoke(t, p, "GetBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+	mustInvoke(t, p, "PutBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "other", "MetricsConfiguration": map[string]any{"Id": "other", "Filter": map[string]any{"Prefix": "logs/prefix"}}}, nil)
+	listed := mustInvoke(t, p, "ListBucketMetricsConfigurations", bucket, nil)
+	_, missingErr := invoke(t, p, "GetBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "missing"}, nil)
+	deleted := mustInvoke(t, p, "DeleteBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+	_, finalErr := invoke(t, p, "GetBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+	_, repeatedDeleteErr := invoke(t, p, "DeleteBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+
+	pageBucket := map[string]any{"Bucket": "metrics-pagination"}
+	mustInvoke(t, p, "CreateBucket", pageBucket, nil)
+	for i := range 102 {
+		id := fmt.Sprintf("%03d", i+100)
+		mustInvoke(t, p, "PutBucketMetricsConfiguration", map[string]any{"Bucket": pageBucket["Bucket"], "Id": id, "MetricsConfiguration": map[string]any{"Id": id, "Filter": map[string]any{"Prefix": "logs/prefix"}}}, nil)
+	}
+	first := mustInvoke(t, p, "ListBucketMetricsConfigurations", pageBucket, nil)
+	firstItems := asSliceForTest(first.Output["MetricsConfigurationList"])
+	token := first.Output["NextContinuationToken"]
+	second := mustInvoke(t, p, "ListBucketMetricsConfigurations", map[string]any{"Bucket": pageBucket["Bucket"], "ContinuationToken": token}, nil)
+	secondItems := asSliceForTest(second.Output["MetricsConfigurationList"])
+	missing, final, repeatedDelete := asFault(t, missingErr), asFault(t, finalErr), asFault(t, repeatedDeleteErr)
+	listedItems := asSliceForTest(listed.Output["MetricsConfigurationList"])
+
+	golden.AssertJSON(t, map[string]any{
+		"configured": configured.Output,
+		"deleted":    deleted.Status,
+		"final":      map[string]any{"code": final.Code, "message": final.Message, "status": final.HTTPStatus},
+		"list": map[string]any{
+			"ids":         []any{asMapForTest(listedItems[0])["Id"], asMapForTest(listedItems[1])["Id"]},
+			"isTruncated": listed.Output["IsTruncated"],
+		},
+		"missing":        map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
+		"overwrite":      overwrite.Status,
+		"overwritten":    overwritten.Output,
+		"put":            put.Status,
+		"repeatedDelete": map[string]any{"code": repeatedDelete.Code, "message": repeatedDelete.Message, "status": repeatedDelete.HTTPStatus},
+		"pagination": map[string]any{
+			"firstCount":        len(firstItems),
+			"firstId":           asMapForTest(firstItems[0])["Id"],
+			"firstIsTruncated":  first.Output["IsTruncated"],
+			"secondCount":       len(secondItems),
+			"secondFirstId":     asMapForTest(secondItems[0])["Id"],
+			"secondIsTruncated": second.Output["IsTruncated"],
+			"tokenEchoed":       second.Output["ContinuationToken"] == token,
+		},
+	})
+}
+
 func TestBucketAndObjectACLConfigurations(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	bucket := map[string]any{"Bucket": "acl-configurations"}
@@ -1447,6 +1980,40 @@ func TestBucketAndObjectACLConfigurations(t *testing.T) {
 	}
 }
 
+func TestOwnerDisplayNamesMatchCurrentLocalStack(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "owner-display-name"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+
+	listedOwner := asMapForTest(mustInvoke(t, p, "ListBuckets", nil, nil).Output["Owner"])
+	defaultACL := mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output
+	defaultOwner := asMapForTest(defaultACL["Owner"])
+	defaultGrantee := asMapForTest(asMapForTest(asSliceForTest(defaultACL["Grants"])[0])["Grantee"])
+	if listedOwner["DisplayName"] != nil || defaultOwner["DisplayName"] != nil || defaultGrantee["DisplayName"] != nil {
+		t.Fatalf("deprecated owner display names: list=%#v owner=%#v grantee=%#v", listedOwner, defaultOwner, defaultGrantee)
+	}
+
+	id := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	mustInvoke(t, p, "PutBucketAcl", map[string]any{"Bucket": bucket["Bucket"], "GrantRead": `id="` + id + `"`}, nil)
+	grant := asMapForTest(asMapForTest(asSliceForTest(mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output["Grants"])[0])["Grantee"])
+	if grant["ID"] != id || grant["DisplayName"] != nil {
+		t.Fatalf("canonical grant = %#v", grant)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "private", "ACL": "private"}, []byte("body"))
+	privateACL := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "private"}, nil).Output
+	privateOwner := asMapForTest(privateACL["Owner"])
+	privateGrantee := asMapForTest(asMapForTest(asSliceForTest(privateACL["Grants"])[0])["Grantee"])
+	if privateOwner["DisplayName"] != nil || privateGrantee["DisplayName"] != nil {
+		t.Fatalf("private object display names: owner=%#v grantee=%#v", privateOwner, privateGrantee)
+	}
+
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket["Bucket"], "Key": "multipart"}, nil)
+	parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket["Bucket"], "Key": "multipart", "UploadId": created.Output["UploadId"]}, nil).Output
+	if asMapForTest(parts["Initiator"])["DisplayName"] != "webfile" || asMapForTest(parts["Owner"])["DisplayName"] != nil {
+		t.Fatalf("multipart identities = %#v", parts)
+	}
+}
+
 func TestACLCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	bucket := map[string]any{"Bucket": "acl-characterization"}
@@ -1513,25 +2080,28 @@ func TestBucketPolicyCharacterization(t *testing.T) {
 	_, invalidErr := invoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": input["Bucket"], "Policy": `{}`}, nil)
 	preserved := mustInvoke(t, p, "GetBucketPolicy", input, nil)
 	deleted := mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
+	idempotentDelete := mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
 	_, finalErr := invoke(t, p, "GetBucketPolicy", input, nil)
 	missing, invalid, final := asFault(t, missingErr), asFault(t, invalidErr), asFault(t, finalErr)
 	golden.AssertJSON(t, map[string]any{
 		"configured": configured.Output,
-		"deleted":    deleted.Status,
-		"final":      map[string]any{"code": final.Code, "bucket": final.Fields["BucketName"]},
+		"deleted":    []any{deleted.Status, idempotentDelete.Status},
+		"final":      map[string]any{"code": final.Code, "message": final.Message, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
 		"invalid":    map[string]any{"code": invalid.Code, "message": invalid.Message},
-		"missing":    map[string]any{"code": missing.Code, "bucket": missing.Fields["BucketName"]},
+		"missing":    map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus, "bucket": missing.Fields["BucketName"]},
 		"preserved":  preserved.Output,
 		"put":        put.Status,
 	})
 }
 
 func TestBucketEncryptionCharacterization(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	bucket := map[string]any{"Bucket": "encryption-characterization"}
 	mustInvoke(t, p, "CreateBucket", bucket, nil)
 	before := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
 	keyID := "arn:aws:kms:us-east-1:000000000000:key/characterization"
+	spitest.SeedKMSKey(t, deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, keyID, "Enabled")
 	rules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "aws:kms", "KMSMasterKeyID": keyID}, "BucketKeyEnabled": true}}
 	put := mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": map[string]any{"Rules": rules}}, nil)
 	configured := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
@@ -1564,6 +2134,9 @@ func TestBucketLifecycleCharacterization(t *testing.T) {
 	configured := mustInvoke(t, p, "GetBucketLifecycleConfiguration", input, nil)
 	object := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "logs/app.log"}, []byte("entry"))
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": input["Bucket"], "Key": "logs/app.log"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": input["Bucket"], "Key": "logs/multipart.log"}, nil).Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": input["Bucket"], "Key": "logs/multipart.log", "UploadId": uploadID, "PartNumber": 1}, []byte("entry"))
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
 	_, invalidErr := invoke(t, p, "PutBucketLifecycleConfiguration", map[string]any{"Bucket": input["Bucket"], "LifecycleConfiguration": map[string]any{"Rules": []any{map[string]any{"ID": "invalid", "Filter": map[string]any{"Prefix": "a", "Tag": map[string]any{"Key": "k", "Value": "v"}}, "Status": "Enabled"}}}}, nil)
 	invalid := asFault(t, invalidErr)
 	preserved := mustInvoke(t, p, "GetBucketLifecycleConfiguration", input, nil)
@@ -1574,7 +2147,7 @@ func TestBucketLifecycleCharacterization(t *testing.T) {
 		"default": map[string]any{"code": before.Code, "message": before.Message, "status": before.HTTPStatus, "bucket": before.Fields["BucketName"]},
 		"put":     map[string]any{"status": put.Status, "transitionMinimum": put.Headers.Get("x-amz-transition-default-minimum-object-size")},
 		"get":     map[string]any{"output": configured.Output, "transitionMinimum": configured.Headers.Get("x-amz-transition-default-minimum-object-size")},
-		"object":  map[string]any{"putExpiration": object.Headers.Get("x-amz-expiration"), "headExpiration": head.Headers.Get("x-amz-expiration")},
+		"object":  map[string]any{"putExpiration": object.Headers.Get("x-amz-expiration"), "headExpiration": head.Headers.Get("x-amz-expiration"), "completeExpiration": completed.Headers.Get("x-amz-expiration")},
 		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus}, "preserved": preserved.Output,
 		"delete":  map[string]any{"status": deleted.Status},
 		"deleted": map[string]any{"code": final.Code, "message": final.Message, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
@@ -1587,20 +2160,41 @@ func TestBucketCorsCharacterization(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", input, nil)
 	_, beforeErr := invoke(t, p, "GetBucketCors", input, nil)
 	before := asFault(t, beforeErr)
-	rules := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}, "ID": "read"}}
+	rules := []any{map[string]any{"AllowedMethods": []any{"GET", "PUT"}, "AllowedOrigins": []any{"https://*.example.test"}, "AllowedHeaders": []any{"x-amz-*"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": float64(300), "ID": "read"}}
 	put := mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
 	after := mustInvoke(t, p, "GetBucketCors", input, nil)
+	preflightRequest := httptest.NewRequest(http.MethodOptions, "https://cors-characterization.s3.us-east-1.amazonaws.com/key", nil)
+	preflightRequest.Header.Set("Origin", "https://app.example.test")
+	preflightRequest.Header.Set("Access-Control-Request-Method", "GET")
+	preflightRequest.Header.Set("Access-Control-Request-Headers", "x-amz-request-payer,x-amz-meta-team")
+	preflight, preflightErr := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: preflightRequest})
+	if preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
+	preflightRequest.Header.Set("Origin", "https://wrong.test")
+	_, rejectedErr := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: preflightRequest})
+	rejected := asFault(t, rejectedErr)
 	_, invalidErr := invoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSRules": []any{map[string]any{"AllowedMethods": []any{"OPTIONS"}, "AllowedOrigins": []any{"*"}}}}, nil)
 	invalid := asFault(t, invalidErr)
 	preserved := mustInvoke(t, p, "GetBucketCors", input, nil)
 	deleted := mustInvoke(t, p, "DeleteBucketCors", input, nil)
 	_, finalErr := invoke(t, p, "GetBucketCors", input, nil)
 	final := asFault(t, finalErr)
+	defaultRequest := httptest.NewRequest(http.MethodOptions, "https://cors-characterization.s3.us-east-1.amazonaws.com/key", nil)
+	defaultRequest.Header.Set("Origin", "https://app.localstack.cloud")
+	defaultRequest.Header.Set("Access-Control-Request-Method", "GET")
+	localstackDefault, defaultErr := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: defaultRequest})
+	if defaultErr != nil {
+		t.Fatal(defaultErr)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"default": map[string]any{"code": before.Code, "status": before.HTTPStatus, "bucket": before.Fields["BucketName"]},
 		"put":     put.Output, "get": after.Output,
-		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus},
-		"preserved": preserved.Output, "delete": deleted.Output,
+		"preflight":         map[string]any{"status": preflight.Status, "headers": preflight.Headers},
+		"rejected":          map[string]any{"code": rejected.Code, "message": rejected.Message, "method": rejected.Fields["Method"], "resourceType": rejected.Fields["ResourceType"], "status": rejected.HTTPStatus},
+		"localstackDefault": map[string]any{"status": localstackDefault.Status, "headers": localstackDefault.Headers},
+		"invalid":           map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus},
+		"preserved":         preserved.Output, "delete": deleted.Output,
 		"deleted": map[string]any{"code": final.Code, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
 	})
 }
@@ -1662,6 +2256,21 @@ func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
 			delivery["object"] = payload
 		}
 	}
+	filterFaults := map[string]any{}
+	for name, rule := range map[string]map[string]any{
+		"missing":      {},
+		"missingName":  {"Value": "test"},
+		"missingValue": {"Name": "prefix"},
+		"invalidName":  {"Name": "INVALID", "Value": "test"},
+	} {
+		configuration := map[string]any{"QueueConfigurations": []any{map[string]any{
+			"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"},
+			"Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{rule}}},
+		}}}
+		_, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration, "SkipDestinationValidation": true}, nil)
+		fault := asFault(t, err)
+		filterFaults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "argument": fault.Fields["ArgumentName"], "value": fault.Fields["ArgumentValue"]}
+	}
 	_, invalidErr := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:missing", "Events": []any{"s3:ObjectCreated:*"}}}}}, nil)
 	invalid := asFault(t, invalidErr)
 	preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
@@ -1669,8 +2278,9 @@ func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
 	final := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
 	golden.AssertJSON(t, map[string]any{
 		"default": before.Output, "put": put.Output, "get": after.Output, "delivery": delivery,
-		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
-		"preserved": preserved.Output, "clear": cleared.Output, "cleared": final.Output,
+		"filterFaults": filterFaults,
+		"invalid":      map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
+		"preserved":    preserved.Output, "clear": cleared.Output, "cleared": final.Output,
 	})
 }
 
@@ -1699,14 +2309,24 @@ func TestBucketAccelerateConfigurationCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate-characterization"}, nil)
 	before := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
-	put := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
-	after := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
-	_, invalidErr := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Invalid"}}, nil)
-	invalid := asFault(t, invalidErr)
+	putEnabled := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
+	enabled := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	putSuspended := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Suspended"}}, nil)
+	suspended := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	invalid := map[string]any{}
+	for _, status := range []string{"enabled", "random"} {
+		_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": status}}, nil)
+		fault := asFault(t, err)
+		invalid[status] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}
+	}
 	preserved := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate.characterization"}, nil)
+	_, dottedErr := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate.characterization", "AccelerateConfiguration": map[string]any{"Status": "random"}}, nil)
+	dotted := asFault(t, dottedErr)
 	golden.AssertJSON(t, map[string]any{
-		"default": before.Output, "put": put.Output, "get": after.Output,
-		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus}, "preserved": preserved.Output,
+		"default": before.Output, "putEnabled": putEnabled.Output, "enabled": enabled.Output,
+		"putSuspended": putSuspended.Output, "suspended": suspended.Output, "invalid": invalid, "preserved": preserved.Output,
+		"dotted": map[string]any{"code": dotted.Code, "message": dotted.Message, "status": dotted.HTTPStatus},
 	})
 }
 
@@ -1728,6 +2348,7 @@ func TestBucketRequestPaymentCharacterization(t *testing.T) {
 func TestPublicAccessBlockCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
+	defaultConfiguration := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
 	put := mustInvoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization", "PublicAccessBlockConfiguration": map[string]any{"IgnorePublicAcls": true}}, nil)
 	get := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
 	_, invalidErr := invoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization", "PublicAccessBlockConfiguration": map[string]any{"Unknown": true}}, nil)
@@ -1736,10 +2357,10 @@ func TestPublicAccessBlockCharacterization(t *testing.T) {
 	_, missingErr := invoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
 	missing := asFault(t, missingErr)
 	golden.AssertJSON(t, map[string]any{
-		"put": put.Output, "get": get.Output,
+		"default": defaultConfiguration.Output, "put": put.Output, "get": get.Output,
 		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus},
 		"delete":  deleted.Status,
-		"missing": map[string]any{"code": missing.Code, "status": missing.HTTPStatus},
+		"missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus, "bucket": missing.Fields["BucketName"]},
 	})
 }
 
@@ -1755,12 +2376,15 @@ func TestBucketOwnershipControlsCharacterization(t *testing.T) {
 	secondDelete := mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
 	_, missingErr := invoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
 	missing := asFault(t, missingErr)
+	if missing.Code != "OwnershipControlsNotFoundError" || missing.Message != "The bucket ownership controls were not found" || missing.HTTPStatus != http.StatusNotFound || missing.Fields["BucketName"] != "ownership-characterization" {
+		t.Fatalf("missing ownership controls = %#v", missing)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"put":     map[string]any{"status": put.Status, "output": put.Output},
 		"get":     get.Output,
 		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus},
 		"delete":  []any{firstDelete.Status, secondDelete.Status},
-		"missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
+		"missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus, "bucket": missing.Fields["BucketName"]},
 	})
 }
 
@@ -1770,7 +2394,7 @@ func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	characterization := map[string]any{}
 	name := "team-" + east.Account + "-" + east.Region + "-an"
 	input := map[string]any{"Bucket": name, "BucketNamespace": "account-regional"}
-	if got, err := invokeAs(t, p, east, "CreateBucket", input, nil); err != nil || got.Headers.Get("Location") != "/"+name {
+	if got, err := invokeAs(t, p, east, "CreateBucket", input, nil); err != nil || got.Headers.Get("Location") != "/"+name || got.Output["BucketArn"] != "arn:aws:s3:::"+name {
 		t.Fatalf("create = %#v %v", got, err)
 	} else {
 		characterization["east-location"] = got.Headers.Get("Location")
@@ -1816,7 +2440,7 @@ func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
 	westName := "team-" + west.Account + "-" + west.Region + "-an"
 	westInput := map[string]any{"Bucket": westName, "BucketNamespace": "account-regional", "LocationConstraint": west.Region}
-	if got, err := invokeAs(t, p, west, "CreateBucket", westInput, nil); err != nil || got.Headers.Get("Location") != "/"+westName {
+	if got, err := invokeAs(t, p, west, "CreateBucket", westInput, nil); err != nil || got.Headers.Get("Location") != "/"+westName || got.Output["BucketArn"] != "arn:aws:s3:::"+westName {
 		t.Fatalf("west create = %#v %v", got, err)
 	} else {
 		characterization["west-location"] = got.Headers.Get("Location")
@@ -1841,7 +2465,10 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 		if id.Region != "us-east-1" {
 			input["LocationConstraint"] = id.Region
 		}
-		mustInvokeAs(t, p, id, "CreateBucket", input, nil)
+		created := mustInvokeAs(t, p, id, "CreateBucket", input, nil)
+		if created.Output["BucketArn"] != "arn:aws:s3:::"+name {
+			t.Fatalf("create bucket ARN = %#v", created.Output)
+		}
 		if err := deps.Clock.Advance(time.Second); err != nil {
 			t.Fatal(err)
 		}
@@ -1865,8 +2492,11 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if got := strings.Join(names(all), ","); got != "alpha-bucket,team-alpha,team-beta,team-charlie" {
 		t.Fatalf("all buckets = %s", got)
 	}
+	if upper := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"Prefix": "TEAM-"}, nil); len(names(upper)) != 0 || upper.Output["Prefix"] != "TEAM-" {
+		t.Fatalf("case-sensitive prefix = %#v", upper.Output)
+	}
 	firstCreated := stringValue(asMapForTest(all.Output["Buckets"].([]any)[0])["CreationDate"])
-	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil {
+	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketArn"] != "arn:aws:s3:::alpha-bucket" {
 		t.Fatalf("unpaginated bucket = %#v", all.Output["Buckets"].([]any)[0])
 	}
 	if err := deps.Clock.Advance(time.Hour); err != nil {
@@ -1890,6 +2520,10 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if token == "" || token == "team-beta" {
 		t.Fatalf("continuation token = %q", token)
 	}
+	emptyToken := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"MaxBuckets": 1, "Prefix": "team-", "ContinuationToken": ""}, nil)
+	if got := strings.Join(names(emptyToken), ","); got != "team-alpha" || emptyToken.Output["ContinuationToken"] == "" {
+		t.Fatalf("empty continuation token = %#v", emptyToken.Output)
+	}
 	last := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"MaxBuckets": 2, "Prefix": "team-", "ContinuationToken": token}, nil)
 	if got := strings.Join(names(last), ","); got != "team-charlie" || last.Output["ContinuationToken"] != nil {
 		t.Fatalf("last page = %#v", last.Output)
@@ -1898,11 +2532,34 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if got := strings.Join(names(regional), ","); got != "team-beta,team-charlie" {
 		t.Fatalf("regional buckets = %#v", regional.Output)
 	}
+	_, err := invokeAs(t, p, east, "ListBuckets", map[string]any{"BucketRegion": "eu-east-1"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Argument value eu-east-1 is not a valid AWS Region" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "bucket-region" {
+		t.Fatalf("invalid bucket region = %#v", fault)
+	}
 
 	for _, input := range []map[string]any{{"MaxBuckets": 0}, {"MaxBuckets": 10001}, {"MaxBuckets": "invalid"}, {"ContinuationToken": "!"}, {"ContinuationToken": strings.Repeat("a", 1025)}} {
 		_, err := invokeAs(t, p, east, "ListBuckets", input, nil)
 		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("invalid input %#v = %#v", input, fault)
+		}
+	}
+	nonstandardDeps := spitest.Deps(t)
+	nonstandardDeps.S3AllowNonstandardRegions = true
+	nonstandard := s3.New(nonstandardDeps)
+	badRegion := spi.Identity{Account: east.Account, Region: "eu-east-1"}
+	mustInvokeAs(t, nonstandard, east, "CreateBucket", map[string]any{"Bucket": "nonstandard-east", "LocationConstraint": badRegion.Region}, nil)
+	mustInvokeAs(t, nonstandard, badRegion, "CreateBucket", map[string]any{"Bucket": "nonstandard-native", "LocationConstraint": badRegion.Region}, nil)
+	_, err = invokeAs(t, nonstandard, badRegion, "CreateBucket", map[string]any{"Bucket": "nonstandard-mismatch", "LocationConstraint": east.Region}, nil)
+	if fault := asFault(t, err); fault.Code != "IllegalLocationConstraintException" || fault.Message != "The us-east-1 location constraint is incompatible for the region specific endpoint this request was sent to." {
+		t.Fatalf("nonstandard region mismatch = %#v", fault)
+	}
+	nonstandardList := mustInvokeAs(t, nonstandard, east, "ListBuckets", map[string]any{"BucketRegion": badRegion.Region}, nil)
+	if got := strings.Join(names(nonstandardList), ","); got != "nonstandard-east,nonstandard-native" {
+		t.Fatalf("nonstandard regions = %#v", nonstandardList.Output)
+	}
+	for _, bucket := range nonstandardList.Output["Buckets"].([]any) {
+		if asMapForTest(bucket)["BucketRegion"] != badRegion.Region {
+			t.Fatalf("nonstandard bucket = %#v", bucket)
 		}
 	}
 	golden.AssertJSON(t, map[string]any{"all": all.Output, "page": page.Output, "last": last.Output, "regional": regional.Output})
@@ -2069,6 +2726,20 @@ func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
 		t.Fatalf("historical-only version delete = %#v", fault)
 	}
 	characterization["historical-only-version"] = "BucketNotEmpty"
+
+	markerBucket := map[string]any{"Bucket": "marker-only-bucket"}
+	mustInvoke(t, p, "CreateBucket", markerBucket, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "marker-only-bucket", "Status": "Enabled"}, nil)
+	created := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "marker-only-bucket", "Key": "object"}, []byte("body"))
+	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "marker-only-bucket", "Key": "object"}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "marker-only-bucket", "Key": "object", "VersionId": created.Headers.Get("x-amz-version-id")}, nil)
+	_, err = invoke(t, p, "DeleteBucket", markerBucket, nil)
+	if fault := asFault(t, err); fault.Code != "BucketNotEmpty" || fault.Message != "The bucket you tried to delete is not empty. You must delete all versions in the bucket." {
+		t.Fatalf("marker-only delete = %#v", fault)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "marker-only-bucket", "Key": "object", "VersionId": marker.Headers.Get("x-amz-version-id")}, nil)
+	mustInvoke(t, p, "DeleteBucket", markerBucket, nil)
+	characterization["marker-only-version"] = "BucketNotEmpty"
 	golden.AssertJSON(t, characterization)
 }
 
@@ -2144,6 +2815,16 @@ func TestBucketVersioningState(t *testing.T) {
 			characterization[status] = got
 		}
 	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": input["Bucket"], "Status": "Enabled"}, nil)
+	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "version-format"}, nil)
+	versionID := put.Headers.Get("x-amz-version-id")
+	if len(versionID) != 32 || strings.IndexFunc(versionID, func(r rune) bool { return !strings.ContainsRune("0123456789abcdef", r) }) >= 0 {
+		t.Fatalf("version id = %q", versionID)
+	}
+	deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": input["Bucket"], "Key": "version-format"}, nil)
+	if markerID := deleted.Headers.Get("x-amz-version-id"); len(markerID) != 32 {
+		t.Fatalf("delete marker version id = %q", markerID)
+	}
 	golden.AssertJSON(t, characterization)
 }
 
@@ -2193,11 +2874,24 @@ func TestObjectMetadata(t *testing.T) {
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "default"}, []byte("body"))
 	defaultHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "default"}, nil)
 	assert("default", defaultHead, "binary/octet-stream", "")
+	queryRequest := httptest.NewRequest(http.MethodPut, "https://bucket.s3.us-east-1.amazonaws.com/query?x-amz-meta-owner=presigned", strings.NewReader("query"))
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "PutObject", Input: map[string]any{"Bucket": "bucket", "Key": "query"}, Body: queryRequest.Body, HTTP: queryRequest}); err != nil {
+		t.Fatal(err)
+	}
+	queryHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "query"}, nil)
+	assert("query", queryHead, "binary/octet-stream", "presigned")
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "pinned-system-metadata", "CacheControl": "no-cache", "ContentLanguage": "de", "ContentDisposition": `attachment; filename="foo.jpg"`}, []byte("abc123"))
+	pinned := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "pinned-system-metadata"}, nil)
+	if body := string(readStream(t, pinned)); body != "abc123" || pinned.Headers.Get("Cache-Control") != "no-cache" || pinned.Headers.Get("Content-Language") != "de" || pinned.Headers.Get("Content-Disposition") != `attachment; filename="foo.jpg"` {
+		t.Fatalf("pinned system metadata body=%q headers=%v", body, pinned.Headers)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"get":      map[string]any{"contentType": get.Headers.Get("Content-Type"), "cacheControl": get.Headers.Get("Cache-Control"), "owner": get.Headers.Get("x-amz-meta-owner"), "redirect": get.Headers.Get("x-amz-website-redirect-location")},
 		"head":     map[string]any{"contentType": head.Headers.Get("Content-Type"), "owner": head.Headers.Get("x-amz-meta-owner")},
 		"replaced": map[string]any{"contentType": replaced.Headers.Get("Content-Type"), "cacheControl": replaced.Headers.Get("Cache-Control"), "owner": replaced.Headers.Get("x-amz-meta-owner")},
 		"default":  map[string]any{"contentType": defaultHead.Headers.Get("Content-Type")},
+		"query":    map[string]any{"contentType": queryHead.Headers.Get("Content-Type"), "owner": queryHead.Headers.Get("x-amz-meta-owner")},
+		"pinned":   map[string]any{"cacheControl": pinned.Headers.Get("Cache-Control"), "contentDisposition": pinned.Headers.Get("Content-Disposition"), "contentLanguage": pinned.Headers.Get("Content-Language")},
 	})
 }
 
@@ -2216,6 +2910,8 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 			"Bad-Q":        "=?UTF-8?Q?bad=4A=ZZ_value?=",
 			"Raw-Unicode":  "ÄMÄZÕÑ S3",
 			"Safe":         safe,
+			"TEST_META_1":  "foo",
+			"__meta_2":     "bar",
 		},
 	}, []byte("body"))
 
@@ -2231,12 +2927,14 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 			"badQ":        response.Headers.Get("x-amz-meta-bad-q"),
 			"rawUnicode":  response.Headers.Get("x-amz-meta-raw-unicode"),
 			"safe":        response.Headers.Get("x-amz-meta-safe"),
+			"testMeta1":   response.Headers.Get("x-amz-meta-test_meta_1"),
+			"meta2":       response.Headers.Get("x-amz-meta-__meta_2"),
 		}
 	}
 	get := read("GetObject", "source")
 	head := read("HeadObject", "source")
 	for name, got := range map[string]map[string]any{"get": get, "head": head} {
-		if got["fakeEncoded"] != "actually-ascii" || got["asciiB64"] != "abc" || got["badB64"] != "=?UTF-8?B?77+977+977+9?=" || got["badQ"] != "badJ=ZZ value" || got["safe"] != safe {
+		if got["fakeEncoded"] != "actually-ascii" || got["asciiB64"] != "abc" || got["badB64"] != "=?UTF-8?B?77+977+977+9?=" || got["badQ"] != "badJ=ZZ value" || got["safe"] != safe || got["testMeta1"] != "foo" || got["meta2"] != "bar" {
 			t.Fatalf("%s decoded metadata = %#v", name, got)
 		}
 		if got["nonASCII"] != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || got["rawUnicode"] != got["nonASCII"] || got["binary"] != "=?UTF-8?B?AAECAw==?=" {
@@ -2258,6 +2956,22 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 		t.Fatalf("replacement metadata = %v", replaced.Headers)
 	}
 	golden.AssertJSON(t, map[string]any{"get": get, "head": head, "copy": copyMetadata, "replace": replaced.Headers.Get("x-amz-meta-fake-encoded")})
+}
+
+func TestUnicodeSystemMetadataCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unicode-system-metadata"}, nil)
+	disposition := `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unicode-system-metadata", "Key": "test", "ContentLanguage": "de", "ContentDisposition": disposition, "CacheControl": "ÄMÄZÕÑ S3"}, nil)
+	got := map[string]any{}
+	for _, operation := range []string{"GetObject", "HeadObject"} {
+		response := mustInvoke(t, p, operation, map[string]any{"Bucket": "unicode-system-metadata", "Key": "test"}, nil)
+		if response.Headers.Get("Content-Language") != "de" || response.Headers.Get("Content-Disposition") != disposition || response.Headers.Get("Cache-Control") != "ÄMÄZÕÑ S3" {
+			t.Fatalf("%s metadata = %v", operation, response.Headers)
+		}
+		got[operation] = map[string]any{"cacheControl": response.Headers.Get("Cache-Control"), "contentDisposition": response.Headers.Get("Content-Disposition"), "contentLanguage": response.Headers.Get("Content-Language")}
+	}
+	golden.AssertJSON(t, got)
 }
 
 func TestGetObjectResponseHeaderOverrides(t *testing.T) {
@@ -2285,12 +2999,44 @@ func TestGetObjectResponseHeaderOverrides(t *testing.T) {
 	if ranged.Status != http.StatusPartialContent || ranged.Headers.Get("Content-Type") != "text/csv" || string(readStream(t, ranged)) != "bo" {
 		t.Fatalf("ranged override = %d %v", ranged.Status, ranged.Headers)
 	}
+	_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object", "response-cache-control": "non-ascii-%E2%80%94_—_é_"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Header value cannot be represented using ISO-8859-1." || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "response-cache-control" || fault.Fields["ArgumentValue"] != "non-ascii-%E2%80%94_—_é_" {
+		t.Fatalf("Unicode override fault = %#v", fault)
+	}
 	stored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object"}, nil)
 	readStream(t, stored)
 	if stored.Headers.Get("Cache-Control") != "stored" || stored.Headers.Get("Content-Type") != "application/json" || stored.Headers.Get("Expires") != "Thu, 22 Oct 2026 07:28:00 GMT" {
 		t.Fatalf("overrides changed stored metadata = %v", stored.Headers)
 	}
 	golden.AssertJSON(t, map[string]any{"overrides": got, "range": map[string]any{"body": "bo", "contentType": ranged.Headers.Get("Content-Type"), "status": ranged.Status}, "stored": map[string]any{"cacheControl": stored.Headers.Get("Cache-Control"), "contentType": stored.Headers.Get("Content-Type"), "expires": stored.Headers.Get("Expires")}})
+}
+
+func TestCopyObjectKMSEncryptionCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "kms-copy"}, nil)
+	keyID := "arn:aws:kms:us-east-1:123456789012:key/copy"
+	spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
+	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "kms-copy", "Key": "source", "ChecksumCRC32": "DUoRhQ=="}, []byte("hello world"))
+	copied := mustInvoke(t, p, "CopyObject", map[string]any{
+		"Bucket": "kms-copy", "Key": "copied", "CopySource": "kms-copy/source",
+		"ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true,
+	}, nil)
+	stored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "kms-copy", "Key": "copied", "ChecksumMode": "ENABLED"}, nil)
+	body := string(readStream(t, stored))
+	for name, response := range map[string]*spi.Response{"copy": copied, "get": stored} {
+		if response.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("%s encryption = %v", name, response.Headers)
+		}
+	}
+	if body != "hello world" || copied.Headers.Get("ETag") != source.Headers.Get("ETag") || copied.Output["ChecksumCRC32"] == "" || copied.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("copy = %#v headers=%v body=%q", copied.Output, copied.Headers, body)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"body": body, "etagMatches": copied.Headers.Get("ETag") == source.Headers.Get("ETag"),
+		"copy": map[string]any{"algorithm": copied.Headers.Get("x-amz-server-side-encryption"), "key": copied.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": copied.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "checksum": copied.Output["ChecksumCRC32"], "checksumType": copied.Output["ChecksumType"]},
+		"get":  map[string]any{"algorithm": stored.Headers.Get("x-amz-server-side-encryption"), "key": stored.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": stored.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "checksum": stored.Headers.Get("x-amz-checksum-crc32"), "checksumType": stored.Headers.Get("x-amz-checksum-type")},
+	})
 }
 
 func TestObjectServerSideEncryption(t *testing.T) {
@@ -2382,10 +3128,21 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 	mustInvoke(t, s3Pack, "CreateBucket", map[string]any{"Bucket": "kms-validation"}, nil)
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "source"}, []byte("source"))
 	keyID, keyARN := createKey(t, owner)
-	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "enabled", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID}, []byte("body"))
+	bare := mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "enabled", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID}, []byte("body"))
+	if bare.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyARN {
+		t.Fatalf("bare key response = %v", bare.Headers)
+	}
 	kmsCall(t, owner, "CreateAlias", map[string]any{"AliasName": "alias/s3", "TargetKeyId": keyID})
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "alias", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": "arn:aws:kms:us-east-1:123456789012:alias/s3"}, []byte("body"))
-	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "managed", "ServerSideEncryption": "aws:kms"}, []byte("body"))
+	managed := mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "managed", "ServerSideEncryption": "aws:kms"}, []byte("body"))
+	managedMetadata := asMapForTest(kmsCall(t, owner, "DescribeKey", map[string]any{"KeyId": managed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id")}).Output["KeyMetadata"])
+	if managedMetadata["KeyManager"] != "AWS" || managedMetadata["Description"] != "Default key that protects my S3 objects when no other key is defined" {
+		t.Fatalf("managed key metadata = %#v", managedMetadata)
+	}
+	managedAgain := mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "managed-again", "ServerSideEncryption": "aws:kms"}, []byte("body"))
+	if managedAgain.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != managed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") {
+		t.Fatalf("managed key changed: %v != %v", managedAgain.Headers, managed.Headers)
+	}
 	mustInvoke(t, s3Pack, "GetObject", map[string]any{"Bucket": "kms-validation", "Key": "managed"}, nil)
 
 	faults := map[string]any{}
@@ -2421,10 +3178,12 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 }
 
 func TestBucketEncryptionConfiguration(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	bucket := map[string]any{"Bucket": "bucket-encryption"}
 	mustInvoke(t, p, "CreateBucket", bucket, nil)
-	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output; len(got) != 0 {
+	defaultRules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}
+	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, defaultRules) {
 		t.Fatalf("default encryption = %#v", got)
 	}
 	rule := func(algorithm string, keyID any, bucketKey bool) map[string]any {
@@ -2450,7 +3209,15 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 			t.Fatalf("%s object encryption = %q", algorithm, got)
 		}
 	}
+	if _, err := put(map[string]any{"Rules": []any{rule("AES256", nil, true)}}); err != nil {
+		t.Fatal(err)
+	}
+	aes := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "aes-bucket-key"}, []byte("body"))
+	if aes.Headers.Get("x-amz-server-side-encryption") != "AES256" || aes.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "" {
+		t.Fatalf("AES bucket key headers = %v", aes.Headers)
+	}
 	keyID := "arn:aws:kms:us-east-1:000000000000:key/bucket-default"
+	spitest.SeedKMSKey(t, deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, keyID, "Enabled")
 	baseline := map[string]any{"Rules": []any{rule("aws:kms", keyID, true)}}
 	if _, err := put(baseline); err != nil {
 		t.Fatal(err)
@@ -2459,6 +3226,11 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	if inherited.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || inherited.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || inherited.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
 		t.Fatalf("inherited bucket encryption = %v", inherited.Headers)
 	}
+	spitest.SeedKMSKey(t, deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, keyID, "Disabled")
+	if _, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "disabled-default"}, []byte("body")); asFault(t, err).Code != "KMS.DisabledException" {
+		t.Fatalf("disabled bucket key = %v", err)
+	}
+	spitest.SeedKMSKey(t, deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, keyID, "Enabled")
 
 	invalid := []struct {
 		name, code string
@@ -2493,7 +3265,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	for range 2 {
 		mustInvoke(t, p, "DeleteBucketEncryption", bucket, nil)
 	}
-	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output; len(got) != 0 {
+	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, defaultRules) {
 		t.Fatalf("deleted encryption = %#v", got)
 	}
 }
@@ -2560,7 +3332,7 @@ func TestMultipartServerSideEncryption(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)
 	keyID := "arn:aws:kms:us-east-1:123456789012:key/multipart"
 	spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ChecksumAlgorithm": "CRC64NVME", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
 	assertEncryption := func(name string, response *spi.Response) {
 		t.Helper()
 		if response.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
@@ -2575,8 +3347,14 @@ func TestMultipartServerSideEncryption(t *testing.T) {
 	mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": "multipart-encryption", "ServerSideEncryptionConfiguration": aes}, nil)
 	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
 	assertEncryption("complete", completed)
-	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "multipart-encryption", "Key": "object"}, nil)
+	if completed.Headers.Get("x-amz-checksum-crc64nvme") != "" || completed.Headers.Get("x-amz-checksum-type") != "" || completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil {
+		t.Fatalf("KMS completion exposed checksum = headers %v output %#v", completed.Headers, completed.Output)
+	}
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
 	assertEncryption("head", head)
+	if head.Headers.Get("x-amz-checksum-crc64nvme") == "" || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("KMS object did not persist checksum = %v", head.Headers)
+	}
 
 	_, err := invoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "invalid", "ServerSideEncryption": "invalid"}, nil)
 	fault := asFault(t, err)
@@ -2584,7 +3362,7 @@ func TestMultipartServerSideEncryption(t *testing.T) {
 		t.Fatalf("invalid encryption fault = %+v", fault)
 	}
 	snapshot := func(response *spi.Response) map[string]any {
-		return map[string]any{"algorithm": response.Headers.Get("x-amz-server-side-encryption"), "key": response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled")}
+		return map[string]any{"algorithm": response.Headers.Get("x-amz-server-side-encryption"), "key": response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "checksum": response.Headers.Get("x-amz-checksum-crc64nvme"), "checksumType": response.Headers.Get("x-amz-checksum-type")}
 	}
 	golden.AssertJSON(t, map[string]any{"create": snapshot(created), "part": snapshot(part), "complete": snapshot(completed), "head": snapshot(head), "invalid": map[string]any{"code": fault.Code, "status": fault.HTTPStatus}})
 }
@@ -2636,6 +3414,52 @@ func TestMultipartSSECustomerKey(t *testing.T) {
 		"complete": map[string]any{"algorithm": completed.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": completed.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
 		"get":      map[string]any{"algorithm": get.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5, "body": body},
 	})
+}
+
+func TestUploadPartSSECustomerKeyFaults(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-sse-c-faults"}, nil)
+	key := bytes.Repeat([]byte{'a'}, 32)
+	digest := md5.Sum(key)
+	encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(key), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+	create := maps.Clone(encryption)
+	create["Bucket"], create["Key"] = "upload-part-sse-c-faults", "encrypted"
+	encryptedID := mustInvoke(t, p, "CreateMultipartUpload", create, nil).Output["UploadId"].(string)
+	plainID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-sse-c-faults", "Key": "plain"}, nil).Output["UploadId"].(string)
+
+	otherKey := bytes.Repeat([]byte{'b'}, 32)
+	otherDigest := md5.Sum(otherKey)
+	wrongEncryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(otherKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(otherDigest[:])}
+	tests := []struct {
+		name, key, uploadID string
+		encryption          map[string]any
+		message             string
+	}{
+		{"missing", "encrypted", encryptedID, nil, "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."},
+		{"unexpected", "plain", plainID, encryption, "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."},
+		{"mismatch", "encrypted", encryptedID, wrongEncryption, "The provided encryption parameters did not match the ones used originally."},
+	}
+	characterization := map[string]any{}
+	for index, test := range tests {
+		input := maps.Clone(test.encryption)
+		if input == nil {
+			input = map[string]any{}
+		}
+		input["Bucket"], input["Key"], input["UploadId"], input["PartNumber"] = "upload-part-sse-c-faults", test.key, test.uploadID, index+1
+		_, err := invoke(t, p, "UploadPart", input, []byte("part"))
+		if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("case %d fault = %#v", index, fault)
+		} else {
+			characterization[test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
+		}
+	}
+	for _, upload := range []struct{ key, id string }{{"encrypted", encryptedID}, {"plain", plainID}} {
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "upload-part-sse-c-faults", "Key": upload.key, "UploadId": upload.id}, nil)
+		if len(listed.Output["Parts"].([]any)) != 0 {
+			t.Fatalf("rejected SSE-C request stored parts = %#v", listed.Output)
+		}
+	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestCopyObjectSSECustomerKeys(t *testing.T) {
@@ -2740,6 +3564,62 @@ func TestCopyObjectTaggingDirective(t *testing.T) {
 	if tags := replaced.Output["TagSet"].([]any); len(tags) != 1 || tags[0].(map[string]any)["Key"] != "owner" {
 		t.Fatalf("replaced tags = %#v", tags)
 	}
+}
+
+func TestCopyObjectChecksums(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	body := []byte("copy me")
+	sha256Sum := sha256.Sum256(body)
+	sha256Value := base64.StdEncoding.EncodeToString(sha256Sum[:])
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "source", "ChecksumSHA256": sha256Value}, body)
+
+	inherited := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "bucket", "Key": "inherited", "CopySource": "bucket/source"}, nil)
+	if inherited.Output["ChecksumSHA256"] != sha256Value || inherited.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("inherited copy checksum = %#v", inherited.Output)
+	}
+	inheritedHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "inherited", "ChecksumMode": "ENABLED"}, nil)
+	if inheritedHead.Headers.Get("x-amz-checksum-sha256") != sha256Value || inheritedHead.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("inherited stored checksum = %v", inheritedHead.Headers)
+	}
+
+	crc32Sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(crc32Sum, crc32.ChecksumIEEE(body))
+	crc32Value := base64.StdEncoding.EncodeToString(crc32Sum)
+	overridden := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "bucket", "Key": "overridden", "CopySource": "bucket/source", "ChecksumAlgorithm": "CRC32"}, nil)
+	if overridden.Output["ChecksumCRC32"] != crc32Value || overridden.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("overridden copy checksum = %#v", overridden.Output)
+	}
+	overriddenHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "overridden", "ChecksumMode": "ENABLED"}, nil)
+	if overriddenHead.Headers.Get("x-amz-checksum-crc32") != crc32Value || overriddenHead.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("overridden stored checksum = %v", overriddenHead.Headers)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"inherited":  map[string]any{"checksum": inherited.Output["ChecksumSHA256"], "type": inherited.Output["ChecksumType"], "stored": inheritedHead.Headers.Get("x-amz-checksum-sha256")},
+		"overridden": map[string]any{"checksum": overridden.Output["ChecksumCRC32"], "type": overridden.Output["ChecksumType"], "stored": overriddenHead.Headers.Get("x-amz-checksum-crc32")},
+	})
+}
+
+func TestCopyObjectLastModifiedCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "source"}, []byte("body"))
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	copied := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "bucket", "Key": "copy", "CopySource": "bucket/source"}, nil)
+	modifiedValue, ok := copied.Output["LastModified"].(string)
+	modified, err := time.Parse(time.RFC3339, modifiedValue)
+	if !ok || err != nil {
+		t.Fatalf("copy LastModified = %#v: %v", copied.Output["LastModified"], err)
+	}
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "copy"}, nil)
+	stored, err := http.ParseTime(head.Headers.Get("Last-Modified"))
+	if err != nil || !modified.Equal(stored) {
+		t.Fatalf("copy LastModified %s, stored %q: %v", modified, head.Headers.Get("Last-Modified"), err)
+	}
+	golden.AssertJSON(t, map[string]any{"response": copied.Output["LastModified"], "stored": head.Headers.Get("Last-Modified")})
 }
 
 func TestCopyObjectDirectiveValidation(t *testing.T) {
@@ -2996,7 +3876,7 @@ func TestObjectKeyLengthValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "keys"}, nil)
 	valid := map[string]any{}
-	for name, key := range map[string]string{"ascii": strings.Repeat("a", 1024), "utf8": strings.Repeat("é", 512)} {
+	for name, key := range map[string]string{"ascii": strings.Repeat("a", 1024), "pinned_utf8": "Ā0Ä", "utf8": strings.Repeat("é", 512)} {
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "keys", "Key": key}, []byte(name))
 		if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "keys", "Key": key}, nil); string(readStream(t, got)) != name {
 			t.Fatalf("%s boundary key was not stored", name)
@@ -3042,7 +3922,7 @@ func TestExpectedBucketOwnerAndDeleteBoundary(t *testing.T) {
 		t.Fatalf("matching owner: %v", err)
 	}
 	errors := map[string]any{}
-	for _, expected := range []string{"12345678901", "12345678901x"} {
+	for _, expected := range []string{"12345678901", "12345678901x", "0000", "0000000000020", "abcd", "aa000000000$"} {
 		_, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "bucket", "ExpectedBucketOwner": expected}, nil)
 		fault := asFault(t, err)
 		if fault.Code != "InvalidBucketOwnerAWSAccountID" || fault.HTTPStatus != http.StatusBadRequest {
@@ -3156,6 +4036,8 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "k"}, []byte("id,name\n1,Ada\n"))
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*"}]}`
+	mustInvoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": "bucket", "Policy": policy}, nil)
 	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart"}, nil).Output["UploadId"].(string)
 	tests := []struct {
 		operation string
@@ -3163,6 +4045,9 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 		body      []byte
 	}{
 		{"PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil},
+		{"GetBucketPolicy", map[string]any{"Bucket": "bucket"}, nil},
+		{"PutBucketPolicy", map[string]any{"Bucket": "bucket", "Policy": `{}`}, nil},
+		{"DeleteBucketPolicy", map[string]any{"Bucket": "bucket"}, nil},
 		{"CopyObject", map[string]any{"Bucket": "bucket", "Key": "copy", "CopySource": "missing/k"}, nil},
 		{"DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{}}, nil},
 		{"UploadPart", map[string]any{"Bucket": "bucket", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1}, []byte("part")},
@@ -3193,6 +4078,9 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 	}
 	if versioning := mustInvoke(t, p, "GetBucketVersioning", map[string]any{"Bucket": "bucket"}, nil).Output; len(versioning) != 0 {
 		t.Fatalf("rejected versioning persisted: %#v", versioning)
+	}
+	if got := mustInvoke(t, p, "GetBucketPolicy", map[string]any{"Bucket": "bucket"}, nil).Output["Policy"]; got != policy {
+		t.Fatalf("rejected policy operations changed policy: %q", got)
 	}
 	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "copy"}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatalf("rejected copy persisted: %v", err)
@@ -3262,12 +4150,16 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 	characterization["acceptedBucketTags"] = 50
 	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source", "TagSet": valid}, nil)
 	mustInvoke(t, p, "DeleteBucketTagging", map[string]any{"Bucket": "bucket"}, nil)
+	_, err = invoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source"}, nil)
+	if fault := asFault(t, err); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing tag set = %#v", fault)
+	}
+	characterization["missing-tag-set"] = "MalformedXML"
 	for _, test := range []struct {
 		name string
 		set  any
 		code string
 	}{
-		{"missing-tag-set", nil, "MalformedXML"},
 		{"missing-value", []any{map[string]any{"Key": "key"}}, "MalformedXML"},
 		{"duplicate-key", []any{map[string]any{"Key": "key", "Value": "one"}, map[string]any{"Key": "key", "Value": "two"}}, "InvalidTag"},
 		{"reserved-key", []any{map[string]any{"Key": "aws:team", "Value": "one"}}, "InvalidTag"},
@@ -3329,14 +4221,30 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 			t.Fatalf("rejected %s created object: %v", key, err)
 		}
 	}
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source", "TagSet": nil}, nil)
+	if got := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source"}, nil).Output["TagSet"]; len(asSliceForTest(got)) != 0 {
+		t.Fatalf("nil object tags = %#v", got)
+	}
+	characterization["nilObjectTags"] = []any{}
+	for _, tagSet := range []any{valid, nil, valid, []any{}} {
+		if response := mustInvoke(t, p, "PutBucketTagging", map[string]any{"Bucket": "bucket", "TagSet": tagSet}, nil); response.Status != http.StatusNoContent {
+			t.Fatalf("put bucket tags status = %d", response.Status)
+		}
+	}
+	if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "bucket"}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+		t.Fatalf("empty bucket tags = %v", err)
+	}
+	characterization["emptyBucketTags"] = "NoSuchTagSet"
 	characterization["storedTags"] = mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source"}, nil).Output["TagSet"]
 	golden.AssertJSON(t, characterization)
 }
 
 func TestCopyObjectConditions(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "source"}, []byte("source"))
+	_ = deps.Clock.Advance(2 * time.Second)
 	etag := source.Headers.Get("ETag")
 	copyObject := func(key string, input map[string]any, headers map[string]string) (*spi.Response, error) {
 		t.Helper()
@@ -3367,6 +4275,7 @@ func TestCopyObjectConditions(t *testing.T) {
 
 	before := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
 	after := time.Unix(1, 0).UTC().Format(http.TimeFormat)
+	farFuture := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
 	if _, err := copyObject("matched", nil, map[string]string{
 		"x-amz-copy-source-if-match":            etag,
 		"x-amz-copy-source-if-unmodified-since": before,
@@ -3378,6 +4287,27 @@ func TestCopyObjectConditions(t *testing.T) {
 		"x-amz-copy-source-if-modified-since": before,
 	})
 	wantPrecondition(err)
+	if _, err := copyObject("future-modified", nil, map[string]string{"x-amz-copy-source-if-modified-since": farFuture}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = copyObject("match-future-modified", nil, map[string]string{
+		"x-amz-copy-source-if-match":          etag,
+		"x-amz-copy-source-if-modified-since": farFuture,
+	})
+	wantPrecondition(err)
+	_, err = copyObject("none-mismatch-modified", nil, map[string]string{
+		"x-amz-copy-source-if-none-match":     `"wrong"`,
+		"x-amz-copy-source-if-modified-since": after,
+	})
+	wantPrecondition(err)
+	if _, err := copyObject("match-unmodified", nil, map[string]string{
+		"x-amz-copy-source-if-match":            etag,
+		"x-amz-copy-source-if-none-match":       etag,
+		"x-amz-copy-source-if-modified-since":   before,
+		"x-amz-copy-source-if-unmodified-since": before,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, test := range []struct {
 		name, header, value string
@@ -3413,8 +4343,121 @@ func TestCopyObjectConditions(t *testing.T) {
 	}
 }
 
-func TestObjectReadConditions(t *testing.T) {
+func TestCopyDestinationPreconditionsCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
+	const bucket, source, destination = "copy-write-conditions", "source", "destination"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+	sourcePut := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": source}, []byte("source content"))
+	copyObject := func(key, match, noneMatch string) (*spi.Response, error) {
+		t.Helper()
+		input := map[string]any{"Bucket": bucket, "Key": key, "CopySource": bucket + "/" + source}
+		if match != "" {
+			input["IfMatch"] = match
+		}
+		if noneMatch != "" {
+			input["IfNoneMatch"] = noneMatch
+		}
+		return invoke(t, p, "CopyObject", input, nil)
+	}
+	faults := map[string]any{}
+	wantFault := func(name string, err error, code string, status int) {
+		t.Helper()
+		fault := asFault(t, err)
+		if fault.Code != code || fault.HTTPStatus != status {
+			t.Fatalf("%s fault = %#v", name, fault)
+		}
+		faults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+
+	first, err := copyObject(destination, "", "*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = copyObject(destination, "", "*")
+	wantFault("if-none-match-existing", err, "PreconditionFailed", http.StatusPreconditionFailed)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": destination}, nil)
+	afterDelete, err := copyObject(destination, "", "*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = copyObject(destination, `"wrong-etag"`, "")
+	wantFault("if-match-wrong", err, "PreconditionFailed", http.StatusPreconditionFailed)
+	matched, err := copyObject(destination, afterDelete.Headers.Get("ETag"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": destination}, nil)
+	_, err = copyObject(destination, matched.Headers.Get("ETag"), "")
+	wantFault("if-match-delete-marker", err, "NoSuchKey", http.StatusNotFound)
+	current := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": destination}, []byte("current"))
+	if _, err := copyObject(destination, current.Headers.Get("ETag"), ""); err != nil {
+		t.Fatal(err)
+	}
+	for name, conditions := range map[string]struct{ match, noneMatch string }{
+		"non-wildcard-if-none-match": {noneMatch: sourcePut.Headers.Get("ETag")},
+		"wildcard-if-match":          {match: "*"},
+		"combined":                   {match: "*", noneMatch: sourcePut.Headers.Get("ETag")},
+	} {
+		_, err := copyObject("validation-"+name, conditions.match, conditions.noneMatch)
+		wantFault(name, err, "NotImplemented", http.StatusNotImplemented)
+	}
+	_, err = invoke(t, p, "CopyObject", map[string]any{"Bucket": bucket, "Key": source, "CopySource": bucket + "/" + source, "IfNoneMatch": "*", "StorageClass": "STANDARD"}, nil)
+	wantFault("in-place-if-none-match", err, "PreconditionFailed", http.StatusPreconditionFailed)
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": bucket, "Key": source, "CopySource": bucket + "/" + source, "IfMatch": sourcePut.Headers.Get("ETag"), "StorageClass": "STANDARD"}, nil); err != nil {
+		t.Fatalf("in-place If-Match: %v", err)
+	}
+	listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": bucket}, nil).Output
+	golden.AssertJSON(t, map[string]any{
+		"faults": faults, "firstETag": first.Headers.Get("ETag"), "afterDeleteETag": afterDelete.Headers.Get("ETag"),
+		"versions": len(asSliceForTest(listed["Versions"])), "deleteMarkers": len(asSliceForTest(listed["DeleteMarkers"])),
+	})
+}
+
+func TestCopySourcePreconditionsCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-conditions"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "copy-conditions", "Status": "Enabled"}, nil)
+	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-conditions", "Key": "source"}, []byte("source"))
+	_ = deps.Clock.Advance(2 * time.Second)
+	etag := put.Headers.Get("ETag")
+	past := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
+	modified := time.Unix(0, 0).UTC().Format(http.TimeFormat)
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
+	cases := map[string]map[string]any{
+		"if-match":              {"CopySourceIfMatch": `"wrong"`},
+		"if-match-list":         {"CopySourceIfMatch": `"wrong", ` + etag},
+		"if-unmodified-since":   {"CopySourceIfUnmodifiedSince": past},
+		"if-none-match":         {"CopySourceIfNoneMatch": etag},
+		"if-none-match-list":    {"CopySourceIfNoneMatch": `"wrong", ` + etag},
+		"if-modified-since":     {"CopySourceIfModifiedSince": modified},
+		"if-modified-before":    {"CopySourceIfModifiedSince": past},
+		"if-unmodified-equal":   {"CopySourceIfUnmodifiedSince": modified},
+		"future-modified-since": {"CopySourceIfModifiedSince": future},
+		"all-positive": {"CopySourceIfMatch": etag, "CopySourceIfNoneMatch": `"wrong"`,
+			"CopySourceIfModifiedSince": past, "CopySourceIfUnmodifiedSince": modified},
+	}
+	outcomes := map[string]any{}
+	for name, conditions := range cases {
+		input := map[string]any{"Bucket": "copy-conditions", "Key": name, "CopySource": "copy-conditions/source"}
+		for key, value := range conditions {
+			input[key] = value
+		}
+		_, err := invoke(t, p, "CopyObject", input, nil)
+		if err == nil {
+			outcomes[name] = "success"
+		} else {
+			fault := asFault(t, err)
+			outcomes[name] = map[string]any{"code": fault.Code, "message": fault.Message, "condition": fault.Fields["Condition"]}
+		}
+	}
+	golden.AssertJSON(t, outcomes)
+}
+
+func TestObjectReadConditionsCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "conditional"}, []byte("body"))
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "conditional"}, nil)
@@ -3422,7 +4465,9 @@ func TestObjectReadConditions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	past, future := modified.Add(-time.Hour).Format(http.TimeFormat), modified.Add(time.Hour).Format(http.TimeFormat)
+	_ = deps.Clock.Advance(2 * time.Second)
+	past, notModified := modified.Add(-time.Hour).Format(http.TimeFormat), modified.Add(time.Second).Format(http.TimeFormat)
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
 	etag := put.Headers.Get("ETag")
 	call := func(operation string, conditions map[string]any) (*spi.Response, error) {
 		t.Helper()
@@ -3439,20 +4484,25 @@ func TestObjectReadConditions(t *testing.T) {
 		}
 		return response, err
 	}
+	futureOutcomes := map[string]string{}
 	for _, operation := range []string{"GetObject", "HeadObject", "GetObjectAttributes"} {
-		for _, conditions := range []map[string]any{
-			{"IfMatch": `"wrong"`},
-			{"IfUnmodifiedSince": past},
+		for _, test := range []struct {
+			conditions map[string]any
+			condition  string
+		}{
+			{map[string]any{"IfMatch": `"wrong"`}, "If-Match"},
+			{map[string]any{"IfMatch": `"wrong", ` + etag}, "If-Match"},
+			{map[string]any{"IfUnmodifiedSince": past}, "If-Unmodified-Since"},
 		} {
-			_, err := call(operation, conditions)
-			if fault := asFault(t, err); fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed {
-				t.Fatalf("%s %#v fault = %#v", operation, conditions, fault)
+			_, err := call(operation, test.conditions)
+			if fault := asFault(t, err); fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != test.condition {
+				t.Fatalf("%s %#v fault = %#v", operation, test.conditions, fault)
 			}
 		}
 		for _, conditions := range []map[string]any{
 			{"IfNoneMatch": etag},
 			{"IfNoneMatch": "*"},
-			{"IfModifiedSince": future},
+			{"IfModifiedSince": notModified},
 		} {
 			response, err := call(operation, conditions)
 			if err != nil || response.Status != http.StatusNotModified {
@@ -3460,15 +4510,22 @@ func TestObjectReadConditions(t *testing.T) {
 			}
 		}
 		for _, conditions := range []map[string]any{
-			{"IfMatch": `"wrong", ` + etag, "IfUnmodifiedSince": past},
+			{"IfMatch": etag, "IfUnmodifiedSince": past},
+			{"IfNoneMatch": `"wrong", ` + etag},
+			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": notModified},
 			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": future},
+			{"IfModifiedSince": future},
 		} {
 			response, err := call(operation, conditions)
 			if err != nil || response.Status == http.StatusNotModified {
 				t.Fatalf("%s precedence %#v: %#v %v", operation, conditions, response, err)
 			}
+			if len(conditions) == 1 && conditions["IfModifiedSince"] == future {
+				futureOutcomes[operation] = "success"
+			}
 		}
 	}
+	golden.AssertJSON(t, futureOutcomes)
 }
 
 func TestCopyObjectSourceVersions(t *testing.T) {
@@ -3535,6 +4592,7 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 	for _, invalid := range []struct {
 		source, code string
 	}{
+		{"wrongformat", "InvalidArgument"},
 		{"bucket/bad%zz", "InvalidArgument"},
 		{source + "?versionId=missing", "NoSuchKey"},
 		{source + "?versionId=", "InvalidArgument"},
@@ -3594,8 +4652,172 @@ func TestDeleteObjectRestoresPreviousVersion(t *testing.T) {
 	})
 }
 
+func TestSuspendedVersioningReplacesNullVersion(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("unversioned"))
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
+	enabled := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("enabled"))
+	enabledVersion := enabled.Headers.Get("x-amz-version-id")
+
+	beforeSuspension := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil)
+	if body := string(readStream(t, beforeSuspension)); body != "unversioned" {
+		t.Fatalf("converted null version = %q", body)
+	}
+	converted := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "bucket"}, nil).Output["Versions"])
+	if len(converted) != 2 || asMapForTest(converted[0])["VersionId"] != enabledVersion || asMapForTest(converted[0])["IsLatest"] != true || asMapForTest(converted[1])["VersionId"] != "null" || asMapForTest(converted[1])["IsLatest"] != false {
+		t.Fatalf("converted versions = %#v", converted)
+	}
+
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Suspended"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first null"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("second null"))
+
+	listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "bucket"}, nil).Output
+	suspendedVersions := listed
+	versions := asSliceForTest(listed["Versions"])
+	if len(versions) != 2 || asMapForTest(versions[0])["VersionId"] != "null" || asMapForTest(versions[1])["VersionId"] != enabledVersion {
+		t.Fatalf("suspended versions = %#v", listed)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil))); body != "second null" {
+		t.Fatalf("replacement null version = %q", body)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": enabledVersion}, nil))); body != "enabled" {
+		t.Fatalf("preserved enabled version = %q", body)
+	}
+
+	deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
+	if deleted.Headers.Get("x-amz-delete-marker") != "true" || deleted.Headers.Get("x-amz-version-id") != "null" {
+		t.Fatalf("suspended delete = %#v", deleted.Headers)
+	}
+	listed = mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "bucket"}, nil).Output
+	if markers := asSliceForTest(listed["DeleteMarkers"]); len(markers) != 1 || asMapForTest(markers[0])["VersionId"] != "null" {
+		t.Fatalf("suspended delete marker = %#v", listed)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil)
+	restoredBody := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)))
+	if restoredBody != "enabled" {
+		t.Fatalf("restored enabled version = %q", restoredBody)
+	}
+	golden.AssertJSON(t, map[string]any{"suspended": suspendedVersions, "deleted": listed, "restoredBody": restoredBody})
+}
+
+func TestDeleteObjectPreconditionsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
+	faults := map[string]any{}
+	for _, tc := range []struct {
+		name   string
+		input  map[string]any
+		code   string
+		status int
+		field  string
+		value  any
+	}{
+		{"etag", map[string]any{"IfMatch": `"wrong"`}, "PreconditionFailed", http.StatusPreconditionFailed, "Condition", "If-Match"},
+		{"size", map[string]any{"IfMatchSize": "10"}, "NotImplemented", http.StatusNotImplemented, "Header", "x-amz-if-match-size"},
+		{"modified", map[string]any{"IfMatchLastModifiedTime": "Sun, 06 Nov 1994 08:49:37 GMT"}, "NotImplemented", http.StatusNotImplemented, "Header", "x-amz-if-match-last-modified-time"},
+		{"all", map[string]any{"IfMatch": `"wrong"`, "IfMatchSize": "10", "IfMatchLastModifiedTime": "Sun, 06 Nov 1994 08:49:37 GMT"}, "NotImplemented", http.StatusNotImplemented, "Header", "x-amz-if-match-last-modified-time"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.input["Bucket"], tc.input["Key"] = "bucket", "key"
+			_, err := invoke(t, p, "DeleteObject", tc.input, nil)
+			fault := asFault(t, err)
+			if fault.Code != tc.code || fault.HTTPStatus != tc.status || fault.Fields[tc.field] != tc.value {
+				t.Fatalf("fault = %#v", fault)
+			}
+			faults[tc.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+			if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil))); body != "body" {
+				t.Fatalf("object changed after rejected delete: %q", body)
+			}
+		})
+	}
+	matched := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "IfMatch": put.Headers.Get("ETag")}, nil)
+	if matched.Status != http.StatusNoContent {
+		t.Fatalf("matching delete = %#v", matched)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
+	wildcard := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "IfMatch": "*"}, nil)
+	_, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "IfMatch": "*"}, nil)
+	missing := asFault(t, err)
+	if wildcard.Status != http.StatusNoContent || missing.Code != "PreconditionFailed" || missing.HTTPStatus != http.StatusPreconditionFailed {
+		t.Fatalf("wildcard deletes = %#v, %#v", wildcard, missing)
+	}
+	golden.AssertJSON(t, map[string]any{"faults": faults, "matchedStatus": matched.Status, "wildcardStatus": wildcard.Status, "missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus, "fields": missing.Fields}})
+}
+
+func TestDeleteObjectMissingKeyVersionIsIdempotent(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	var results []any
+	for _, tc := range []struct{ status, version string }{{"Enabled", "missing-version"}, {"Suspended", "null"}} {
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": tc.status}, nil)
+		deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "missing", "VersionId": tc.version}, nil)
+		if deleted.Status != http.StatusNoContent || len(deleted.Headers) != 0 {
+			t.Fatalf("%s missing version delete = %#v", tc.status, deleted)
+		}
+		results = append(results, map[string]any{"status": tc.status, "version": tc.version, "httpStatus": deleted.Status, "headers": deleted.Headers})
+	}
+	golden.AssertJSON(t, results)
+}
+
+func TestDeleteObjectRejectsVersionOnUnversionedMissingKey(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	_, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "missing", "VersionId": "missing-version"}, nil)
+	fault := asFault(t, err)
+	if fault.Code != "InvalidArgument" || fault.Message != "Invalid version id specified" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "versionId" || fault.Fields["ArgumentValue"] != "missing-version" {
+		t.Fatalf("fault = %#v", fault)
+	}
+	deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "missing", "VersionId": "null"}, nil)
+	if deleted.Status != http.StatusNoContent || len(deleted.Headers) != 0 {
+		t.Fatalf("null version delete = %#v", deleted)
+	}
+	golden.AssertJSON(t, map[string]any{"invalid": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}, "null": map[string]any{"status": deleted.Status, "headers": deleted.Headers}})
+}
+
+func TestGetObjectVersionErrors(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
+	_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "missing"}, nil)
+	invalid := asFault(t, err)
+	if invalid.Code != "InvalidArgument" || invalid.Message != "Invalid version id specified" || invalid.Fields["ArgumentName"] != "versionId" || invalid.Fields["ArgumentValue"] != "missing" {
+		t.Fatalf("unversioned read = %#v", invalid)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil))); body != "body" {
+		t.Fatalf("null version body = %q", body)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
+	version := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("versioned")).Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": version}, nil)
+	_, err = invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": version}, nil)
+	missing := asFault(t, err)
+	if missing.Code != "NoSuchVersion" || missing.Message != "The specified version does not exist." || missing.Fields["Key"] != "key" || missing.Fields["VersionId"] != version {
+		t.Fatalf("deleted version read = %#v", missing)
+	}
+	golden.AssertJSON(t, map[string]any{"invalid": invalid, "missing": missing})
+}
+
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unversioned", "Key": "key"}, []byte("body"))
+	wrongVersion := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "unversioned", "Objects": []any{map[string]any{"Key": "key", "VersionId": "missing"}}}, nil).Output
+	if failures := asSliceForTest(wrongVersion["Errors"]); len(failures) != 1 || asMapForTest(failures[0])["Code"] != "NoSuchVersion" || asMapForTest(failures[0])["VersionId"] != "missing" {
+		t.Fatalf("unversioned wrong version = %#v", wrongVersion)
+	}
+	bulk := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "unversioned", "Objects": []any{map[string]any{"Key": "key"}, map[string]any{"Key": "c-missing"}, map[string]any{"Key": "a-missing"}}}, nil).Output
+	deletedKeys := []string{}
+	for _, raw := range asSliceForTest(bulk["Deleted"]) {
+		deletedKeys = append(deletedKeys, asMapForTest(raw)["Key"].(string))
+	}
+	sort.Strings(deletedKeys)
+	if !reflect.DeepEqual(deletedKeys, []string{"a-missing", "c-missing", "key"}) || bulk["Errors"] != nil {
+		t.Fatalf("unversioned bulk delete = %#v", bulk)
+	}
+
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
 	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first"))
@@ -3626,7 +4848,7 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	if failure["Code"] != "NoSuchVersion" || failure["VersionId"] != "missing" {
 		t.Fatalf("failure %#v", failure)
 	}
-	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "quiet", "VersionId": quietVersion}, nil); asFault(t, err).Code != "NoSuchKey" {
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "quiet", "VersionId": quietVersion}, nil); asFault(t, err).Code != "NoSuchVersion" {
 		t.Fatalf("quiet delete did not run: %v", err)
 	}
 	_, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{}}, nil)
@@ -3882,6 +5104,96 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	})
 }
 
+func TestObjectLockConfigurationParity(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	fault := func(operation string, input map[string]any) *spi.Fault {
+		t.Helper()
+		_, err := invoke(t, p, operation, input, nil)
+		return asFault(t, err)
+	}
+
+	missingBucket := fault("GetBucketObjectLockConfiguration", map[string]any{"Bucket": "missing"})
+	if missingBucket.Code != "NoSuchBucket" || missingBucket.Message != "The specified bucket does not exist" || missingBucket.Fields["BucketName"] != "missing" {
+		t.Fatalf("missing bucket fault = %#v", missingBucket)
+	}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "plain"}, nil)
+	missingConfiguration := fault("GetBucketObjectLockConfiguration", map[string]any{"Bucket": "plain"})
+	if missingConfiguration.Code != "ObjectLockConfigurationNotFoundError" || missingConfiguration.Message != "Object Lock configuration does not exist for this bucket" ||
+		missingConfiguration.HTTPStatus != http.StatusNotFound || missingConfiguration.Fields["BucketName"] != "plain" {
+		t.Fatalf("missing configuration fault = %#v", missingConfiguration)
+	}
+	for _, bypass := range []bool{true, false} {
+		t.Run(fmt.Sprintf("delete bypass %t", bypass), func(t *testing.T) {
+			got := fault("DeleteObject", map[string]any{"Bucket": "plain", "Key": "key", "BypassGovernanceRetention": bypass})
+			if got.Code != "InvalidArgument" || got.Message != "x-amz-bypass-governance-retention is only applicable to Object Lock enabled buckets." ||
+				got.HTTPStatus != http.StatusBadRequest || got.Fields["ArgumentName"] != "x-amz-bypass-governance-retention" {
+				t.Fatalf("delete bypass fault = %#v", got)
+			}
+		})
+	}
+	bulkBypass := fault("DeleteObjects", map[string]any{"Bucket": "plain", "Objects": []any{map[string]any{"Key": "key"}}, "BypassGovernanceRetention": true})
+	if bulkBypass.Code != "InvalidArgument" || bulkBypass.Fields["ArgumentName"] != "x-amz-bypass-governance-retention" {
+		t.Fatalf("bulk bypass fault = %#v", bulkBypass)
+	}
+
+	noVersioning := fault("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}})
+	if noVersioning.Code != "InvalidBucketState" || noVersioning.HTTPStatus != http.StatusConflict {
+		t.Fatalf("unversioned configuration fault = %#v", noVersioning)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "plain", "Status": "Suspended"}, nil)
+	suspended := fault("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}})
+	if suspended.Code != "InvalidBucketState" || suspended.Message != "Versioning must be 'Enabled' on the bucket to apply a Object Lock configuration" {
+		t.Fatalf("suspended configuration fault = %#v", suspended)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "plain", "Status": "Enabled"}, nil)
+
+	invalidConfigurations := []struct {
+		name          string
+		configuration map[string]any
+	}{
+		{"no enabled", map[string]any{"Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1}}}},
+		{"empty", map[string]any{}},
+		{"empty rule", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{}}},
+		{"empty retention", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{}}}},
+		{"no duration", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE"}}}},
+		{"bad mode", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "INVALID", "Days": 1}}}},
+		{"both durations", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1, "Years": 1}}}},
+	}
+	for _, tc := range invalidConfigurations {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fault("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": tc.configuration})
+			if got.Code != "MalformedXML" || got.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("invalid configuration fault = %#v", got)
+			}
+		})
+	}
+
+	configuration := map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1}}}
+	mustInvoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": configuration}, nil)
+	configured := mustInvoke(t, p, "GetBucketObjectLockConfiguration", map[string]any{"Bucket": "plain"}, nil)
+	mustInvoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}, nil)
+	enabledOnly := mustInvoke(t, p, "GetBucketObjectLockConfiguration", map[string]any{"Bucket": "plain"}, nil)
+	if _, exists := asMapForTest(enabledOnly.Output["ObjectLockConfiguration"])["Rule"]; exists {
+		t.Fatalf("enabled-only configuration retained rule: %#v", enabledOnly.Output)
+	}
+	suspendLocked := fault("PutBucketVersioning", map[string]any{"Bucket": "plain", "Status": "Suspended"})
+	if suspendLocked.Code != "InvalidBucketState" || suspendLocked.Message != "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed." {
+		t.Fatalf("locked versioning fault = %#v", suspendLocked)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "plain", "Status": "Enabled"}, nil)
+
+	golden.AssertJSON(t, map[string]any{
+		"missingBucket":        map[string]any{"code": missingBucket.Code, "message": missingBucket.Message, "bucket": missingBucket.Fields["BucketName"]},
+		"missingConfiguration": map[string]any{"code": missingConfiguration.Code, "message": missingConfiguration.Message, "bucket": missingConfiguration.Fields["BucketName"]},
+		"bulkBypass":           map[string]any{"code": bulkBypass.Code, "argument": bulkBypass.Fields["ArgumentName"]},
+		"noVersioning":         map[string]any{"code": noVersioning.Code, "message": noVersioning.Message},
+		"suspended":            map[string]any{"code": suspended.Code, "message": suspended.Message},
+		"configured":           configured.Output,
+		"enabledOnly":          enabledOnly.Output,
+		"suspendLocked":        map[string]any{"code": suspendLocked.Code, "message": suspendLocked.Message},
+	})
+}
+
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
@@ -3932,13 +5244,42 @@ func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	if tags := asSliceForTest(retained.Output["TagSet"]); len(tags) != 1 || asMapForTest(tags[0])["Value"] != "second" {
 		t.Fatalf("delete marker lost version tags: %#v", retained.Output)
 	}
-	_, currentErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source"}, nil)
-	_, markerErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source", "VersionId": marker}, nil)
+	markerFaults := map[string]any{}
+	for _, version := range []string{"", marker} {
+		for _, operation := range []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"} {
+			input := map[string]any{"Bucket": "bucket", "Key": "source", "TagSet": currentTag}
+			if version != "" {
+				input["VersionId"] = version
+			}
+			_, err := invoke(t, p, operation, input, nil)
+			fault := asFault(t, err)
+			method := strings.ToUpper(strings.TrimSuffix(operation, "ObjectTagging"))
+			if fault.Code != "MethodNotAllowed" || fault.Message != "The specified method is not allowed against this resource." || fault.HTTPStatus != http.StatusMethodNotAllowed ||
+				fault.Fields["Method"] != method || fault.Fields["ResourceType"] != "DeleteMarker" || fault.Headers.Get("x-amz-delete-marker") != "true" ||
+				fault.Headers.Get("x-amz-version-id") != marker || fault.Headers.Get("Allow") != "DELETE" {
+				t.Fatalf("%s marker %q = %#v", operation, version, fault)
+			}
+			suffix := "Current"
+			if version != "" {
+				suffix = "Explicit"
+			}
+			markerFaults[operation+suffix] = fault.Code
+		}
+	}
 	for _, operation := range []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"} {
 		_, err := invoke(t, p, operation, map[string]any{"Bucket": "bucket", "Key": "missing", "TagSet": currentTag}, nil)
-		if fault := asFault(t, err); fault.Code != "NoSuchKey" || fault.HTTPStatus != http.StatusNotFound {
+		fault := asFault(t, err)
+		wantKey := "missing"
+		if operation == "GetObjectTagging" {
+			wantKey = "bucket/missing"
+		}
+		if fault.Code != "NoSuchKey" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["Key"] != wantKey {
 			t.Fatalf("%s missing object fault = %#v", operation, fault)
 		}
+	}
+	_, missingVersionErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source", "VersionId": "missing-version"}, nil)
+	if fault := asFault(t, missingVersionErr); fault.Code != "NoSuchVersion" || fault.Fields["Key"] != "source" || fault.Fields["VersionId"] != "missing-version" {
+		t.Fatalf("missing tag version = %#v", fault)
 	}
 
 	golden.AssertJSON(t, map[string]any{
@@ -3946,58 +5287,101 @@ func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 		"currentTags":      current.Output["TagSet"],
 		"retainedTags":     retained.Output["TagSet"],
 		"copiedTags":       copiedTags.Output["TagSet"],
-		"currentMarker":    asFault(t, currentErr).Code,
-		"explicitMarker":   asFault(t, markerErr).Code,
+		"markerFaults":     markerFaults,
+		"missingVersion":   asFault(t, missingVersionErr).Code,
 	})
 }
 
-func TestUploadPartCopyConditionsAndRange(t *testing.T) {
+func TestListObjectVersionsUnversionedOrder(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned-order"}, nil)
+	for _, key := range []string{"c", "a", "b"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unversioned-order", "Key": key}, []byte(key))
+	}
+	versions := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "unversioned-order"}, nil).Output["Versions"])
+	if len(versions) != 3 {
+		t.Fatalf("versions = %#v", versions)
+	}
+	for index, key := range []string{"a", "b", "c"} {
+		version := asMapForTest(versions[index])
+		if version["Key"] != key || version["VersionId"] != "null" || version["IsLatest"] != true {
+			t.Fatalf("version %d = %#v", index, version)
+		}
+	}
+}
+
+func TestUploadPartCopyConditionsAndRange(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	body := bytes.Repeat([]byte("0123456789"), 600000)
-	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "large"}, body)
+	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "source"}, []byte("0123456789"))
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "source"}, nil)
+	modified, err := http.ParseTime(head.Headers.Get("Last-Modified"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = deps.Clock.Advance(2 * time.Second)
 	createUpload := func(key string) string {
 		t.Helper()
 		response := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": key}, nil)
 		return response.Output["UploadId"].(string)
 	}
-
-	_, err := invoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": createUpload("rejected"), "PartNumber": 1, "CopySource": "bucket/large", "CopySourceIfMatch": `"wrong"`,
-	}, nil)
-	if fault := asFault(t, err); fault.Code != "PreconditionFailed" {
-		t.Fatalf("condition fault = %#v", fault)
+	characterization := map[string]any{}
+	type copyCase struct {
+		name, copyRange, code, condition string
+		conditions                       map[string]any
+		size                             int
 	}
-
-	uploadID := createUpload("range")
-	part := mustInvoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": uploadID, "PartNumber": 1, "CopySource": "bucket/large",
-		"CopySourceIfMatch": source.Headers.Get("ETag"), "CopySourceRange": "bytes=10-19",
-	}, nil)
-	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
-	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "range"}, nil)); string(got) != "0123456789" {
-		t.Fatalf("range copy = %q", got)
+	cases := []copyCase{
+		{name: "no-range", size: 10},
+		{name: "range-0-8", copyRange: "bytes=0-8", size: 9},
+		{name: "range-1-1", copyRange: "bytes=1-1", size: 1},
+		{name: "range-0-0", copyRange: "bytes=0-0", size: 1},
+		{name: "if-match", conditions: map[string]any{"CopySourceIfMatch": source.Headers.Get("ETag")}, size: 10},
+		{name: "if-none-match", conditions: map[string]any{"CopySourceIfNoneMatch": `"not-matching"`}, size: 10},
+		{name: "if-unmodified-since", conditions: map[string]any{"CopySourceIfUnmodifiedSince": modified.Add(time.Second).Format(http.TimeFormat)}, size: 10},
+		{name: "if-modified-since", conditions: map[string]any{"CopySourceIfModifiedSince": modified.Add(-time.Second).Format(http.TimeFormat)}, size: 10},
+		{name: "future-if-modified-since", conditions: map[string]any{"CopySourceIfModifiedSince": time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)}, size: 10},
+		{name: "failed-if-match", conditions: map[string]any{"CopySourceIfMatch": `"not-matching"`}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-Match"},
+		{name: "failed-if-none-match", conditions: map[string]any{"CopySourceIfNoneMatch": source.Headers.Get("ETag")}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-None-Match"},
+		{name: "failed-if-unmodified-since", conditions: map[string]any{"CopySourceIfUnmodifiedSince": modified.Add(-time.Second).Format(http.TimeFormat)}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-Unmodified-Since"},
+		{name: "if-match-overrides-unmodified", conditions: map[string]any{"CopySourceIfMatch": source.Headers.Get("ETag"), "CopySourceIfUnmodifiedSince": modified.Add(-time.Second).Format(http.TimeFormat)}, size: 10},
+		{name: "failed-none-match-and-unmodified", conditions: map[string]any{"CopySourceIfNoneMatch": `"not-matching"`, "CopySourceIfUnmodifiedSince": modified.Add(-time.Second).Format(http.TimeFormat)}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-Unmodified-Since"},
+		{name: "failed-if-modified-since", conditions: map[string]any{"CopySourceIfModifiedSince": modified.Format(http.TimeFormat)}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-Modified-Since"},
 	}
-
-	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": createUpload("invalid-range"), "PartNumber": 1, "CopySource": "bucket/large", "CopySourceRange": "bytes=7000000-7000001",
-	}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRange" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable {
-		t.Fatalf("range fault = %#v", fault)
+	malformed := []string{"0-8", "bytes=1-0", "bytes=-1-", "bytes=0--1", "bytes=0-1,3-4,7-9", "bytes=-", "bytes=-0", "bytes=1-", "bytes=-2", "bytes=-15"}
+	for _, value := range malformed {
+		cases = append(cases, copyCase{name: "invalid-" + value, copyRange: value, code: "InvalidArgument"})
 	}
-	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": createUpload("malformed-range"), "PartNumber": 1, "CopySource": "bucket/large", "CopySourceRange": "0-1",
-	}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
-		t.Fatalf("malformed range fault = %#v", fault)
+	cases = append(cases,
+		copyCase{name: "range-past-end", copyRange: "bytes=0-100", code: "InvalidArgument"},
+		copyCase{name: "range-after-object", copyRange: "bytes=100-200", code: "InvalidRequest"},
+	)
+	for _, tc := range cases {
+		uploadID := createUpload(tc.name)
+		input := map[string]any{"Bucket": "bucket", "Key": tc.name, "UploadId": uploadID, "PartNumber": 1, "CopySource": "bucket/source"}
+		if tc.copyRange != "" {
+			input["CopySourceRange"] = tc.copyRange
+		}
+		for key, value := range tc.conditions {
+			input[key] = value
+		}
+		_, err := invoke(t, p, "UploadPartCopy", input, nil)
+		parts := asSliceForTest(mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": tc.name, "UploadId": uploadID}, nil).Output["Parts"])
+		if tc.code == "" {
+			if err != nil || len(parts) != 1 || asMapForTest(parts[0])["Size"] != tc.size {
+				t.Fatalf("%s = parts %#v, err %v", tc.name, parts, err)
+			}
+			characterization[tc.name] = map[string]any{"size": tc.size, "status": http.StatusOK}
+			continue
+		}
+		fault := asFault(t, err)
+		if fault.Code != tc.code || fault.HTTPStatus != http.StatusBadRequest && fault.HTTPStatus != http.StatusPreconditionFailed || tc.condition != "" && fault.Fields["Condition"] != tc.condition || len(parts) != 0 {
+			t.Fatalf("%s = fault %#v, parts %#v", tc.name, fault, parts)
+		}
+		characterization[tc.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
 	}
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "small"}, []byte("small"))
-	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": createUpload("too-small"), "PartNumber": 1, "CopySource": "bucket/small", "CopySourceRange": "bytes=0-1",
-	}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
-		t.Fatalf("small range fault = %#v", fault)
-	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestListObjectsV2Prefix(t *testing.T) {
@@ -4012,13 +5396,604 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	for _, item := range contents {
 		m, _ := item.(map[string]any)
 		keys[m["Key"].(string)] = true
-		if m["LastModified"] == "" || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
+		if modified := m["LastModified"].(string); !strings.HasSuffix(modified, ".000Z") || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
 			t.Fatalf("object metadata: %#v", m)
 		}
 	}
 	if !keys["a/1"] || !keys["a/2"] || keys["z/9"] || len(keys) != 2 {
 		t.Fatalf("prefix list: %v", keys)
 	}
+}
+
+func TestListObjectsDelimiterEncodingAndEmptyMarker(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-delimiters"}, nil)
+	empty := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-delimiters", "Marker": ""}, nil).Output
+	if empty["Marker"] != "" || len(asSliceForTest(empty["Contents"])) != 0 {
+		t.Fatalf("empty marker = %#v", empty)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-delimiters", "Key": "test/foo/bar/123"}, []byte("content 123"))
+	for _, tc := range []struct {
+		delimiter, content, prefix string
+	}{{"", "test/foo/bar/123", ""}, {"/", "", "test/foo/"}, {"%2F", "test/foo/bar/123", ""}} {
+		out := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-delimiters", "Prefix": "test/", "Delimiter": tc.delimiter, "MaxKeys": 1, "EncodingType": "url"}, nil).Output
+		if tc.content != "" && (len(asSliceForTest(out["Contents"])) != 1 || asMapForTest(asSliceForTest(out["Contents"])[0])["Key"] != tc.content) {
+			t.Fatalf("delimiter %q contents = %#v", tc.delimiter, out)
+		}
+		if tc.prefix != "" && (len(asSliceForTest(out["CommonPrefixes"])) != 1 || asMapForTest(asSliceForTest(out["CommonPrefixes"])[0])["Prefix"] != tc.prefix) {
+			t.Fatalf("delimiter %q prefixes = %#v", tc.delimiter, out)
+		}
+		if tc.delimiter == "%2F" && out["Delimiter"] != "%252F" {
+			t.Fatalf("encoded delimiter = %#v", out)
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://list-delimiters.s3.us-east-1.amazonaws.com/?prefix=test&delimiter=%2F", nil)
+	routed, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListObjectsV2", Input: map[string]any{"Bucket": "list-delimiters"}, Identity: ident(), HTTP: request})
+	if err != nil || len(asSliceForTest(routed.Output["CommonPrefixes"])) != 1 || asMapForTest(asSliceForTest(routed.Output["CommonPrefixes"])[0])["Prefix"] != "test/" {
+		t.Fatalf("raw encoded delimiter = %#v, %v", routed, err)
+	}
+}
+
+func TestListObjectOwnerIdentityCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-owner"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-owner", "Key": "key"}, []byte("body"))
+	owner := func(output map[string]any) map[string]any {
+		t.Helper()
+		contents := output["Contents"].([]any)
+		return asMapForTest(asMapForTest(contents[0])["Owner"])
+	}
+	v1 := owner(mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-owner"}, nil).Output)
+	if v1["ID"] != "123456789012" || v1["DisplayName"] != nil {
+		t.Fatalf("ListObjects owner = %#v", v1)
+	}
+	v2 := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "list-owner"}, nil).Output["Contents"].([]any)[0].(map[string]any)
+	if v2["Owner"] != nil {
+		t.Fatalf("ListObjectsV2 default owner = %#v", v2["Owner"])
+	}
+	v2Owner := owner(mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "list-owner", "FetchOwner": true}, nil).Output)
+	if v2Owner["ID"] != "123456789012" || v2Owner["DisplayName"] != nil {
+		t.Fatalf("ListObjectsV2 requested owner = %#v", v2Owner)
+	}
+	golden.AssertJSON(t, map[string]any{"v1": v1, "v2Default": v2["Owner"], "v2FetchOwner": v2Owner})
+}
+
+func TestListObjectsBucketRegionCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "east"}, nil)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "west", "LocationConstraint": "us-west-2"}, nil)
+	for _, bucket := range []string{"east", "west"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "key"}, []byte("body"))
+	}
+	characterization := map[string]any{}
+	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
+		west := mustInvoke(t, p, operation, map[string]any{"Bucket": "west"}, nil).Output["BucketRegion"]
+		if west != "us-west-2" {
+			t.Fatalf("%s west BucketRegion = %#v", operation, west)
+		}
+		east := mustInvoke(t, p, operation, map[string]any{"Bucket": "east"}, nil).Output["BucketRegion"]
+		if east != nil {
+			t.Fatalf("%s east BucketRegion = %#v", operation, east)
+		}
+		characterization[operation] = map[string]any{"east": east, "west": west}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestListObjectChecksumMetadata(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-checksums"}, nil)
+	body := []byte("checksummed")
+	sum := sha256.Sum256(body)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-checksums", "Key": "checksummed", "ChecksumSHA256": base64.StdEncoding.EncodeToString(sum[:])}, body)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-checksums", "Key": "plain"}, body)
+	characterization := map[string]any{}
+	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
+		contents := mustInvoke(t, p, operation, map[string]any{"Bucket": "list-checksums"}, nil).Output["Contents"].([]any)
+		checksummed, plain := asMapForTest(contents[0]), asMapForTest(contents[1])
+		if !reflect.DeepEqual(checksummed["ChecksumAlgorithm"], []any{"SHA256"}) || checksummed["ChecksumType"] != "FULL_OBJECT" {
+			t.Fatalf("%s checksummed object = %#v", operation, checksummed)
+		}
+		if plain["ChecksumAlgorithm"] != nil || plain["ChecksumType"] != nil {
+			t.Fatalf("%s plain object = %#v", operation, plain)
+		}
+		characterization[operation] = []any{
+			map[string]any{"key": checksummed["Key"], "algorithm": checksummed["ChecksumAlgorithm"], "type": checksummed["ChecksumType"]},
+			map[string]any{"key": plain["Key"], "algorithm": plain["ChecksumAlgorithm"], "type": plain["ChecksumType"]},
+		}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestListEncodingTypeValidation(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "list-encoding", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-encoding", "Key": "versioned"}, []byte("body"))
+	for _, operation := range []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"} {
+		t.Run(operation, func(t *testing.T) {
+			for _, value := range []string{"value", "", "URL"} {
+				_, err := invoke(t, p, operation, map[string]any{"Bucket": "list-encoding", "EncodingType": value}, nil)
+				fault := asFault(t, err)
+				if fault.Code != "InvalidArgument" || fault.Message != "Invalid Encoding Method specified in Request" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "encoding-type" || fault.Fields["ArgumentValue"] != value {
+					t.Fatalf("encoding %q fault = %#v", value, fault)
+				}
+			}
+			for _, input := range []map[string]any{{"Bucket": "list-encoding"}, {"Bucket": "list-encoding", "EncodingType": "url"}} {
+				if _, err := invoke(t, p, operation, input, nil); err != nil {
+					t.Fatalf("valid encoding %#v: %v", input, err)
+				}
+			}
+		})
+	}
+	_, err := invoke(t, p, "ListObjects", map[string]any{"Bucket": "list-encoding", "encoding-type": "value"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+		t.Fatalf("lowercase input fault = %#v", fault)
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://list-encoding.s3.us-east-1.amazonaws.com/?list-type=2&encoding-type=", nil)
+	_, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListObjectsV2", Input: map[string]any{}, Identity: ident(), HTTP: request})
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Fields["ArgumentValue"] != "" {
+		t.Fatalf("empty query fault = %#v", fault)
+	}
+}
+
+func TestListEncodingTypeCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding-golden"}, nil)
+	got := map[string]any{}
+	for _, operation := range []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"} {
+		for _, value := range []string{"value", ""} {
+			_, err := invoke(t, p, operation, map[string]any{"Bucket": "list-encoding-golden", "EncodingType": value}, nil)
+			fault := asFault(t, err)
+			got[operation+":"+value] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+		}
+	}
+	golden.AssertJSON(t, got)
+}
+
+func TestListURLResponseEncoding(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-url"}, nil)
+	for _, key := range []string{"folder/a b/file+one", "folder/root ?"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-url", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-url", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1, "EncodingType": "url"}, nil).Output
+	prefixes := asSliceForTest(first["CommonPrefixes"])
+	if len(prefixes) != 1 || asMapForTest(prefixes[0])["Prefix"] != "folder/a%20b/" || first["NextMarker"] != "folder/a%20b/" || first["Prefix"] != "folder/" || first["Delimiter"] != "/" {
+		t.Fatalf("encoded V1 page = %#v", first)
+	}
+	v2 := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "list-url", "Prefix": "folder/a b/", "StartAfter": "folder/a b/", "EncodingType": "url"}, nil).Output
+	contents := asSliceForTest(v2["Contents"])
+	if len(contents) != 1 || asMapForTest(contents[0])["Key"] != "folder/a%20b/file%2Bone" || v2["Prefix"] != "folder/a%20b/" || v2["StartAfter"] != "folder/a%20b/" || v2["EncodingType"] != "url" {
+		t.Fatalf("encoded V2 page = %#v", v2)
+	}
+	golden.AssertJSON(t, map[string]any{"v1": first, "v2": v2})
+}
+
+func TestListObjectVersionsURLResponseEncoding(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-url"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-url", "Status": "Enabled"}, nil)
+	for _, key := range []string{"folder/a b/file+one", "folder/root ?"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-url", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-url", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1, "EncodingType": "url"}, nil).Output
+	if prefixes := asSliceForTest(first["CommonPrefixes"]); len(prefixes) != 1 || asMapForTest(prefixes[0])["Prefix"] != "folder/a%20b/" || first["NextKeyMarker"] != "folder/a%20b/" {
+		t.Fatalf("encoded version prefix page = %#v", first)
+	}
+	versions := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-url", "Prefix": "folder/a b/", "EncodingType": "url"}, nil).Output
+	rows := asSliceForTest(versions["Versions"])
+	if len(rows) != 1 || asMapForTest(rows[0])["Key"] != "folder/a%20b/file%2Bone" || versions["Prefix"] != "folder/a%20b/" || versions["EncodingType"] != "url" {
+		t.Fatalf("encoded versions = %#v", versions)
+	}
+	golden.AssertJSON(t, map[string]any{"first": first, "versions": versions})
+}
+
+func TestListObjectVersionsURLMarkerRoundTrip(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-url-markers"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-url-markers", "Status": "Enabled"}, nil)
+	for _, key := range []string{"folder/a key", "folder/a!key"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-url-markers", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-url-markers", "Prefix": "folder/", "MaxKeys": 1, "EncodingType": "url"}, nil).Output
+	firstRows := asSliceForTest(first["Versions"])
+	if len(firstRows) != 1 || asMapForTest(firstRows[0])["Key"] != "folder/a%20key" || first["NextKeyMarker"] != "folder/a%20key" || first["NextVersionIdMarker"] == nil {
+		t.Fatalf("first encoded page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-url-markers", "Prefix": "folder/", "MaxKeys": 1, "EncodingType": "url", "KeyMarker": first["NextKeyMarker"], "VersionIdMarker": first["NextVersionIdMarker"]}, nil).Output
+	secondRows := asSliceForTest(second["Versions"])
+	if len(secondRows) != 1 || asMapForTest(secondRows[0])["Key"] != "folder/a%21key" || second["KeyMarker"] != "folder/a%20key" {
+		t.Fatalf("second encoded page = %#v", second)
+	}
+	golden.AssertJSON(t, map[string]any{"first": first, "second": second})
+}
+
+func TestListZeroMaxKeysUsesDefault(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-zero-max"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "list-zero-max", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-zero-max", "Key": "key"}, []byte("body"))
+	got := map[string]any{}
+	for _, tc := range []struct{ operation, collection string }{{"ListObjects", "Contents"}, {"ListObjectsV2", "Contents"}, {"ListObjectVersions", "Versions"}} {
+		t.Run(tc.operation, func(t *testing.T) {
+			out := mustInvoke(t, p, tc.operation, map[string]any{"Bucket": "list-zero-max", "MaxKeys": 0}, nil).Output
+			if out["MaxKeys"] != 1000 || len(asSliceForTest(out[tc.collection])) != 1 || out["IsTruncated"] != false {
+				t.Fatalf("zero max keys = %#v", out)
+			}
+			got[tc.operation] = out
+		})
+	}
+	golden.AssertJSON(t, got)
+}
+
+func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil)
+	for _, key := range []string{"folder/aSubfolder/subFile1", "folder/aSubfolder/subFile2", "folder/file1", "folder/file2"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-pagination", "Key": key}, []byte("content"))
+	}
+	input := map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1}
+	first := mustInvoke(t, p, "ListObjects", input, nil).Output
+	firstPrefixes := asSliceForTest(first["CommonPrefixes"])
+	if len(firstPrefixes) != 1 || asMapForTest(firstPrefixes[0])["Prefix"] != "folder/aSubfolder/" || len(asSliceForTest(first["Contents"])) != 0 || first["NextMarker"] != "folder/aSubfolder/" || first["KeyCount"] != 1 || first["IsTruncated"] != true {
+		t.Fatalf("first V1 page = %#v", first)
+	}
+	secondInput := maps.Clone(input)
+	secondInput["Marker"] = first["NextMarker"]
+	second := mustInvoke(t, p, "ListObjects", secondInput, nil).Output
+	secondContents := asSliceForTest(second["Contents"])
+	if len(secondContents) != 1 || asMapForTest(secondContents[0])["Key"] != "folder/file1" || second["NextMarker"] != "folder/file1" || second["Marker"] != "folder/aSubfolder/" {
+		t.Fatalf("second V1 page = %#v", second)
+	}
+	lastInput := maps.Clone(input)
+	lastInput["Marker"] = second["NextMarker"]
+	last := mustInvoke(t, p, "ListObjects", lastInput, nil).Output
+	lastContents := asSliceForTest(last["Contents"])
+	if len(lastContents) != 1 || asMapForTest(lastContents[0])["Key"] != "folder/file2" || last["IsTruncated"] != false || last["NextMarker"] != nil {
+		t.Fatalf("last V1 page = %#v", last)
+	}
+	manualInput := maps.Clone(input)
+	manualInput["Marker"] = "folder/aSubfolder/subFile1"
+	manual := mustInvoke(t, p, "ListObjects", manualInput, nil).Output
+	if got := asSliceForTest(manual["Contents"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" {
+		t.Fatalf("manual V1 marker = %#v", manual)
+	}
+	withoutDelimiter := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-pagination", "MaxKeys": 1}, nil).Output
+	if withoutDelimiter["IsTruncated"] != true || withoutDelimiter["NextMarker"] != nil {
+		t.Fatalf("V1 page without delimiter = %#v", withoutDelimiter)
+	}
+	v2First := mustInvoke(t, p, "ListObjectsV2", input, nil).Output
+	v2Next := v2First["NextContinuationToken"]
+	if v2Next != "Zm9sZGVyL2ZpbGUx" || v2First["KeyCount"] != 1 {
+		t.Fatalf("first V2 page = %#v", v2First)
+	}
+	v2Input := maps.Clone(input)
+	v2Input["ContinuationToken"] = v2Next
+	v2Second := mustInvoke(t, p, "ListObjectsV2", v2Input, nil).Output
+	if got := asSliceForTest(v2Second["Contents"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" || v2Second["ContinuationToken"] != v2Next || v2Second["NextContinuationToken"] != "Zm9sZGVyL2ZpbGUy" {
+		t.Fatalf("second V2 page = %#v", v2Second)
+	}
+	for _, test := range []struct {
+		query, token, want string
+	}{{"", "NextMarker", "folder/aSubfolder/"}, {"?list-type=2", "NextContinuationToken", "Zm9sZGVyL2ZpbGUx"}} {
+		request := httptest.NewRequest(http.MethodGet, "https://list-pagination.s3.us-east-1.amazonaws.com/"+test.query, nil)
+		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListObjectsV2", Input: input, Identity: ident(), HTTP: request})
+		if err != nil || response.Output[test.token] != test.want {
+			t.Fatalf("route %q = %#v, %v", test.query, response, err)
+		}
+	}
+}
+
+func TestListObjectsPaginationCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-characterization"}, nil)
+	for _, key := range []string{"folder/aSubfolder/subFile1", "folder/aSubfolder/subFile2", "folder/file1", "folder/file2"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-characterization", "Key": key}, []byte("content"))
+	}
+	input := map[string]any{"Bucket": "list-characterization", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1}
+	v1First := mustInvoke(t, p, "ListObjects", input, nil).Output
+	v1NextInput := maps.Clone(input)
+	v1NextInput["Marker"] = v1First["NextMarker"]
+	v2First := mustInvoke(t, p, "ListObjectsV2", input, nil).Output
+	v2NextInput := maps.Clone(input)
+	v2NextInput["ContinuationToken"] = v2First["NextContinuationToken"]
+	golden.AssertJSON(t, map[string]any{
+		"v1-first": v1First,
+		"v1-next":  mustInvoke(t, p, "ListObjects", v1NextInput, nil).Output,
+		"v2-first": v2First,
+		"v2-next":  mustInvoke(t, p, "ListObjectsV2", v2NextInput, nil).Output,
+	})
+}
+
+func TestListObjectsV2OpaqueContinuationTokens(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "opaque-tokens"}, nil)
+	for _, key := range []string{"a", "b", "c"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "opaque-tokens", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "MaxKeys": 1}, nil).Output
+	if contents := asSliceForTest(first["Contents"]); len(contents) != 1 || asMapForTest(contents[0])["Key"] != "a" || first["NextContinuationToken"] != "Yg==" {
+		t.Fatalf("first page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "MaxKeys": 1, "ContinuationToken": first["NextContinuationToken"]}, nil).Output
+	if contents := asSliceForTest(second["Contents"]); len(contents) != 1 || asMapForTest(contents[0])["Key"] != "b" || second["ContinuationToken"] != "Yg==" || second["NextContinuationToken"] != "Yw==" {
+		t.Fatalf("second page = %#v", second)
+	}
+	for _, token := range []string{"", "not-base64"} {
+		_, err := invoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "ContinuationToken": token}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.Message != "The continuation token provided is incorrect" || fault.Fields["ArgumentName"] != "continuation-token" {
+			t.Fatalf("token %q fault = %#v", token, fault)
+		}
+	}
+}
+
+func TestListObjectsV2SafeContinuationTokens(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "safe-tokens"}, nil)
+	keys := []string{"file%2Fname", "test@key/", "test%123", "test key/", "a/😀/", "date=2026-01-01/"}
+	for _, key := range keys {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "safe-tokens", "Key": key}, nil)
+	}
+	first := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "MaxKeys": 3}, nil).Output
+	second := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "ContinuationToken": first["NextContinuationToken"]}, nil).Output
+	var got []string
+	for _, page := range []map[string]any{first, second} {
+		for _, row := range asSliceForTest(page["Contents"]) {
+			got = append(got, asMapForTest(row)["Key"].(string))
+		}
+	}
+	sort.Strings(keys)
+	if !reflect.DeepEqual(got, keys) || first["NextContinuationToken"] == "" || second["ContinuationToken"] != first["NextContinuationToken"] {
+		t.Fatalf("safe token pages first=%#v second=%#v", first, second)
+	}
+	start := "date=2026-01-01/"
+	after := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "StartAfter": start, "MaxKeys": 2, "EncodingType": "url"}, nil).Output
+	if after["StartAfter"] != "date%3D2026-01-01/" || len(asSliceForTest(after["Contents"])) != 2 {
+		t.Fatalf("encoded start-after = %#v", after)
+	}
+}
+
+func TestSpecialObjectKeyCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, bucket := range []string{"special-keys", "special-key-copies"} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	}
+	keys := []string{"/foo", "bar", "/bar/foo/", "file%2Fname", "test@key/", "test%123", "test%percent", "test key/", "test key//", "test%123/", "a/%F0%9F%98%80/", "a/", "t/", "u/", "test+key", "test%40key/", "test%40key", "#key-with-hash-prefix"}
+	got := map[string]any{"objects": map[string]any{}, "copies": map[string]any{}, "missing": map[string]any{}}
+	objects, copies, missing := got["objects"].(map[string]any), got["copies"].(map[string]any), got["missing"].(map[string]any)
+	for i, key := range keys {
+		body := []byte(fmt.Sprintf("body-%d", i))
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "special-keys", "Key": key}, body)
+		objects[key] = string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "special-keys", "Key": key}, nil)))
+	}
+	for _, key := range []string{"file%2Fname", "test@key/", "test key/", "test key//", "a/%F0%9F%98%80/", "test+key"} {
+		mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "special-key-copies", "Key": key, "CopySource": url.QueryEscape("special-keys/" + key)}, nil)
+		copies[key] = string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "special-key-copies", "Key": key}, nil)))
+	}
+	for _, key := range []string{"foo", "//foo", "/bar"} {
+		_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "special-keys", "Key": key}, nil)
+		missing[key] = asFault(t, err).Code
+	}
+	listed := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "special-keys"}, nil).Output["Contents"]
+	var listedKeys []string
+	for _, row := range asSliceForTest(listed) {
+		listedKeys = append(listedKeys, asMapForTest(row)["Key"].(string))
+	}
+	wantKeys := append([]string(nil), keys...)
+	sort.Strings(wantKeys)
+	got["listed"] = listedKeys
+	if !reflect.DeepEqual(listedKeys, wantKeys) || objects["test@key/"] == objects["test%40key/"] || copies["test+key"] == nil {
+		t.Fatalf("special object keys = %#v", got)
+	}
+	golden.AssertJSON(t, got)
+}
+
+func TestMultipartUnicodeLocationCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "multipart-unicode-location", "Key": "test-unicode_—_file"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	upload := mustInvoke(t, p, "CreateMultipartUpload", input, nil)
+	partInput := maps.Clone(input)
+	partInput["UploadId"], partInput["PartNumber"] = upload.Output["UploadId"], 1
+	part := mustInvoke(t, p, "UploadPart", partInput, []byte("upload-part-1"))
+	complete := maps.Clone(input)
+	complete["UploadId"], complete["MultipartUpload"] = upload.Output["UploadId"], map[string]any{"Parts": []any{completedPart(1, part)}}
+	response := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if response.Output["Location"] != "http://multipart-unicode-location.s3.amazonaws.com/test-unicode_%E2%80%94_file" {
+		t.Fatalf("multipart Unicode location = %#v", response.Output)
+	}
+	advertisedInput := map[string]any{"Bucket": input["Bucket"], "Key": "custom-host"}
+	advertisedUpload := mustInvoke(t, p, "CreateMultipartUpload", advertisedInput, nil)
+	advertisedPart := maps.Clone(advertisedInput)
+	advertisedPart["UploadId"], advertisedPart["PartNumber"] = advertisedUpload.Output["UploadId"], 1
+	part = mustInvoke(t, p, "UploadPart", advertisedPart, []byte("body"))
+	advertisedInput["UploadId"] = advertisedUpload.Output["UploadId"]
+	advertisedInput["MultipartUpload"] = map[string]any{"Parts": []any{completedPart(1, part)}}
+	advertised, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "CompleteMultipartUpload", Input: advertisedInput, Identity: ident(), AdvertiseURL: "https://foobar:4566/base/"})
+	if err != nil || advertised.Output["Location"] != "https://foobar:4566/base/multipart-unicode-location/custom-host" {
+		t.Fatalf("advertised multipart location = %#v, %v", advertised, err)
+	}
+	golden.AssertJSON(t, response.Output)
+}
+
+func TestListObjectVersionsPagination(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-list", "Status": "Enabled"}, nil)
+	for _, key := range []string{"folder/a/one", "folder/a/two", "folder/file1", "folder/file2"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list", "Key": key}, []byte(key))
+	}
+	for range 5 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list", "Key": "versions/key"}, []byte("version"))
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "version-list", "Key": "deleted"}, nil)
+
+	input := map[string]any{"Bucket": "version-list", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1}
+	first := mustInvoke(t, p, "ListObjectVersions", input, nil).Output
+	if got := asSliceForTest(first["CommonPrefixes"]); len(got) != 1 || asMapForTest(got[0])["Prefix"] != "folder/a/" || len(asSliceForTest(first["Versions"])) != 0 || first["NextKeyMarker"] != "folder/a/" || first["NextVersionIdMarker"] != nil || first["IsTruncated"] != true {
+		t.Fatalf("first prefix page = %#v", first)
+	}
+	nextInput := maps.Clone(input)
+	nextInput["KeyMarker"] = first["NextKeyMarker"]
+	next := mustInvoke(t, p, "ListObjectVersions", nextInput, nil).Output
+	if got := asSliceForTest(next["Versions"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" || next["NextKeyMarker"] != "folder/file1" {
+		t.Fatalf("next prefix page = %#v", next)
+	}
+
+	versionInput := map[string]any{"Bucket": "version-list", "Prefix": "versions/", "MaxKeys": 3}
+	page := mustInvoke(t, p, "ListObjectVersions", versionInput, nil).Output
+	versions := asSliceForTest(page["Versions"])
+	if len(versions) != 3 || page["NextKeyMarker"] != "versions/key" || page["NextVersionIdMarker"] == nil || asMapForTest(versions[0])["IsLatest"] != true {
+		t.Fatalf("first version page = %#v", page)
+	}
+	for _, item := range versions {
+		row := asMapForTest(item)
+		if _, err := time.Parse("2006-01-02T15:04:05.000Z", row["LastModified"].(string)); err != nil || row["StorageClass"] != "STANDARD" || row["Owner"] == nil {
+			t.Fatalf("version row = %#v", row)
+		}
+	}
+	pageInput := maps.Clone(versionInput)
+	pageInput["KeyMarker"], pageInput["VersionIdMarker"] = page["NextKeyMarker"], page["NextVersionIdMarker"]
+	last := mustInvoke(t, p, "ListObjectVersions", pageInput, nil).Output
+	if got := asSliceForTest(last["Versions"]); len(got) != 2 || last["IsTruncated"] != false {
+		t.Fatalf("last version page = %#v", last)
+	}
+	keyOnly := maps.Clone(versionInput)
+	keyOnly["KeyMarker"], keyOnly["MaxKeys"] = "versions/key", 100
+	if got := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", keyOnly, nil).Output["Versions"]); len(got) != 0 {
+		t.Fatalf("key-only marker retained versions = %#v", got)
+	}
+	_, err := invoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list", "VersionIdMarker": "orphan"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "version-id-marker" {
+		t.Fatalf("orphan version marker = %#v", fault)
+	}
+	encoded := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list", "Prefix": "folder/", "EncodingType": "url"}, nil).Output
+	if encoded["Prefix"] != "folder/" || encoded["EncodingType"] != "url" {
+		t.Fatalf("encoded version list = %#v", encoded)
+	}
+	all := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list"}, nil).Output
+	if len(asSliceForTest(all["DeleteMarkers"])) != 1 {
+		t.Fatalf("delete markers = %#v", all)
+	}
+}
+
+func TestListObjectsDefaultThousandBoundary(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "thousand-boundary"}, nil)
+	for index := range 1010 {
+		key := fmt.Sprintf("key-%04d", index)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "thousand-boundary", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "thousand-boundary", "Delimiter": "/"}, nil).Output
+	if len(asSliceForTest(first["Contents"])) != 1000 || first["IsTruncated"] != true || first["NextMarker"] != "key-0999" {
+		t.Fatalf("first page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "thousand-boundary", "Marker": first["NextMarker"]}, nil).Output
+	if len(asSliceForTest(second["Contents"])) != 10 || second["IsTruncated"] != false {
+		t.Fatalf("second page = %#v", second)
+	}
+}
+
+func TestListObjectVersionsManyVersionsPagination(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "many-versions"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "many-versions", "Status": "Enabled"}, nil)
+	for range 101 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "many-versions", "Key": "prefixed-key"}, nil)
+	}
+	first := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "many-versions", "Prefix": "prefix", "MaxKeys": 100}, nil).Output
+	if len(asSliceForTest(first["Versions"])) != 100 || first["IsTruncated"] != true || first["NextKeyMarker"] != "prefixed-key" || first["NextVersionIdMarker"] == nil {
+		t.Fatalf("first version page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjectVersions", map[string]any{
+		"Bucket": "many-versions", "Prefix": "prefix", "MaxKeys": 100,
+		"KeyMarker": first["NextKeyMarker"], "VersionIdMarker": first["NextVersionIdMarker"],
+	}, nil).Output
+	if len(asSliceForTest(second["Versions"])) != 1 || second["IsTruncated"] != false || second["NextKeyMarker"] != nil || second["NextVersionIdMarker"] != nil {
+		t.Fatalf("second version page = %#v", second)
+	}
+}
+
+func TestListObjectVersionsResumesAfterDeletedVersionMarker(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "deleted-version-marker"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "deleted-version-marker", "Status": "Enabled"}, nil)
+	for range 3 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key"}, []byte("body"))
+	}
+
+	first := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "MaxKeys": 1}, nil).Output
+	marker := first["NextVersionIdMarker"]
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key", "VersionId": marker}, nil)
+	resumed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "KeyMarker": "key", "VersionIdMarker": marker}, nil).Output
+	versions := asSliceForTest(resumed["Versions"])
+	if len(versions) != 2 {
+		t.Fatalf("versions after deleted marker = %#v", resumed)
+	}
+	golden.AssertJSON(t, map[string]any{"first": first, "resumed": resumed})
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key", "VersionId": asMapForTest(versions[0])["VersionId"]}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key"}, []byte("newer"))
+	chained := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "KeyMarker": "key", "VersionIdMarker": marker}, nil).Output
+	if rows := asSliceForTest(chained["Versions"]); len(rows) != 1 || asMapForTest(rows[0])["VersionId"] != asMapForTest(versions[1])["VersionId"] {
+		t.Fatalf("versions after chained deletion = %#v", chained)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key", "VersionId": asMapForTest(versions[1])["VersionId"]}, nil)
+	terminal := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "KeyMarker": "key", "VersionIdMarker": marker}, nil).Output
+	if rows := asSliceForTest(terminal["Versions"]); len(rows) != 0 {
+		t.Fatalf("versions after deleting resume target = %#v", terminal)
+	}
+}
+
+func TestListObjectVersionChecksumMetadata(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-checksums"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-checksums", "Status": "Enabled"}, nil)
+	body := []byte("checksummed")
+	sum := sha256.Sum256(body)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-checksums", "Key": "key", "ChecksumSHA256": base64.StdEncoding.EncodeToString(sum[:])}, body)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-checksums", "Key": "key"}, []byte("plain"))
+	versions := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-checksums"}, nil).Output["Versions"])
+	if len(versions) != 2 {
+		t.Fatalf("versions = %#v", versions)
+	}
+	withChecksum := 0
+	characterization := []any{}
+	for _, value := range versions {
+		row := asMapForTest(value)
+		characterization = append(characterization, map[string]any{"latest": row["IsLatest"], "algorithm": row["ChecksumAlgorithm"], "type": row["ChecksumType"]})
+		if row["ChecksumAlgorithm"] == nil {
+			if row["ChecksumType"] != nil {
+				t.Fatalf("plain version = %#v", row)
+			}
+			continue
+		}
+		withChecksum++
+		if !reflect.DeepEqual(row["ChecksumAlgorithm"], []any{"SHA256"}) || row["ChecksumType"] != "FULL_OBJECT" {
+			t.Fatalf("checksummed version = %#v", row)
+		}
+	}
+	if withChecksum != 1 {
+		t.Fatalf("checksummed versions = %d: %#v", withChecksum, versions)
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestListObjectVersionsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list-golden"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-list-golden", "Status": "Enabled"}, nil)
+	for range 3 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/key"}, []byte("body"))
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/other"}, []byte("body"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/other"}, nil)
+	input := map[string]any{"Bucket": "version-list-golden", "Prefix": "prefix/", "MaxKeys": 2}
+	first := mustInvoke(t, p, "ListObjectVersions", input, nil).Output
+	nextInput := maps.Clone(input)
+	nextInput["KeyMarker"], nextInput["VersionIdMarker"] = first["NextKeyMarker"], first["NextVersionIdMarker"]
+	golden.AssertJSON(t, map[string]any{"first": first, "next": mustInvoke(t, p, "ListObjectVersions", nextInput, nil).Output})
 }
 
 func TestMultipartETagForm(t *testing.T) {
@@ -4057,7 +6032,7 @@ func TestMultipartPartReads(t *testing.T) {
 	firstBody := bytes.Repeat([]byte("A"), 5<<20)
 	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 1}, firstBody)
 	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 2}, []byte("tail"))
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, first), completedPart(2, second)), nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, first, "ChecksumSHA256", "x-amz-checksum-sha256"), completedPartWithChecksum(2, second, "ChecksumSHA256", "x-amz-checksum-sha256")), nil)
 	version := done.Headers.Get("x-amz-version-id")
 	if version == "" {
 		t.Fatal("missing multipart version")
@@ -4134,7 +6109,7 @@ func TestObjectByteRanges(t *testing.T) {
 			t.Fatalf("range %q checksum headers = %v", test.value, response.Headers)
 		}
 	}
-	for _, value := range []string{"2-5", "items=0-1", "bytes=bad", "bytes=5-2", "bytes=0-1,3-4"} {
+	for _, value := range []string{"2-5", "items=0-1", "bytes=bad", "bytes=5-2", "bytes=-1-", "bytes=0--1", "bytes=-", "bytes=0-1,3-4"} {
 		response, got, err := get(value)
 		if err != nil || response.Status != http.StatusOK || string(got) != string(body) || response.Headers.Get("Content-Range") != "" {
 			t.Fatalf("ignored range %q = %q %#v %v", value, got, response, err)
@@ -4143,7 +6118,7 @@ func TestObjectByteRanges(t *testing.T) {
 	for _, value := range []string{"bytes=10-", "bytes=-0"} {
 		_, _, err := get(value)
 		fault := asFault(t, err)
-		if fault.Code != "InvalidRange" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable || fault.Headers.Get("Content-Range") != "bytes */10" {
+		if fault.Code != "InvalidRange" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable || fault.Headers.Get("Content-Range") != "bytes */10" || fault.Fields["ActualObjectSize"] != "10" || fault.Fields["RangeRequested"] != value {
 			t.Fatalf("range %q fault = %#v", value, fault)
 		}
 	}
@@ -4161,8 +6136,16 @@ func TestGetObjectAttributesContract(t *testing.T) {
 		t.Fatalf("missing attributes bucket = %#v", fault)
 	}
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "standard"}, []byte("body"))
-	if standard := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "bucket", "Key": "standard", "ObjectAttributes": []string{"StorageClass"}}, nil); len(standard.Output) != 0 {
+	standard := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "bucket", "Key": "standard", "ObjectAttributes": []string{"StorageClass"}}, nil)
+	if len(standard.Output) != 1 || standard.Output["StorageClass"] != "STANDARD" {
 		t.Fatalf("standard storage class attributes = %#v", standard.Output)
+	}
+	httpRequest := httptest.NewRequest(http.MethodGet, "https://bucket.s3.us-east-1.amazonaws.com/standard?attributes", nil)
+	httpRequest.Header.Add("x-amz-object-attributes", "ETag")
+	httpRequest.Header.Add("x-amz-object-attributes", "StorageClass")
+	multi, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "GetObjectAttributes", Input: map[string]any{"Bucket": "bucket", "Key": "standard"}, HTTP: httpRequest})
+	if err != nil || len(multi.Output) != 2 || multi.Output["ETag"] == nil || multi.Output["StorageClass"] != "STANDARD" {
+		t.Fatalf("repeated attribute headers = %#v: %v", multi, err)
 	}
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "composite", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA"}, nil)
@@ -4170,7 +6153,7 @@ func TestGetObjectAttributesContract(t *testing.T) {
 	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 1}, bytes.Repeat([]byte("A"), 5<<20))
 	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 2}, bytes.Repeat([]byte("B"), 5<<20))
 	third := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 3}, []byte("tail"))
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, first), completedPart(2, second), completedPart(3, third)), nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, first, "ChecksumSHA256", "x-amz-checksum-sha256"), completedPartWithChecksum(2, second, "ChecksumSHA256", "x-amz-checksum-sha256"), completedPartWithChecksum(3, third, "ChecksumSHA256", "x-amz-checksum-sha256")), nil)
 	version := done.Headers.Get("x-amz-version-id")
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "composite"}, []byte("newer"))
 
@@ -4197,6 +6180,13 @@ func TestGetObjectAttributesContract(t *testing.T) {
 	if lastParts["IsTruncated"] != false || lastParts["PartNumberMarker"] != "2" || lastParts["NextPartNumberMarker"] != "3" || len(lastParts["Parts"].([]any)) != 1 || asMapForTest(lastParts["Parts"].([]any)[0])["PartNumber"] != 3 {
 		t.Fatalf("object parts final page = %#v", lastParts)
 	}
+	emptyPage := mustInvoke(t, p, "GetObjectAttributes", map[string]any{
+		"Bucket": "bucket", "Key": "composite", "VersionId": version, "ObjectAttributes": []string{"ObjectParts"}, "PartNumberMarker": "10", "MaxParts": 2,
+	}, nil).Output
+	emptyParts := asMapForTest(emptyPage["ObjectParts"])
+	if emptyParts["IsTruncated"] != false || emptyParts["PartNumberMarker"] != "10" || emptyParts["NextPartNumberMarker"] != "0" || emptyParts["Parts"] != nil || emptyParts["TotalPartsCount"] != 3 {
+		t.Fatalf("object parts empty page = %#v", emptyParts)
+	}
 	selected := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "bucket", "Key": "composite", "VersionId": version, "ObjectAttributes": []string{"ObjectSize"}}, nil)
 	if len(selected.Output) != 1 || selected.Output["ObjectSize"] == nil {
 		t.Fatalf("selected attributes = %#v", selected.Output)
@@ -4221,7 +6211,33 @@ func TestGetObjectAttributesContract(t *testing.T) {
 		t.Fatalf("full object parts = %#v", fullParts)
 	}
 
-	golden.AssertJSON(t, map[string]any{"page": page.Output, "lastPage": lastPage, "full": fullAttrs})
+	golden.AssertJSON(t, map[string]any{"standard": standard.Output, "page": page.Output, "lastPage": lastPage, "emptyPage": emptyPage, "full": fullAttrs})
+}
+
+func TestGetObjectAttributesVersionedCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "versioned-attributes", "Key": "key"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": input["Bucket"], "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", input, []byte("69\n420\n"))
+	mustInvoke(t, p, "PutObject", input, []byte("version 2"))
+	attributes := "ETag, Checksum, ObjectParts, StorageClass, ObjectSize"
+	current := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": input["Bucket"], "Key": input["Key"], "ObjectAttributes": attributes}, nil)
+	compact := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": input["Bucket"], "Key": input["Key"], "ObjectAttributes": strings.ReplaceAll(attributes, " ", "")}, nil)
+	if !reflect.DeepEqual(current.Output, compact.Output) || current.Output["ObjectSize"] != 9 || current.Output["StorageClass"] != "STANDARD" {
+		t.Fatalf("spaced attributes = %#v; compact = %#v", current.Output, compact.Output)
+	}
+	mustInvoke(t, p, "DeleteObject", input, nil)
+	_, err := invoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": input["Bucket"], "Key": input["Key"], "ObjectAttributes": []string{"ETag"}}, nil)
+	deleted := asFault(t, err)
+	if deleted.Code != "NoSuchKey" || deleted.Headers.Get("x-amz-delete-marker") != "true" {
+		t.Fatalf("deleted current attributes = %#v", deleted)
+	}
+	versioned := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": input["Bucket"], "Key": input["Key"], "VersionId": first.Headers.Get("x-amz-version-id"), "ObjectAttributes": []string{"ETag", "StorageClass", "ObjectSize"}}, nil)
+	if versioned.Output["ObjectSize"] != 7 || versioned.Output["StorageClass"] != "STANDARD" || versioned.Output["ETag"] != first.Headers.Get("ETag") {
+		t.Fatalf("versioned attributes = %#v", versioned.Output)
+	}
+	golden.AssertJSON(t, map[string]any{"current": current.Output, "deleted": map[string]any{"code": deleted.Code, "deleteMarker": deleted.Headers.Get("x-amz-delete-marker")}, "versioned": versioned.Output})
 }
 
 func TestWriteChecksumValidation(t *testing.T) {
@@ -4279,23 +6295,18 @@ func TestWriteChecksumValidation(t *testing.T) {
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart", "ChecksumAlgorithm": "MD5"}, nil)
 	uploadID := created.Output["UploadId"].(string)
 	_, err = invoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": "AA=="}, body)
-	if fault := asFault(t, err); fault.Code != "BadDigest" {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
 		t.Fatalf("upload checksum fault = %#v", fault)
 	}
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": checksums["ChecksumMD5"]}, body)
 	if part.Headers.Get("x-amz-checksum-md5") != checksums["ChecksumMD5"] {
 		t.Fatalf("upload checksum headers = %v", part.Headers)
 	}
-	complete := completeInput(uploadID, completedPart(1, part))
+	complete := completeInput(uploadID, completedPartWithChecksum(1, part, "ChecksumMD5", "x-amz-checksum-md5"))
 	complete["ChecksumMD5"] = "AA=="
-	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
-	if fault := asFault(t, err); fault.Code != "BadDigest" {
-		t.Fatalf("complete checksum fault = %#v", fault)
-	}
 	partDigest := md5.Sum(body)
 	compositeDigest := md5.Sum(partDigest[:])
 	composite := base64.StdEncoding.EncodeToString(compositeDigest[:]) + "-1"
-	complete["ChecksumMD5"] = composite
 	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 	if done.Output["ChecksumMD5"] != composite || done.Output["ChecksumType"] != "COMPOSITE" {
 		t.Fatalf("complete checksum output = %#v", done.Output)
@@ -4304,6 +6315,113 @@ func TestWriteChecksumValidation(t *testing.T) {
 	if head.Headers.Get("x-amz-checksum-md5") != composite || head.Headers.Get("x-amz-checksum-type") != "COMPOSITE" {
 		t.Fatalf("multipart checksum metadata = %v", head.Headers)
 	}
+}
+
+func TestUploadPartContentMD5(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-md5"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-md5", "Key": "key"}, nil).Output["UploadId"].(string)
+	body := []byte("content-md5")
+	for _, test := range []struct {
+		value, code, message string
+		fields               map[string]any
+	}{
+		{"!", "InvalidDigest", "The Content-MD5 you specified was invalid.", map[string]any{"Content_MD5": "!"}},
+		{"AA==", "InvalidDigest", "The Content-MD5 you specified was invalid.", map[string]any{"Content_MD5": "AA=="}},
+		{"AAAAAAAAAAAAAAAAAAAAAA==", "BadDigest", "The Content-MD5 you specified did not match what we received.", map[string]any{"ExpectedDigest": "AAAAAAAAAAAAAAAAAAAAAA=="}},
+	} {
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": test.value}, body)
+		fault := asFault(t, err)
+		if fault.Code != test.code || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("Content-MD5 %q fault = %#v", test.value, fault)
+		}
+		for key, value := range test.fields {
+			if fault.Fields[key] != value {
+				t.Fatalf("Content-MD5 %q field %s = %#v", test.value, key, fault)
+			}
+		}
+		if test.code == "BadDigest" {
+			sum := md5.Sum(body)
+			if fault.Fields["CalculatedDigest"] != base64.StdEncoding.EncodeToString(sum[:]) {
+				t.Fatalf("Content-MD5 calculated digest = %#v", fault)
+			}
+		}
+	}
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": uploadID}, nil)
+	if len(listed.Output["Parts"].([]any)) != 0 {
+		t.Fatalf("rejected digest stored parts = %#v", listed.Output)
+	}
+	sum := md5.Sum(body)
+	mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": base64.StdEncoding.EncodeToString(sum[:])}, body)
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": "missing", "PartNumber": 1, "ContentMD5": "!"}, body)
+	if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != "missing" {
+		t.Fatalf("missing upload digest precedence = %#v", fault)
+	}
+}
+
+func TestUploadPartContentMD5Characterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-md5-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-md5-golden", "Key": "key"}, nil).Output["UploadId"].(string)
+	results := map[string]any{}
+	for name, value := range map[string]string{"malformed": "!", "mismatch": "AAAAAAAAAAAAAAAAAAAAAA=="} {
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5-golden", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": value}, []byte("content-md5"))
+		fault := asFault(t, err)
+		results[name] = map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields}
+	}
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5-golden", "Key": "key", "UploadId": "missing", "PartNumber": 1, "ContentMD5": "!"}, []byte("content-md5"))
+	fault := asFault(t, err)
+	results["missing-upload"] = map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields}
+	golden.AssertJSON(t, results)
+}
+
+func TestUploadPartChecksumFaults(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-checksum"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-checksum", "Key": "key", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+	body := []byte("checksum")
+	for _, test := range []struct {
+		input         map[string]any
+		code, message string
+	}{
+		{map[string]any{"ChecksumCRC32": "!"}, "InvalidRequest", "Value for x-amz-checksum-crc32 header is invalid."},
+		{map[string]any{"ChecksumCRC32": "AA=="}, "InvalidRequest", "Value for x-amz-checksum-crc32 header is invalid."},
+		{map[string]any{"ChecksumCRC32": "AAAAAA=="}, "BadDigest", "The CRC32 you specified did not match the calculated checksum."},
+		{map[string]any{"ChecksumSHA256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}, "InvalidRequest", "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256"},
+		{map[string]any{"ChecksumAlgorithm": "SHA256"}, "InvalidRequest", "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256"},
+	} {
+		test.input["Bucket"], test.input["Key"], test.input["UploadId"], test.input["PartNumber"] = "upload-part-checksum", "key", uploadID, 1
+		_, err := invoke(t, p, "UploadPart", test.input, body)
+		if fault := asFault(t, err); fault.Code != test.code || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("checksum input %#v fault = %#v", test.input, fault)
+		}
+	}
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "upload-part-checksum", "Key": "key", "UploadId": uploadID}, nil)
+	if len(listed.Output["Parts"].([]any)) != 0 {
+		t.Fatalf("rejected checksums stored parts = %#v", listed.Output)
+	}
+	sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+	mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-checksum", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ChecksumCRC32": base64.StdEncoding.EncodeToString(sum)}, body)
+}
+
+func TestUploadPartChecksumFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-checksum-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-checksum-golden", "Key": "key", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+	results := map[string]any{}
+	for name, input := range map[string]map[string]any{
+		"malformed":          {"ChecksumCRC32": "!"},
+		"mismatch":           {"ChecksumCRC32": "AAAAAA=="},
+		"header-algorithm":   {"ChecksumSHA256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+		"declared-algorithm": {"ChecksumAlgorithm": "SHA256"},
+	} {
+		input["Bucket"], input["Key"], input["UploadId"], input["PartNumber"] = "upload-part-checksum-golden", "key", uploadID, 1
+		_, err := invoke(t, p, "UploadPart", input, []byte("checksum"))
+		fault := asFault(t, err)
+		results[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
+	}
+	golden.AssertJSON(t, results)
 }
 
 func TestMultipartChecksumContract(t *testing.T) {
@@ -4325,6 +6443,7 @@ func TestMultipartChecksumContract(t *testing.T) {
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "CRC64NVME", "ChecksumType": "COMPOSITE"}, "InvalidRequest")
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "CRC32", "ChecksumType": "invalid"}, "InvalidArgument")
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "XXHASH64", "ChecksumType": "FULL_OBJECT"}, "InvalidRequest")
+	wantCreateFault(map[string]any{"ChecksumType": "FULL_OBJECT"}, "InvalidRequest")
 
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "full", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil)
 	if created.Headers.Get("x-amz-checksum-algorithm") != "CRC32" || created.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
@@ -4354,7 +6473,7 @@ func TestMultipartChecksumContract(t *testing.T) {
 	delete(complete["MultipartUpload"].(map[string]any)["Parts"].([]any)[0].(map[string]any), "ChecksumCRC32")
 	complete["ChecksumType"] = "COMPOSITE"
 	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
-	if fault := asFault(t, err); fault.Code != "BadDigest" {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The upload was created using the FULL_OBJECT checksum mode. The complete request must use the same checksum mode." || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("complete checksum type fault = %#v", fault)
 	}
 	complete["ChecksumType"] = "FULL_OBJECT"
@@ -4367,6 +6486,12 @@ func TestMultipartChecksumContract(t *testing.T) {
 	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
 	want := base64.StdEncoding.EncodeToString(sum)
 	complete["ChecksumCRC32"] = want
+	delete(complete, "ChecksumType")
+	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The crc32 you specified did not match the calculated checksum." || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("implicit full-object checksum type fault = %#v", fault)
+	}
+	complete["ChecksumType"] = "FULL_OBJECT"
 	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 	if done.Output["ChecksumCRC32"] != want || done.Output["ChecksumType"] != "FULL_OBJECT" {
 		t.Fatalf("complete checksum = %#v", done.Output)
@@ -4374,6 +6499,35 @@ func TestMultipartChecksumContract(t *testing.T) {
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "full", "ChecksumMode": "ENABLED"}, nil)
 	if head.Headers.Get("x-amz-checksum-crc32") != want || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
 		t.Fatalf("stored checksum = %v", head.Headers)
+	}
+
+	missing := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "missing-part-checksum", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+	missingPart := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "missing-part-checksum", "UploadId": missing, "PartNumber": 1}, body)
+	_, err = invoke(t, p, "CompleteMultipartUpload", completeInput(missing, completedPart(1, missingPart)), nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The upload was created using a crc32 checksum. The complete request must include the checksum for each part. It was missing for part 1 in the request." || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing part checksum fault = %#v", fault)
+	}
+	alternate := completedPart(1, missingPart).(map[string]any)
+	alternate["ChecksumSHA256"] = "AA=="
+	_, err = invoke(t, p, "CompleteMultipartUpload", completeInput(missing, alternate), nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The sha256 you specified for part 1 did not match what we received." || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("alternate part checksum fault = %#v", fault)
+	}
+	ignored := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "ignored-composite", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+	ignoredPart := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "ignored-composite", "UploadId": ignored, "PartNumber": 1}, body)
+	ignoredInput := completeInput(ignored, completedPartWithChecksum(1, ignoredPart, "ChecksumCRC32", "x-amz-checksum-crc32"))
+	ignoredInput["ChecksumCRC32"] = "AA=="
+	ignoredDone := mustInvoke(t, p, "CompleteMultipartUpload", ignoredInput, nil)
+	if ignoredDone.Output["ChecksumCRC32"] == "AA==" || ignoredDone.Output["ChecksumType"] != "COMPOSITE" {
+		t.Fatalf("ignored composite checksum = %#v", ignoredDone.Output)
+	}
+	alternateObject := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "alternate-object", "ChecksumAlgorithm": "SHA256"}, nil).Output["UploadId"].(string)
+	alternateObjectPart := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "alternate-object", "UploadId": alternateObject, "PartNumber": 1}, body)
+	alternateObjectInput := completeInput(alternateObject, completedPartWithChecksum(1, alternateObjectPart, "ChecksumSHA256", "x-amz-checksum-sha256"))
+	alternateObjectInput["ChecksumCRC32"] = "AAAAAA=="
+	_, err = invoke(t, p, "CompleteMultipartUpload", alternateObjectInput, nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The sha256 you specified did not match the calculated checksum." || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("alternate object checksum fault = %#v", fault)
 	}
 
 	composite := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "gap", "ChecksumAlgorithm": "SHA256"}, nil)
@@ -4407,7 +6561,7 @@ func TestXXHashMultipartChecksums(t *testing.T) {
 			if part.Headers.Get(tc.header) != tc.part {
 				t.Fatalf("part headers = %v", part.Headers)
 			}
-			complete := completeInput(id, completedPart(1, part))
+			complete := completeInput(id, completedPartWithChecksum(1, part, tc.input, tc.header))
 			complete[tc.input] = tc.composite
 			done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 			if done.Output[tc.input] != tc.composite || done.Output["ChecksumType"] != "COMPOSITE" {
@@ -4439,7 +6593,7 @@ func TestXXHashChecksumCharacterization(t *testing.T) {
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart", "ChecksumAlgorithm": "XXHASH128"}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "multipart", "UploadId": id, "PartNumber": 1}, body)
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, part, "ChecksumXXHASH128", "x-amz-checksum-xxhash128")), nil)
 	snapshot["multipart"] = map[string]any{"part": part.Headers.Get("x-amz-checksum-xxhash128"), "complete": done.Output["ChecksumXXHASH128"], "type": done.Output["ChecksumType"]}
 	golden.AssertJSON(t, snapshot)
 }
@@ -4447,19 +6601,79 @@ func TestXXHashChecksumCharacterization(t *testing.T) {
 func TestMultipartChecksumCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "snapshot", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA", "Tagging": "env=snapshot"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "snapshot", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA", "Tagging": "env=snapshot", "CacheControl": "max-age=120", "ContentType": "application/json", "Metadata": map[string]any{"Env": "snapshot"}, "WebsiteRedirectLocation": "/snapshot"}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id, "PartNumber": 1}, []byte("snapshot"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id}, nil)
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	mismatch := completeInput(id, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256"))
+	mismatch["ChecksumType"] = "FULL_OBJECT"
+	_, err := invoke(t, p, "CompleteMultipartUpload", mismatch, nil)
+	fault := asFault(t, err)
+	_, err = invoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	missing := asFault(t, err)
+	completion := completeInput(id, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256"))
+	completion["ChecksumSHA256"] = "AA=="
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completion, nil)
+	alternateID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "alternate", "ChecksumAlgorithm": "SHA256"}, nil).Output["UploadId"].(string)
+	alternatePart := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "alternate", "UploadId": alternateID, "PartNumber": 1}, []byte("snapshot"))
+	alternateInput := completeInput(alternateID, completedPartWithChecksum(1, alternatePart, "ChecksumSHA256", "x-amz-checksum-sha256"))
+	alternateInput["ChecksumCRC32"] = "AAAAAA=="
+	_, err = invoke(t, p, "CompleteMultipartUpload", alternateInput, nil)
+	alternate := asFault(t, err)
+	fullID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "full", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil).Output["UploadId"].(string)
+	fullPart := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "full", "UploadId": fullID, "PartNumber": 1}, []byte("snapshot"))
+	fullInput := completeInput(fullID, completedPart(1, fullPart))
+	fullSum := make([]byte, 4)
+	binary.BigEndian.PutUint32(fullSum, crc32.ChecksumIEEE([]byte("snapshot")))
+	fullInput["ChecksumCRC32"] = base64.StdEncoding.EncodeToString(fullSum)
+	_, err = invoke(t, p, "CompleteMultipartUpload", fullInput, nil)
+	fullObjectType := asFault(t, err)
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil)
 	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil).Output["TagSet"]
 	golden.AssertJSON(t, map[string]any{
-		"create":   map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"], "storageClass": "STANDARD_IA", "tags": "env=snapshot"},
-		"part":     map[string]any{"checksum": part.Headers.Get("x-amz-checksum-sha256")},
-		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
-		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "type": done.Output["ChecksumType"]},
-		"object":   map[string]any{"storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
+		"create":         map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"], "storageClass": "STANDARD_IA", "tags": "env=snapshot"},
+		"part":           map[string]any{"checksum": part.Headers.Get("x-amz-checksum-sha256")},
+		"list":           map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
+		"mismatch":       map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus},
+		"missing":        map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
+		"alternate":      map[string]any{"code": alternate.Code, "message": alternate.Message, "status": alternate.HTTPStatus},
+		"fullObjectType": map[string]any{"code": fullObjectType.Code, "message": fullObjectType.Message, "status": fullObjectType.HTTPStatus},
+		"complete":       map[string]any{"checksum": done.Output["ChecksumSHA256"], "supplied": "AA==", "type": done.Output["ChecksumType"]},
+		"object":         map[string]any{"cacheControl": head.Headers.Get("Cache-Control"), "contentType": head.Headers.Get("Content-Type"), "metadata": head.Headers.Get("x-amz-meta-env"), "redirect": head.Headers.Get("x-amz-website-redirect-location"), "storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
+	})
+}
+
+func TestMultipartWithoutChecksum(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "plain"}, nil)
+	if created.Output["ChecksumAlgorithm"] != nil || created.Output["ChecksumType"] != nil {
+		t.Fatalf("create checksum = %#v", created.Output)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	body := []byte("plain")
+	sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "plain", "UploadId": uploadID, "PartNumber": 1, "ChecksumAlgorithm": "CRC32", "ChecksumCRC32": base64.StdEncoding.EncodeToString(sum)}, body)
+	if part.Headers.Get("x-amz-checksum-crc32") == "" || part.Headers.Get("x-amz-checksum-crc64nvme") != "" || part.Headers.Get("x-amz-checksum-type") != "" {
+		t.Fatalf("part checksum headers = %v", part.Headers)
+	}
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "plain", "UploadId": uploadID}, nil)
+	if listed.Output["ChecksumAlgorithm"] != nil || listed.Output["ChecksumType"] != nil || listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"] != nil {
+		t.Fatalf("list checksum = %#v", listed.Output)
+	}
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+	if done.Output["ChecksumCRC64NVME"] != nil || done.Output["ChecksumType"] != nil {
+		t.Fatalf("complete checksum = %#v", done.Output)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "plain", "ChecksumMode": "ENABLED"}, nil))); body != "plain" {
+		t.Fatalf("body = %q", body)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"create":   map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"]},
+		"part":     map[string]any{"crc32": part.Headers.Get("x-amz-checksum-crc32")},
+		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "partCRC32": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"]},
+		"complete": map[string]any{"crc64nvme": done.Output["ChecksumCRC64NVME"], "type": done.Output["ChecksumType"]},
 	})
 }
 
@@ -4468,16 +6682,21 @@ func TestMultipartCreationAttributes(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{
 		"Bucket": "bucket", "Key": "attributes", "StorageClass": "STANDARD_IA", "Tagging": "team=storage&env=test",
+		"CacheControl": "max-age=60", "ContentDisposition": `attachment; filename="multipart.txt"`, "ContentEncoding": "gzip", "ContentLanguage": "en-US", "ContentType": "text/plain", "Expires": "Wed, 21 Oct 2026 07:28:00 GMT",
+		"Metadata": map[string]any{"Team": "storage"}, "WebsiteRedirectLocation": "/multipart",
 	}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "attributes", "UploadId": id, "PartNumber": 1}, []byte("body"))
 	complete := completeInput(id, completedPart(1, part))
-	complete["StorageClass"], complete["Tagging"] = "STANDARD", "ignored=true"
+	complete["StorageClass"], complete["Tagging"], complete["ContentType"], complete["Metadata"], complete["WebsiteRedirectLocation"] = "STANDARD", "ignored=true", "application/json", map[string]any{"Team": "ignored"}, "/ignored"
 	mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "attributes"}, nil)
 	if head.Headers.Get("x-amz-storage-class") != "STANDARD_IA" {
 		t.Fatalf("multipart storage class = %v", head.Headers)
+	}
+	if head.Headers.Get("Cache-Control") != "max-age=60" || head.Headers.Get("Content-Disposition") != `attachment; filename="multipart.txt"` || head.Headers.Get("Content-Encoding") != "gzip" || head.Headers.Get("Content-Language") != "en-US" || head.Headers.Get("Content-Type") != "text/plain" || head.Headers.Get("Expires") != "Wed, 21 Oct 2026 07:28:00 GMT" || head.Headers.Get("x-amz-meta-team") != "storage" || head.Headers.Get("x-amz-website-redirect-location") != "/multipart" {
+		t.Fatalf("multipart metadata = %v", head.Headers)
 	}
 	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "attributes"}, nil)
 	if get.Headers.Get("x-amz-storage-class") != "STANDARD_IA" {
@@ -4501,12 +6720,14 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 		t.Helper()
 		return mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": key}, nil).Output["UploadId"].(string)
 	}
-	wantFault := func(uploadID, code string, parts ...any) {
+	wantFault := func(uploadID, code string, parts ...any) *spi.Fault {
 		t.Helper()
 		_, err := invoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, parts...), nil)
-		if fault := asFault(t, err); fault.Code != code || fault.HTTPStatus != http.StatusBadRequest {
+		fault := asFault(t, err)
+		if fault.Code != code || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("complete fault = %#v want %s", fault, code)
 		}
+		return fault
 	}
 
 	noncontiguous := create("noncontiguous")
@@ -4522,27 +6743,48 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 
 	wrongETag := create("wrong-etag")
 	mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": wrongETag, "PartNumber": 1}, []byte("one"))
-	wantFault(wrongETag, "InvalidPart", map[string]any{"PartNumber": 1, "ETag": `"wrong"`})
+	if fault := wantFault(wrongETag, "InvalidPart", map[string]any{"PartNumber": 1, "ETag": `"wrong"`}); fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != "wrong" || fault.Fields["PartNumber"] != "1" || fault.Fields["UploadId"] != wrongETag {
+		t.Fatalf("wrong ETag fault = %#v", fault)
+	}
 	missing := create("missing")
-	wantFault(missing, "InvalidPart", map[string]any{"PartNumber": 9, "ETag": `"missing"`})
+	if fault := wantFault(missing, "InvalidPart", map[string]any{"PartNumber": 9, "ETag": `"missing"`}); fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != "missing" || fault.Fields["PartNumber"] != "9" || fault.Fields["UploadId"] != missing {
+		t.Fatalf("missing part fault = %#v", fault)
+	}
+	checksumMismatch := create("checksum-mismatch")
+	checksumPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": checksumMismatch, "PartNumber": 1}, []byte("checksum"))
+	checksumManifest := asMapForTest(completedPart(1, checksumPart))
+	checksumManifest["ChecksumCRC64NVME"] = "AA=="
+	if fault := wantFault(checksumMismatch, "InvalidPart", checksumManifest); fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != strings.Trim(checksumPart.Headers.Get("ETag"), `"`) || fault.Fields["PartNumber"] != "1" || fault.Fields["UploadId"] != checksumMismatch {
+		t.Fatalf("part checksum fault = %#v", fault)
+	}
 
 	badOrder := create("order")
 	large := bytes.Repeat([]byte("A"), 5<<20)
 	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": badOrder, "PartNumber": 2}, large)
 	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": badOrder, "PartNumber": 1}, []byte("last"))
-	wantFault(badOrder, "InvalidPartOrder", completedPart(2, second), completedPart(1, first))
+	if fault := wantFault(badOrder, "InvalidPartOrder", completedPart(2, second), completedPart(1, first)); fault.Message != "The list of parts was not in ascending order. Parts must be ordered by part number." || fault.Fields["UploadId"] != badOrder {
+		t.Fatalf("part order fault = %#v", fault)
+	}
 
 	tooSmall := create("small")
 	smallFirst := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": tooSmall, "PartNumber": 1}, []byte("small"))
 	smallLast := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": tooSmall, "PartNumber": 2}, []byte("last"))
-	wantFault(tooSmall, "EntityTooSmall", completedPart(1, smallFirst), completedPart(2, smallLast))
+	if fault := wantFault(tooSmall, "EntityTooSmall", completedPart(1, smallFirst), completedPart(2, smallLast)); fault.Message != "Your proposed upload is smaller than the minimum allowed size" || fault.Fields["ETag"] != strings.Trim(smallFirst.Headers.Get("ETag"), `"`) || fault.Fields["PartNumber"] != "1" || fault.Fields["MinSizeAllowed"] != 5<<20 || fault.Fields["ProposedSize"] != 5 {
+		t.Fatalf("small part fault = %#v", fault)
+	}
+
+	zeroIgnored := create("zero-ignored")
+	zeroIgnoredPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": zeroIgnored, "PartNumber": 1}, []byte("body"))
+	zeroIgnoredInput := completeInput(zeroIgnored, completedPart(1, zeroIgnoredPart))
+	zeroIgnoredInput["MpuObjectSize"] = "0"
+	mustInvoke(t, p, "CompleteMultipartUpload", zeroIgnoredInput, nil)
 
 	sized := create("sized")
 	sizedPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": sized, "PartNumber": 1}, []byte("sized"))
 	sizedInput := completeInput(sized, completedPart(1, sizedPart))
 	sizedInput["MpuObjectSize"] = "4"
 	_, err := invoke(t, p, "CompleteMultipartUpload", sizedInput, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The provided 'x-amz-mp-object-size' header value 4 does not match what was computed: 5" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("object size fault = %#v", fault)
 	}
 	sizedInput["MpuObjectSize"] = "invalid"
@@ -4562,19 +6804,490 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	}
 	zeroInput["MpuObjectSize"] = "0"
 	mustInvoke(t, p, "CompleteMultipartUpload", zeroInput, nil)
-	wantFault(create("empty"), "InvalidPart")
+	if fault := wantFault(create("empty"), "InvalidRequest"); fault.Message != "You must specify at least one part" {
+		t.Fatalf("empty manifest fault = %#v", fault)
+	}
+}
+
+func TestMultipartObjectSizeCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-size-golden"}, nil)
+	create := func(key string) (string, *spi.Response) {
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-size-golden", "Key": key}, nil).Output["UploadId"].(string)
+		return uploadID, mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1}, []byte("sized"))
+	}
+	zeroID, zeroPart := create("zero")
+	zero := completeInput(zeroID, completedPart(1, zeroPart))
+	zero["MpuObjectSize"] = "0"
+	accepted := mustInvoke(t, p, "CompleteMultipartUpload", zero, nil)
+	mismatchID, mismatchPart := create("mismatch")
+	mismatch := completeInput(mismatchID, completedPart(1, mismatchPart))
+	mismatch["MpuObjectSize"] = "4"
+	_, err := invoke(t, p, "CompleteMultipartUpload", mismatch, nil)
+	fault := asFault(t, err)
+	golden.AssertJSON(t, map[string]any{"zero": accepted.Output["ETag"], "mismatch": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}})
+}
+
+func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "complete-preconditions"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "complete-preconditions", "Key": "key"}, nil).Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "complete-preconditions", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+	tests := []struct {
+		name               string
+		conditions         map[string]any
+		header, additional string
+	}{
+		{"combined", map[string]any{"IfMatch": `"etag"`, "IfNoneMatch": "*"}, "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
+		{"if-none-match", map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-Match", "We don't accept the provided value of If-Match header for this API"},
+	}
+	characterization := map[string]any{}
+	for index, test := range tests {
+		input := completeInput(uploadID, completedPart(1, part))
+		for name, value := range test.conditions {
+			input[name] = value
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != test.header || fault.Fields["additionalMessage"] != test.additional {
+			t.Fatalf("case %d fault = %#v", index, fault)
+		}
+		characterization[test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "complete-preconditions", "Key": "key", "UploadId": uploadID}, nil)
+	if len(listed.Output["Parts"].([]any)) != 1 {
+		t.Fatalf("rejected completions changed upload = %#v", listed.Output)
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestWritePreconditionFaults(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-preconditions"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-preconditions", "Key": "source"}, []byte("source"))
+	tests := []struct {
+		name               string
+		conditions         map[string]any
+		header, additional string
+	}{
+		{"combined", map[string]any{"IfMatch": `"etag"`, "IfNoneMatch": "*"}, "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
+		{"if-none-match", map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-Match", "We don't accept the provided value of If-Match header for this API"},
+	}
+	characterization := map[string]any{}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		for _, test := range tests {
+			t.Run(operation+"/"+test.name, func(t *testing.T) {
+				mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-preconditions", "Key": "destination"}, []byte("old"))
+				input := map[string]any{"Bucket": "write-preconditions", "Key": "destination"}
+				if operation == "CopyObject" {
+					input["CopySource"] = "write-preconditions/source"
+				}
+				for name, value := range test.conditions {
+					input[name] = value
+				}
+				_, err := invoke(t, p, operation, input, []byte("new"))
+				fault := asFault(t, err)
+				if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != test.header || fault.Fields["additionalMessage"] != test.additional {
+					t.Fatalf("fault = %#v", fault)
+				}
+				characterization[operation+"/"+test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+				if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-preconditions", "Key": "destination"}, nil))); body != "old" {
+					t.Fatalf("rejected write stored %q", body)
+				}
+			})
+		}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestWritePreconditionFaultDetails(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-precondition-details"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-precondition-details", "Key": "source"}, []byte("source"))
+	characterization := map[string]any{}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		for _, test := range []struct {
+			name, condition, value, code, message, field, detail string
+			status                                               int
+			existing                                             bool
+		}{
+			{"missing-if-match", "IfMatch", `"missing"`, "NoSuchKey", "The specified key does not exist.", "Key", "destination", http.StatusNotFound, false},
+			{"wrong-if-match", "IfMatch", `"wrong"`, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-Match", http.StatusPreconditionFailed, true},
+			{"if-none-match", "IfNoneMatch", "*", "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-None-Match", http.StatusPreconditionFailed, true},
+		} {
+			t.Run(operation+"/"+test.name, func(t *testing.T) {
+				if test.existing {
+					mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-precondition-details", "Key": "destination"}, []byte("old"))
+				} else {
+					mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "write-precondition-details", "Key": "destination"}, nil)
+				}
+				input := map[string]any{"Bucket": "write-precondition-details", "Key": "destination", test.condition: test.value}
+				if operation == "CopyObject" {
+					input["CopySource"] = "write-precondition-details/source"
+				}
+				_, err := invoke(t, p, operation, input, []byte("new"))
+				fault := asFault(t, err)
+				if fault.Code != test.code || fault.Message != test.message || fault.HTTPStatus != test.status || fault.Fault != "client" || fault.Fields[test.field] != test.detail {
+					t.Fatalf("fault = %#v", fault)
+				}
+				characterization[operation+"/"+test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+				if test.existing {
+					if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-precondition-details", "Key": "destination"}, nil))); body != "old" {
+						t.Fatalf("rejected write stored %q", body)
+					}
+				}
+			})
+		}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestPutObjectIfNoneMatchLifecycleCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	characterization := map[string]any{}
+	for _, versioned := range []bool{false, true} {
+		name := "unversioned"
+		if versioned {
+			name = "versioned"
+		}
+		bucket := "put-if-none-match-" + name
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		if versioned {
+			mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+		}
+		first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "key", "IfNoneMatch": "*"}, []byte("first"))
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "key", "IfNoneMatch": "*"}, []byte("blocked"))
+		fault := asFault(t, err)
+		if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-None-Match" {
+			t.Fatalf("%s fault = %#v", name, fault)
+		}
+		mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "key"}, nil)
+		afterDelete := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "key", "IfNoneMatch": "*"}, []byte("after-delete"))
+		if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": "key"}, nil))); body != "after-delete" {
+			t.Fatalf("%s body = %q", name, body)
+		}
+		entry := map[string]any{
+			"firstETag": first.Headers.Get("ETag"), "afterDeleteETag": afterDelete.Headers.Get("ETag"),
+			"blocked": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields},
+		}
+		if versioned {
+			listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": bucket}, nil).Output
+			entry["versions"], entry["deleteMarkers"] = len(asSliceForTest(listed["Versions"])), len(asSliceForTest(listed["DeleteMarkers"]))
+		}
+		characterization[name] = entry
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestPutObjectIfMatchLifecycleCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	const bucket, key = "put-if-match", "key"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte("first"))
+	faults := map[string]any{}
+	for name, input := range map[string]map[string]any{
+		"wrong":    {"IfMatch": "d41d8cd98f00b204e9800998ecf8427e"},
+		"star":     {"IfMatch": "*"},
+		"combined": {"IfMatch": "abcdef", "IfNoneMatch": "*"},
+	} {
+		input["Bucket"], input["Key"] = bucket, key
+		_, err := invoke(t, p, "PutObject", input, nil)
+		fault := asFault(t, err)
+		if name == "wrong" && (fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match") || name == "star" && (fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != "If-Match") || name == "combined" && (fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != "If-Match,If-None-Match") {
+			t.Fatalf("%s If-Match fault = %#v", name, fault)
+		}
+		faults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+	matched := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": first.Headers.Get("ETag")}, []byte("matched"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": key}, nil)
+	_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": matched.Headers.Get("ETag")}, nil)
+	deletedFault := asFault(t, err)
+	if deletedFault.Code != "NoSuchKey" || deletedFault.HTTPStatus != http.StatusNotFound || deletedFault.Fields["Key"] != key {
+		t.Fatalf("delete-marker If-Match fault = %#v", deletedFault)
+	}
+	for name, value := range map[string]string{"bad-value": "abcdef", "bad-characters": "bad-char_/"} {
+		missingKey := "missing-" + name
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": missingKey, "IfMatch": value}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchKey" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["Key"] != missingKey {
+			t.Fatalf("%s If-Match validation fault = %#v", name, fault)
+		}
+		faults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+	afterDelete := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte("after-delete"))
+	final := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": afterDelete.Headers.Get("ETag")}, []byte("final"))
+	listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": bucket}, nil).Output
+	golden.AssertJSON(t, map[string]any{
+		"faults":       faults,
+		"deleteMarker": map[string]any{"code": deletedFault.Code, "message": deletedFault.Message, "status": deletedFault.HTTPStatus, "fields": deletedFault.Fields},
+		"matchedETag":  matched.Headers.Get("ETag"), "finalETag": final.Headers.Get("ETag"),
+		"versions": len(asSliceForTest(listed["Versions"])), "deleteMarkers": len(asSliceForTest(listed["DeleteMarkers"])),
+	})
+}
+
+func TestWriteIfMatchRequiresSingleETag(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-if-match"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-if-match", "Key": "source"}, []byte("source"))
+	characterization := map[string]any{}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		key := "destination-" + operation
+		seed := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-if-match", "Key": key}, []byte("old"))
+		input := map[string]any{"Bucket": "write-if-match", "Key": key, "IfMatch": `"wrong", ` + seed.Headers.Get("ETag")}
+		if operation == "CopyObject" {
+			input["CopySource"] = "write-if-match/source"
+		}
+		_, err := invoke(t, p, operation, input, []byte("new"))
+		fault := asFault(t, err)
+		if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {
+			t.Fatalf("%s list fault = %#v", operation, fault)
+		}
+		characterization[operation] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+		if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-if-match", "Key": key}, nil))); body != "old" {
+			t.Fatalf("%s rejected list stored %q", operation, body)
+		}
+		input["IfMatch"] = seed.Headers.Get("ETag")
+		if _, err := invoke(t, p, operation, input, []byte("new")); err != nil {
+			t.Fatalf("%s exact ETag: %v", operation, err)
+		}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestCompleteMultipartIfMatchRequiresSingleETag(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	const bucket, key = "complete-if-match", "key"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	seed := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte("old"))
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, []byte("new"))
+	empty := completeInput(uploadID)
+	empty["Bucket"], empty["Key"], empty["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
+	_, err := invoke(t, p, "CompleteMultipartUpload", empty, nil)
+	orderFault := asFault(t, err)
+	if orderFault.Code != "PreconditionFailed" || orderFault.Fields["Condition"] != "If-Match" {
+		t.Fatalf("validation order fault = %#v", orderFault)
+	}
+	input := completeInput(uploadID, completedPart(1, part))
+	input["Bucket"], input["Key"], input["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
+	readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": seed.Headers.Get("ETag")}, nil))
+	_, err = invoke(t, p, "CompleteMultipartUpload", input, nil)
+	fault := asFault(t, err)
+	if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {
+		t.Fatalf("list fault = %#v", fault)
+	}
+	characterization := map[string]any{
+		"beforeManifest": map[string]any{"code": orderFault.Code, "message": orderFault.Message, "status": orderFault.HTTPStatus, "fields": orderFault.Fields},
+		"validManifest":  map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields},
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key}, nil))); body != "old" {
+		t.Fatalf("rejected completion stored %q", body)
+	}
+	if parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID}, nil).Output["Parts"].([]any); len(parts) != 1 {
+		t.Fatalf("rejected completion changed upload = %#v", parts)
+	}
+	input["IfMatch"] = seed.Headers.Get("ETag")
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+	multipartETag := completed.Output["ETag"].(string)
+	if multipartETag == seed.Headers.Get("ETag") {
+		t.Fatalf("multipart ETag = original ETag %q", multipartETag)
+	}
+	uploadID = mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
+	part = mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, []byte("new"))
+	input = completeInput(uploadID, completedPart(1, part))
+	input["Bucket"], input["Key"], input["IfMatch"] = bucket, key, seed.Headers.Get("ETag")
+	_, err = invoke(t, p, "CompleteMultipartUpload", input, nil)
+	stale := asFault(t, err)
+	if stale.Code != "PreconditionFailed" || stale.HTTPStatus != http.StatusPreconditionFailed || stale.Fields["Condition"] != "If-Match" {
+		t.Fatalf("stale original ETag fault = %#v", stale)
+	}
+	input["IfMatch"] = multipartETag
+	if _, err := invoke(t, p, "CompleteMultipartUpload", input, nil); err != nil {
+		t.Fatalf("exact ETag: %v", err)
+	}
+	characterization["multipartETag"] = multipartETag
+	characterization["staleOriginalETag"] = map[string]any{"code": stale.Code, "message": stale.Message, "status": stale.HTTPStatus, "fields": stale.Fields}
+	golden.AssertJSON(t, characterization)
+}
+
+func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	const bucket = "complete-conditional-conflicts"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	put := func(key, body string) string {
+		t.Helper()
+		return mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte(body)).Headers.Get("ETag")
+	}
+	upload := func(key string) (string, map[string]any) {
+		t.Helper()
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+		input := completeInput(uploadID, completedPart(1, part))
+		input["Bucket"], input["Key"] = bucket, key
+		return uploadID, input
+	}
+	characterization := map[string]any{}
+	wantFault := func(name, uploadID string, input map[string]any, code, message string, status int, fields map[string]any) {
+		t.Helper()
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fault != "client" || !maps.Equal(fault.Fields, fields) {
+			t.Fatalf("fault = %#v", fault)
+		}
+		characterization[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket, "Key": input["Key"], "UploadId": uploadID}, nil)
+		if len(listed.Output["Parts"].([]any)) != 1 {
+			t.Fatalf("rejected completion changed upload = %#v", listed.Output)
+		}
+	}
+
+	uploadID, input := upload("missing")
+	input["IfMatch"] = `"missing"`
+	wantFault("missing-if-match", uploadID, input, "NoSuchKey", "The specified key does not exist.", http.StatusNotFound, map[string]any{"Key": "missing"})
+
+	put("mismatch", "old")
+	uploadID, input = upload("mismatch")
+	input["IfMatch"] = `"wrong"`
+	wantFault("mismatched-if-match", uploadID, input, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, map[string]any{"Condition": "If-Match"})
+
+	uploadID, input = upload("created-after-initiation")
+	put("created-after-initiation", "object")
+	input["IfNoneMatch"] = "*"
+	wantFault("created-after-initiation", uploadID, input, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, map[string]any{"Condition": "If-None-Match"})
+
+	put("deleted-after-initiation", "object")
+	uploadID, input = upload("deleted-after-initiation")
+	input["IfNoneMatch"] = "*"
+	wantFault("existing-before-delete", uploadID, input, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, map[string]any{"Condition": "If-None-Match"})
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "deleted-after-initiation"}, nil)
+	wantFault("deleted-after-initiation", uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-None-Match", "Key": "deleted-after-initiation"})
+	_, input = upload("deleted-after-initiation")
+	input["IfNoneMatch"] = "*"
+	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+
+	oldETag := put("changed-after-initiation", "old")
+	uploadID, input = upload("changed-after-initiation")
+	_ = deps.Clock.Advance(2 * time.Second)
+	newETag := put("changed-after-initiation", "new")
+	input["IfMatch"] = oldETag
+	wantFault("changed-after-initiation-old-etag", uploadID, input, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, map[string]any{"Condition": "If-Match"})
+	input["IfMatch"] = newETag
+	wantFault("changed-after-initiation", uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-Match", "Key": "changed-after-initiation"})
+	_, input = upload("changed-after-initiation")
+	input["IfMatch"] = newETag
+	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+
+	etag := put("identical-after-initiation", "same")
+	uploadID, input = upload("identical-after-initiation")
+	_ = deps.Clock.Advance(2 * time.Second)
+	if replacement := put("identical-after-initiation", "same"); replacement != etag {
+		t.Fatalf("identical replacement ETag = %q, want %q", replacement, etag)
+	}
+	input["IfMatch"] = etag
+	wantFault("identical-after-initiation", uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-Match", "Key": "identical-after-initiation"})
+	_, input = upload("identical-after-initiation")
+	input["IfMatch"] = etag
+	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+
+	etag = put("deleted-if-match", "same")
+	uploadID, input = upload("deleted-if-match")
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "deleted-if-match"}, nil)
+	input["IfMatch"] = etag
+	wantFault("deleted-if-match", uploadID, input, "NoSuchKey", "The specified key does not exist.", http.StatusNotFound, map[string]any{"Key": "deleted-if-match"})
+	_ = deps.Clock.Advance(2 * time.Second)
+	put("deleted-if-match", "same")
+	wantFault("recreated-if-match", uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-Match", "Key": "deleted-if-match"})
+
+	_, input = upload("absent")
+	input["IfNoneMatch"] = "*"
+	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+	golden.AssertJSON(t, characterization)
+}
+
+func TestMultipartCompletionFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "completion-fault-golden"}, nil)
+	create := func(key string) string {
+		t.Helper()
+		return mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "completion-fault-golden", "Key": key}, nil).Output["UploadId"].(string)
+	}
+	capture := func(uploadID string, parts ...any) map[string]any {
+		t.Helper()
+		_, err := invoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, parts...), nil)
+		fault := asFault(t, err)
+		fields := map[string]any{}
+		for key, value := range fault.Fields {
+			fields[key] = value
+		}
+		if _, ok := fields["UploadId"]; ok {
+			fields["UploadId"] = "<upload-id>"
+		}
+		return map[string]any{"code": fault.Code, "message": fault.Message, "fields": fields}
+	}
+	results := map[string]any{"empty": capture(create("empty"))}
+	missing := create("missing")
+	results["missing"] = capture(missing, map[string]any{"PartNumber": 9, "ETag": `"missing"`})
+	order := create("order")
+	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": order, "PartNumber": 2}, bytes.Repeat([]byte("A"), 5<<20))
+	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": order, "PartNumber": 1}, []byte("last"))
+	results["order"] = capture(order, completedPart(2, second), completedPart(1, first))
+	small := create("small")
+	smallFirst := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": small, "PartNumber": 1}, []byte("small"))
+	smallLast := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": small, "PartNumber": 2}, []byte("last"))
+	results["small"] = capture(small, completedPart(1, smallFirst), completedPart(2, smallLast))
+	golden.AssertJSON(t, results)
+}
+
+func TestMultipartZeroLimitsUseDefaults(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-zero-limits"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-zero-limits", "Key": "key"}, nil)
+	uploadID := created.Output["UploadId"]
+	mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+	got := map[string]any{}
+	t.Run("ListMultipartUploads", func(t *testing.T) {
+		response, err := invoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-zero-limits", "MaxUploads": 0}, nil)
+		if err != nil || response.Output["MaxUploads"] != 1000 || len(asSliceForTest(response.Output["Uploads"])) != 1 {
+			t.Fatalf("zero max uploads = %#v, %v", response, err)
+		}
+		got["uploads"] = response.Output
+	})
+	t.Run("ListPartsHTTP", func(t *testing.T) {
+		var response *spi.Response
+		for _, query := range []string{"&max-parts=0", "&max-parts=&part-number-marker="} {
+			request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/multipart-zero-limits/key?uploadId="+url.QueryEscape(fmt.Sprint(uploadID))+query, nil)
+			var err error
+			response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListParts", Input: map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID}, Identity: ident(), HTTP: request})
+			if err != nil || response.Output["MaxParts"] != 1000 || response.Output["PartNumberMarker"] != 0 || len(asSliceForTest(response.Output["Parts"])) != 1 {
+				t.Fatalf("default list parts %q = %#v, %v", query, response, err)
+			}
+		}
+		got["parts"] = response.Output
+	})
+	golden.AssertJSON(t, got)
 }
 
 func TestListPartsAndMultipartUploads(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "k"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "k", "ChecksumAlgorithm": "CRC64NVME"}, nil)
 	id, _ := created.Output["UploadId"].(string)
+	empty := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "MaxParts": 0}, nil).Output
+	if len(empty["Parts"].([]any)) != 0 || empty["MaxParts"] != 1000 || empty["NextPartNumberMarker"] != 0 || asMapForTest(empty["Initiator"])["ID"] != "123456789012" || asMapForTest(empty["Initiator"])["DisplayName"] != "webfile" || asMapForTest(empty["Owner"])["ID"] != "123456789012" {
+		t.Fatalf("empty ListParts %v", empty)
+	}
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "PartNumber": 1}, []byte("AAA"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id}, nil)
 	parts, _ := listed.Output["Parts"].([]any)
-	if len(parts) != 1 || listed.Output["ChecksumAlgorithm"] != "CRC64NVME" || listed.Output["ChecksumType"] != "FULL_OBJECT" {
+	if len(parts) != 1 || listed.Output["ChecksumAlgorithm"] != "CRC64NVME" || listed.Output["ChecksumType"] != "FULL_OBJECT" || listed.Output["NextPartNumberMarker"] != 1 {
 		t.Fatalf("ListParts %v", listed.Output)
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05.000Z", asMapForTest(parts[0])["LastModified"].(string)); err != nil {
+		t.Fatalf("part timestamp = %#v", parts[0])
 	}
 	paged := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "paged", "StorageClass": "STANDARD_IA", "ChecksumAlgorithm": "CRC32"}, nil)
 	pagedID := paged.Output["UploadId"].(string)
@@ -4594,8 +7307,12 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	}
 	secondPage := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 2, "MaxParts": 2}, nil)
 	last := secondPage.Output["Parts"].([]any)[0].(map[string]any)
-	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == nil || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 {
+	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == nil || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 || secondPage.Output["NextPartNumberMarker"] != 3 {
 		t.Fatalf("ListParts second page %v", secondPage.Output)
+	}
+	beyond := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 10, "MaxParts": 1}, nil).Output
+	if len(beyond["Parts"].([]any)) != 0 || beyond["PartNumberMarker"] != 10 || beyond["NextPartNumberMarker"] != 0 || beyond["IsTruncated"] != false {
+		t.Fatalf("ListParts beyond final part %v", beyond)
 	}
 	for _, input := range []map[string]any{
 		{"Bucket": "bucket", "Key": "paged", "UploadId": "missing"},
@@ -4615,6 +7332,10 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	if len(uploads) != 2 {
 		t.Fatalf("ListMultipartUploads %v", ups.Output)
 	}
+	firstUpload, secondUpload := asMapForTest(uploads[0]), asMapForTest(uploads[1])
+	if firstUpload["Key"] != "k" || firstUpload["ChecksumAlgorithm"] != "CRC64NVME" || firstUpload["ChecksumType"] != "FULL_OBJECT" || asMapForTest(firstUpload["Initiator"])["DisplayName"] != "webfile" || secondUpload["Key"] != "paged" || secondUpload["ChecksumAlgorithm"] != "CRC32" || secondUpload["ChecksumType"] != "COMPOSITE" || asMapForTest(secondUpload["Initiator"])["DisplayName"] != "webfile" {
+		t.Fatalf("ListMultipartUploads metadata %v", uploads)
+	}
 	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
 	mustInvoke(t, p, "AbortMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "paged", "UploadId": pagedID}, nil)
 	after := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket"}, nil)
@@ -4622,6 +7343,34 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	if len(uploads) != 0 {
 		t.Fatalf("completed upload still listed: %v", after.Output)
 	}
+}
+
+func TestListPartsCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "parts-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "parts-golden", "Key": "object", "ChecksumAlgorithm": "CRC64NVME"}, nil).Output["UploadId"].(string)
+	input := map[string]any{"Bucket": "parts-golden", "Key": "object", "UploadId": uploadID}
+	empty := mustInvoke(t, p, "ListParts", maps.Clone(input), nil).Output
+	for _, part := range []struct {
+		number int
+		body   string
+	}{{1, "one"}, {3, "three"}} {
+		partInput := maps.Clone(input)
+		partInput["PartNumber"] = part.number
+		mustInvoke(t, p, "UploadPart", partInput, []byte(part.body))
+		_ = deps.Clock.Advance(time.Second)
+	}
+	firstInput := maps.Clone(input)
+	firstInput["MaxParts"] = 1
+	first := mustInvoke(t, p, "ListParts", firstInput, nil).Output
+	nextInput := maps.Clone(firstInput)
+	nextInput["PartNumberMarker"] = first["NextPartNumberMarker"]
+	next := mustInvoke(t, p, "ListParts", nextInput, nil).Output
+	beyondInput := maps.Clone(firstInput)
+	beyondInput["PartNumberMarker"] = 10
+	beyond := mustInvoke(t, p, "ListParts", beyondInput, nil).Output
+	golden.AssertJSON(t, map[string]any{"empty": empty, "first": first, "next": next, "beyond": beyond})
 }
 
 func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
@@ -4638,19 +7387,37 @@ func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 	firstSame := create("same", "STANDARD_IA")
 	create("alpha", "STANDARD")
 	secondSame := create("same", "STANDARD")
-	create("space key", "STANDARD")
+	spaceUpload := create("space key", "STANDARD")
 
 	firstPage := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "MaxUploads": 3}, nil)
 	first := firstPage.Output["Uploads"].([]any)
-	if len(first) != 3 || first[0].(map[string]any)["Key"] != "alpha" || first[1].(map[string]any)["Key"] != "photos/2026/b.jpg" || first[2].(map[string]any)["UploadId"] != firstSame || first[2].(map[string]any)["StorageClass"] != "STANDARD_IA" || first[2].(map[string]any)["Initiated"] == "" || firstPage.Output["IsTruncated"] != true || firstPage.Output["NextKeyMarker"] != "same" || firstPage.Output["NextUploadIdMarker"] != firstSame {
+	if len(first) != 3 || first[0].(map[string]any)["Key"] != "alpha" || first[1].(map[string]any)["Key"] != "photos/2026/b.jpg" || first[2].(map[string]any)["UploadId"] != firstSame || first[2].(map[string]any)["StorageClass"] != "STANDARD_IA" || firstPage.Output["IsTruncated"] != true || firstPage.Output["NextKeyMarker"] != "same" || firstPage.Output["NextUploadIdMarker"] != firstSame {
 		t.Fatalf("first multipart page = %v", firstPage.Output)
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05.000Z", first[0].(map[string]any)["Initiated"].(string)); err != nil {
+		t.Fatalf("multipart initiation timestamp = %v", first[0])
 	}
 	secondPage := mustInvoke(t, p, "ListMultipartUploads", map[string]any{
 		"Bucket": "bucket", "KeyMarker": "same", "UploadIdMarker": firstSame, "MaxUploads": 3,
 	}, nil)
 	second := secondPage.Output["Uploads"].([]any)
-	if len(second) != 2 || second[0].(map[string]any)["UploadId"] != secondSame || second[1].(map[string]any)["Key"] != "space key" || secondPage.Output["IsTruncated"] != false {
+	if len(second) != 2 || second[0].(map[string]any)["UploadId"] != secondSame || second[1].(map[string]any)["Key"] != "space key" || secondPage.Output["IsTruncated"] != false || secondPage.Output["NextKeyMarker"] != "space key" || secondPage.Output["NextUploadIdMarker"] != spaceUpload {
 		t.Fatalf("second multipart page = %v", secondPage.Output)
+	}
+	uploadMarkerOnly := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "UploadIdMarker": firstSame, "MaxUploads": 1}, nil).Output
+	if uploadMarkerOnly["UploadIdMarker"] != "" || asMapForTest(asSliceForTest(uploadMarkerOnly["Uploads"])[0])["Key"] != "alpha" {
+		t.Fatalf("upload marker without key = %#v", uploadMarkerOnly)
+	}
+	_, err := invoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "KeyMarker": "alpha", "UploadIdMarker": firstSame}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Invalid uploadId marker" || fault.Fields["ArgumentName"] != "upload-id-marker" || fault.Fields["ArgumentValue"] != firstSame {
+		t.Fatalf("mismatched upload marker = %#v", fault)
+	}
+	for _, key := range []string{"folder/a/one", "folder/a/two", "folder/file1", "folder/file2"} {
+		create(key, "STANDARD")
+	}
+	prefixPage := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "Prefix": "folder/", "Delimiter": "/", "MaxUploads": 1}, nil).Output
+	if prefixes := asSliceForTest(prefixPage["CommonPrefixes"]); len(prefixes) != 1 || asMapForTest(prefixes[0])["Prefix"] != "folder/a/" || prefixPage["IsTruncated"] != true || prefixPage["NextKeyMarker"] != "" || prefixPage["NextUploadIdMarker"] != "" {
+		t.Fatalf("multipart common prefix page = %#v", prefixPage)
 	}
 	grouped := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "Prefix": "photos/", "Delimiter": "/"}, nil)
 	groups := grouped.Output["CommonPrefixes"].([]any)
@@ -4667,13 +7434,26 @@ func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 		httpStatus int
 	}{
 		{map[string]any{"Bucket": "missing"}, "NoSuchBucket", http.StatusNotFound},
-		{map[string]any{"Bucket": "bucket", "MaxUploads": 0}, "InvalidArgument", http.StatusBadRequest},
 	} {
 		_, err := invoke(t, p, "ListMultipartUploads", test.input, nil)
 		if fault := asFault(t, err); fault.Code != test.code || fault.HTTPStatus != test.httpStatus {
 			t.Fatalf("invalid multipart listing fault = %#v", fault)
 		}
 	}
+}
+
+func TestListMultipartUploadsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-list-golden"}, nil)
+	ids := map[string]string{}
+	for _, key := range []string{"folder/a/one", "folder/a/two", "folder/file1", "folder/file2"} {
+		ids[key] = mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-golden", "Key": key, "ChecksumAlgorithm": "CRC64NVME"}, nil).Output["UploadId"].(string)
+	}
+	first := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-golden", "Prefix": "folder/", "Delimiter": "/", "MaxUploads": 1}, nil).Output
+	next := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-golden", "Prefix": "folder/", "Delimiter": "/", "MaxUploads": 1, "KeyMarker": "folder/a/"}, nil).Output
+	_, err := invoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-golden", "KeyMarker": "folder/file1", "UploadIdMarker": ids["folder/file2"]}, nil)
+	fault := asFault(t, err)
+	golden.AssertJSON(t, map[string]any{"first": first, "next": next, "invalid": map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields}})
 }
 
 func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
@@ -4695,12 +7475,32 @@ func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 			if input["Bucket"] == "wrong" {
 				expected = "NoSuchBucket"
 			}
-			if fault := asFault(t, err); fault.Code != expected || fault.HTTPStatus != http.StatusNotFound {
+			fault := asFault(t, err)
+			if fault.Code != expected || fault.HTTPStatus != http.StatusNotFound {
 				t.Fatalf("%s fault = %#v", operation, fault)
+			}
+			if expected == "NoSuchUpload" && (fault.Message != "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed." || fault.Fields["UploadId"] != input["UploadId"]) {
+				t.Fatalf("%s modeled fault = %#v", operation, fault)
 			}
 		}
 	}
 	mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": uploadID}, nil)
+}
+
+func TestNoSuchUploadCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-fault-golden"}, nil)
+	results := map[string]any{}
+	for _, operation := range []string{"UploadPart", "CompleteMultipartUpload", "ListParts", "AbortMultipartUpload"} {
+		input := map[string]any{"Bucket": "multipart-fault-golden", "Key": "key", "UploadId": "missing", "PartNumber": 1}
+		if operation == "CompleteMultipartUpload" {
+			input["MultipartUpload"] = map[string]any{"Parts": []any{}}
+		}
+		_, err := invoke(t, p, operation, input, []byte("part"))
+		fault := asFault(t, err)
+		results[operation] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+	golden.AssertJSON(t, results)
 }
 
 func TestMultipartPartNumberBounds(t *testing.T) {
@@ -4715,9 +7515,18 @@ func TestMultipartPartNumberBounds(t *testing.T) {
 		{"UploadId": uploadID, "PartNumber": 10001},
 	} {
 		_, err := invoke(t, p, "UploadPart", input, []byte("part"))
-		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+		fault := asFault(t, err)
+		want := 0
+		if number, ok := input["PartNumber"]; ok {
+			want = number.(int)
+		}
+		if fault.Code != "InvalidArgument" || fault.Message != "Part number must be an integer between 1 and 10000, inclusive" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "partNumber" || fault.Fields["ArgumentValue"] != want {
 			t.Fatalf("UploadPart %#v fault = %#v", input, fault)
 		}
+	}
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": "missing", "PartNumber": 0}, []byte("part"))
+	if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != "missing" {
+		t.Fatalf("missing upload precedence fault = %#v", fault)
 	}
 	last := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 10000}, []byte("last"))
 	for _, number := range []int{0, 10001} {
@@ -4731,6 +7540,22 @@ func TestMultipartPartNumberBounds(t *testing.T) {
 	if listed.Output["Parts"].([]any)[0].(map[string]any)["PartNumber"] != 10000 {
 		t.Fatalf("valid boundary part = %v", listed.Output)
 	}
+}
+
+func TestMultipartPartNumberFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "part-number-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "part-number-golden", "Key": "key"}, nil).Output["UploadId"].(string)
+	results := []any{}
+	for _, number := range []int{-1, 0, 10001} {
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "part-number-golden", "Key": "key", "UploadId": uploadID, "PartNumber": number}, []byte("part"))
+		fault := asFault(t, err)
+		results = append(results, map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields})
+	}
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "part-number-golden", "Key": "key", "UploadId": "missing", "PartNumber": 0}, []byte("part"))
+	fault := asFault(t, err)
+	results = append(results, map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields})
+	golden.AssertJSON(t, results)
 }
 
 func TestMissingBucket404(t *testing.T) {
@@ -5348,12 +8173,12 @@ func TestPostObjectChecksums(t *testing.T) {
 func TestObjectCreatedEventNames(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
-	var events []string
+	var events []map[string]any
 	cancel := deps.Bus.(*bus.Memory).Subscribe("s3:events", func(_ context.Context, payload []byte) {
 		var envelope map[string]any
 		_ = json.Unmarshal(payload, &envelope)
 		records := envelope["Records"].([]any)
-		events = append(events, records[0].(map[string]any)["eventName"].(string))
+		events = append(events, records[0].(map[string]any))
 	})
 	defer cancel()
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "events"}, nil)
@@ -5374,9 +8199,20 @@ func TestObjectCreatedEventNames(t *testing.T) {
 	if _, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "events"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"ObjectCreated:Put", "ObjectCreated:Copy", "ObjectCreated:CompleteMultipartUpload", "ObjectCreated:Post"}
-	if !reflect.DeepEqual(events, want) {
-		t.Fatalf("events=%v want=%v", events, want)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "events", "Key": "a@b"}, []byte("something"))
+	var names, keys []string
+	var sizes []int
+	for _, event := range events {
+		object := asMapForTest(asMapForTest(event["s3"])["object"])
+		names = append(names, event["eventName"].(string))
+		keys = append(keys, object["key"].(string))
+		sizes = append(sizes, int(object["size"].(float64)))
+	}
+	wantNames := []string{"ObjectCreated:Put", "ObjectCreated:Copy", "ObjectCreated:CompleteMultipartUpload", "ObjectCreated:Post", "ObjectCreated:Put"}
+	wantKeys := []string{"source", "copy", "multipart", "post", "a%40b"}
+	wantSizes := []int{4, 4, 4, 4, 9}
+	if !reflect.DeepEqual(names, wantNames) || !reflect.DeepEqual(keys, wantKeys) || !reflect.DeepEqual(sizes, wantSizes) {
+		t.Fatalf("events names=%v keys=%v sizes=%v", names, keys, sizes)
 	}
 }
 

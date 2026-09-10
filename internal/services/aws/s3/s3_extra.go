@@ -64,7 +64,10 @@ func (p *Pack) selectObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
 	defer rc.Close()
-	raw, _ := io.ReadAll(rc)
+	raw, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, err
+	}
 	expr := str(req.Input["Expression"])
 	if expr == "" && req.HTTP != nil {
 		_ = req.HTTP.ParseForm()
@@ -250,7 +253,11 @@ func (p *Pack) writeGetObjectResponse(ctx context.Context, req *spi.Request) (*s
 	}
 	var body []byte
 	if req.Body != nil {
-		body, _ = io.ReadAll(req.Body)
+		var err error
+		body, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
 	}
 	_ = p.col(req, "wgor").Put(ctx, route+"/"+tok, body)
 	return &spi.Response{Status: 200, Output: map[string]any{"RequestRoute": route, "RequestToken": tok}}, nil
@@ -359,7 +366,11 @@ func (p *Pack) metadataCfg(ctx context.Context, req *spi.Request) (*spi.Response
 		req.Body = req.HTTP.Body
 	}
 	if req.Body != nil {
-		if body, _ := io.ReadAll(req.Body); len(body) > 0 {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		if len(body) > 0 {
 			doc["_body"] = string(body)
 		}
 	}

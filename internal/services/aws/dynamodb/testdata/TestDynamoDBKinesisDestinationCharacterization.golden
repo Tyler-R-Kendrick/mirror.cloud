@@ -1,0 +1,89 @@
+{
+  "active": {
+    "KinesisDataStreamDestinations": [
+      {
+        "DestinationStatus": "ACTIVE",
+        "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+      }
+    ],
+    "TableName": "T"
+  },
+  "disabled": {
+    "DestinationStatus": "DISABLING",
+    "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+    "TableName": "T"
+  },
+  "enabled": {
+    "DestinationStatus": "ENABLING",
+    "EnableKinesisStreamingConfiguration": {},
+    "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+    "TableName": "T"
+  },
+  "faults": {
+    "disableMissingTable": {
+      "code": "ResourceNotFoundException",
+      "message": "Requested resource not found: Table: missing not found"
+    },
+    "invalidPrecision": {
+      "code": "ValidationException",
+      "message": "1 validation error detected: Value 'SECOND' at 'updateKinesisStreamingConfiguration.approximateCreationDateTimePrecision' failed to satisfy constraint: Member must satisfy enum value set: [MILLISECOND, MICROSECOND]"
+    },
+    "missingConfiguration": {
+      "code": "ValidationException",
+      "message": "Streaming destination cannot be updated with given parameters: UpdateKinesisStreamingConfiguration cannot be null or contain only null values"
+    },
+    "missingDestination": {
+      "code": "ValidationException",
+      "message": "Table is not in a valid state to enable Kinesis Streaming Destination: No streaming destination with streamArn: arn:aws:kinesis:us-east-1:000000000000:stream/missing found for table with tableName: T"
+    },
+    "missingTable": {
+      "code": "ResourceNotFoundException",
+      "message": "Requested resource not found: Table: missing not found"
+    },
+    "repeatPrecision": {
+      "code": "ValidationException",
+      "message": "Invalid Request: Precision is already set to the desired value of MICROSECOND for tableId: 79310823-0b1a-444b-9528-357dcebab4fe, kdsArn: arn:aws:kinesis:us-east-1:000000000000:stream/s"
+    }
+  },
+  "inactive": {
+    "KinesisDataStreamDestinations": [
+      {
+        "ApproximateCreationDateTimePrecision": "MICROSECOND",
+        "DestinationStatus": "DISABLED",
+        "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+      }
+    ],
+    "TableName": "T"
+  },
+  "record": {
+    "dynamodb": {
+      "ApproximateCreationDateTime": 0,
+      "Keys": {
+        "id": {
+          "S": "one"
+        }
+      },
+      "NewImage": {
+        "data": {
+          "B": "kA=="
+        },
+        "id": {
+          "S": "one"
+        }
+      },
+      "SequenceNumber": "000000000000001",
+      "SizeBytes": 15,
+      "StreamViewType": "NEW_AND_OLD_IMAGES"
+    },
+    "eventName": "INSERT",
+    "tableName": "T"
+  },
+  "updated": {
+    "DestinationStatus": "UPDATING",
+    "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+    "TableName": "T",
+    "UpdateKinesisStreamingConfiguration": {
+      "ApproximateCreationDateTimePrecision": "MICROSECOND"
+    }
+  }
+}

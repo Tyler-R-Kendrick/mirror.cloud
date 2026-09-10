@@ -1,0 +1,6 @@
+{
+  "Code": "InvalidParameterValue",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "Value 2 for parameter DelaySeconds is invalid. Reason: The request include parameter that is not valid for this queue type."
+}

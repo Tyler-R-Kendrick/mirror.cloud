@@ -1,0 +1,27 @@
+{
+  "invalidARN": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400
+  },
+  "invalidCount": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400
+  },
+  "malformed": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400
+  },
+  "missingCount": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400
+  },
+  "missingTarget": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400
+  }
+}

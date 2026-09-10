@@ -3,6 +3,7 @@ package store_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -92,6 +93,35 @@ func TestMemoryPutGetListTxn(t *testing.T) {
 	}
 	if _, ok, err := c.Get(ctx, "drop"); err != nil || ok {
 		t.Fatalf("txn delete did not stick: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestMemoryScopeTxnRollsBackAllCollections(t *testing.T) {
+	ctx := context.Background()
+	scope := store.NewMemory("lock").Scope("111111111111", "us-east-1")
+	if err := scope.Collection("one").Put(ctx, "a", []byte("before-one")); err != nil {
+		t.Fatal(err)
+	}
+	if err := scope.Collection("two").Put(ctx, "b", []byte("before-two")); err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("rollback")
+	if err := scope.Txn(ctx, func(tx spi.ScopeTx) error {
+		_ = tx.Collection("one").Put("a", []byte("changed"))
+		_ = tx.Collection("two").Delete("b")
+		_ = tx.Collection("three").Put("c", []byte("created"))
+		return want
+	}); !errors.Is(err, want) {
+		t.Fatalf("scope transaction error = %v", err)
+	}
+	for collection, check := range map[string]struct{ key, value string }{"one": {"a", "before-one"}, "two": {"b", "before-two"}} {
+		value, ok, err := scope.Collection(collection).Get(ctx, check.key)
+		if err != nil || !ok || string(value) != check.value {
+			t.Fatalf("rolled back %s: ok=%v value=%q err=%v", collection, ok, value, err)
+		}
+	}
+	if _, ok, err := scope.Collection("three").Get(ctx, "c"); err != nil || ok {
+		t.Fatalf("rolled back created value: ok=%v err=%v", ok, err)
 	}
 }
 

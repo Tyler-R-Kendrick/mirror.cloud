@@ -1,0 +1,6 @@
+{
+  "Code": "AWS.SimpleQueueService.BatchRequestTooLong",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "Batch requests cannot be longer than 1048576 bytes. You have sent 1048577 bytes."
+}

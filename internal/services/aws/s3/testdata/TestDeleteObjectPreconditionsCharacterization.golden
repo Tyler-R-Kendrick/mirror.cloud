@@ -1,0 +1,46 @@
+{
+  "faults": {
+    "all": {
+      "code": "NotImplemented",
+      "fields": {
+        "Header": "x-amz-if-match-last-modified-time"
+      },
+      "message": "A header you provided implies functionality that is not implemented",
+      "status": 501
+    },
+    "etag": {
+      "code": "PreconditionFailed",
+      "fields": {
+        "Condition": "If-Match"
+      },
+      "message": "At least one of the pre-conditions you specified did not hold",
+      "status": 412
+    },
+    "modified": {
+      "code": "NotImplemented",
+      "fields": {
+        "Header": "x-amz-if-match-last-modified-time"
+      },
+      "message": "A header you provided implies functionality that is not implemented",
+      "status": 501
+    },
+    "size": {
+      "code": "NotImplemented",
+      "fields": {
+        "Header": "x-amz-if-match-size"
+      },
+      "message": "A header you provided implies functionality that is not implemented",
+      "status": 501
+    }
+  },
+  "matchedStatus": 204,
+  "missing": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
+  "wildcardStatus": 204
+}

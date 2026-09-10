@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -39,6 +40,28 @@ func FuzzVerifyS3PresignedV4(f *testing.F) {
 		}
 		request.Host = host
 		_ = VerifyS3PresignedV4(request, secret)
+	})
+}
+
+func FuzzS3AmzHeaderSigning(f *testing.F) {
+	for _, suffix := range []string{"user-agent", "checksum-crc32", "content-sha256"} {
+		f.Add(suffix)
+	}
+	f.Fuzz(func(t *testing.T, suffix string) {
+		if suffix == "" || strings.ContainsFunc(suffix, func(r rune) bool {
+			return r != '-' && (r < 'a' || r > 'z') && (r < '0' || r > '9')
+		}) {
+			t.Skip()
+		}
+		name := "x-amz-" + suffix
+		request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
+		request.Header.Set(name, "value")
+		if got := s3AmzHeadersSigned(request, []string{"host"}); got != (name == "x-amz-content-sha256") {
+			t.Fatalf("unsigned %s accepted=%t", name, got)
+		}
+		if !s3AmzHeadersSigned(request, []string{"host", name}) {
+			t.Fatalf("signed %s rejected", name)
+		}
 	})
 }
 
@@ -179,6 +202,61 @@ func FuzzVerifyS3StreamingUnsignedTrailerV4(f *testing.F) {
 			signature = "unexpected"
 		}
 		_ = VerifyS3StreamingV4(request, secret, [][]byte{data, nil}, []string{signature, ""}, http.Header{name: {value}})
+	})
+}
+
+func FuzzVerifyS3StreamingV4A(f *testing.F) {
+	f.Add(false, []byte("hello"), "**304502201ba0be85f07d901a715f28fbcd6d4ee4d14ab70abe11f5cfaff93a3c1961e4ae022100f5693b9c34d100107df15bd06cbc5c1a608d467761f97f26e048c240b21cc256", "**304502202bed57aec7b9b53cfebdf5163fbc5c61009c0f0b1e1b50848ac50641c6d0d14a022100806a00edfb80226cf9f2761851cd38cb9f33ee3fdafb597c723086655aad5cb9", "", "", "", "test")
+	f.Add(true, []byte("hello"), "**3045022014ec32c1ce4d72ad9504db7c3584cdf88ef5408590472dfa1333f3696d030a76022100e15554ef66351e5f90b6b9a62e67b0fdf0b2e678ce3c5394252f3e57d93275a6", "**304502210090e80732fa8c16e01818cafdbff64c37e56feced7c512cd43c48481df98377970220145d5e04288392f3bad2740bc847b217751f666baad7ee1a5358c68161b9297d", "x-amz-checksum-crc32c", "mnG7TA==", "****30440220053b683045656f9eba0a1a2785bea923cddca5c5cc83b0d1fba03e1aab23fd5502200c01dde330a75c75412925fe9dd44324a60aee6a7491714e1c1ed6944e0a05aa", "test")
+	f.Fuzz(func(t *testing.T, trailer bool, data []byte, signature, finalSignature, trailerName, trailerValue, trailerSignature, secret string) {
+		path := "/v4a/object"
+		payloadHash := "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD"
+		signedHeaders := "content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set"
+		seed := "30450220292f2afead2f51323260a06fdfed3d88e0998b54f024a175f65e19bdbf970425022100e28adec0e230329184badd9bf335b18c8ad5373000bad0c47223b173ecd16d11"
+		trailers := http.Header(nil)
+		if trailer {
+			path = "/v4a-trailers/object"
+			payloadHash += "-TRAILER"
+			signedHeaders += ";x-amz-trailer"
+			seed = "3046022100dcdd29ee9c78fdb87571b7ee2f202417795100fc3782a87296d8dbcdfd05ee91022100e72c624e7c065de7d9d6bc9f44b805390367f72d041219ea147ec45c4d47d180"
+			trailers = http.Header{trailerName: {trailerValue}, "X-Amz-Trailer-Signature": {trailerSignature}}
+		}
+		request, err := http.NewRequest(http.MethodPut, "https://s3.localhost.localstack.cloud:4566"+path, nil)
+		if err != nil {
+			t.Skip()
+		}
+		request.Header.Set("Content-Encoding", "aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", payloadHash)
+		request.Header.Set("X-Amz-Date", "20990101T000000Z")
+		request.Header.Set("X-Amz-Decoded-Content-Length", strconv.Itoa(len(data)))
+		request.Header.Set("X-Amz-Region-Set", "us-east-1")
+		if trailer {
+			request.Header.Set("X-Amz-Trailer", trailerName)
+		}
+		request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders="+signedHeaders+",Signature="+seed)
+		_ = VerifyS3StreamingSignature(request, "test", secret, [][]byte{data, nil}, []string{signature, finalSignature}, trailers)
+	})
+}
+
+func FuzzVerifyS3StreamingUnsignedTrailerV4A(f *testing.F) {
+	f.Add([]byte("hello"), "x-amz-checksum-crc32c", "mnG7TA==", false, "test")
+	f.Fuzz(func(t *testing.T, data []byte, name, value string, signedChunk bool, secret string) {
+		request, err := http.NewRequest(http.MethodPut, "https://s3.localhost.localstack.cloud:4566/v4a-unsigned/object", nil)
+		if err != nil {
+			t.Skip()
+		}
+		request.Header.Set("Content-Encoding", "aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+		request.Header.Set("X-Amz-Date", "20990101T000000Z")
+		request.Header.Set("X-Amz-Decoded-Content-Length", strconv.Itoa(len(data)))
+		request.Header.Set("X-Amz-Region-Set", "us-east-1")
+		request.Header.Set("X-Amz-Trailer", name)
+		request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set;x-amz-trailer,Signature=304402201f09d982734f868ab87f6e305473f7ef74a6882095dbf5d0f0b97bede169993402204a4c59017095e2ffaf861e04fc6c73b5d1c9b0d8c041b7fd2acb05d0a4c356f3")
+		signature := ""
+		if signedChunk {
+			signature = "unexpected"
+		}
+		_ = VerifyS3StreamingSignature(request, "test", secret, [][]byte{data, nil}, []string{signature, ""}, http.Header{name: {value}})
 	})
 }
 

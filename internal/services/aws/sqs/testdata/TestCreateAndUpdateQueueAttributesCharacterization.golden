@@ -1,0 +1,34 @@
+{
+  "after": {
+    "Attributes": {
+      "ApproximateNumberOfMessages": "0",
+      "ApproximateNumberOfMessagesDelayed": "0",
+      "ApproximateNumberOfMessagesNotVisible": "0",
+      "CreatedTimestamp": "0",
+      "DelaySeconds": "420",
+      "LastModifiedTimestamp": "0",
+      "MaximumMessageSize": "2048",
+      "MessageRetentionPeriod": "604800",
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:attribute-update",
+      "ReceiveMessageWaitTimeSeconds": "10",
+      "SqsManagedSseEnabled": "true",
+      "VisibilityTimeout": "69"
+    }
+  },
+  "before": {
+    "Attributes": {
+      "ApproximateNumberOfMessages": "0",
+      "ApproximateNumberOfMessagesDelayed": "0",
+      "ApproximateNumberOfMessagesNotVisible": "0",
+      "CreatedTimestamp": "0",
+      "DelaySeconds": "0",
+      "LastModifiedTimestamp": "0",
+      "MaximumMessageSize": "1048576",
+      "MessageRetentionPeriod": "604800",
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:attribute-update",
+      "ReceiveMessageWaitTimeSeconds": "10",
+      "SqsManagedSseEnabled": "true",
+      "VisibilityTimeout": "20"
+    }
+  }
+}

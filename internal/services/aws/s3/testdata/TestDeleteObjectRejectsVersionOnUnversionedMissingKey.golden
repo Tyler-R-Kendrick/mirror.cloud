@@ -1,0 +1,15 @@
+{
+  "invalid": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "versionId",
+      "ArgumentValue": "missing-version"
+    },
+    "message": "Invalid version id specified",
+    "status": 400
+  },
+  "null": {
+    "headers": {},
+    "status": 204
+  }
+}

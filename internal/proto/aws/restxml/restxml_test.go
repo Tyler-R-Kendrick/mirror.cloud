@@ -355,7 +355,7 @@ func TestACLXML(t *testing.T) {
 }
 
 func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
-	body := `<CompleteMultipartUpload><Part><ETag>"first"</ETag><PartNumber>1</PartNumber></Part><Part><ETag>"third"</ETag><PartNumber>3</PartNumber></Part></CompleteMultipartUpload>`
+	body := `<CompleteMultipartUpload><Part><ETag>"first"</ETag><PartNumber>1</PartNumber><ChecksumCRC32>crc32</ChecksumCRC32><ChecksumCRC32C>crc32c</ChecksumCRC32C><ChecksumCRC64NVME>crc64</ChecksumCRC64NVME><ChecksumMD5>md5</ChecksumMD5><ChecksumSHA1>sha1</ChecksumSHA1><ChecksumSHA256>sha256</ChecksumSHA256><ChecksumXXHASH64>xx64</ChecksumXXHASH64><ChecksumXXHASH3>xx3</ChecksumXXHASH3><ChecksumXXHASH128>xx128</ChecksumXXHASH128></Part><Part><ETag>"third"</ETag><PartNumber>3</PartNumber></Part></CompleteMultipartUpload>`
 	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/b/k?uploadId=id", strings.NewReader(body))
 	req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "CompleteMultipartUpload"}, r)
 	if err != nil {
@@ -364,6 +364,10 @@ func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
 	parts := req.Input["MultipartUpload"].(map[string]any)["Parts"].([]any)
 	if len(parts) != 2 || parts[1].(map[string]any)["PartNumber"] != 3 || parts[1].(map[string]any)["ETag"] != `"third"` {
 		t.Fatalf("parts = %#v", parts)
+	}
+	want := map[string]any{"ETag": `"first"`, "PartNumber": 1, "ChecksumCRC32": "crc32", "ChecksumCRC32C": "crc32c", "ChecksumCRC64NVME": "crc64", "ChecksumMD5": "md5", "ChecksumSHA1": "sha1", "ChecksumSHA256": "sha256", "ChecksumXXHASH64": "xx64", "ChecksumXXHASH3": "xx3", "ChecksumXXHASH128": "xx128"}
+	if !reflect.DeepEqual(parts[0], want) {
+		t.Fatalf("checksums = %#v", parts[0])
 	}
 }
 
@@ -450,6 +454,10 @@ func TestRESTXMLServiceRoutes(t *testing.T) {
 	if _, err := codec.Route(&model.Service{ID: "aws.empty"}, httptest.NewRequest(http.MethodOptions, "/unknown", nil)); err == nil {
 		t.Fatal("routed empty unknown service")
 	}
+	preflight, err := codec.Route(&model.Service{ID: "aws.s3", Operations: []model.Operation{{Name: "GetObject"}}}, httptest.NewRequest(http.MethodOptions, "/bucket/key", nil))
+	if err != nil || preflight.Name != "GetObject" {
+		t.Fatalf("S3 preflight route %#v %v", preflight, err)
+	}
 	virtual := httptest.NewRequest(http.MethodGet, "https://bucket.s3.us-east-1.amazonaws.com/key", nil)
 	if got := RouteName(virtual); got != "GetObject" {
 		t.Fatalf("virtual-host route %q", got)
@@ -503,7 +511,7 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 			t.Errorf("%s decode %#v %v", test.operation, decoded, err)
 		}
 	}
-	notification := `<NotificationConfiguration><QueueConfiguration><Id>queue</Id><Queue>arn:aws:sqs:us-east-1:111111111111:q</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>images/</Value></FilterRule></S3Key></Filter></QueueConfiguration><TopicConfiguration><Topic>arn:aws:sns:us-east-1:111111111111:t</Topic><Event>s3:ObjectRemoved:*</Event></TopicConfiguration><CloudFunctionConfiguration><CloudFunction>arn:aws:lambda:us-east-1:111111111111:function:f</CloudFunction><Event>s3:ObjectCreated:Put</Event></CloudFunctionConfiguration><EventBridgeConfiguration/></NotificationConfiguration>`
+	notification := `<NotificationConfiguration><QueueConfiguration><Id>queue</Id><Queue>arn:aws:sqs:us-east-1:111111111111:q</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>images/</Value></FilterRule><FilterRule><Value>test</Value></FilterRule><FilterRule><Name>prefix</Name></FilterRule><FilterRule/></S3Key></Filter></QueueConfiguration><TopicConfiguration><Topic>arn:aws:sns:us-east-1:111111111111:t</Topic><Event>s3:ObjectRemoved:*</Event></TopicConfiguration><CloudFunctionConfiguration><CloudFunction>arn:aws:lambda:us-east-1:111111111111:function:f</CloudFunction><Event>s3:ObjectCreated:Put</Event></CloudFunctionConfiguration><EventBridgeConfiguration/></NotificationConfiguration>`
 	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketNotificationConfiguration"}, httptest.NewRequest(http.MethodPut, "/bucket?notification", strings.NewReader(notification)))
 	notificationConfiguration, _ := decoded.Input["NotificationConfiguration"].(map[string]any)
 	queues, _ := notificationConfiguration["QueueConfigurations"].([]any)
@@ -512,9 +520,12 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	keyFilter, _ := filter["Key"].(map[string]any)
 	filterRules, _ := keyFilter["FilterRules"].([]any)
 	filterRule, _ := filterRules[0].(map[string]any)
+	missingName, _ := filterRules[1].(map[string]any)
+	missingValue, _ := filterRules[2].(map[string]any)
+	missingBoth, _ := filterRules[3].(map[string]any)
 	topics, _ := notificationConfiguration["TopicConfigurations"].([]any)
 	lambdas, _ := notificationConfiguration["LambdaFunctionConfigurations"].([]any)
-	if err != nil || queue["Id"] != "queue" || filterRule["Value"] != "images/" || len(topics) != 1 || len(lambdas) != 1 || !reflect.DeepEqual(notificationConfiguration["EventBridgeConfiguration"], map[string]any{}) {
+	if err != nil || queue["Id"] != "queue" || filterRule["Value"] != "images/" || !reflect.DeepEqual(missingName, map[string]any{"Value": "test"}) || !reflect.DeepEqual(missingValue, map[string]any{"Name": "prefix"}) || len(missingBoth) != 0 || len(topics) != 1 || len(lambdas) != 1 || !reflect.DeepEqual(notificationConfiguration["EventBridgeConfiguration"], map[string]any{}) {
 		t.Fatalf("notification decode %#v %v", decoded, err)
 	}
 	ownership := `<OwnershipControls><Rule><ObjectOwnership>ObjectWriter</ObjectOwnership></Rule></OwnershipControls>`
@@ -655,6 +666,21 @@ func TestEmptyResponseHeadersCharacterization(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestETagHeaderCasingCharacterization(t *testing.T) {
+	w := httptest.NewRecorder()
+	response := &spi.Response{Headers: http.Header{"Etag": {`"etag"`}}, Stream: io.NopCloser(strings.NewReader("body"))}
+	if err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "GetObject"}, w, response); err != nil {
+		t.Fatal(err)
+	}
+	_, exact := w.Header()["ETag"]
+	_, canonicalized := w.Header()["Etag"]
+	values := w.Header()["ETag"]
+	if !exact || canonicalized || len(values) != 1 || values[0] != `"etag"` {
+		t.Fatalf("headers = %#v", w.Header())
+	}
+	golden.AssertJSON(t, map[string]any{"exact_etag": exact, "go_canonicalized_etag": canonicalized, "value": values[0]})
+}
+
 func FuzzEmptyResponseHeaders(f *testing.F) {
 	f.Add(uint8(0))
 	f.Add(uint8(1))
@@ -680,7 +706,7 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if err := codec.Encode(svc, &model.Operation{Name: "GetObject"}, w, &spi.Response{Status: http.StatusPartialContent, Headers: http.Header{"ETag": {"one"}}, Stream: io.NopCloser(strings.NewReader("object"))}); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != http.StatusPartialContent || w.Header().Get("ETag") != "one" || w.Body.String() != "object" {
+	if w.Code != http.StatusPartialContent || len(w.Header()["ETag"]) != 1 || w.Header()["ETag"][0] != "one" || w.Body.String() != "object" {
 		t.Fatalf("stream response %d %#v %q", w.Code, w.Header(), w.Body.String())
 	}
 	w = httptest.NewRecorder()
@@ -710,6 +736,23 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	}})
 	if body := w.Body.String(); err != nil || !strings.Contains(body, "<Buckets><Bucket><BucketRegion>us-west-2</BucketRegion><CreationDate>date</CreationDate><Name>one</Name></Bucket></Buckets>") || strings.Contains(body, "<member>") {
 		t.Fatalf("bucket list response %v %s", err, body)
+	}
+	w = httptest.NewRecorder()
+	err = codec.Encode(svc, &model.Operation{Name: "GetObjectAttributes"}, w, &spi.Response{Output: map[string]any{
+		"ObjectSize": 4, "StorageClass": "STANDARD", "ObjectParts": map[string]any{"TotalPartsCount": 1, "Parts": []any{map[string]any{"PartNumber": 1}}}, "Checksum": map[string]any{"ChecksumCRC32": "sum"}, "ETag": "etag",
+	}})
+	if body, want := w.Body.String(), "<?xml version=\"1.0\" encoding=\"UTF-8\"?><GetObjectAttributesResponse><ETag>etag</ETag><Checksum><ChecksumCRC32>sum</ChecksumCRC32></Checksum><ObjectParts><PartsCount>1</PartsCount><Part><PartNumber>1</PartNumber></Part></ObjectParts><StorageClass>STANDARD</StorageClass><ObjectSize>4</ObjectSize></GetObjectAttributesResponse>"; err != nil || body != want {
+		t.Fatalf("object attributes response %v %s", err, body)
+	}
+	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
+		w = httptest.NewRecorder()
+		err := codec.Encode(svc, &model.Operation{Name: operation}, w, &spi.Response{Output: map[string]any{
+			"Contents": []any{map[string]any{"Key": "folder/file", "ChecksumAlgorithm": []any{"SHA256", "CRC32"}}}, "CommonPrefixes": []any{map[string]any{"Prefix": "folder/subfolder/"}}, "BucketRegion": "us-west-2",
+		}})
+		body := w.Body.String()
+		if err != nil || !strings.Contains(body, "<ChecksumAlgorithm>SHA256</ChecksumAlgorithm><ChecksumAlgorithm>CRC32</ChecksumAlgorithm><Key>folder/file</Key>") || !strings.Contains(body, "<CommonPrefixes><Prefix>folder/subfolder/</Prefix></CommonPrefixes>") || !strings.Contains(body, "<BucketRegion>us-west-2</BucketRegion>") || strings.Contains(body, "<member>") {
+			t.Fatalf("%s flattened response %v %s", operation, err, body)
+		}
 	}
 	w = httptest.NewRecorder()
 	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketLocation"}, w, &spi.Response{Output: map[string]any{"LocationConstraint": "EU"}}); err != nil || !strings.Contains(w.Body.String(), `<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>`) {
@@ -768,6 +811,13 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	}
 	if w.Header().Get("x-amz-bucket-region") != "us-east-1" || !strings.Contains(w.Body.String(), "<BucketName>bucket&lt;&amp;</BucketName><Region>us-east-1</Region>") {
 		t.Fatalf("structured fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(svc, &model.Operation{Name: "PutBucketVersioning"}, w, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest}, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(w.Body.String(), "<Message>The XML you provided was not well-formed or did not validate against our published schema</Message>") {
+		t.Fatalf("malformed XML fault %s", w.Body.String())
 	}
 }
 

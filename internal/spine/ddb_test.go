@@ -13,6 +13,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 )
 
 func TestBootedServerDynamoDBQueryAndDelete(t *testing.T) {
@@ -111,7 +112,7 @@ func TestBootedServerDynamoDBQueryAndDelete(t *testing.T) {
 
 func TestBootedServerDynamoDBExtraEngines(t *testing.T) {
 	cfg := config.Default()
-	cfg.Services = []string{"aws.dynamodb"}
+	cfg.Services = []string{"aws.dynamodb", "aws.kinesis"}
 	cfg.Seed = "ddb-extra"
 	rt, err := runtime.Boot(cfg)
 	if err != nil {
@@ -123,8 +124,12 @@ func TestBootedServerDynamoDBExtraEngines(t *testing.T) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
-		req.Header.Set("X-Amz-Target", "DynamoDB_20120810."+op)
-		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+		target, service := "DynamoDB_20120810", "dynamodb"
+		if op == "CreateStream" {
+			target, service = "Kinesis_20131202", "kinesis"
+		}
+		req.Header.Set("X-Amz-Target", target+"."+op)
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/"+service+"/aws4_request, SignedHeaders=host, Signature=00")
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -142,6 +147,7 @@ func TestBootedServerDynamoDBExtraEngines(t *testing.T) {
 		return res.StatusCode, out
 	}
 	call("CreateTable", `{"TableName":"T","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}]}`)
+	call("CreateStream", `{"StreamName":"s"}`)
 	call("ExecuteStatement", `{"Statement":"INSERT INTO T VALUE {'id': 'k1', 'n': '7'}"}`)
 	_, got := call("ExecuteStatement", `{"Statement":"SELECT * FROM T WHERE id = 'k1'"}`)
 	item := asM(got["Item"])
@@ -186,7 +192,9 @@ func TestBootedServerDynamoDBExtraEngines(t *testing.T) {
 	}
 	call("UpdateTableReplicaAutoScaling", `{"TableName":"T"}`)
 	call("DescribeTableReplicaAutoScaling", `{"TableName":"T"}`)
-	call("UpdateKinesisStreamingDestination", `{"TableName":"T","StreamArn":"arn:k"}`)
+	streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+	call("EnableKinesisStreamingDestination", `{"TableName":"T","StreamArn":"`+streamARN+`"}`)
+	call("UpdateKinesisStreamingDestination", `{"TableName":"T","StreamArn":"`+streamARN+`","UpdateKinesisStreamingConfiguration":{"ApproximateCreationDateTimePrecision":"MICROSECOND"}}`)
 	call("UpdateGlobalTableSettings", `{"GlobalTableName":"gt"}`)
 	call("DescribeGlobalTableSettings", `{"GlobalTableName":"gt"}`)
 	call("ListContributorInsights", `{}`)
@@ -197,7 +205,7 @@ func TestBootedServerDynamoDBExtraEngines(t *testing.T) {
 
 func TestBootedServerDynamoDBSection48(t *testing.T) {
 	cfg := config.Default()
-	cfg.Services = []string{"aws.dynamodb"}
+	cfg.Services = []string{"aws.dynamodb", "aws.kinesis"}
 	cfg.Seed = "ddb-48"
 	rt, err := runtime.Boot(cfg)
 	if err != nil {
@@ -209,8 +217,12 @@ func TestBootedServerDynamoDBSection48(t *testing.T) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
-		req.Header.Set("X-Amz-Target", "DynamoDB_20120810."+op)
-		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+		target, service := "DynamoDB_20120810", "dynamodb"
+		if op == "CreateStream" {
+			target, service = "Kinesis_20131202", "kinesis"
+		}
+		req.Header.Set("X-Amz-Target", target+"."+op)
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/"+service+"/aws4_request, SignedHeaders=host, Signature=00")
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -269,7 +281,7 @@ func TestBootedServerDynamoDBSection48(t *testing.T) {
 		t.Fatalf("scan filter %v", sc)
 	}
 
-	code, fail := call("UpdateItem", `{"TableName":"T","Key":{"id":{"S":"a"}},"ConditionExpression":"n > :n","UpdateExpression":"SET extra = :e","ExpressionAttributeValues":{":n":{"N":"50"},":e":{"S":"no"}}}`)
+	code, fail := call("UpdateItem", `{"TableName":"T","Key":{"id":{"S":"a"}},"ConditionExpression":"n > :n","UpdateExpression":"SET extra = :e","ExpressionAttributeValues":{":n":{"N":"50"},":e":{"S":"no"}},"ReturnValuesOnConditionCheckFailure":"ALL_OLD"}`)
 	if code != 400 {
 		t.Fatalf("cond status %d %v", code, fail)
 	}
@@ -520,6 +532,7 @@ func TestBootedServerDynamoDBSection48(t *testing.T) {
 		t.Fatalf("restore %v", rest)
 	}
 	call("DeleteBackup", `{"BackupArn":"`+bArn+`"}`)
+	call("CreateStream", `{"StreamName":"s"}`)
 	call("EnableKinesisStreamingDestination", `{"TableName":"T","StreamArn":"arn:aws:kinesis:us-east-1:000000000000:stream/s"}`)
 	_, kd := call("DescribeKinesisStreamingDestination", `{"TableName":"T"}`)
 	if kd["KinesisDataStreamDestinations"] == nil {

@@ -1,4 +1,13 @@
 {
+  "emptyPage": {
+    "ObjectParts": {
+      "IsTruncated": false,
+      "MaxParts": 2,
+      "NextPartNumberMarker": "0",
+      "PartNumberMarker": "10",
+      "TotalPartsCount": 3
+    }
+  },
   "full": {
     "Checksum": {
       "ChecksumCRC32": "ZaN+Aw==",
@@ -51,5 +60,8 @@
     },
     "ObjectSize": 10485764,
     "StorageClass": "STANDARD_IA"
+  },
+  "standard": {
+    "StorageClass": "STANDARD"
   }
 }

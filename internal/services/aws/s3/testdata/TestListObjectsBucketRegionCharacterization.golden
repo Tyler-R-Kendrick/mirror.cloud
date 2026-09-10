@@ -1,0 +1,10 @@
+{
+  "ListObjects": {
+    "east": null,
+    "west": "us-west-2"
+  },
+  "ListObjectsV2": {
+    "east": null,
+    "west": "us-west-2"
+  }
+}

@@ -1,0 +1,33 @@
+[
+  {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "partNumber",
+      "ArgumentValue": -1
+    },
+    "message": "Part number must be an integer between 1 and 10000, inclusive"
+  },
+  {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "partNumber",
+      "ArgumentValue": 0
+    },
+    "message": "Part number must be an integer between 1 and 10000, inclusive"
+  },
+  {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "partNumber",
+      "ArgumentValue": 10001
+    },
+    "message": "Part number must be an integer between 1 and 10000, inclusive"
+  },
+  {
+    "code": "NoSuchUpload",
+    "fields": {
+      "UploadId": "missing"
+    },
+    "message": "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed."
+  }
+]

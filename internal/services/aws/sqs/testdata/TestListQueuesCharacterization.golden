@@ -1,0 +1,34 @@
+{
+  "all": {
+    "QueueUrls": [
+      "http://127.0.0.1:4566/123456789012/a-0",
+      "http://127.0.0.1:4566/123456789012/a-1",
+      "http://127.0.0.1:4566/123456789012/a-2",
+      "http://127.0.0.1:4566/123456789012/b-0"
+    ]
+  },
+  "empty": {},
+  "first": {
+    "NextToken": "aHR0cDovLzEyNy4wLjAuMTo0NTY2LzEyMzQ1Njc4OTAxMi9hLTE=",
+    "QueueUrls": [
+      "http://127.0.0.1:4566/123456789012/a-0",
+      "http://127.0.0.1:4566/123456789012/a-1"
+    ]
+  },
+  "invalidToken": {
+    "code": "InvalidAddress",
+    "message": "The address not-base64 is not valid for this endpoint."
+  },
+  "prefix": {
+    "QueueUrls": [
+      "http://127.0.0.1:4566/123456789012/a-0",
+      "http://127.0.0.1:4566/123456789012/a-1",
+      "http://127.0.0.1:4566/123456789012/a-2"
+    ]
+  },
+  "second": {
+    "QueueUrls": [
+      "http://127.0.0.1:4566/123456789012/a-2"
+    ]
+  }
+}

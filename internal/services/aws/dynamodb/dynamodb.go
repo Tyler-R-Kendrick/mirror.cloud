@@ -4,6 +4,7 @@ package dynamodb
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"sort"
 	"strconv"
@@ -56,18 +57,90 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	table := str(req.Input["TableName"])
+	requireTable := func(name string) error {
+		_, ok, err := p.col(req, "tables").Get(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found", HTTPStatus: 400, Fault: "client"}
+		}
+		return nil
+	}
+	switch req.Operation {
+	case "PutItem", "GetItem", "DeleteItem", "UpdateItem", "Query", "Scan",
+		"UpdateContinuousBackups", "DescribeContinuousBackups",
+		"UpdateContributorInsights", "DescribeContributorInsights":
+		if err := requireTable(table); err != nil {
+			return nil, err
+		}
+	}
 	switch req.Operation {
 	case "CreateTable":
 		b, _ := json.Marshal(req.Input)
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		if str(rec["BillingMode"]) == "PAY_PER_REQUEST" && len(asMap(rec["ProvisionedThroughput"])) > 0 {
+			return nil, &spi.Fault{Code: "ValidationException", Message: "One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST", HTTPStatus: 400, Fault: "client"}
+		}
+		arn := "arn:aws:dynamodb:" + req.Identity.Region + ":" + req.Identity.Account + ":table/" + table
+		tags := rec["Tags"]
+		delete(rec, "Tags")
+		rec["TableArn"] = arn
+		rec["TableId"] = p.deps.Rand.Derive("dynamodb:table:" + req.Identity.Account + ":" + req.Identity.Region + ":" + table).UUID()
+		rec["CreationDateTime"] = p.deps.Clock.Now().Unix()
+		rec["DeletionProtectionEnabled"] = false
+		rec["ItemCount"] = 0
+		rec["TableSizeBytes"] = 0
+		if err := p.prepareTableMetadata(ctx, req, rec); err != nil {
+			return nil, err
+		}
+		if class := str(rec["TableClass"]); class != "" {
+			rec["TableClassSummary"] = map[string]any{"TableClass": class}
+			delete(rec, "TableClass")
+		}
 		p.ensureStream(req, rec, table)
 		b, _ = json.Marshal(rec)
-		_ = p.col(req, "tables").Put(ctx, table, b)
-		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableStatus": "ACTIVE", "LatestStreamArn": rec["LatestStreamArn"]}}}, nil
+		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
+			if _, ok, err := tx.Get(table); err != nil {
+				return err
+			} else if ok {
+				return &spi.Fault{Code: "ResourceInUseException", Message: "Table already exists: " + table, HTTPStatus: 400, Fault: "client"}
+			}
+			return tx.Put(table, b)
+		}); err != nil {
+			return nil, err
+		}
+		if len(asSlice(tags)) > 0 {
+			_, _ = p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "TagResource", Input: map[string]any{"ResourceArn": arn, "Tags": tags}})
+		}
+		description := tableDescription(rec, "CREATING")
+		return &spi.Response{Output: map[string]any{"TableDescription": description}}, nil
 	case "DeleteTable":
-		_ = p.col(req, "tables").Delete(ctx, table)
-		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableStatus": "DELETING"}}}, nil
+		var existing map[string]any
+		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
+			b, ok, err := tx.Get(table)
+			if err != nil {
+				return err
+			} else if !ok {
+				return &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found: Table: " + table + " not found", HTTPStatus: 400, Fault: "client"}
+			}
+			_ = json.Unmarshal(b, &existing)
+			return tx.Delete(table)
+		}); err != nil {
+			return nil, err
+		}
+		_ = p.col(req, "ttl").Delete(ctx, table)
+		_ = p.col(req, "tags").Delete(ctx, "arn:aws:dynamodb:"+req.Identity.Region+":"+req.Identity.Account+":table/"+table)
+		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{
+			"DeletionProtectionEnabled": existing["DeletionProtectionEnabled"],
+			"ItemCount":                 existing["ItemCount"],
+			"ProvisionedThroughput":     existing["ProvisionedThroughput"],
+			"TableArn":                  existing["TableArn"],
+			"TableId":                   existing["TableId"],
+			"TableName":                 table,
+			"TableStatus":               "DELETING",
+		}}}, nil
 	case "DescribeTable":
 		b, ok, _ := p.col(req, "tables").Get(ctx, table)
 		if !ok {
@@ -75,9 +148,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
-		m["TableStatus"] = "ACTIVE"
-		m["TableName"] = table
-		return &spi.Response{Output: map[string]any{"Table": m}}, nil
+		return &spi.Response{Output: map[string]any{"Table": tableDescription(m, "ACTIVE")}}, nil
 	case "ListTables":
 		kvs, _, _ := p.col(req, "tables").List(ctx, "", "", 0)
 		var names []any
@@ -87,13 +158,25 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"TableNames": names}}, nil
 	case "PutItem":
 		item, _ := req.Input["Item"].(map[string]any)
-		if err := p.checkCond(req, item); err != nil {
+		if err := p.validateItemKey(ctx, req, table, item); err != nil {
 			return nil, err
 		}
 		key := p.itemKeyFrom(ctx, req, table, item)
-		old := p.loadItem(ctx, req, table, key)
 		b, _ := json.Marshal(item)
-		_ = p.col(req, "items:"+table).Put(ctx, key, b)
+		var old map[string]any
+		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+			if raw, ok, err := tx.Get(key); err != nil {
+				return err
+			} else if ok {
+				_ = json.Unmarshal(raw, &old)
+			}
+			if err := p.checkCond(req, old); err != nil {
+				return err
+			}
+			return tx.Put(key, b)
+		}); err != nil {
+			return nil, err
+		}
 		ev := "INSERT"
 		if old != nil {
 			ev = "MODIFY"
@@ -110,37 +193,64 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"Item": item}}, nil
 	case "DeleteItem":
 		key := p.itemKeyFrom(ctx, req, table, asMap(req.Input["Key"]))
-		old := p.loadItem(ctx, req, table, key)
-		if err := p.checkCond(req, old); err != nil {
+		var old map[string]any
+		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+			if raw, ok, err := tx.Get(key); err != nil {
+				return err
+			} else if ok {
+				_ = json.Unmarshal(raw, &old)
+			}
+			if err := p.checkCond(req, old); err != nil {
+				return err
+			}
+			return tx.Delete(key)
+		}); err != nil {
 			return nil, err
 		}
-		_ = p.col(req, "items:"+table).Delete(ctx, key)
 		p.emitStream(ctx, req, table, "REMOVE", asMap(req.Input["Key"]), old)
 		return p.returnValues(req, old, nil, nil), nil
 	case "Scan":
 		return p.listItems(ctx, req, table, "", str(req.Input["FilterExpression"]))
 	case "Query":
+		if indexName := str(req.Input["IndexName"]); indexName != "" {
+			index := indexSpec(p.tableDef(ctx, req, table), indexName)
+			if len(index) == 0 {
+				return nil, &spi.Fault{Code: "ValidationException", Message: "The table does not have the specified index: " + indexName, HTTPStatus: 400, Fault: "client"}
+			}
+			if str(req.Input["Select"]) == "ALL_ATTRIBUTES" && str(asMap(index["Projection"])["ProjectionType"]) != "ALL" {
+				return nil, &spi.Fault{Code: "ValidationException", Message: "Select type ALL_ATTRIBUTES is not supported for global secondary index " + indexName + " because its projection type is not ALL", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 		return p.listItems(ctx, req, table, str(req.Input["KeyConditionExpression"]), str(req.Input["FilterExpression"]))
 	case "UpdateItem":
 		key := p.itemKeyFrom(ctx, req, table, asMap(req.Input["Key"]))
-		old := p.loadItem(ctx, req, table, key)
-		item := cloneMap(old)
-		if item == nil {
-			item = cloneMap(asMap(req.Input["Key"]))
-		}
-		if err := p.checkCond(req, item); err != nil {
+		var old, item map[string]any
+		var touched []string
+		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+			if raw, ok, err := tx.Get(key); err != nil {
+				return err
+			} else if ok {
+				_ = json.Unmarshal(raw, &old)
+			}
+			if err := p.checkCond(req, old); err != nil {
+				return err
+			}
+			item = cloneMap(old)
+			if item == nil {
+				item = cloneMap(asMap(req.Input["Key"]))
+			}
+			if ue := str(req.Input["UpdateExpression"]); ue != "" {
+				var err error
+				touched, err = expr.ApplyUpdate(ue, item, asMap(req.Input["ExpressionAttributeNames"]), asMap(req.Input["ExpressionAttributeValues"]))
+				if err != nil {
+					return &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
+				}
+			}
+			raw, _ := json.Marshal(item)
+			return tx.Put(key, raw)
+		}); err != nil {
 			return nil, err
 		}
-		var touched []string
-		if ue := str(req.Input["UpdateExpression"]); ue != "" {
-			var err error
-			touched, err = expr.ApplyUpdate(ue, item, asMap(req.Input["ExpressionAttributeNames"]), asMap(req.Input["ExpressionAttributeValues"]))
-			if err != nil {
-				return nil, &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
-			}
-		}
-		raw, _ := json.Marshal(item)
-		_ = p.col(req, "items:"+table).Put(ctx, key, raw)
 		ev := "INSERT"
 		if old != nil {
 			ev = "MODIFY"
@@ -148,11 +258,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		p.emitStream(ctx, req, table, ev, item, old)
 		return p.returnValues(req, old, item, touched), nil
 	case "UpdateTimeToLive":
+		if _, ok, _ := p.col(req, "tables").Get(ctx, table); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Cannot do operations on a non-existent table", HTTPStatus: 400, Fault: "client"}
+		}
 		spec := req.Input["TimeToLiveSpecification"]
 		b, _ := json.Marshal(spec)
 		_ = p.col(req, "ttl").Put(ctx, table, b)
 		return &spi.Response{Output: map[string]any{"TimeToLiveSpecification": spec}}, nil
 	case "DescribeTimeToLive":
+		if _, ok, _ := p.col(req, "tables").Get(ctx, table); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Cannot do operations on a non-existent table", HTTPStatus: 400, Fault: "client"}
+		}
 		b, ok, _ := p.col(req, "ttl").Get(ctx, table)
 		if !ok {
 			return &spi.Response{Output: map[string]any{"TimeToLiveDescription": map[string]any{"TimeToLiveStatus": "DISABLED"}}}, nil
@@ -165,30 +281,92 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		out := map[string]any{"TimeToLiveStatus": status, "AttributeName": spec["AttributeName"]}
 		return &spi.Response{Output: map[string]any{"TimeToLiveDescription": out}}, nil
+	case "ExpireItems":
+		tables, _, err := p.col(req, "tables").List(ctx, "", "", 0)
+		if err != nil {
+			return nil, err
+		}
+		expired := 0
+		for _, tableRecord := range tables {
+			table := tableRecord.Key
+			rawTTL, ok, err := p.col(req, "ttl").Get(ctx, table)
+			if err != nil {
+				return nil, err
+			}
+			var ttl map[string]any
+			if !ok || json.Unmarshal(rawTTL, &ttl) != nil || !truthy(ttl["Enabled"]) || str(ttl["AttributeName"]) == "" {
+				continue
+			}
+			items, _, err := p.col(req, "items:"+table).List(ctx, "", "", 0)
+			if err != nil {
+				return nil, err
+			}
+			definition := p.tableDef(ctx, req, table)
+			for _, itemRecord := range items {
+				var item map[string]any
+				_ = json.Unmarshal(itemRecord.Value, &item)
+				expires, err := strconv.ParseInt(str(asMap(item[str(ttl["AttributeName"])])["N"]), 10, 64)
+				if err != nil || expires > p.deps.Clock.Now().Unix() {
+					continue
+				}
+				deleted := false
+				if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+					if _, ok, err := tx.Get(itemRecord.Key); err != nil || !ok {
+						return err
+					}
+					deleted = true
+					return tx.Delete(itemRecord.Key)
+				}); err != nil {
+					return nil, err
+				}
+				if !deleted {
+					continue
+				}
+				expired++
+				p.emitStream(ctx, req, table, "REMOVE", p.tableKey(definition, item), item)
+			}
+		}
+		return &spi.Response{Output: map[string]any{"ExpiredItems": expired}}, nil
 	case "UpdateContinuousBackups":
 		spec := asMap(req.Input["PointInTimeRecoverySpecification"])
-		b, _ := json.Marshal(spec)
-		_ = p.col(req, "pitr").Put(ctx, table, b)
-		st := "DISABLED"
-		if truthy(spec["PointInTimeRecoveryEnabled"]) {
-			st = "ENABLED"
+		enabled := truthy(spec["PointInTimeRecoveryEnabled"])
+		status := "DISABLED"
+		recovery := map[string]any{"PointInTimeRecoveryStatus": status}
+		if enabled {
+			status = "ENABLED"
+			now := p.deps.Clock.Now().Unix()
+			earliest := now
+			if previous, ok, _ := p.col(req, "pitr").Get(ctx, table); ok {
+				var description map[string]any
+				_ = json.Unmarshal(previous, &description)
+				if str(description["PointInTimeRecoveryStatus"]) == "ENABLED" {
+					earliest = int64(asInt(description["EarliestRestorableDateTime"]))
+				}
+			}
+			recovery = map[string]any{
+				"PointInTimeRecoveryStatus":  status,
+				"EarliestRestorableDateTime": earliest,
+				"LatestRestorableDateTime":   now,
+				"RecoveryPeriodInDays":       35,
+			}
 		}
+		b, _ := json.Marshal(recovery)
+		_ = p.col(req, "pitr").Put(ctx, table, b)
 		return &spi.Response{Output: map[string]any{"ContinuousBackupsDescription": map[string]any{
 			"ContinuousBackupsStatus":        "ENABLED",
-			"PointInTimeRecoveryDescription": map[string]any{"PointInTimeRecoveryStatus": st},
+			"PointInTimeRecoveryDescription": recovery,
 		}}}, nil
 	case "DescribeContinuousBackups":
-		st := "DISABLED"
+		recovery := map[string]any{"PointInTimeRecoveryStatus": "DISABLED"}
 		if b, ok, _ := p.col(req, "pitr").Get(ctx, table); ok {
-			var spec map[string]any
-			_ = json.Unmarshal(b, &spec)
-			if truthy(spec["PointInTimeRecoveryEnabled"]) {
-				st = "ENABLED"
+			_ = json.Unmarshal(b, &recovery)
+			if str(recovery["PointInTimeRecoveryStatus"]) == "ENABLED" {
+				recovery["LatestRestorableDateTime"] = p.deps.Clock.Now().Unix()
 			}
 		}
 		return &spi.Response{Output: map[string]any{"ContinuousBackupsDescription": map[string]any{
 			"ContinuousBackupsStatus":        "ENABLED",
-			"PointInTimeRecoveryDescription": map[string]any{"PointInTimeRecoveryStatus": st},
+			"PointInTimeRecoveryDescription": recovery,
 		}}}, nil
 	case "DescribeEndpoints":
 		addr := "http://127.0.0.1:4566"
@@ -264,25 +442,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": dst, "TableStatus": "ACTIVE"}}}, nil
-	case "EnableKinesisStreamingDestination":
-		stream := first(req.Input, "StreamArn")
-		_ = p.col(req, "kinesisdest").Put(ctx, table+"/"+stream, []byte(stream))
-		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": stream, "DestinationStatus": "ACTIVE"}}, nil
-	case "DisableKinesisStreamingDestination":
-		stream := first(req.Input, "StreamArn")
-		_ = p.col(req, "kinesisdest").Delete(ctx, table+"/"+stream)
-		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": stream, "DestinationStatus": "DISABLED"}}, nil
-	case "DescribeKinesisStreamingDestination":
-		kvs, _, _ := p.col(req, "kinesisdest").List(ctx, table+"/", "", 0)
-		var dest []any
-		for _, kv := range kvs {
-			dest = append(dest, map[string]any{"StreamArn": string(kv.Value), "DestinationStatus": "ACTIVE"})
-		}
-		return &spi.Response{Output: map[string]any{"TableName": table, "KinesisDataStreamDestinations": dest}}, nil
+	case "EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination", "DescribeKinesisStreamingDestination":
+		return p.kinesisDestination(ctx, req)
 	case "BatchGetItem":
 		out := map[string]any{}
 		if ri, ok := req.Input["RequestItems"].(map[string]any); ok {
 			for tbl, spec := range ri {
+				if err := requireTable(tbl); err != nil {
+					return nil, err
+				}
 				var items []any
 				keys, _ := asMap(spec)["Keys"].([]any)
 				for _, k := range keys {
@@ -302,11 +470,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "BatchWriteItem":
 		if ri, ok := req.Input["RequestItems"].(map[string]any); ok {
 			for tbl, spec := range ri {
+				if err := requireTable(tbl); err != nil {
+					return nil, err
+				}
 				reqs, _ := spec.([]any)
 				for _, r := range reqs {
 					m := asMap(r)
 					if put := asMap(m["PutRequest"]); len(put) > 0 {
 						item := asMap(put["Item"])
+						if err := p.validateItemKey(ctx, req, tbl, item); err != nil {
+							return nil, err
+						}
 						key := p.itemKeyFrom(ctx, req, tbl, item)
 						old := p.loadItem(ctx, req, tbl, key)
 						b, _ := json.Marshal(item)
@@ -329,46 +503,26 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"UnprocessedItems": map[string]any{}}}, nil
 	case "TransactGetItems":
-		ri := map[string]any{}
-		items, _ := req.Input["TransactItems"].([]any)
-		for _, it := range items {
-			g := asMap(asMap(it)["Get"])
-			tbl := str(g["TableName"])
-			if tbl == "" {
-				continue
-			}
-			slot := asMap(ri[tbl])
-			keys, _ := slot["Keys"].([]any)
-			keys = append(keys, g["Key"])
-			slot["Keys"] = keys
-			ri[tbl] = slot
-		}
-		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "BatchGetItem", Input: map[string]any{"RequestItems": ri}})
+		return p.transactGetItems(ctx, req)
 	case "TransactWriteItems":
-		ri := map[string]any{}
-		items, _ := req.Input["TransactItems"].([]any)
-		for _, it := range items {
-			m := asMap(it)
-			if put := asMap(m["Put"]); len(put) > 0 {
-				tbl := str(put["TableName"])
-				reqs, _ := ri[tbl].([]any)
-				ri[tbl] = append(reqs, map[string]any{"PutRequest": map[string]any{"Item": put["Item"]}})
-			}
-			if del := asMap(m["Delete"]); len(del) > 0 {
-				tbl := str(del["TableName"])
-				reqs, _ := ri[tbl].([]any)
-				ri[tbl] = append(reqs, map[string]any{"DeleteRequest": map[string]any{"Key": del["Key"]}})
-			}
-		}
-		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "BatchWriteItem", Input: map[string]any{"RequestItems": ri}})
+		return p.transactWriteItems(ctx, req)
 	case "UpdateTable":
 		b, ok, _ := p.col(req, "tables").Get(ctx, table)
-		m := map[string]any{"TableName": table}
-		if ok {
-			_ = json.Unmarshal(b, &m)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found", HTTPStatus: 400, Fault: "client"}
+		}
+		m := map[string]any{}
+		_ = json.Unmarshal(b, &m)
+		if req.Input["ReplicaUpdates"] != nil {
+			deletedCurrent, err := p.updateTableReplicas(ctx, req, table, m)
+			if err != nil {
+				return nil, err
+			}
+			if deletedCurrent {
+				return &spi.Response{Output: map[string]any{"TableDescription": tableDescription(m, "UPDATING")}}, nil
+			}
 		}
 		if gsi := req.Input["GlobalSecondaryIndexUpdates"]; gsi != nil {
-			m["GlobalSecondaryIndexUpdates"] = gsi
 			indexes, _ := m["GlobalSecondaryIndexes"].([]any)
 			if ups, ok := gsi.([]any); ok {
 				for _, u := range ups {
@@ -394,9 +548,26 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			m["StreamSpecification"] = spec
 			p.ensureStream(req, m, table)
 		}
+		if class := str(req.Input["TableClass"]); class != "" {
+			m["TableClassSummary"] = map[string]any{"TableClass": class}
+		}
+		for _, key := range []string{"AttributeDefinitions", "BillingMode", "ProvisionedThroughput", "SSESpecification", "WarmThroughput"} {
+			if value := req.Input[key]; value != nil {
+				m[key] = value
+			}
+		}
+		if err := p.prepareTableMetadata(ctx, req, m); err != nil {
+			return nil, err
+		}
 		nb, _ := json.Marshal(m)
 		_ = p.col(req, "tables").Put(ctx, table, nb)
-		return &spi.Response{Output: map[string]any{"TableDescription": m}}, nil
+		description := tableDescription(m, "UPDATING")
+		if spec := asMap(req.Input["SSESpecification"]); spec["Enabled"] == false {
+			if sse := asMap(description["SSEDescription"]); len(sse) > 0 {
+				sse["Status"] = "UPDATING"
+			}
+		}
+		return &spi.Response{Output: map[string]any{"TableDescription": description}}, nil
 	case "TagResource":
 		arn := str(req.Input["ResourceArn"])
 		var tags []any
@@ -463,7 +634,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SearchVectors":
 		return p.searchVectors(ctx, req)
 	case "UpdateKinesisStreamingDestination":
-		return p.updateKinesisDest(ctx, req)
+		return p.kinesisDestination(ctx, req)
 	case "ListStreams":
 		return p.listStreams(ctx, req)
 	case "DescribeStream":
@@ -475,6 +646,20 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	default:
 		return nil, spi.NotImplemented("aws.dynamodb", req.Operation, "emulate")
 	}
+}
+
+func (p *Pack) validateItemKey(ctx context.Context, req *spi.Request, table string, item map[string]any) error {
+	return validateItemKeyDefinition(p.tableDef(ctx, req, table), item)
+}
+
+func validateItemKeyDefinition(definition, item map[string]any) error {
+	for _, key := range asSlice(definition["KeySchema"]) {
+		name := str(asMap(key)["AttributeName"])
+		if name != "" && len(asMap(item[name])) == 0 {
+			return &spi.Fault{Code: "ValidationException", Message: "One or more parameter values were invalid: Missing the key " + name + " in the item", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	return nil
 }
 
 func (p *Pack) listItems(ctx context.Context, req *spi.Request, table, keyCond, filter string) (*spi.Response, error) {
@@ -592,6 +777,8 @@ func asInt(v any) int {
 		return int(n)
 	case int:
 		return n
+	case int64:
+		return int(n)
 	case string:
 		i, _ := strconv.Atoi(n)
 		return i
@@ -609,6 +796,119 @@ func cloneMap(m map[string]any) map[string]any {
 	return o
 }
 
+func (p *Pack) prepareTableMetadata(ctx context.Context, req *spi.Request, table map[string]any) error {
+	billing := str(table["BillingMode"])
+	if billing == "" {
+		billing = str(asMap(table["BillingModeSummary"])["BillingMode"])
+	}
+	if billing == "PAY_PER_REQUEST" {
+		table["BillingModeSummary"] = map[string]any{"BillingMode": billing}
+	}
+	delete(table, "BillingMode")
+	throughput := cloneMap(asMap(table["ProvisionedThroughput"]))
+	if billing == "PAY_PER_REQUEST" {
+		throughput = map[string]any{"ReadCapacityUnits": 0, "WriteCapacityUnits": 0}
+	}
+	if len(throughput) > 0 {
+		throughput["NumberOfDecreasesToday"] = 0
+		table["ProvisionedThroughput"] = throughput
+	}
+	arn := str(table["TableArn"])
+	for _, raw := range asSlice(table["GlobalSecondaryIndexes"]) {
+		index := asMap(raw)
+		index["IndexArn"] = arn + "/index/" + str(index["IndexName"])
+		index["IndexSizeBytes"] = 0
+		index["ItemCount"] = 0
+		indexThroughput := cloneMap(asMap(index["ProvisionedThroughput"]))
+		if billing == "PAY_PER_REQUEST" {
+			indexThroughput = map[string]any{"ReadCapacityUnits": 0, "WriteCapacityUnits": 0}
+		}
+		if len(indexThroughput) > 0 {
+			indexThroughput["NumberOfDecreasesToday"] = 0
+			index["ProvisionedThroughput"] = indexThroughput
+		}
+	}
+	if spec := asMap(table["SSESpecification"]); len(spec) > 0 {
+		if spec["Enabled"] == true {
+			key := str(spec["KMSMasterKeyId"])
+			if key == "" {
+				var err error
+				key, err = p.defaultDynamoDBKey(ctx, req)
+				if err != nil {
+					return err
+				}
+			} else if !strings.HasPrefix(key, "arn:") {
+				key = "arn:aws:kms:" + req.Identity.Region + ":" + req.Identity.Account + ":key/" + key
+			}
+			table["SSEDescription"] = map[string]any{"Status": "ENABLED", "SSEType": "KMS", "KMSMasterKeyArn": key}
+		}
+		delete(table, "SSESpecification")
+	}
+	return nil
+}
+
+func (p *Pack) defaultDynamoDBKey(ctx context.Context, req *spi.Request) (string, error) {
+	const alias = "alias/aws/dynamodb"
+	var arn string
+	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(tx spi.ScopeTx) error {
+		aliases := tx.Collection("kmsalias")
+		keys := tx.Collection("kms")
+		if raw, ok, err := aliases.Get(alias); err != nil {
+			return err
+		} else if ok {
+			var record map[string]any
+			_ = json.Unmarshal(raw, &record)
+			if raw, ok, err = keys.Get(str(record["TargetKeyId"])); err != nil {
+				return err
+			} else if ok {
+				_ = json.Unmarshal(raw, &record)
+				arn = str(record["Arn"])
+				return nil
+			}
+		}
+		random := p.deps.Rand.Derive("aws-managed-kms:" + req.Identity.Account + ":" + req.Identity.Region + ":" + alias)
+		id := random.Hex(8)
+		arn = "arn:aws:kms:" + req.Identity.Region + ":" + req.Identity.Account + ":key/" + id
+		key := map[string]any{
+			"AWSAccountId": req.Identity.Account, "Arn": arn, "CreationDate": p.deps.Clock.Now().Unix(),
+			"CurrentKeyMaterialId": random.UUID(), "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+			"Description": "Default key that protects my DynamoDB data when no other key is defined",
+			"Enabled":     true, "EncryptionAlgorithms": []any{"SYMMETRIC_DEFAULT"}, "KeyId": id, "KeyManager": "AWS",
+			"KeyMaterial": base64.StdEncoding.EncodeToString(random.Bytes(32)), "KeySpec": "SYMMETRIC_DEFAULT",
+			"KeyState": "Enabled", "KeyUsage": "ENCRYPT_DECRYPT", "MultiRegion": false, "Origin": "AWS_KMS",
+		}
+		raw, _ := json.Marshal(key)
+		if err := keys.Put(id, raw); err != nil {
+			return err
+		}
+		raw, _ = json.Marshal(map[string]any{"AliasName": alias, "TargetKeyId": id})
+		return aliases.Put(alias, raw)
+	})
+	return arn, err
+}
+
+func tableDescription(table map[string]any, status string) map[string]any {
+	description := cloneMap(table)
+	description["TableStatus"] = status
+	warm := asMap(description["WarmThroughput"])
+	if status == "ACTIVE" && len(warm) == 0 {
+		if throughput := asMap(description["ProvisionedThroughput"]); asInt(throughput["ReadCapacityUnits"]) > 0 || asInt(throughput["WriteCapacityUnits"]) > 0 {
+			warm = map[string]any{"ReadUnitsPerSecond": throughput["ReadCapacityUnits"], "WriteUnitsPerSecond": throughput["WriteCapacityUnits"]}
+			description["WarmThroughput"] = warm
+		}
+	}
+	if len(warm) > 0 {
+		warm["Status"] = "ACTIVE"
+		if status != "ACTIVE" {
+			warm["Status"] = "UPDATING"
+		}
+	}
+	for _, raw := range asSlice(description["GlobalSecondaryIndexes"]) {
+		asMap(raw)["IndexStatus"] = status
+	}
+	return description
+}
+
 func (p *Pack) loadItem(ctx context.Context, req *spi.Request, table, key string) map[string]any {
 	b, ok, _ := p.col(req, "items:"+table).Get(ctx, key)
 	if !ok {
@@ -620,21 +920,29 @@ func (p *Pack) loadItem(ctx context.Context, req *spi.Request, table, key string
 }
 
 func (p *Pack) checkCond(req *spi.Request, item map[string]any) error {
-	cond := str(req.Input["ConditionExpression"])
-	if cond == "" {
-		return nil
-	}
-	if item == nil {
-		item = map[string]any{}
-	}
-	ok, err := expr.EvalBool(cond, item, asMap(req.Input["ExpressionAttributeNames"]), asMap(req.Input["ExpressionAttributeValues"]))
+	ok, err := conditionOK(req.Input, item)
 	if err != nil {
 		return &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 	}
 	if !ok {
-		return &spi.Fault{Code: "ConditionalCheckFailedException", Message: "The conditional request failed", HTTPStatus: 400, Fault: "client", Fields: map[string]any{"Item": item}}
+		fields := map[string]any{}
+		if str(req.Input["ReturnValuesOnConditionCheckFailure"]) == "ALL_OLD" && item != nil {
+			fields["Item"] = item
+		}
+		return &spi.Fault{Code: "ConditionalCheckFailedException", Message: "The conditional request failed", HTTPStatus: 400, Fault: "client", Fields: fields}
 	}
 	return nil
+}
+
+func conditionOK(input, item map[string]any) (bool, error) {
+	cond := str(input["ConditionExpression"])
+	if cond == "" {
+		return true, nil
+	}
+	if item == nil {
+		item = map[string]any{}
+	}
+	return expr.EvalBool(cond, item, asMap(input["ExpressionAttributeNames"]), asMap(input["ExpressionAttributeValues"]))
 }
 
 func (p *Pack) returnValues(req *spi.Request, old, neu map[string]any, touched []string) *spi.Response {
@@ -666,6 +974,9 @@ func (p *Pack) returnValues(req *spi.Request, old, neu map[string]any, touched [
 	default:
 		attrs = map[string]any{}
 	}
+	if len(attrs) == 0 {
+		return &spi.Response{Output: map[string]any{}}
+	}
 	return &spi.Response{Output: map[string]any{"Attributes": attrs}}
 }
 
@@ -684,8 +995,8 @@ func (p *Pack) tableKey(td, item map[string]any) map[string]any {
 	ks, _ := td["KeySchema"].([]any)
 	for _, e := range ks {
 		name := str(asMap(e)["AttributeName"])
-		if name != "" {
-			out[name] = item[name]
+		if value, ok := item[name]; name != "" && ok {
+			out[name] = value
 		}
 	}
 	if len(out) == 0 {
@@ -698,16 +1009,7 @@ func (p *Pack) projectIndex(td map[string]any, indexName string, item map[string
 	if indexName == "" {
 		return item
 	}
-	var spec map[string]any
-	for _, key := range []string{"GlobalSecondaryIndexes", "LocalSecondaryIndexes"} {
-		arr, _ := td[key].([]any)
-		for _, ix := range arr {
-			m := asMap(ix)
-			if str(m["IndexName"]) == indexName {
-				spec = m
-			}
-		}
-	}
+	spec := indexSpec(td, indexName)
 	if len(spec) == 0 {
 		return item
 	}
@@ -736,6 +1038,18 @@ func (p *Pack) projectIndex(td map[string]any, indexName string, item map[string
 	return out
 }
 
+func indexSpec(td map[string]any, indexName string) map[string]any {
+	for _, key := range []string{"GlobalSecondaryIndexes", "LocalSecondaryIndexes"} {
+		for _, ix := range asSlice(td[key]) {
+			m := asMap(ix)
+			if str(m["IndexName"]) == indexName {
+				return m
+			}
+		}
+	}
+	return nil
+}
+
 func asSlice(v any) []any {
 	s, _ := v.([]any)
 	return s
@@ -751,16 +1065,20 @@ func (p *Pack) itemKeyFrom(ctx context.Context, req *spi.Request, table string, 
 	if ok {
 		var td map[string]any
 		_ = json.Unmarshal(b, &td)
-		if ks, ok := td["KeySchema"].([]any); ok && len(ks) > 0 {
-			km := map[string]any{}
-			for _, e := range ks {
-				name := str(asMap(e)["AttributeName"])
-				if name != "" {
-					km[name] = attrs[name]
-				}
+		return itemKeyFromDefinition(td, attrs)
+	}
+	return itemKey(attrs)
+}
+
+func itemKeyFromDefinition(definition, attrs map[string]any) string {
+	if keys := asSlice(definition["KeySchema"]); len(keys) > 0 {
+		item := map[string]any{}
+		for _, key := range keys {
+			if name := str(asMap(key)["AttributeName"]); name != "" {
+				item[name] = attrs[name]
 			}
-			return itemKey(km)
 		}
+		return itemKey(item)
 	}
 	return itemKey(attrs)
 }

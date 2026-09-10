@@ -1,0 +1,9 @@
+{
+  "destinationArn": "arn:aws:sqs:us-east-1:123456789012:move-destination",
+  "moved": 2,
+  "sourceArn": "arn:aws:sqs:us-east-1:123456789012:move-dlq",
+  "status": "COMPLETED",
+  "taskHandleLength": 144,
+  "taskIdLength": 36,
+  "toMove": 2
+}

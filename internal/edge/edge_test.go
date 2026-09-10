@@ -3,6 +3,8 @@ package edge_test
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"io"
@@ -21,10 +23,32 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 )
 
 type recordingAuthorizer struct{ checks []string }
+
+func TestSNSCertificateEndpoint(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sns"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	response, err := http.Get(ts.URL + "/_aws/sns/SimpleNotificationService.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("BEGIN CERTIFICATE")) {
+		t.Fatalf("certificate response status=%d err=%v body=%q", response.StatusCode, err, body)
+	}
+}
 
 func s3Envelope(t testing.TB, response *http.Response) map[string]any {
 	t.Helper()
@@ -214,6 +238,57 @@ func TestS3PutGetAndForeignService501(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"create": createEnvelope, "get": getEnvelope, "head": headEnvelope, "missing": missingEnvelope, "put": putEnvelope})
 }
 
+func TestS3BucketCORSHTTP(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=00"
+	do := func(method, target, host string, body []byte, headers map[string]string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(method, target, bytes.NewReader(body))
+		request.Host = host
+		request.Header.Set("Authorization", auth)
+		for key, value := range headers {
+			request.Header.Set(key, value)
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	if got := do(http.MethodPut, "/cors-edge", "localhost", nil, nil); got.Code != http.StatusOK {
+		t.Fatalf("create bucket = %d %s", got.Code, got.Body.String())
+	}
+	configuration := []byte(`<CORSConfiguration><CORSRule><AllowedOrigin>https://*.example.test</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedHeader>x-amz-*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>`)
+	if got := do(http.MethodPut, "/cors-edge?cors", "localhost", configuration, nil); got.Code != http.StatusOK {
+		t.Fatalf("put CORS = %d %s", got.Code, got.Body.String())
+	}
+	if got := do(http.MethodPut, "/cors-edge/key", "localhost", []byte("body"), nil); got.Code != http.StatusOK {
+		t.Fatalf("put object = %d %s", got.Code, got.Body.String())
+	}
+	headers := map[string]string{"Origin": "https://app.example.test", "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "x-amz-request-payer"}
+	if got := do(http.MethodOptions, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, headers); got.Code != http.StatusOK || got.Header().Get("Access-Control-Allow-Origin") != headers["Origin"] || got.Header().Get("Access-Control-Allow-Headers") != "x-amz-request-payer" {
+		t.Fatalf("preflight = %d %#v %s", got.Code, got.Header(), got.Body.String())
+	}
+	if got := do(http.MethodGet, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, map[string]string{"Origin": headers["Origin"]}); got.Code != http.StatusOK || got.Body.String() != "body" || got.Header().Get("Access-Control-Expose-Headers") != "ETag" {
+		t.Fatalf("actual CORS = %d %#v %s", got.Code, got.Header(), got.Body.String())
+	}
+	if got := do(http.MethodOptions, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, map[string]string{"Origin": "https://wrong.test", "Access-Control-Request-Method": "GET"}); got.Code != http.StatusForbidden || !strings.Contains(got.Body.String(), "AccessForbidden") {
+		t.Fatalf("rejected preflight = %d %s", got.Code, got.Body.String())
+	}
+	if got := do(http.MethodOptions, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, nil); got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), "Origin request header needed") {
+		t.Fatalf("missing origin = %d %s", got.Code, got.Body.String())
+	}
+	if got := do(http.MethodOptions, "/key", "missing.s3.us-east-1.amazonaws.com", nil, map[string]string{"Origin": "https://app.localstack.cloud"}); got.Code != http.StatusOK || got.Header().Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
+		t.Fatalf("LocalStack default preflight = %d %#v %s", got.Code, got.Header(), got.Body.String())
+	}
+}
+
 func TestS3PresignedExpiryFaultCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
@@ -273,9 +348,10 @@ func TestS3PresignedAuthFaultCharacterization(t *testing.T) {
 		status int
 		code   string
 	}{
-		"sigv2":  {"/bucket/key?AWSAccessKeyId=test&Signature=00", http.StatusForbidden, "AccessDenied"},
-		"sigv4":  {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host", http.StatusBadRequest, "AuthorizationQueryParametersError"},
-		"sigv4a": {"/bucket/key?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test%2F20990101%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=00", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+		"malformed": {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%252F20990101%252Fus-east-1%252Fs3%252Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=00", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+		"sigv2":     {"/bucket/key?AWSAccessKeyId=test&Signature=00", http.StatusForbidden, "AccessDenied"},
+		"sigv4":     {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+		"sigv4a":    {"/bucket/key?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test%2F20990101%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=00", http.StatusBadRequest, "AuthorizationQueryParametersError"},
 	} {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.target, nil))
@@ -436,7 +512,7 @@ func TestS3StreamingSignatureCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := edge.New(cfg, deps, reg, "test").Handler()
-	for _, bucket := range []string{"streaming", "trailers", "unsigned"} {
+	for _, bucket := range []string{"streaming", "trailers", "unsigned", "v4a", "v4a-trailers", "v4a-unsigned"} {
 		created := httptest.NewRecorder()
 		handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
 		if created.Code != http.StatusOK {
@@ -496,6 +572,48 @@ func TestS3StreamingSignatureCharacterization(t *testing.T) {
 		}
 		results[name] = result
 	}
+	for name, tc := range map[string]struct {
+		trailer  bool
+		payload  string
+		checksum string
+	}{
+		"v4a_stream_valid":     {payload: "hello"},
+		"v4a_stream_tampered":  {payload: "jello"},
+		"v4a_trailer_valid":    {trailer: true, payload: "hello", checksum: "mnG7TA=="},
+		"v4a_trailer_tampered": {trailer: true, payload: "hello", checksum: "AAAAAA=="},
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, streamingV4ARequest(tc.trailer, tc.payload, tc.checksum))
+		result := map[string]any{"status": recorder.Code}
+		if recorder.Code != http.StatusOK {
+			var fault struct{ Code string }
+			if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+				t.Fatal(err)
+			}
+			result["code"] = fault.Code
+		}
+		results[name] = result
+	}
+	for name, tc := range map[string]struct {
+		checksum string
+		signed   bool
+	}{
+		"v4a_unsigned_trailer_valid":        {"mnG7TA==", false},
+		"v4a_unsigned_trailer_bad_checksum": {"AAAAAA==", false},
+		"v4a_unsigned_trailer_signed_chunk": {"mnG7TA==", true},
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, streamingUnsignedV4ARequest(tc.checksum, tc.signed))
+		result := map[string]any{"status": recorder.Code}
+		if recorder.Code != http.StatusOK {
+			var fault struct{ Code string }
+			if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+				t.Fatal(err)
+			}
+			result["code"] = fault.Code
+		}
+		results[name] = result
+	}
 	read := httptest.NewRecorder()
 	handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/streaming/object", nil))
 	results["stored"] = map[string]any{"body": read.Body.String(), "status": read.Code}
@@ -505,7 +623,212 @@ func TestS3StreamingSignatureCharacterization(t *testing.T) {
 	unsignedRead := httptest.NewRecorder()
 	handler.ServeHTTP(unsignedRead, httptest.NewRequest(http.MethodGet, "/unsigned/object", nil))
 	results["unsigned_trailer_stored"] = map[string]any{"body": unsignedRead.Body.String(), "status": unsignedRead.Code}
+	for _, bucket := range []string{"v4a", "v4a-trailers", "v4a-unsigned"} {
+		read := httptest.NewRecorder()
+		handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/"+bucket+"/object", nil))
+		results[bucket+"_stored"] = map[string]any{"body": read.Body.String(), "status": read.Code}
+	}
 	golden.AssertJSON(t, results)
+}
+
+func TestS3MalformedAWSChunkedCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-errors", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	valid := "5\r\nhello\r\n0\r\n\r\n"
+	results := map[string]any{}
+	for name, tc := range map[string]struct {
+		decoded string
+		body    string
+	}{
+		"missing decoded length": {body: valid},
+		"non-integer length":     {decoded: "test", body: valid},
+		"negative length":        {decoded: "-1", body: valid},
+		"mismatched length":      {decoded: "4", body: valid},
+		"truncated chunk":        {decoded: "5", body: "5\r\nhello"},
+		"missing terminal chunk": {decoded: "5", body: "5\r\nhello\r\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPut, "/chunk-errors/"+strings.ReplaceAll(name, " ", "-"), strings.NewReader(tc.body))
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			if tc.decoded != "" {
+				request.Header.Set("X-Amz-Decoded-Content-Length", tc.decoded)
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			var fault struct{ Code string }
+			if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusForbidden || fault.Code != "SignatureDoesNotMatch" {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			results[name] = map[string]any{"code": fault.Code, "status": recorder.Code}
+		})
+	}
+	golden.AssertJSON(t, results)
+}
+
+func TestS3AWSChunkedUploadPartRetryCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-part", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	started := httptest.NewRecorder()
+	handler.ServeHTTP(started, httptest.NewRequest(http.MethodPost, "/chunk-part/object?uploads", nil))
+	var upload struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if started.Code != http.StatusOK || xml.Unmarshal(started.Body.Bytes(), &upload) != nil || upload.UploadID == "" {
+		t.Fatalf("create upload: %d %s", started.Code, started.Body.String())
+	}
+	path := "/chunk-part/object?partNumber=1&uploadId=" + url.QueryEscape(upload.UploadID)
+	put := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+		request.Header.Set("Content-Encoding", "aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "10")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder
+	}
+	invalid := put("\r\nHello Blob\r\n0;chunk-signature=invalid\r\n")
+	var fault struct{ Code string }
+	if xml.Unmarshal(invalid.Body.Bytes(), &fault) != nil || invalid.Code != http.StatusInternalServerError || fault.Code != "InternalError" {
+		t.Fatalf("invalid part: %d %s", invalid.Code, invalid.Body.String())
+	}
+	valid := put("a;chunk-signature=first\r\nHello Blob\r\n0;chunk-signature=last\r\n")
+	sum := md5.Sum([]byte("Hello Blob"))
+	wantETag := `"` + hex.EncodeToString(sum[:]) + `"`
+	etag := ""
+	if values := valid.Header()["ETag"]; len(values) > 0 {
+		etag = values[0]
+	}
+	if valid.Code != http.StatusOK || etag != wantETag {
+		t.Fatalf("valid retry: %d etag=%q body=%s", valid.Code, etag, valid.Body.String())
+	}
+	listed := httptest.NewRecorder()
+	handler.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/chunk-part/object?uploadId="+url.QueryEscape(upload.UploadID), nil))
+	var parts struct {
+		Parts []struct{} `xml:"Part"`
+	}
+	if listed.Code != http.StatusOK || xml.Unmarshal(listed.Body.Bytes(), &parts) != nil || len(parts.Parts) != 1 {
+		t.Fatalf("list parts: %d %s", listed.Code, listed.Body.String())
+	}
+	golden.AssertJSON(t, map[string]any{"invalid": map[string]any{"code": fault.Code, "status": invalid.Code}, "retry": map[string]any{"etag": etag, "parts": len(parts.Parts), "status": valid.Code}})
+}
+
+func TestS3AWSChunkedContentEncodingCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-encoding", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	results := map[string]any{}
+	for name, tc := range map[string]struct {
+		encoding string
+		want     string
+	}{
+		"chunked only":         {"aws-chunked", ""},
+		"content before chunk": {"gzip, aws-chunked", "gzip"},
+		"content after chunk":  {"AWS-CHUNKED, br", "br"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := "/chunk-encoding/" + strings.ReplaceAll(name, " ", "-")
+			request := httptest.NewRequest(http.MethodPut, path, strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+			request.Header.Set("Content-Encoding", tc.encoding)
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("put: %d %s", recorder.Code, recorder.Body.String())
+			}
+			read := httptest.NewRecorder()
+			handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, path, nil))
+			if read.Code != http.StatusOK || read.Body.String() != "hello" || read.Header().Get("Content-Encoding") != tc.want {
+				t.Fatalf("get: %d encoding=%q body=%q", read.Code, read.Header().Get("Content-Encoding"), read.Body.String())
+			}
+			results[name] = map[string]any{"body": read.Body.String(), "content_encoding": read.Header().Get("Content-Encoding"), "status": read.Code}
+		})
+	}
+	golden.AssertJSON(t, results)
+}
+
+func streamingUnsignedV4ARequest(checksum string, signedChunk bool) *http.Request {
+	extension := ""
+	if signedChunk {
+		extension = ";chunk-signature=unexpected"
+	}
+	raw := "5" + extension + "\r\nhello\r\n0\r\nx-amz-checksum-crc32c:" + checksum + "\r\n\r\n"
+	request := httptest.NewRequest(http.MethodPut, "/v4a-unsigned/object", strings.NewReader(raw))
+	request.Host = "s3.localhost.localstack.cloud:4566"
+	request.Header.Set("Content-Encoding", "aws-chunked")
+	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+	request.Header.Set("X-Amz-Region-Set", "us-east-1")
+	request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+	request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set;x-amz-trailer,Signature=304402201f09d982734f868ab87f6e305473f7ef74a6882095dbf5d0f0b97bede169993402204a4c59017095e2ffaf861e04fc6c73b5d1c9b0d8c041b7fd2acb05d0a4c356f3")
+	return request
+}
+
+func streamingV4ARequest(trailer bool, payload, checksum string) *http.Request {
+	path := "/v4a/object"
+	payloadHash := "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD"
+	signedHeaders := "content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set"
+	seed := "30450220292f2afead2f51323260a06fdfed3d88e0998b54f024a175f65e19bdbf970425022100e28adec0e230329184badd9bf335b18c8ad5373000bad0c47223b173ecd16d11"
+	chunks := []string{"**304502201ba0be85f07d901a715f28fbcd6d4ee4d14ab70abe11f5cfaff93a3c1961e4ae022100f5693b9c34d100107df15bd06cbc5c1a608d467761f97f26e048c240b21cc256", "**304502202bed57aec7b9b53cfebdf5163fbc5c61009c0f0b1e1b50848ac50641c6d0d14a022100806a00edfb80226cf9f2761851cd38cb9f33ee3fdafb597c723086655aad5cb9"}
+	trailerBlock := ""
+	if trailer {
+		path = "/v4a-trailers/object"
+		payloadHash += "-TRAILER"
+		signedHeaders += ";x-amz-trailer"
+		seed = "3046022100dcdd29ee9c78fdb87571b7ee2f202417795100fc3782a87296d8dbcdfd05ee91022100e72c624e7c065de7d9d6bc9f44b805390367f72d041219ea147ec45c4d47d180"
+		chunks = []string{"**3045022014ec32c1ce4d72ad9504db7c3584cdf88ef5408590472dfa1333f3696d030a76022100e15554ef66351e5f90b6b9a62e67b0fdf0b2e678ce3c5394252f3e57d93275a6", "**304502210090e80732fa8c16e01818cafdbff64c37e56feced7c512cd43c48481df98377970220145d5e04288392f3bad2740bc847b217751f666baad7ee1a5358c68161b9297d"}
+		trailerBlock = "x-amz-checksum-crc32c:" + checksum + "\r\nx-amz-trailer-signature:****30440220053b683045656f9eba0a1a2785bea923cddca5c5cc83b0d1fba03e1aab23fd5502200c01dde330a75c75412925fe9dd44324a60aee6a7491714e1c1ed6944e0a05aa\r\n"
+	}
+	raw := "5;chunk-signature=" + chunks[0] + "\r\n" + payload + "\r\n0;chunk-signature=" + chunks[1] + "\r\n" + trailerBlock + "\r\n"
+	request := httptest.NewRequest(http.MethodPut, path, strings.NewReader(raw))
+	request.Host = "s3.localhost.localstack.cloud:4566"
+	request.Header.Set("Content-Encoding", "aws-chunked")
+	request.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+	request.Header.Set("X-Amz-Region-Set", "us-east-1")
+	if trailer {
+		request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+	}
+	request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders="+signedHeaders+",Signature="+seed)
+	return request
 }
 
 func streamingTrailerSignatureRequest(checksum, trailerSignature string) *http.Request {
@@ -548,6 +871,46 @@ func streamingSignatureRequest(payload string) *http.Request {
 	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
 	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length,Signature=d32bab45d70b05d89ada2e57acc27c4117cf31f7ce3de470cf916b8f89558054")
 	return request
+}
+
+func FuzzS3AWSChunkedContentEncoding(f *testing.F) {
+	deps := spitest.Deps(f)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		f.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-encoding-fuzz", nil))
+	if created.Code != http.StatusOK {
+		f.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	f.Add("aws-chunked")
+	f.Add("gzip, aws-chunked")
+	f.Add("AWS-CHUNKED, br")
+	f.Fuzz(func(t *testing.T, encoding string) {
+		if len(encoding) > 1024 || strings.ContainsAny(encoding, "\r\n") {
+			t.Skip()
+		}
+		request := httptest.NewRequest(http.MethodPut, "/chunk-encoding-fuzz/object", strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+		request.Header.Set("Content-Encoding", encoding)
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("put: %d %s", recorder.Code, recorder.Body.String())
+		}
+		read := httptest.NewRecorder()
+		handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/chunk-encoding-fuzz/object", nil))
+		for _, value := range strings.Split(read.Header().Get("Content-Encoding"), ",") {
+			if strings.EqualFold(strings.TrimSpace(value), "aws-chunked") {
+				t.Fatalf("transport encoding persisted: %q", read.Header().Get("Content-Encoding"))
+			}
+		}
+	})
 }
 
 func FuzzS3ResponseEnvelope(f *testing.F) {

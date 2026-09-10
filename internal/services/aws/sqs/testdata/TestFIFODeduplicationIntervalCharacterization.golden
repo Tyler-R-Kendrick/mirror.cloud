@@ -1,0 +1,8 @@
+{
+  "afterWindowNewId": true,
+  "bodies": [
+    "second",
+    "after"
+  ],
+  "withinWindowSameId": true
+}

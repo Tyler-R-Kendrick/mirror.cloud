@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/restxml"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -75,17 +77,25 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.Contains(r.URL.Path, "/_aws/sns/SimpleNotificationService") && strings.HasSuffix(r.URL.Path, ".pem") {
+		w.Header().Set("Content-Type", "application/x-pem-file")
+		_, _ = w.Write(cert.Certificate())
+		return
+	}
 	var awsChunks [][]byte
 	var awsChunkSignatures []string
 	var awsTrailers http.Header
 	var awsDecodedLength int64
 	awsChunkedDecoded := false
+	awsChunkedInvalid := false
 	if r.Method == http.MethodOptions {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "*")
-		w.WriteHeader(204)
-		return
+		if svc := s.demux(r); svc == nil || svc.ID != "aws.s3" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "*")
+			w.WriteHeader(204)
+			return
+		}
 	}
 	if r.Header.Get("Expect") == "100-continue" {
 		w.WriteHeader(http.StatusContinue)
@@ -102,22 +112,42 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if enc := r.Header.Get("Content-Encoding"); strings.Contains(strings.ToLower(enc), "aws-chunked") || r.Header.Get("X-Amz-Decoded-Content-Length") != "" {
 		raw, err := io.ReadAll(r.Body)
 		_ = r.Body.Close()
-		if err == nil {
+		decodedLength, lengthErr := strconv.ParseInt(r.Header.Get("X-Amz-Decoded-Content-Length"), 10, 64)
+		if err == nil && lengthErr == nil && decodedLength >= 0 {
 			body := raw
 			if deframed, chunks, signatures, trailers, err2 := parseAWSChunked(bytes.NewReader(raw)); err2 == nil {
-				body = deframed
-				awsChunks = chunks
-				awsChunkSignatures = signatures
-				awsTrailers = trailers
-				awsDecodedLength = int64(len(body))
-				awsChunkedDecoded = true
+				if int64(len(deframed)) == decodedLength {
+					body = deframed
+					awsChunks = chunks
+					awsChunkSignatures = signatures
+					awsTrailers = trailers
+					awsDecodedLength = int64(len(body))
+					awsChunkedDecoded = true
+				} else {
+					awsChunkedInvalid = true
+				}
+			} else {
+				awsChunkedInvalid = true
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
+		} else {
+			awsChunkedInvalid = true
+			r.Body = io.NopCloser(bytes.NewReader(raw))
 		}
 	}
 
 	svc := s.demux(r)
 	w.Header().Set("x-mirror-request-id", rid)
+	if svc != nil && svc.ID == "aws.s3" && awsChunkedInvalid {
+		operation := "unknown"
+		fault := &spi.Fault{Code: "SignatureDoesNotMatch", Message: "The request signature we calculated does not match the signature you provided.", HTTPStatus: http.StatusForbidden, Fault: "client"}
+		if r.Method == http.MethodPut && r.URL.Query().Get("partNumber") != "" && r.URL.Query().Get("uploadId") != "" {
+			operation = "UploadPart"
+			fault = &spi.Fault{Code: "InternalError", Message: "We encountered an internal error. Please try again.", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
+		}
+		s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: operation}, fault, rid)
+		return
+	}
 	if svc != nil && svc.ID == "aws.s3" {
 		w.Header().Set("x-amz-request-id", rid)
 		w.Header().Set("x-amz-id-2", "mirror-"+rid)
@@ -163,7 +193,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fault = identity.S3AuthorizationTimeFault(r, s.deps.Clock.Now())
 		}
 		if fault == nil {
-			fault = identity.VerifyS3StreamingV4(r, secret, awsChunks, awsChunkSignatures, awsTrailers)
+			fault = identity.VerifyS3StreamingSignature(r, id.AccessKeyID, secret, awsChunks, awsChunkSignatures, awsTrailers)
 		}
 		if fault != nil {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
@@ -172,6 +202,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if awsChunkedDecoded {
 		r.ContentLength = awsDecodedLength
+		var encodings []string
+		for _, encoding := range strings.Split(r.Header.Get("Content-Encoding"), ",") {
+			if encoding = strings.TrimSpace(encoding); encoding != "" && !strings.EqualFold(encoding, "aws-chunked") {
+				encodings = append(encodings, encoding)
+			}
+		}
+		if len(encodings) == 0 {
+			r.Header.Del("Content-Encoding")
+		} else {
+			r.Header.Set("Content-Encoding", strings.Join(encodings, ","))
+		}
 		for name, values := range awsTrailers {
 			if strings.EqualFold(name, "X-Amz-Trailer-Signature") {
 				continue
@@ -397,8 +438,26 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	// bundle. What it replaced was a chain of about a hundred and thirty
 	// hand-written substring guesses, every one of them inside `if action !=
 	// ""` -- a condition only a query-protocol request satisfies.
+	if action != "" {
+		if sqsQueuePath(r.URL.Path) || sqsQueueDomainHost(host) {
+			return s.bundle.ServiceByID("aws.sqs")
+		}
+		if action == "ConfirmSubscription" || action == "Unsubscribe" {
+			arn := r.URL.Query().Get("TopicArn")
+			if action == "Unsubscribe" {
+				arn = r.URL.Query().Get("SubscriptionArn")
+			}
+			parts := strings.Split(arn, ":")
+			if len(parts) >= 6 && parts[0] == "arn" && parts[2] == "sns" {
+				return s.bundle.ServiceByID("aws.sns")
+			}
+		}
+	}
 	if svc := s.resolveByModel(r); svc != nil {
 		return svc
+	}
+	if action == "" && r.Method == http.MethodGet && sqsQueuePath(r.URL.Path) {
+		return s.bundle.ServiceByID("aws.sqs")
 	}
 	path := r.URL.Path
 	if strings.Contains(path, "/storage/v1") || strings.Contains(path, "/upload/storage") {
@@ -429,6 +488,31 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	return nil
 }
 
+func sqsQueuePath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	account, name := "", ""
+	switch {
+	case len(parts) == 2:
+		account, name = parts[0], parts[1]
+	case len(parts) == 4 && parts[0] == "queue":
+		account, name = parts[2], parts[3]
+	default:
+		return false
+	}
+	if len(account) != 12 || name == "" {
+		return false
+	}
+	for _, r := range account {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func sqsQueueDomainHost(host string) bool {
+	return strings.HasPrefix(host, "queue.") || strings.Contains(host, ".queue.")
+}
 func (s *Server) looksLike(r *http.Request, prefix string) bool {
 	host := strings.ToLower(r.Host)
 	if strings.Contains(host, prefix) {

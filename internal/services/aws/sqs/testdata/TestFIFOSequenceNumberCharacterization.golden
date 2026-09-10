@@ -1,0 +1,16 @@
+{
+  "duplicate": {
+    "MD5OfMessageBody": "3d6b824fd8c1520e9a047d21fee6fb1f",
+    "MessageId": "7c5891299f6489f8",
+    "SequenceNumber": "1"
+  },
+  "sequences": [
+    "1",
+    "2",
+    "3"
+  ],
+  "standard": {
+    "MD5OfMessageBody": "78e731027d8fd50ed642340b7c9a63b3",
+    "MessageId": "3ed10eca83a29db2"
+  }
+}

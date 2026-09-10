@@ -1,0 +1,66 @@
+{
+  "first": {
+    "CommonPrefixes": null,
+    "DeleteMarkers": null,
+    "Delimiter": "",
+    "IsTruncated": true,
+    "KeyMarker": "",
+    "MaxKeys": 1,
+    "Name": "deleted-version-marker",
+    "NextKeyMarker": "key",
+    "NextVersionIdMarker": "9c8e2cb00724681e24b29522455f06cd",
+    "Prefix": "key",
+    "VersionIdMarker": "",
+    "Versions": [
+      {
+        "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
+        "IsLatest": true,
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 4,
+        "StorageClass": "STANDARD",
+        "VersionId": "9c8e2cb00724681e24b29522455f06cd"
+      }
+    ]
+  },
+  "resumed": {
+    "CommonPrefixes": null,
+    "DeleteMarkers": null,
+    "Delimiter": "",
+    "IsTruncated": false,
+    "KeyMarker": "key",
+    "MaxKeys": 1000,
+    "Name": "deleted-version-marker",
+    "Prefix": "key",
+    "VersionIdMarker": "9c8e2cb00724681e24b29522455f06cd",
+    "Versions": [
+      {
+        "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
+        "IsLatest": true,
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 4,
+        "StorageClass": "STANDARD",
+        "VersionId": "5f59f223d7974d142efbc70e360dac9b"
+      },
+      {
+        "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
+        "IsLatest": false,
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 4,
+        "StorageClass": "STANDARD",
+        "VersionId": "7c5891299f6489f8b140efe7f0cd8bce"
+      }
+    ]
+  }
+}

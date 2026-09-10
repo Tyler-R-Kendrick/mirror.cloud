@@ -63,7 +63,7 @@ func TestSplitFlagsAllowsBindAfterService(t *testing.T) {
 func TestUsageNonEmpty(t *testing.T) {
 	var b bytes.Buffer
 	usage(&b)
-	if !strings.Contains(b.String(), "mirror up") {
+	if !strings.Contains(b.String(), "mirror up") || !strings.Contains(b.String(), "sqs-endpoint-strategy") {
 		t.Fatal(b.String())
 	}
 }

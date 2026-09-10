@@ -1,0 +1,132 @@
+{
+  "description": {
+    "keySchema": [
+      {
+        "AttributeName": "Username",
+        "KeyType": "HASH"
+      }
+    ],
+    "streamLabel": "7c589129",
+    "streamViewType": "KEYS_ONLY"
+  },
+  "exclusiveShards": [],
+  "iteratorFormat": true,
+  "records": [
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "Username": {
+          "S": "Fred"
+        }
+      },
+      "size": 12,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "MODIFY",
+      "keys": {
+        "Username": {
+          "S": "Fred"
+        }
+      },
+      "size": 12,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "REMOVE",
+      "keys": {
+        "Username": {
+          "S": "Fred"
+        }
+      },
+      "size": 12,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "Username": {
+          "S": "Alice"
+        }
+      },
+      "size": 13,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "MODIFY",
+      "keys": {
+        "Username": {
+          "S": "Alice"
+        }
+      },
+      "size": 13,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "REMOVE",
+      "keys": {
+        "Username": {
+          "S": "Alice"
+        }
+      },
+      "size": 13,
+      "view": "KEYS_ONLY"
+    }
+  ],
+  "updateRecords": [
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "pk": {
+          "S": "my-item-id"
+        }
+      },
+      "newImage": {
+        "attr1": {
+          "S": "value1"
+        },
+        "attr2": {
+          "S": "value2"
+        },
+        "pk": {
+          "S": "my-item-id"
+        }
+      },
+      "oldImage": null,
+      "sequenceNumber": "000000000000001",
+      "size": 46
+    },
+    {
+      "eventName": "MODIFY",
+      "keys": {
+        "pk": {
+          "S": "my-item-id"
+        }
+      },
+      "newImage": {
+        "attr1": {
+          "S": "value2"
+        },
+        "attr2": {
+          "S": "value3"
+        },
+        "pk": {
+          "S": "my-item-id"
+        }
+      },
+      "oldImage": {
+        "attr1": {
+          "S": "value1"
+        },
+        "attr2": {
+          "S": "value2"
+        },
+        "pk": {
+          "S": "my-item-id"
+        }
+      },
+      "sequenceNumber": "000000000000002",
+      "size": 80
+    }
+  ]
+}

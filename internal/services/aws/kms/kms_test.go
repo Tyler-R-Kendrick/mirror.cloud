@@ -25,7 +25,11 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kid := created.Output["KeyMetadata"].(map[string]any)["KeyId"].(string)
+	metadata := created.Output["KeyMetadata"].(map[string]any)
+	if metadata["KeyMaterial"] != nil {
+		t.Fatal("CreateKey exposed key material")
+	}
+	kid := metadata["KeyId"].(string)
 	enc, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Encrypt", Input: map[string]any{"KeyId": kid, "Plaintext": []byte("hello-kms")}})
 	if err != nil {
 		t.Fatal(err)

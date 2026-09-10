@@ -1,0 +1,22 @@
+{
+  "corrupt": {
+    "pending": false,
+    "ready": false
+  },
+  "missing": {
+    "pending": true,
+    "ready": false
+  },
+  "running-match": {
+    "pending": true,
+    "ready": true
+  },
+  "running-other": {
+    "pending": true,
+    "ready": false
+  },
+  "succeeded": {
+    "pending": false,
+    "ready": false
+  }
+}

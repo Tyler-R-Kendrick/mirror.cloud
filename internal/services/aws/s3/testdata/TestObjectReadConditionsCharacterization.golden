@@ -1,0 +1,5 @@
+{
+  "GetObject": "success",
+  "GetObjectAttributes": "success",
+  "HeadObject": "success"
+}

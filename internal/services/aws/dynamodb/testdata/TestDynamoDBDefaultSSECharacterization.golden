@@ -1,0 +1,66 @@
+{
+  "created": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/a02cda24",
+    "SSEType": "KMS",
+    "Status": "ENABLED"
+  },
+  "described": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/a02cda24",
+    "SSEType": "KMS",
+    "Status": "ENABLED"
+  },
+  "disabled": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/a02cda24",
+    "SSEType": "KMS",
+    "Status": "UPDATING"
+  },
+  "hasSSESpecification": false,
+  "key": {
+    "AWSAccountId": "000000000000",
+    "Arn": "arn:aws:kms:us-east-1:000000000000:key/a02cda24",
+    "CreationDate": 0,
+    "CurrentKeyMaterialId": "28f1536b-6f4c-43a3-a4a7-00800ae96b62",
+    "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+    "Description": "Default key that protects my DynamoDB data when no other key is defined",
+    "Enabled": true,
+    "EncryptionAlgorithms": [
+      "SYMMETRIC_DEFAULT"
+    ],
+    "KeyId": "a02cda24",
+    "KeyManager": "AWS",
+    "KeySpec": "SYMMETRIC_DEFAULT",
+    "KeyState": "Enabled",
+    "KeyUsage": "ENCRYPT_DECRYPT",
+    "MultiRegion": false,
+    "Origin": "AWS_KMS"
+  },
+  "reused": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/a02cda24",
+    "SSEType": "KMS",
+    "Status": "ENABLED"
+  },
+  "reusedKey": {
+    "AWSAccountId": "000000000000",
+    "Arn": "arn:aws:kms:us-east-1:000000000000:key/a02cda24",
+    "CreationDate": 0,
+    "CurrentKeyMaterialId": "28f1536b-6f4c-43a3-a4a7-00800ae96b62",
+    "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+    "Description": "Default key that protects my DynamoDB data when no other key is defined",
+    "Enabled": true,
+    "EncryptionAlgorithms": [
+      "SYMMETRIC_DEFAULT"
+    ],
+    "KeyId": "a02cda24",
+    "KeyManager": "AWS",
+    "KeySpec": "SYMMETRIC_DEFAULT",
+    "KeyState": "Enabled",
+    "KeyUsage": "ENCRYPT_DECRYPT",
+    "MultiRegion": false,
+    "Origin": "AWS_KMS"
+  },
+  "updated": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/a02cda24",
+    "SSEType": "KMS",
+    "Status": "ENABLED"
+  }
+}

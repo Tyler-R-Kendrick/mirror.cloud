@@ -1,0 +1,30 @@
+{
+  "ListObjects": [
+    {
+      "algorithm": [
+        "SHA256"
+      ],
+      "key": "checksummed",
+      "type": "FULL_OBJECT"
+    },
+    {
+      "algorithm": null,
+      "key": "plain",
+      "type": null
+    }
+  ],
+  "ListObjectsV2": [
+    {
+      "algorithm": [
+        "SHA256"
+      ],
+      "key": "checksummed",
+      "type": "FULL_OBJECT"
+    },
+    {
+      "algorithm": null,
+      "key": "plain",
+      "type": null
+    }
+  ]
+}

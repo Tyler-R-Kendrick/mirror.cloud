@@ -83,6 +83,7 @@ up flags:
   --persist DIR          snapshot dir loaded at boot, saved on shutdown
   --bind ADDR            listen address (default 127.0.0.1:4566)
   --advertise-url URL    self-referencing URLs
+  --sqs-endpoint-strategy off|standard|domain|path
   --tls-cert PATH --tls-key PATH
   --real-clock           wall clock (default; required for SQS long poll)
 `)
@@ -98,6 +99,7 @@ func cmdUp(args []string) error {
 	persist := fs.String("persist", cfg.PersistDir, "")
 	bind := fs.String("bind", cfg.Bind, "")
 	adv := fs.String("advertise-url", cfg.AdvertiseURL, "")
+	sqsStrategy := fs.String("sqs-endpoint-strategy", cfg.SQSEndpointStrategy, "")
 	tlsCert := fs.String("tls-cert", cfg.TLSCert, "")
 	tlsKey := fs.String("tls-key", cfg.TLSKey, "")
 	var tiers []string
@@ -113,6 +115,7 @@ func cmdUp(args []string) error {
 	cfg.PersistDir = *persist
 	cfg.Bind = *bind
 	cfg.AdvertiseURL = *adv
+	cfg.SQSEndpointStrategy = *sqsStrategy
 	cfg.TLSCert = *tlsCert
 	cfg.TLSKey = *tlsKey
 	cfg.LockSHA = lockSHA()

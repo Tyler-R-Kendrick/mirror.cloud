@@ -33,6 +33,14 @@ func VerifyS3Signature(r *http.Request, accessKey, secret, region string) *spi.F
 	return VerifyS3AuthorizationV2(r, secret)
 }
 
+// VerifyS3StreamingSignature verifies the supported aws-chunked signature algorithm.
+func VerifyS3StreamingSignature(r *http.Request, accessKey, secret string, chunks [][]byte, signatures []string, trailers http.Header) *spi.Fault {
+	if strings.HasPrefix(r.Header.Get("Authorization"), s3V4AAlgorithm) {
+		return VerifyS3StreamingV4A(r, accessKey, secret, chunks, signatures, trailers)
+	}
+	return VerifyS3StreamingV4(r, secret, chunks, signatures, trailers)
+}
+
 // VerifyS3Presigned verifies supported query-signature versions when present.
 func VerifyS3Presigned(r *http.Request, secret string) *spi.Fault {
 	if fault := VerifyS3PresignedV4(r, secret); fault != nil {
@@ -77,8 +85,9 @@ func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
 	if !ok {
 		return signatureFault()
 	}
-	canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
-	if !ok {
+	names := strings.Split(signedHeaders, ";")
+	canonicalHeaders, ok := signedHeaderValues(r, names)
+	if !ok || !s3AmzHeadersSigned(r, names) {
 		return signatureFault()
 	}
 	date := r.Header.Get("X-Amz-Date")
@@ -314,8 +323,9 @@ func VerifyS3PresignedV4(r *http.Request, secret string) *spi.Fault {
 		return signatureFault()
 	}
 	signedHeaders := q.Get("X-Amz-SignedHeaders")
-	canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
-	if !ok {
+	names := strings.Split(signedHeaders, ";")
+	canonicalHeaders, ok := signedHeaderValues(r, names)
+	if !ok || !s3AmzHeadersSigned(r, names) {
 		return signatureFault()
 	}
 	payloadHash := q.Get("X-Amz-Content-Sha256")
@@ -339,7 +349,9 @@ func verifyS3V4Signature(credential []string, date, canonicalRequest, signature,
 	signingKey := s3V4SigningKey(credential, secret)
 	want := hmacSHA256(signingKey, stringToSign)
 	if !s3V4SignatureMatches(signature, want) {
-		return signatureFault()
+		fault := signatureFault()
+		fault.Fields = map[string]any{"AWSAccessKeyId": credential[0], "CanonicalRequest": canonicalRequest, "SignatureProvided": signature, "StringToSign": stringToSign}
+		return fault
 	}
 	return nil
 }
@@ -463,9 +475,19 @@ func signedHeaderValues(r *http.Request, names []string) (string, bool) {
 	return b.String(), true
 }
 
+func s3AmzHeadersSigned(r *http.Request, names []string) bool {
+	for name := range r.Header {
+		name = strings.ToLower(name)
+		if strings.HasPrefix(name, "x-amz-") && name != "x-amz-content-sha256" && !containsString(names, name) {
+			return false
+		}
+	}
+	return true
+}
+
 func canonicalPath(u *url.URL) string {
-	if path := u.EscapedPath(); path != "" {
-		return path
+	if u.Path != "" {
+		return (&url.URL{Path: u.Path}).EscapedPath()
 	}
 	return "/"
 }

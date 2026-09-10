@@ -1,0 +1,26 @@
+{
+  "mismatched length": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "missing decoded length": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "missing terminal chunk": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "negative length": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "non-integer length": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "truncated chunk": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  }
+}

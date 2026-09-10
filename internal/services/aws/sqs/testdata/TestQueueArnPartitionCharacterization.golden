@@ -1,0 +1,11 @@
+{
+  "cn-north-1": {
+    "QueueArn": "arn:aws-cn:sqs:cn-north-1:123456789012:partition-cnnorth1"
+  },
+  "us-east-1": {
+    "QueueArn": "arn:aws:sqs:us-east-1:123456789012:partition-useast1"
+  },
+  "us-gov-west-1": {
+    "QueueArn": "arn:aws-us-gov:sqs:us-gov-west-1:123456789012:partition-usgovwest1"
+  }
+}

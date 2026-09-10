@@ -1,0 +1,22 @@
+{
+  "attributes": {
+    "ApproximateNumberOfMessages": "0",
+    "ApproximateNumberOfMessagesDelayed": "0",
+    "ApproximateNumberOfMessagesNotVisible": "0",
+    "CreatedTimestamp": "0",
+    "DelaySeconds": "0",
+    "LastModifiedTimestamp": "0",
+    "MaximumMessageSize": "1048576",
+    "MessageRetentionPeriod": "345600",
+    "QueueArn": "arn:aws:sqs:us-east-1:123456789012:sse-exclusive",
+    "ReceiveMessageWaitTimeSeconds": "0",
+    "SqsManagedSseEnabled": "true",
+    "VisibilityTimeout": "30"
+  },
+  "error": {
+    "Code": "InvalidAttributeName",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "You can use one type of server-side encryption (SSE) at one time. You can either enable KMS SSE or SQS SSE."
+  }
+}

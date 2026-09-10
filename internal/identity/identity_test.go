@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 )
 
 func TestParseAndExpiry(t *testing.T) {
@@ -57,13 +59,41 @@ func TestParseAndExpiry(t *testing.T) {
 	}
 }
 
+func TestLocalhostCredentialUsesUSEast1(t *testing.T) {
+	for name, request := range map[string]*http.Request{
+		"header": httptest.NewRequest("POST", "/", nil),
+		"query":  httptest.NewRequest("GET", "/?X-Amz-Credential=test%2F20200101%2Flocalhost%2Fdynamodb%2Faws4_request", nil),
+	} {
+		if name == "header" {
+			request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/localhost/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+		}
+		if got := Parse(request, "", "eu-west-1", time.Unix(0, 0)).Region; got != "us-east-1" {
+			t.Fatalf("%s localhost credential region %q", name, got)
+		}
+	}
+}
+
+func TestLocalhostRegionCharacterization(t *testing.T) {
+	header := httptest.NewRequest("POST", "/", nil)
+	header.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/localhost/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+	query := httptest.NewRequest("GET", "/?X-Amz-Credential=test%2F20200101%2Flocalhost%2Fdynamodb%2Faws4_request", nil)
+	override := header.Clone(header.Context())
+	override.Header.Set("X-Mirror-Region", "localhost")
+	golden.AssertJSON(t, map[string]any{
+		"header":   Parse(header, "", "eu-west-1", time.Unix(0, 0)),
+		"query":    Parse(query, "", "eu-west-1", time.Unix(0, 0)),
+		"override": Parse(override, "", "eu-west-1", time.Unix(0, 0)),
+	})
+}
+
 func TestPresignedAuthFault(t *testing.T) {
 	for name, target := range map[string]string{
 		"none":       "/x?list-type=2",
 		"sigv2":      "/x?AWSAccessKeyId=test&Signature=00",
 		"sigv2-full": "/x?AWSAccessKeyId=test&Signature=00&Expires=90",
 		"sigv4":      "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
-		"sigv4-full": "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Date=20200101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
+		"sigv4-full": "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20200101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=00&X-Amz-Date=20200101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
+		"malformed":  "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%252F20200101%252Fus-east-1%252Fs3%252Faws4_request&X-Amz-Signature=00&X-Amz-Date=20200101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
 		"sigv4a":     "/x?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Date=20200101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
 	} {
 		fault := PresignedAuthFault(httptest.NewRequest("GET", target, nil))
@@ -72,9 +102,12 @@ func TestPresignedAuthFault(t *testing.T) {
 			if fault == nil || fault.Code != "AccessDenied" || fault.HTTPStatus != 403 {
 				t.Fatalf("%s fault %#v", name, fault)
 			}
-		case "sigv4", "sigv4a":
+		case "sigv4", "sigv4a", "malformed":
 			if fault == nil || fault.Code != "AuthorizationQueryParametersError" || fault.HTTPStatus != 400 {
 				t.Fatalf("%s fault %#v", name, fault)
+			}
+			if name == "malformed" && fault.Message != `Error parsing the X-Amz-Credential parameter; the Credential is mal-formed; expecting "<YOUR-AKID>/YYYYMMDD/REGION/SERVICE/aws4_request".` {
+				t.Fatalf("%s message %q", name, fault.Message)
 			}
 		default:
 			if fault != nil {

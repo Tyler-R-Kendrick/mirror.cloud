@@ -1,0 +1,20 @@
+{
+  "direct": {
+    "Code": "AWS.SimpleQueueService.NonExistentQueue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The specified queue does not exist."
+  },
+  "json": {
+    "Code": "AWS.SimpleQueueService.NonExistentQueue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The specified queue does not exist."
+  },
+  "query": {
+    "Code": "AWS.SimpleQueueService.NonExistentQueue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The specified queue does not exist for this wsdl version."
+  }
+}

@@ -39,13 +39,14 @@ func (p *Pack) col(req *spi.Request) spi.Collection {
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	switch req.Operation {
 	case "CreateKey":
-		id := p.deps.Rand.Hex(8)
-		mat := p.deps.Rand.Bytes(32)
-		arn := "arn:aws:kms:" + req.Identity.Region + ":" + req.Identity.Account + ":key/" + id
-		rec := map[string]any{"KeyId": id, "Arn": arn, "KeyMaterial": base64.StdEncoding.EncodeToString(mat), "KeyState": "Enabled"}
+		manager := str(req.Input["KeyManager"])
+		if manager == "" {
+			manager = "CUSTOMER"
+		}
+		rec := p.newKey(req.Identity, str(req.Input["Description"]), manager)
 		b, _ := json.Marshal(rec)
-		_ = p.col(req).Put(ctx, id, b)
-		return &spi.Response{Output: map[string]any{"KeyMetadata": map[string]any{"KeyId": id, "Arn": arn, "KeyState": "Enabled"}}}, nil
+		_ = p.col(req).Put(ctx, str(rec["KeyId"]), b)
+		return &spi.Response{Output: map[string]any{"KeyMetadata": keyMetadata(rec)}}, nil
 	case "DescribeKey":
 		id := p.resolve(ctx, req, str(req.Input["KeyId"]))
 		b, ok, _ := p.col(req).Get(ctx, id)
@@ -112,6 +113,26 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	default:
 		return p.extra(ctx, req)
 	}
+}
+
+func (p *Pack) newKey(identity spi.Identity, description, manager string) map[string]any {
+	id := p.deps.Rand.Hex(8)
+	return map[string]any{
+		"AWSAccountId": identity.Account, "Arn": "arn:aws:kms:" + identity.Region + ":" + identity.Account + ":key/" + id,
+		"CreationDate": p.deps.Clock.Now().Unix(), "CurrentKeyMaterialId": p.deps.Rand.Derive("kms:key-material:" + id).UUID(),
+		"CustomerMasterKeySpec": "SYMMETRIC_DEFAULT", "Description": description, "Enabled": true,
+		"EncryptionAlgorithms": []any{"SYMMETRIC_DEFAULT"}, "KeyId": id, "KeyManager": manager,
+		"KeyMaterial": base64.StdEncoding.EncodeToString(p.deps.Rand.Bytes(32)), "KeySpec": "SYMMETRIC_DEFAULT",
+		"KeyState": "Enabled", "KeyUsage": "ENCRYPT_DECRYPT", "MultiRegion": false, "Origin": "AWS_KMS",
+	}
+}
+
+func keyMetadata(key map[string]any) map[string]any {
+	raw, _ := json.Marshal(key)
+	metadata := map[string]any{}
+	_ = json.Unmarshal(raw, &metadata)
+	delete(metadata, "KeyMaterial")
+	return metadata
 }
 
 func (p *Pack) material(ctx context.Context, req *spi.Request, id string) ([]byte, error) {

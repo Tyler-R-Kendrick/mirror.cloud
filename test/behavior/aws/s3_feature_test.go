@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,6 +24,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 )
@@ -30,7 +32,7 @@ import (
 func TestS3ObjectLifecycle(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
-	cfg.Services = []string{"aws.s3"}
+	cfg.Services = []string{"aws.s3", "aws.lambda"}
 	reg, err := registry.New(deps, cfg.Services, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +43,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	testIdentity := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/multipart-behavior", "Enabled")
 	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/kms-bdd", "Enabled")
+	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/encryption-bdd", "Enabled")
 	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/disabled-bdd", "Disabled")
 
 	do := func(method, path string, body []byte, storageClass string) *http.Response {
@@ -53,11 +56,17 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if method == http.MethodPut && path == "/object-lock" {
 			req.Header.Set("x-amz-bucket-object-lock-enabled", "true")
 		}
+		if path == "/object-lock-plain?delete" {
+			req.Header.Set("x-amz-bypass-governance-retention", "false")
+		}
 		if method == http.MethodPut && path == "/create-owned" {
 			req.Header.Set("x-amz-object-ownership", "BucketOwnerPreferred")
 		}
 		if method == http.MethodPut && path == "/invalid-create-owned" {
 			req.Header.Set("x-amz-object-ownership", "")
+		}
+		if method == http.MethodPut && path == "/invalid-create-owned-random" {
+			req.Header.Set("x-amz-object-ownership", "RandomValue")
 		}
 		if strings.Contains(path, "?delete") {
 			digest := md5.Sum(body)
@@ -72,6 +81,307 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		return res
 	}
+
+	t.Run("Given a standard object When requesting storage attributes Then STANDARD is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/standard-attributes-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/standard-attributes-bdd/key", []byte("body"), "")
+		res.Body.Close()
+		request, _ := http.NewRequest(http.MethodGet, ts.URL+"/standard-attributes-bdd/key?attributes", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-object-attributes", "ETag, Checksum, ObjectParts, StorageClass, ObjectSize")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		etag, storageClass, objectSize := bytes.Index(body, []byte("<ETag>")), bytes.Index(body, []byte("<StorageClass>")), bytes.Index(body, []byte("<ObjectSize>"))
+		if res.StatusCode != http.StatusOK || etag < 0 || !(etag < storageClass && storageClass < objectSize) || !bytes.Contains(body, []byte("<StorageClass>STANDARD</StorageClass>")) || !bytes.Contains(body, []byte("<ObjectSize>4</ObjectSize>")) {
+			t.Fatalf("standard storage attributes %d %s", res.StatusCode, body)
+		}
+		request, _ = http.NewRequest(http.MethodGet, ts.URL+"/standard-attributes-bdd/key?attributes", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-object-attributes", "ETag,Checksum,ObjectParts,StorageClass,ObjectSize")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compact, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Equal(body, compact) {
+			t.Fatalf("compact object attributes %d %s; spaced %s", res.StatusCode, compact, body)
+		}
+	})
+
+	t.Run("Given presigned query metadata When putting an object Then metadata is persisted", func(t *testing.T) {
+		res := do(http.MethodPut, "/presigned-metadata-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/presigned-metadata-bdd/key?x-amz-meta-owner=presigned", []byte("body"), "")
+		res.Body.Close()
+		res = do(http.MethodHead, "/presigned-metadata-bdd/key", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-owner") != "presigned" {
+			t.Fatalf("presigned metadata %d %#v", res.StatusCode, res.Header)
+		}
+	})
+
+	t.Run("Given presigned query headers When putting an object Then conditions and attributes are honored", func(t *testing.T) {
+		res := do(http.MethodPut, "/presigned-headers-bdd", nil, "")
+		res.Body.Close()
+		query := url.Values{
+			"If-None-Match":                               {"*"},
+			"x-amz-server-side-encryption":                {"aws:kms"},
+			"x-amz-server-side-encryption-aws-kms-key-id": {"arn:aws:kms:us-east-1:000000000000:key/kms-bdd"},
+			"x-amz-storage-class":                         {"DEEP_ARCHIVE"},
+		}.Encode()
+		res = do(http.MethodPut, "/presigned-headers-bdd/key?"+query, []byte("body"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("first presigned header put %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/presigned-headers-bdd/key?"+query, []byte("changed"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("second presigned header put %d", res.StatusCode)
+		}
+		res = do(http.MethodHead, "/presigned-headers-bdd/key", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-storage-class") != "DEEP_ARCHIVE" || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/kms-bdd" {
+			t.Fatalf("presigned query headers %d %#v", res.StatusCode, res.Header)
+		}
+	})
+
+	t.Run("Given a GET request body When reading an object Then the body is ignored", func(t *testing.T) {
+		res := do(http.MethodPut, "/get-body-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/get-body-bdd/key", []byte("stored"), "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/get-body-bdd/key", []byte("ignored"), "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "stored" {
+			t.Fatalf("GET body handling %d %q", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given an unrepresentable response override When reading an object Then InvalidArgument is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/unicode-override-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/unicode-override-bdd/key", []byte("body"), "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/unicode-override-bdd/key?response-cache-control=non-ascii-%E2%80%94", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("Header value cannot be represented using ISO-8859-1.")) || !bytes.Contains(body, []byte("<ArgumentName>response-cache-control</ArgumentName>")) {
+			t.Fatalf("Unicode response override %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a UTF-8 key and system metadata When put and fetched Then the object round trips", func(t *testing.T) {
+		res := do(http.MethodPut, "/utf8-metadata-bdd", nil, "")
+		res.Body.Close()
+		path := "/utf8-metadata-bdd/" + url.PathEscape("Ā0Ä")
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader("abc123"))
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("Cache-Control", "no-cache")
+		request.Header.Set("Content-Language", "de")
+		request.Header.Set("Content-Disposition", `attachment; filename="foo.jpg"`)
+		res, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "AES256" {
+			t.Fatalf("put UTF-8 object %d %#v", res.StatusCode, res.Header)
+		}
+		res = do(http.MethodGet, path, nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "abc123" || res.Header.Get("Cache-Control") != "no-cache" || res.Header.Get("Content-Language") != "de" || res.Header.Get("Content-Disposition") != `attachment; filename="foo.jpg"` || res.Header.Get("Content-Type") != "binary/octet-stream" || res.Header.Get("x-amz-server-side-encryption") != "AES256" {
+			t.Fatalf("get UTF-8 object %d %#v %q", res.StatusCode, res.Header, body)
+		}
+		unicodeDisposition := `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`
+		request, _ = http.NewRequest(http.MethodPut, ts.URL+"/utf8-metadata-bdd/unicode-system", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("Cache-Control", "ÄMÄZÕÑ S3")
+		request.Header.Set("Content-Language", "de")
+		request.Header.Set("Content-Disposition", unicodeDisposition)
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodGet, "/utf8-metadata-bdd/unicode-system", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "ÄMÄZÕÑ S3" || res.Header.Get("Content-Language") != "de" || res.Header.Get("Content-Disposition") != unicodeDisposition {
+			t.Fatalf("Unicode system metadata %d %#v", res.StatusCode, res.Header)
+		}
+	})
+
+	t.Run("Given encoded and literal object keys When copied Then S3 keeps each key distinct", func(t *testing.T) {
+		for _, bucket := range []string{"special-key-bdd", "special-key-copy-bdd"} {
+			res := do(http.MethodPut, "/"+bucket, nil, "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("create %s: %d", bucket, res.StatusCode)
+			}
+		}
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+"/special-key-bdd/test%20key/", strings.NewReader("space"))
+		request.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		request, _ = http.NewRequest(http.MethodPut, ts.URL+"/special-key-copy-bdd/copied", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-copy-source", "special-key-bdd%2Ftest+key%2F")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodGet, "/special-key-copy-bdd/copied", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "space" {
+			t.Fatalf("copy encoded source %d %q", res.StatusCode, body)
+		}
+		hashPath := "/special-key-bdd/" + url.PathEscape("#key-with-hash-prefix")
+		res = do(http.MethodPut, hashPath, []byte("test 123"), "")
+		res.Body.Close()
+		res = do(http.MethodGet, hashPath, nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "test 123" {
+			t.Fatalf("hash-prefixed key %d %q", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a missing bucket When accessed Then each operation returns NoSuchBucket", func(t *testing.T) {
+		for _, request := range []struct{ method, path string }{
+			{http.MethodGet, "/does-not-exist/foobar"},
+			{http.MethodDelete, "/does-not-exist"},
+			{http.MethodGet, "/does-not-exist?notification"},
+		} {
+			res := do(request.method, request.path, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchBucket</Code>")) || !bytes.Contains(body, []byte("<BucketName>does-not-exist</BucketName>")) {
+				t.Fatalf("%s %s missing bucket: %d %s", request.method, request.path, res.StatusCode, body)
+			}
+		}
+	})
+
+	t.Run("Given a public object When read without credentials Then its body is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/anonymous-read-bdd", nil, "")
+		res.Body.Close()
+		request := func(method, path, acl string, body io.Reader) *http.Response {
+			t.Helper()
+			req, _ := http.NewRequest(method, ts.URL+path, body)
+			req.Header.Set("Authorization", auth)
+			if acl != "" {
+				req.Header.Set("x-amz-acl", acl)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response
+		}
+		res = request(http.MethodPut, "/anonymous-read-bdd?acl", "public-read", nil)
+		res.Body.Close()
+		res = request(http.MethodPut, "/anonymous-read-bdd/object", "public-read", strings.NewReader("body data"))
+		res.Body.Close()
+		res, err = http.Get(ts.URL + "/anonymous-read-bdd/object")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "body data" {
+			t.Fatalf("anonymous public read %d %q", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given anonymous public objects When batch deleted Then both objects are removed", func(t *testing.T) {
+		res := do(http.MethodPut, "/anonymous-delete-bdd", nil, "")
+		res.Body.Close()
+		acl, _ := http.NewRequest(http.MethodPut, ts.URL+"/anonymous-delete-bdd?acl", nil)
+		acl.Header.Set("Authorization", auth)
+		acl.Header.Set("x-amz-acl", "public-read-write")
+		res, err = http.DefaultClient.Do(acl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		for _, key := range []string{"first", "second"} {
+			put, _ := http.NewRequest(http.MethodPut, ts.URL+"/anonymous-delete-bdd/"+key, strings.NewReader(key))
+			put.Header.Set("x-amz-acl", "public-read-write")
+			res, err = http.DefaultClient.Do(put)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("anonymous put %s: %d", key, res.StatusCode)
+			}
+		}
+		body := []byte(`<Delete><Object><Key>first</Key></Object><Object><Key>second</Key></Object></Delete>`)
+		digest := md5.Sum(body)
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/anonymous-delete-bdd/?delete", bytes.NewReader(body))
+		request.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(digest[:]))
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deleted, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Count(deleted, []byte("<Deleted>")) != 2 {
+			t.Fatalf("anonymous delete %d %s", res.StatusCode, deleted)
+		}
+		res = do(http.MethodGet, "/anonymous-delete-bdd", nil, "")
+		listed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Contains(listed, []byte("<Contents>")) {
+			t.Fatalf("remaining objects %d %s", res.StatusCode, listed)
+		}
+	})
+
+	t.Run("Given a Lambda with S3 endpoint variables When invoked Then it downloads the object", func(t *testing.T) {
+		res := do(http.MethodPut, "/lambda-read-bdd", nil, "")
+		res.Body.Close()
+		put, _ := http.NewRequest(http.MethodPut, ts.URL+"/lambda-read-bdd/object", strings.NewReader("lambda body"))
+		put.Header.Set("Authorization", auth)
+		put.Header.Set("x-amz-acl", "public-read")
+		res, err = http.DefaultClient.Do(put)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		source := "import os, urllib.request\ndef lambda_handler(event, context):\n    return {'name': os.environ['AWS_LAMBDA_FUNCTION_NAME'], 'body': urllib.request.urlopen(os.environ['AWS_ENDPOINT_URL'] + '/lambda-read-bdd/object').read().decode()}\n"
+		createBody := `{"FunctionName":"s3-reader","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(source)) + `"},"Environment":{"Variables":{"AWS_ENDPOINT_URL":"` + ts.URL + `"}}}`
+		create, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(createBody))
+		create.Header.Set("Content-Type", "application/json")
+		create.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/lambda/aws4_request, SignedHeaders=host, Signature=00")
+		res, err = http.DefaultClient.Do(create)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		invoke, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions/s3-reader/invocations", strings.NewReader(`{}`))
+		invoke.Header = create.Header.Clone()
+		res, err = http.DefaultClient.Do(invoke)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(payload, []byte(`"name":"s3-reader"`)) || !bytes.Contains(payload, []byte(`"body":"lambda body"`)) {
+			t.Fatalf("lambda S3 read %d %s", res.StatusCode, payload)
+		}
+	})
 
 	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {
 		configuration := []byte(`<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`)
@@ -95,8 +405,1286 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/cross-region-bdd?list-type=2", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-region") != "us-west-2" || !bytes.Contains(body, []byte("<Key>key</Key>")) {
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-region") != "us-west-2" || !bytes.Contains(body, []byte("<Key>key</Key>")) || !bytes.Contains(body, []byte("<BucketRegion>us-west-2</BucketRegion>")) {
 			t.Fatalf("cross-region list %d %#v %s", res.StatusCode, res.Header, body)
+		}
+		res = do(http.MethodGet, "/cross-region-bdd", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<BucketRegion>us-west-2</BucketRegion>")) {
+			t.Fatalf("cross-region list V1 %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given delimited objects When listing V1 and V2 Then prefixes consume pagination slots", func(t *testing.T) {
+		res := do(http.MethodPut, "/list-pagination-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		for _, key := range []string{"folder/aSubfolder/subFile1", "folder/aSubfolder/subFile2", "folder/file1", "folder/file2"} {
+			res = do(http.MethodPut, "/list-pagination-bdd/"+key, []byte("content"), "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put %q: %d", key, res.StatusCode)
+			}
+		}
+		list := func(query string) string {
+			t.Helper()
+			response := do(http.MethodGet, "/list-pagination-bdd?"+query, nil, "")
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("list %q: %d %s", query, response.StatusCode, body)
+			}
+			return string(body)
+		}
+		first := list("prefix=folder%2F&delimiter=%2F&max-keys=1")
+		if !strings.Contains(first, "<CommonPrefixes><Prefix>folder/aSubfolder/</Prefix></CommonPrefixes>") || !strings.Contains(first, "<NextMarker>folder/aSubfolder/</NextMarker>") || strings.Contains(first, "<Contents>") {
+			t.Fatalf("first V1 page %s", first)
+		}
+		next := list("prefix=folder%2F&delimiter=%2F&max-keys=1&marker=" + url.QueryEscape("folder/aSubfolder/"))
+		if !strings.Contains(next, "<Contents><ETag>") || !strings.Contains(next, "<Key>folder/file1</Key>") || !strings.Contains(next, "<Owner><ID>000000000000</ID></Owner>") || strings.Contains(next, "<DisplayName>") || !strings.Contains(next, "<Marker>folder/aSubfolder/</Marker>") {
+			t.Fatalf("next V1 page %s", next)
+		}
+		firstV2 := list("list-type=2&prefix=folder%2F&delimiter=%2F&max-keys=1")
+		if !strings.Contains(firstV2, "<CommonPrefixes><Prefix>folder/aSubfolder/</Prefix></CommonPrefixes>") || !strings.Contains(firstV2, "<NextContinuationToken>Zm9sZGVyL2ZpbGUx</NextContinuationToken>") || !strings.Contains(firstV2, "<KeyCount>1</KeyCount>") {
+			t.Fatalf("first V2 page %s", firstV2)
+		}
+		nextV2 := list("list-type=2&prefix=folder%2F&delimiter=%2F&max-keys=1&continuation-token=Zm9sZGVyL2ZpbGUx")
+		if !strings.Contains(nextV2, "<Key>folder/file1</Key>") || !strings.Contains(nextV2, "<ContinuationToken>Zm9sZGVyL2ZpbGUx</ContinuationToken>") || !strings.Contains(nextV2, "<NextContinuationToken>Zm9sZGVyL2ZpbGUy</NextContinuationToken>") {
+			t.Fatalf("next V2 page %s", nextV2)
+		}
+		for _, token := range []string{"", "not-base64"} {
+			response := do(http.MethodGet, "/list-pagination-bdd?list-type=2&continuation-token="+token, nil, "")
+			fault, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(fault, []byte("<ArgumentName>continuation-token</ArgumentName>")) {
+				t.Fatalf("token %q: %d %s", token, response.StatusCode, fault)
+			}
+		}
+		defaultOwnerV2 := list("list-type=2&prefix=folder%2Ffile&max-keys=1")
+		if strings.Contains(defaultOwnerV2, "<Owner>") {
+			t.Fatalf("default V2 owner %s", defaultOwnerV2)
+		}
+		fetchedOwnerV2 := list("list-type=2&prefix=folder%2Ffile&max-keys=1&fetch-owner=true")
+		if !strings.Contains(fetchedOwnerV2, "<Owner><ID>000000000000</ID></Owner>") || strings.Contains(fetchedOwnerV2, "<DisplayName>") {
+			t.Fatalf("fetched V2 owner %s", fetchedOwnerV2)
+		}
+	})
+
+	t.Run("Given a checksummed object When listing V1 and V2 Then checksum metadata is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/list-checksum-bdd", nil, "")
+		res.Body.Close()
+		body := []byte("checksummed")
+		sum := sha256.Sum256(body)
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+"/list-checksum-bdd/checksummed", bytes.NewReader(body))
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-checksum-sha256", base64.StdEncoding.EncodeToString(sum[:]))
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		for _, query := range []string{"", "list-type=2"} {
+			res = do(http.MethodGet, "/list-checksum-bdd?"+query, nil, "")
+			listed, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK || !bytes.Contains(listed, []byte("<ChecksumAlgorithm>SHA256</ChecksumAlgorithm><ChecksumType>FULL_OBJECT</ChecksumType>")) || bytes.Contains(listed, []byte("<member>")) {
+				t.Fatalf("list %q: %d %s", query, res.StatusCode, listed)
+			}
+		}
+	})
+
+	t.Run("Given URL encoding When listing V1 and V2 Then response values are percent encoded", func(t *testing.T) {
+		res := do(http.MethodPut, "/list-url-bdd", nil, "")
+		res.Body.Close()
+		for _, key := range []string{"folder/a%20b/file%2Bone", "folder/root%20%3F"} {
+			res = do(http.MethodPut, "/list-url-bdd/"+key, []byte("body"), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put %q: %d", key, res.StatusCode)
+			}
+		}
+		for _, query := range []string{"prefix=folder%2F&delimiter=%2F&encoding-type=url", "list-type=2&prefix=folder%2F&delimiter=%2F&encoding-type=url"} {
+			res = do(http.MethodGet, "/list-url-bdd?"+query, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a%20b/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<Key>folder/root%20%3F</Key>")) || !bytes.Contains(body, []byte("<EncodingType>url</EncodingType>")) {
+				t.Fatalf("list %q: %d %s", query, res.StatusCode, body)
+			}
+		}
+		res = do(http.MethodPut, "/list-url-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/list-url-bdd?versions&prefix=folder%2F&delimiter=%2F&encoding-type=url", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a%20b/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<Key>folder/root%20%3F</Key>")) {
+			t.Fatalf("version URL list: %d %s", res.StatusCode, body)
+		}
+		for _, key := range []string{"marker/a%20key", "marker/a%21key"} {
+			res = do(http.MethodPut, "/list-url-bdd/"+key, []byte("body"), "")
+			res.Body.Close()
+		}
+		res = do(http.MethodGet, "/list-url-bdd?versions&prefix=marker%2F&max-keys=1&encoding-type=url", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		var first struct {
+			NextKeyMarker       string `xml:"NextKeyMarker"`
+			NextVersionIDMarker string `xml:"NextVersionIdMarker"`
+		}
+		if err := xml.Unmarshal(body, &first); err != nil || first.NextKeyMarker != "marker/a%20key" || first.NextVersionIDMarker == "" {
+			t.Fatalf("first encoded version page: %d %s", res.StatusCode, body)
+		}
+		query := "versions&prefix=marker%2F&max-keys=1&encoding-type=url&key-marker=" + url.QueryEscape(first.NextKeyMarker) + "&version-id-marker=" + url.QueryEscape(first.NextVersionIDMarker)
+		res = do(http.MethodGet, "/list-url-bdd?"+query, nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<KeyMarker>marker/a%20key</KeyMarker>")) || !bytes.Contains(body, []byte("<Key>marker/a%21key</Key>")) {
+			t.Fatalf("next encoded version page: %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a checksummed version When listing versions Then checksum metadata is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/version-checksum-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/version-checksum-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		body := []byte("checksummed")
+		sum := sha256.Sum256(body)
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+"/version-checksum-bdd/key", bytes.NewReader(body))
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-checksum-sha256", base64.StdEncoding.EncodeToString(sum[:]))
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodGet, "/version-checksum-bdd?versions", nil, "")
+		listed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(listed, []byte("<ChecksumAlgorithm>SHA256</ChecksumAlgorithm><ChecksumType>FULL_OBJECT</ChecksumType>")) || bytes.Contains(listed, []byte("<member>")) {
+			t.Fatalf("listed versions: %d %s", res.StatusCode, listed)
+		}
+	})
+
+	t.Run("Given zero max keys When listing objects and versions Then the default limit is used", func(t *testing.T) {
+		res := do(http.MethodPut, "/zero-max-list-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/zero-max-list-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/zero-max-list-bdd/key", []byte("body"), "")
+		res.Body.Close()
+		for _, query := range []string{"max-keys=0", "list-type=2&max-keys=0", "versions&max-keys=0"} {
+			res = do(http.MethodGet, "/zero-max-list-bdd?"+query, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<MaxKeys>1000</MaxKeys>")) || !bytes.Contains(body, []byte("<Key>key</Key>")) {
+				t.Fatalf("zero max list %q: %d %s", query, res.StatusCode, body)
+			}
+		}
+	})
+
+	t.Run("Given invalid list encoding When listing Then S3 rejects every list operation", func(t *testing.T) {
+		res := do(http.MethodPut, "/list-encoding-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		for _, route := range []string{"", "list-type=2&", "versions&", "uploads&"} {
+			for _, value := range []string{"value", ""} {
+				res = do(http.MethodGet, "/list-encoding-bdd?"+route+"encoding-type="+value, nil, "")
+				body, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Invalid Encoding Method specified in Request</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>encoding-type</ArgumentName>")) {
+					t.Fatalf("route %q encoding %q: %d %s", route, value, res.StatusCode, body)
+				}
+			}
+		}
+	})
+
+	t.Run("Given object versions When listing pages Then markers include common prefixes", func(t *testing.T) {
+		res := do(http.MethodPut, "/version-list-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/version-list-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("enable versioning %d", res.StatusCode)
+		}
+		for _, key := range []string{"folder/a/one", "folder/file1", "folder/file2"} {
+			res = do(http.MethodPut, "/version-list-bdd/"+key, []byte("body"), "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put %q: %d", key, res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&prefix=folder%2F&delimiter=%2F&max-keys=1", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<NextKeyMarker>folder/a/</NextKeyMarker>")) || bytes.Contains(body, []byte("<member>")) || bytes.Contains(body, []byte("<Version>")) {
+			t.Fatalf("first version page %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&prefix=folder%2F&delimiter=%2F&max-keys=1&key-marker=folder%2Fa%2F", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Version>")) || !bytes.Contains(body, []byte("<Key>folder/file1</Key>")) || !bytes.Contains(body, []byte("<LastModified>")) {
+			t.Fatalf("next version page %d %s", res.StatusCode, body)
+		}
+		for range 3 {
+			res = do(http.MethodPut, "/version-list-bdd/deleted-marker", []byte("body"), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put deleted-marker version: %d", res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&prefix=deleted-marker&max-keys=1", nil, "")
+		var marker struct {
+			Key     string `xml:"NextKeyMarker"`
+			Version string `xml:"NextVersionIdMarker"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&marker); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodDelete, "/version-list-bdd/deleted-marker?versionId="+url.QueryEscape(marker.Version), nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete version marker: %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&prefix=deleted-marker&key-marker="+url.QueryEscape(marker.Key)+"&version-id-marker="+url.QueryEscape(marker.Version), nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Count(body, []byte("<Version>")) != 2 {
+			t.Fatalf("deleted version marker page %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&version-id-marker=orphan", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<ArgumentName>version-id-marker</ArgumentName>")) {
+			t.Fatalf("orphan version marker %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given multipart uploads When listing pages Then markers match LocalStack", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-list-bdd", nil, "")
+		res.Body.Close()
+		create := func(key, checksum string) string {
+			t.Helper()
+			request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-list-bdd/"+key+"?uploads", nil)
+			request.Header.Set("Authorization", auth)
+			if checksum != "" {
+				request.Header.Set("x-amz-checksum-algorithm", checksum)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var output struct {
+				UploadID string `xml:"UploadId"`
+			}
+			if response.StatusCode != http.StatusOK || xml.NewDecoder(response.Body).Decode(&output) != nil || output.UploadID == "" {
+				t.Fatalf("create multipart upload %q: %s", key, response.Status)
+			}
+			return output.UploadID
+		}
+		firstID := create("folder/a/one", "")
+		create("folder/file1", "CRC64NVME")
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2F&max-uploads=0", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<MaxUploads>1000</MaxUploads>")) || bytes.Count(body, []byte("<Upload>")) != 2 {
+			t.Fatalf("zero max uploads %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2F&delimiter=%2F&max-uploads=1", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(body, []byte("<NextKeyMarker></NextKeyMarker>")) || !bytes.Contains(body, []byte("<NextUploadIdMarker></NextUploadIdMarker>")) {
+			t.Fatalf("first multipart page %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2Ffile1", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ChecksumAlgorithm>CRC64NVME</ChecksumAlgorithm>")) || !bytes.Contains(body, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) || !bytes.Contains(body, []byte("<DisplayName>webfile</DisplayName>")) {
+			t.Fatalf("multipart listing metadata %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&key-marker=wrong&upload-id-marker="+url.QueryEscape(firstID), nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Invalid uploadId marker</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>upload-id-marker</ArgumentName>")) {
+			t.Fatalf("mismatched multipart marker %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a checksum-free multipart upload When completed Then checksum metadata stays absent", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-plain-bdd", nil, "")
+		res.Body.Close()
+		path := "/multipart-plain-bdd/" + url.PathEscape("test-unicode_—_file")
+		res = do(http.MethodPost, path+"?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, path+"?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("plain"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		res = do(http.MethodGet, path+"?uploadId="+url.QueryEscape(created.UploadID), nil, "")
+		listed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if bytes.Contains(listed, []byte("ChecksumAlgorithm")) || bytes.Contains(listed, []byte("ChecksumType")) {
+			t.Fatalf("list exposed checksum metadata: %s", listed)
+		}
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, path+"?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		completed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if bytes.Contains(completed, []byte("ChecksumCRC64NVME")) || bytes.Contains(completed, []byte("ChecksumType")) || !bytes.Contains(completed, []byte("<Location>")) || !bytes.Contains(completed, []byte("test-unicode_%E2%80%94_file")) {
+			t.Fatalf("completion exposed checksum metadata: %s", completed)
+		}
+	})
+
+	t.Run("Given a composite multipart upload When a part checksum is omitted Then completion is rejected", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-composite-bdd", nil, "")
+		res.Body.Close()
+		initiate, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-composite-bdd/object?uploads", nil)
+		initiate.Header.Set("Authorization", auth)
+		initiate.Header.Set("x-amz-checksum-algorithm", "CRC32")
+		res, err := http.DefaultClient.Do(initiate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/multipart-composite-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("checked"), "")
+		etag, partChecksum := res.Header.Get("ETag"), res.Header.Get("x-amz-checksum-crc32")
+		res.Body.Close()
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, "/multipart-composite-bdd/object?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(fault, []byte("missing for part 1")) {
+			t.Fatalf("missing composite checksum: %d %s", res.StatusCode, fault)
+		}
+		manifest = []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag><ChecksumCRC32>` + partChecksum + `</ChecksumCRC32></Part></CompleteMultipartUpload>`)
+		complete, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-composite-bdd/object?uploadId="+url.QueryEscape(created.UploadID), bytes.NewReader(manifest))
+		complete.Header.Set("Authorization", auth)
+		complete.Header.Set("x-amz-checksum-crc32", "AA==")
+		res, err = http.DefaultClient.Do(complete)
+		if err != nil {
+			t.Fatal(err)
+		}
+		completed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(completed, []byte("<ChecksumCRC32>")) || bytes.Contains(completed, []byte("<ChecksumCRC32>AA==</ChecksumCRC32>")) {
+			t.Fatalf("ignored composite aggregate: %d %s", res.StatusCode, completed)
+		}
+		attributes, _ := http.NewRequest(http.MethodGet, ts.URL+"/multipart-composite-bdd/object?attributes", nil)
+		attributes.Header.Set("Authorization", auth)
+		attributes.Header.Set("x-amz-object-attributes", "ObjectParts")
+		attributes.Header.Set("x-amz-part-number-marker", "10")
+		res, err = http.DefaultClient.Do(attributes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		empty, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(empty, []byte("<PartNumberMarker>10</PartNumberMarker>")) || !bytes.Contains(empty, []byte("<NextPartNumberMarker>0</NextPartNumberMarker>")) {
+			t.Fatalf("empty object-parts page: %d %s", res.StatusCode, empty)
+		}
+	})
+
+	t.Run("Given a composite multipart upload When an alternate object checksum is supplied Then completion returns BadDigest", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-alternate-bdd", nil, "")
+		res.Body.Close()
+		initiate, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-alternate-bdd/object?uploads", nil)
+		initiate.Header.Set("Authorization", auth)
+		initiate.Header.Set("x-amz-checksum-algorithm", "SHA256")
+		res, err := http.DefaultClient.Do(initiate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/multipart-alternate-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("checked"), "")
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + res.Header.Get("ETag") + `</ETag><ChecksumSHA256>` + res.Header.Get("x-amz-checksum-sha256") + `</ChecksumSHA256></Part></CompleteMultipartUpload>`)
+		res.Body.Close()
+		complete, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-alternate-bdd/object?uploadId="+url.QueryEscape(created.UploadID), bytes.NewReader(manifest))
+		complete.Header.Set("Authorization", auth)
+		complete.Header.Set("x-amz-checksum-crc32", "AAAAAA==")
+		res, err = http.DefaultClient.Do(complete)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(fault, []byte("The sha256 you specified did not match the calculated checksum.")) {
+			t.Fatalf("alternate object checksum: %d %s", res.StatusCode, fault)
+		}
+	})
+
+	t.Run("Given multipart object sizes When completed Then zero is ignored and mismatches are described", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-size-bdd", nil, "")
+		res.Body.Close()
+		createPart := func(key string) (string, string) {
+			response := do(http.MethodPost, "/multipart-size-bdd/"+key+"?uploads", nil, "")
+			var created struct {
+				UploadID string `xml:"UploadId"`
+			}
+			if err := xml.NewDecoder(response.Body).Decode(&created); err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			response = do(http.MethodPut, "/multipart-size-bdd/"+key+"?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("sized"), "")
+			defer response.Body.Close()
+			return created.UploadID, response.Header.Get("ETag")
+		}
+		complete := func(key, uploadID, etag, size string) (int, []byte) {
+			manifest := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
+			request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-size-bdd/"+key+"?uploadId="+url.QueryEscape(uploadID), strings.NewReader(manifest))
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("x-amz-mp-object-size", size)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, payload
+		}
+		zeroID, zeroETag := createPart("zero")
+		if status, body := complete("zero", zeroID, zeroETag, "0"); status != http.StatusOK {
+			t.Fatalf("zero object size: %d %s", status, body)
+		}
+		mismatchID, mismatchETag := createPart("mismatch")
+		if status, body := complete("mismatch", mismatchID, mismatchETag, "4"); status != http.StatusBadRequest || !bytes.Contains(body, []byte("header value 4 does not match what was computed: 5")) {
+			t.Fatalf("mismatched object size: %d %s", status, body)
+		}
+	})
+
+	t.Run("Given multipart parts When listing pages Then empty values use S3 defaults", func(t *testing.T) {
+		res := do(http.MethodPut, "/parts-list-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/parts-list-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		list := func(query string) string {
+			t.Helper()
+			response := do(http.MethodGet, "/parts-list-bdd/object?uploadId="+url.QueryEscape(created.UploadID)+"&"+query, nil, "")
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("list parts %q: %d %s", query, response.StatusCode, body)
+			}
+			return string(body)
+		}
+		empty := list("part-number-marker=&max-parts=")
+		if !strings.Contains(empty, "<PartNumberMarker>0</PartNumberMarker>") || !strings.Contains(empty, "<NextPartNumberMarker>0</NextPartNumberMarker>") || !strings.Contains(empty, "<MaxParts>1000</MaxParts>") || !strings.Contains(empty, "<Initiator>") || !strings.Contains(empty, "<DisplayName>webfile</DisplayName>") || !strings.Contains(empty, "<Owner><ID>000000000000</ID></Owner>") {
+			t.Fatalf("empty parts page %s", empty)
+		}
+		res = do(http.MethodPut, "/parts-list-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "")
+		res.Body.Close()
+		zero := list("max-parts=0")
+		if !strings.Contains(zero, "<MaxParts>1000</MaxParts>") || !strings.Contains(zero, "<Part>") {
+			t.Fatalf("zero max parts page %s", zero)
+		}
+		page := list("max-parts=1")
+		if !strings.Contains(page, "<NextPartNumberMarker>1</NextPartNumberMarker>") || !strings.Contains(page, "<IsTruncated>false</IsTruncated>") || !strings.Contains(page, ".000Z</LastModified>") {
+			t.Fatalf("final parts page %s", page)
+		}
+		beyond := list("max-parts=1&part-number-marker=10")
+		if !strings.Contains(beyond, "<PartNumberMarker>10</PartNumberMarker>") || !strings.Contains(beyond, "<NextPartNumberMarker>0</NextPartNumberMarker>") {
+			t.Fatalf("beyond parts page %s", beyond)
+		}
+	})
+
+	t.Run("Given multipart metadata When completing the upload Then S3 preserves initiation headers", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-metadata-bdd", nil, "")
+		res.Body.Close()
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-metadata-bdd/object?uploads", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("Cache-Control", "max-age=60")
+		request.Header.Set("Content-Type", "text/plain")
+		request.Header.Set("x-amz-meta-team", "storage")
+		request.Header.Set("x-amz-website-redirect-location", "/multipart")
+		res, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/multipart-metadata-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, "/multipart-metadata-bdd/object?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		res.Body.Close()
+		res = do(http.MethodHead, "/multipart-metadata-bdd/object", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "max-age=60" || res.Header.Get("Content-Type") != "text/plain" || res.Header.Get("x-amz-meta-team") != "storage" || res.Header.Get("x-amz-website-redirect-location") != "/multipart" {
+			t.Fatalf("multipart metadata %d headers=%v", res.StatusCode, res.Header)
+		}
+	})
+
+	t.Run("Given a missing multipart upload When accessed Then S3 returns the modeled fault", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-fault-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/multipart-fault-bdd/object?uploadId=missing", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchUpload</Code>")) || !bytes.Contains(body, []byte("<Message>The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.</Message>")) || !bytes.Contains(body, []byte("<UploadId>missing</UploadId>")) {
+			t.Fatalf("missing multipart upload %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given an invalid multipart part number When uploaded Then S3 returns the modeled fault", func(t *testing.T) {
+		res := do(http.MethodPut, "/part-number-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/part-number-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/part-number-bdd/object?partNumber=10001&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Part number must be an integer between 1 and 10000, inclusive</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>partNumber</ArgumentName>")) || !bytes.Contains(body, []byte("<ArgumentValue>10001</ArgumentValue>")) {
+			t.Fatalf("invalid multipart part number %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/part-number-bdd/object?partNumber=0&uploadId=missing", []byte("part"), "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchUpload</Code>")) {
+			t.Fatalf("missing upload precedence %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given an invalid upload part Content-MD5 When uploaded Then S3 returns modeled faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/upload-part-md5-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/upload-part-md5-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		upload := func(digest string) (int, []byte) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+"/upload-part-md5-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), strings.NewReader("part"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Content-MD5", digest)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, body
+		}
+		status, body := upload("!")
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidDigest</Code>")) || !bytes.Contains(body, []byte("<Message>The Content-MD5 you specified was invalid.</Message>")) || !bytes.Contains(body, []byte("<Content_MD5>!</Content_MD5>")) {
+			t.Fatalf("malformed upload part Content-MD5 %d %s", status, body)
+		}
+		status, body = upload("AAAAAAAAAAAAAAAAAAAAAA==")
+		sum := md5.Sum([]byte("part"))
+		calculated := base64.StdEncoding.EncodeToString(sum[:])
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(body, []byte("<Message>The Content-MD5 you specified did not match what we received.</Message>")) || !bytes.Contains(body, []byte("<ExpectedDigest>AAAAAAAAAAAAAAAAAAAAAA==</ExpectedDigest>")) || !bytes.Contains(body, []byte("<CalculatedDigest>"+calculated+"</CalculatedDigest>")) {
+			t.Fatalf("mismatched upload part Content-MD5 %d %s", status, body)
+		}
+	})
+
+	t.Run("Given an invalid upload part checksum When uploaded Then S3 returns modeled faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/upload-part-checksum-bdd", nil, "")
+		res.Body.Close()
+		initiate, _ := http.NewRequest(http.MethodPost, ts.URL+"/upload-part-checksum-bdd/object?uploads", nil)
+		initiate.Header.Set("Authorization", auth)
+		initiate.Header.Set("x-amz-checksum-algorithm", "CRC64NVME")
+		res, err := http.DefaultClient.Do(initiate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		upload := func(header, checksum string) (int, []byte) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+"/upload-part-checksum-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), strings.NewReader("part"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set(header, checksum)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, body
+		}
+		status, body := upload("x-amz-checksum-crc64nvme", "!")
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>Value for x-amz-checksum-crc64nvme header is invalid.</Message>")) {
+			t.Fatalf("malformed upload part checksum %d %s", status, body)
+		}
+		status, body = upload("x-amz-checksum-crc64nvme", "AAAAAAAAAAA=")
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(body, []byte("<Message>The CRC64NVME you specified did not match the calculated checksum.</Message>")) {
+			t.Fatalf("mismatched upload part checksum %d %s", status, body)
+		}
+		status, body = upload("x-amz-checksum-sha256", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>Checksum Type mismatch occurred, expected checksum Type: crc64nvme, actual checksum Type: sha256</Message>")) {
+			t.Fatalf("mismatched upload part checksum algorithm %d %s", status, body)
+		}
+	})
+
+	t.Run("Given an invalid multipart completion When submitted Then S3 returns modeled faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/completion-fault-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/completion-fault-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		path := "/completion-fault-bdd/object?uploadId=" + url.QueryEscape(created.UploadID)
+		res = do(http.MethodPost, path, []byte("<CompleteMultipartUpload/>"), "application/xml")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>You must specify at least one part</Message>")) {
+			t.Fatalf("empty multipart completion %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPost, path, []byte(`<CompleteMultipartUpload><Part><PartNumber>9</PartNumber><ETag>"missing"</ETag></Part></CompleteMultipartUpload>`), "application/xml")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidPart</Code>")) || !bytes.Contains(body, []byte("<Message>One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.</Message>")) || !bytes.Contains(body, []byte("<ETag>missing</ETag>")) || !bytes.Contains(body, []byte("<PartNumber>9</PartNumber>")) || !bytes.Contains(body, []byte("<UploadId>"+created.UploadID+"</UploadId>")) {
+			t.Fatalf("missing multipart completion part %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a mismatched multipart checksum type When completed Then S3 returns the selected mode", func(t *testing.T) {
+		res := do(http.MethodPut, "/completion-checksum-type-bdd", nil, "")
+		res.Body.Close()
+		initiate, _ := http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploads", nil)
+		initiate.Header.Set("Authorization", auth)
+		initiate.Header.Set("x-amz-checksum-algorithm", "CRC64NVME")
+		res, err := http.DefaultClient.Do(initiate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		partPath := "/completion-checksum-type-bdd/object?partNumber=1&uploadId=" + url.QueryEscape(created.UploadID)
+		res = do(http.MethodPut, partPath, []byte("part"), "application/octet-stream")
+		etag, checksum := res.Header.Get("ETag"), res.Header.Get("x-amz-checksum-crc64nvme")
+		res.Body.Close()
+		manifest := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
+		request.Header.Set("x-amz-checksum-type", "COMPOSITE")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>The upload was created using the FULL_OBJECT checksum mode. The complete request must use the same checksum mode.</Message>")) {
+			t.Fatalf("mismatched multipart checksum type %d %s", res.StatusCode, body)
+		}
+		request, _ = http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
+		request.Header.Set("x-amz-checksum-crc64nvme", checksum)
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(body, []byte("The crc64nvme you specified did not match the calculated checksum.")) {
+			t.Fatalf("implicit full-object checksum type %d %s", res.StatusCode, body)
+		}
+		request, _ = http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
+		request.Header.Set("x-amz-checksum-crc64nvme", checksum)
+		request.Header.Set("x-amz-checksum-type", "FULL_OBJECT")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
+			t.Fatalf("explicit full-object checksum type %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given unsupported multipart completion conditions When completed Then S3 returns LocalStack faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/completion-precondition-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/completion-precondition-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		path := "/completion-precondition-bdd/object?partNumber=1&uploadId=" + url.QueryEscape(created.UploadID)
+		res = do(http.MethodPut, path, []byte("part"), "application/octet-stream")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		manifest := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
+		for name, conditions := range map[string]struct{ match, noneMatch, header, detail string }{
+			"combined":      {`"etag"`, "*", "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
+			"if-none-match": {"", `"etag"`, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+			"if-match-star": {"*", "", "If-Match", "We don't accept the provided value of If-Match header for this API"},
+		} {
+			request, err := http.NewRequest(http.MethodPost, ts.URL+"/completion-precondition-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("Content-Type", "application/xml")
+			if conditions.match != "" {
+				request.Header.Set("If-Match", conditions.match)
+			}
+			if conditions.noneMatch != "" {
+				request.Header.Set("If-None-Match", conditions.noneMatch)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusNotImplemented || !bytes.Contains(body, []byte("<Code>NotImplemented</Code>")) || !bytes.Contains(body, []byte("<Message>A header you provided implies functionality that is not implemented</Message>")) || !bytes.Contains(body, []byte("<Header>"+conditions.header+"</Header>")) || !bytes.Contains(body, []byte("<additionalMessage>"+conditions.detail+"</additionalMessage>")) {
+				t.Fatalf("%s multipart precondition fault %d %s", name, response.StatusCode, body)
+			}
+		}
+	})
+
+	t.Run("Given unsupported write conditions When putting or copying Then S3 returns LocalStack faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/write-precondition-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/write-precondition-bdd/source", []byte("source"), "")
+		res.Body.Close()
+		for _, operation := range []string{"PutObject", "CopyObject"} {
+			for name, conditions := range map[string]struct{ match, noneMatch, header, detail string }{
+				"combined":      {`"etag"`, "*", "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
+				"if-none-match": {"", `"etag"`, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+				"if-match-star": {"*", "", "If-Match", "We don't accept the provided value of If-Match header for this API"},
+			} {
+				res = do(http.MethodPut, "/write-precondition-bdd/destination", []byte("old"), "")
+				res.Body.Close()
+				request, err := http.NewRequest(http.MethodPut, ts.URL+"/write-precondition-bdd/destination", strings.NewReader("new"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Authorization", auth)
+				if operation == "CopyObject" {
+					request.Body = http.NoBody
+					request.ContentLength = 0
+					request.Header.Set("x-amz-copy-source", "/write-precondition-bdd/source")
+				}
+				if conditions.match != "" {
+					request.Header.Set("If-Match", conditions.match)
+				}
+				if conditions.noneMatch != "" {
+					request.Header.Set("If-None-Match", conditions.noneMatch)
+				}
+				response, err := http.DefaultClient.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(response.Body)
+				response.Body.Close()
+				if response.StatusCode != http.StatusNotImplemented || !bytes.Contains(body, []byte("<Code>NotImplemented</Code>")) || !bytes.Contains(body, []byte("<Header>"+conditions.header+"</Header>")) || !bytes.Contains(body, []byte("<additionalMessage>"+conditions.detail+"</additionalMessage>")) {
+					t.Fatalf("%s %s write precondition fault %d %s", operation, name, response.StatusCode, body)
+				}
+				res = do(http.MethodGet, "/write-precondition-bdd/destination", nil, "")
+				body, _ = io.ReadAll(res.Body)
+				res.Body.Close()
+				if res.StatusCode != http.StatusOK || string(body) != "old" {
+					t.Fatalf("%s %s changed destination = %d %q", operation, name, res.StatusCode, body)
+				}
+			}
+		}
+	})
+
+	t.Run("Given supported write conditions When they fail Then S3 returns LocalStack fault details", func(t *testing.T) {
+		res := do(http.MethodPut, "/write-condition-detail-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/write-condition-detail-bdd/source", []byte("source"), "")
+		res.Body.Close()
+		for _, operation := range []string{"PutObject", "CopyObject"} {
+			for _, test := range []struct {
+				name, match, noneMatch, code, message, field, detail string
+				status                                               int
+				existing                                             bool
+			}{
+				{"missing-if-match", `"missing"`, "", "NoSuchKey", "The specified key does not exist.", "Key", "destination-" + operation + "-missing-if-match", http.StatusNotFound, false},
+				{"wrong-if-match", `"wrong"`, "", "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-Match", http.StatusPreconditionFailed, true},
+				{"if-none-match", "", "*", "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-None-Match", http.StatusPreconditionFailed, true},
+			} {
+				key := "destination-" + operation + "-" + test.name
+				if test.existing {
+					res = do(http.MethodPut, "/write-condition-detail-bdd/"+key, []byte("old"), "")
+					res.Body.Close()
+				}
+				request, err := http.NewRequest(http.MethodPut, ts.URL+"/write-condition-detail-bdd/"+key, strings.NewReader("new"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Authorization", auth)
+				if operation == "CopyObject" {
+					request.Body = http.NoBody
+					request.ContentLength = 0
+					request.Header.Set("x-amz-copy-source", "/write-condition-detail-bdd/source")
+				}
+				if test.match != "" {
+					request.Header.Set("If-Match", test.match)
+				}
+				if test.noneMatch != "" {
+					request.Header.Set("If-None-Match", test.noneMatch)
+				}
+				response, err := http.DefaultClient.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(response.Body)
+				response.Body.Close()
+				if response.StatusCode != test.status || !bytes.Contains(body, []byte("<Code>"+test.code+"</Code>")) || !bytes.Contains(body, []byte("<Message>"+test.message+"</Message>")) || !bytes.Contains(body, []byte("<"+test.field+">"+test.detail+"</"+test.field+">")) {
+					t.Fatalf("%s %s fault = %d %s", operation, test.name, response.StatusCode, body)
+				}
+				if test.existing {
+					res = do(http.MethodGet, "/write-condition-detail-bdd/"+key, nil, "")
+					body, _ = io.ReadAll(res.Body)
+					res.Body.Close()
+					if res.StatusCode != http.StatusOK || string(body) != "old" {
+						t.Fatalf("%s %s changed destination = %d %q", operation, test.name, res.StatusCode, body)
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("Given an absent object or delete marker When putting with If-None-Match Then S3 creates it", func(t *testing.T) {
+		put := func(path, body string) (int, []byte) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("If-None-Match", "*")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responseBody, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, responseBody
+		}
+		for _, versioned := range []bool{false, true} {
+			name := "unversioned"
+			if versioned {
+				name = "versioned"
+			}
+			bucket, path := "if-none-match-bdd-"+name, "/if-none-match-bdd-"+name+"/key"
+			res := do(http.MethodPut, "/"+bucket, nil, "")
+			res.Body.Close()
+			if versioned {
+				res = do(http.MethodPut, "/"+bucket+"?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+				res.Body.Close()
+			}
+			if status, body := put(path, "first"); status != http.StatusOK {
+				t.Fatalf("first %s conditional put = %d %s", name, status, body)
+			}
+			if status, body := put(path, "blocked"); status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) {
+				t.Fatalf("second %s conditional put = %d %s", name, status, body)
+			}
+			res = do(http.MethodDelete, path, nil, "")
+			res.Body.Close()
+			if status, body := put(path, "after-delete"); status != http.StatusOK {
+				t.Fatalf("%s conditional put after delete = %d %s", name, status, body)
+			}
+		}
+	})
+
+	t.Run("Given a versioned object When putting with If-Match Then S3 checks only the current version", func(t *testing.T) {
+		const bucket, path = "if-match-bdd", "/if-match-bdd/key"
+		res := do(http.MethodPut, "/"+bucket, nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/"+bucket+"?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		res = do(http.MethodPut, path, []byte("first"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		put := func(match, body string) (int, []byte, string) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("If-Match", match)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responseBody, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, responseBody, response.Header.Get("ETag")
+		}
+		status, body, _ := put("d41d8cd98f00b204e9800998ecf8427e", "wrong")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("wrong If-Match = %d %s", status, body)
+		}
+		status, body, etag = put(etag, "matched")
+		if status != http.StatusOK {
+			t.Fatalf("matched If-Match = %d %s", status, body)
+		}
+		res = do(http.MethodDelete, path, nil, "")
+		res.Body.Close()
+		if status, body, _ := put(etag, "after-delete"); status != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) || !bytes.Contains(body, []byte("<Key>key</Key>")) {
+			t.Fatalf("delete-marker If-Match = %d %s", status, body)
+		}
+	})
+
+	t.Run("Given a destination If-Match list When putting or copying Then S3 requires one ETag", func(t *testing.T) {
+		res := do(http.MethodPut, "/write-if-match-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/write-if-match-bdd/source", []byte("source"), "")
+		res.Body.Close()
+		for _, operation := range []string{"PutObject", "CopyObject"} {
+			key := "destination-" + operation
+			res = do(http.MethodPut, "/write-if-match-bdd/"+key, []byte("old"), "")
+			etag := res.Header.Get("ETag")
+			res.Body.Close()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+"/write-if-match-bdd/"+key, strings.NewReader("new"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("If-Match", `"wrong", `+etag)
+			if operation == "CopyObject" {
+				request.Body = http.NoBody
+				request.ContentLength = 0
+				request.Header.Set("x-amz-copy-source", "/write-if-match-bdd/source")
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+				t.Fatalf("%s If-Match list fault = %d %s", operation, response.StatusCode, body)
+			}
+			res = do(http.MethodGet, "/write-if-match-bdd/"+key, nil, "")
+			body, _ = io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK || string(body) != "old" {
+				t.Fatalf("%s If-Match list stored %d %q", operation, res.StatusCode, body)
+			}
+		}
+	})
+
+	t.Run("Given DeleteObject preconditions When deleting Then S3 enforces If-Match and rejects directory-only fields", func(t *testing.T) {
+		res := do(http.MethodPut, "/delete-precondition-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/delete-precondition-bdd/key", []byte("body"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		for _, condition := range []struct {
+			header, value, code, field, detail string
+			status                             int
+		}{
+			{"If-Match", `"wrong"`, "PreconditionFailed", "Condition", "If-Match", http.StatusPreconditionFailed},
+			{"x-amz-if-match-size", "4", "NotImplemented", "Header", "x-amz-if-match-size", http.StatusNotImplemented},
+			{"x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT", "NotImplemented", "Header", "x-amz-if-match-last-modified-time", http.StatusNotImplemented},
+		} {
+			request, err := http.NewRequest(http.MethodDelete, ts.URL+"/delete-precondition-bdd/key", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set(condition.header, condition.value)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != condition.status || !bytes.Contains(body, []byte("<Code>"+condition.code+"</Code>")) || !bytes.Contains(body, []byte("<"+condition.field+">"+condition.detail+"</"+condition.field+">")) {
+				t.Fatalf("%s delete precondition fault %d %s", condition.header, response.StatusCode, body)
+			}
+		}
+		res = do(http.MethodGet, "/delete-precondition-bdd/key", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "body" {
+			t.Fatalf("object after rejected deletes = %d %q", res.StatusCode, body)
+		}
+		request, _ := http.NewRequest(http.MethodDelete, ts.URL+"/delete-precondition-bdd/key", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("If-Match", etag)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("matching conditional delete = %d", response.StatusCode)
+		}
+	})
+
+	t.Run("Given a missing key in a versioned bucket When deleting an explicit version Then S3 is idempotent", func(t *testing.T) {
+		for _, tc := range []struct{ bucket, status, version string }{
+			{"missing-version-enabled-bdd", "Enabled", "missing-version"},
+			{"missing-version-suspended-bdd", "Suspended", "null"},
+		} {
+			res := do(http.MethodPut, "/"+tc.bucket, nil, "")
+			res.Body.Close()
+			res = do(http.MethodPut, "/"+tc.bucket+"?versioning", []byte("<VersioningConfiguration><Status>"+tc.status+"</Status></VersioningConfiguration>"), "")
+			res.Body.Close()
+			res = do(http.MethodDelete, "/"+tc.bucket+"/missing?versionId="+url.QueryEscape(tc.version), nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent || len(body) != 0 || res.Header.Get("x-amz-version-id") != "" || res.Header.Get("x-amz-delete-marker") != "" {
+				t.Fatalf("%s delete response = %d headers=%v body=%q", tc.status, res.StatusCode, res.Header, body)
+			}
+		}
+	})
+
+	t.Run("Given an unversioned bucket When deleting a missing key version Then S3 validates the version", func(t *testing.T) {
+		res := do(http.MethodPut, "/unversioned-delete-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodDelete, "/unversioned-delete-bdd/missing?versionId=missing-version", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Invalid version id specified</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>versionId</ArgumentName>")) || !bytes.Contains(body, []byte("<ArgumentValue>missing-version</ArgumentValue>")) {
+			t.Fatalf("invalid version response = %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodDelete, "/unversioned-delete-bdd/missing?versionId=null", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent || len(body) != 0 || res.Header.Get("x-amz-version-id") != "" || res.Header.Get("x-amz-delete-marker") != "" {
+			t.Fatalf("null version response = %d headers=%v body=%q", res.StatusCode, res.Header, body)
+		}
+	})
+
+	t.Run("Given conflicting multipart completion conditions When completed Then S3 returns LocalStack faults", func(t *testing.T) {
+		startedAt := deps.Clock.Now()
+		defer func() { _ = deps.Clock.Advance(startedAt.Sub(deps.Clock.Now())) }()
+		res := do(http.MethodPut, "/completion-conditional-bdd", nil, "")
+		res.Body.Close()
+		start := func(key string) (string, string) {
+			t.Helper()
+			response := do(http.MethodPost, "/completion-conditional-bdd/"+key+"?uploads", nil, "")
+			var created struct {
+				UploadID string `xml:"UploadId"`
+			}
+			if err := xml.NewDecoder(response.Body).Decode(&created); err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			response = do(http.MethodPut, "/completion-conditional-bdd/"+key+"?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "application/octet-stream")
+			etag := response.Header.Get("ETag")
+			response.Body.Close()
+			return created.UploadID, `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
+		}
+		complete := func(key, uploadID, manifest, match, noneMatch string) (int, []byte) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPost, ts.URL+"/completion-conditional-bdd/"+key+"?uploadId="+url.QueryEscape(uploadID), strings.NewReader(manifest))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("Content-Type", "application/xml")
+			if match != "" {
+				request.Header.Set("If-Match", match)
+			}
+			if noneMatch != "" {
+				request.Header.Set("If-None-Match", noneMatch)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, body
+		}
+
+		uploadID, manifest := start("missing")
+		status, body := complete("missing", uploadID, manifest, `"missing"`, "")
+		if status != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) || !bytes.Contains(body, []byte("<Message>The specified key does not exist.</Message>")) || !bytes.Contains(body, []byte("<Key>missing</Key>")) {
+			t.Fatalf("missing complete If-Match %d %s", status, body)
+		}
+		res = do(http.MethodPut, "/completion-conditional-bdd/mismatch", []byte("old"), "")
+		res.Body.Close()
+		uploadID, manifest = start("mismatch")
+		status, body = complete("mismatch", uploadID, manifest, `"wrong"`, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Message>At least one of the pre-conditions you specified did not hold</Message>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("mismatched complete If-Match %d %s", status, body)
+		}
+		res = do(http.MethodPut, "/completion-conditional-bdd/list", []byte("old"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		uploadID, manifest = start("list")
+		status, body = complete("list", uploadID, `<CompleteMultipartUpload/>`, `"wrong", `+etag, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("listed complete If-Match validation order %d %s", status, body)
+		}
+		status, body = complete("list", uploadID, manifest, `"wrong", `+etag, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("listed complete If-Match %d %s", status, body)
+		}
+		res = do(http.MethodGet, "/completion-conditional-bdd/list?uploadId="+url.QueryEscape(uploadID), nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Part>")) {
+			t.Fatalf("listed completion upload %d %s", res.StatusCode, body)
+		}
+		status, body = complete("list", uploadID, manifest, etag, "")
+		if status != http.StatusOK {
+			t.Fatalf("exact complete If-Match %d %s", status, body)
+		}
+		res = do(http.MethodHead, "/completion-conditional-bdd/list", nil, "")
+		multipartETag := res.Header.Get("ETag")
+		res.Body.Close()
+		if multipartETag == etag {
+			t.Fatalf("multipart ETag = original ETag %q", multipartETag)
+		}
+		uploadID, manifest = start("list")
+		status, body = complete("list", uploadID, manifest, etag, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("stale original complete If-Match %d %s", status, body)
+		}
+		status, body = complete("list", uploadID, manifest, multipartETag, "")
+		if status != http.StatusOK {
+			t.Fatalf("current multipart complete If-Match %d %s", status, body)
+		}
+		uploadID, manifest = start("created")
+		res = do(http.MethodPut, "/completion-conditional-bdd/created", []byte("object"), "")
+		res.Body.Close()
+		status, body = complete("created", uploadID, manifest, "", "*")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) {
+			t.Fatalf("created complete If-None-Match %d %s", status, body)
+		}
+		res = do(http.MethodPut, "/completion-conditional-bdd/deleted", []byte("object"), "")
+		res.Body.Close()
+		uploadID, manifest = start("deleted")
+		status, body = complete("deleted", uploadID, manifest, "", "*")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) {
+			t.Fatalf("existing complete If-None-Match %d %s", status, body)
+		}
+		res = do(http.MethodDelete, "/completion-conditional-bdd/deleted", nil, "")
+		res.Body.Close()
+		status, body = complete("deleted", uploadID, manifest, "", "*")
+		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) || !bytes.Contains(body, []byte("<Message>The conditional request cannot succeed due to a conflicting operation against this resource.</Message>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) || !bytes.Contains(body, []byte("<Key>deleted</Key>")) {
+			t.Fatalf("deleted complete If-None-Match %d %s", status, body)
+		}
+		uploadID, manifest = start("deleted")
+		status, body = complete("deleted", uploadID, manifest, "", "*")
+		if status != http.StatusOK {
+			t.Fatalf("restarted complete If-None-Match %d %s", status, body)
+		}
+
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-put", []byte("old"), "")
+		oldETag := res.Header.Get("ETag")
+		res.Body.Close()
+		uploadID, manifest = start("if-match-put")
+		_ = deps.Clock.Advance(2 * time.Second)
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-put", []byte("new"), "")
+		newETag := res.Header.Get("ETag")
+		res.Body.Close()
+		status, body = complete("if-match-put", uploadID, manifest, oldETag, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("stale complete If-Match %d %s", status, body)
+		}
+		status, body = complete("if-match-put", uploadID, manifest, newETag, "")
+		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("changed complete If-Match %d %s", status, body)
+		}
+		uploadID, manifest = start("if-match-put")
+		status, body = complete("if-match-put", uploadID, manifest, newETag, "")
+		if status != http.StatusOK {
+			t.Fatalf("restarted complete If-Match %d %s", status, body)
+		}
+
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-identical", []byte("same"), "")
+		identicalETag := res.Header.Get("ETag")
+		res.Body.Close()
+		uploadID, manifest = start("if-match-identical")
+		_ = deps.Clock.Advance(2 * time.Second)
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-identical", []byte("same"), "")
+		res.Body.Close()
+		status, body = complete("if-match-identical", uploadID, manifest, identicalETag, "")
+		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) {
+			t.Fatalf("identical complete If-Match %d %s", status, body)
+		}
+
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-delete", []byte("same"), "")
+		deletedETag := res.Header.Get("ETag")
+		res.Body.Close()
+		uploadID, manifest = start("if-match-delete")
+		res = do(http.MethodDelete, "/completion-conditional-bdd/if-match-delete", nil, "")
+		res.Body.Close()
+		status, body = complete("if-match-delete", uploadID, manifest, deletedETag, "")
+		if status != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) {
+			t.Fatalf("deleted complete If-Match %d %s", status, body)
+		}
+		_ = deps.Clock.Advance(2 * time.Second)
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-delete", []byte("same"), "")
+		res.Body.Close()
+		status, body = complete("if-match-delete", uploadID, manifest, deletedETag, "")
+		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) {
+			t.Fatalf("recreated complete If-Match %d %s", status, body)
 		}
 	})
 
@@ -134,6 +1722,112 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given malformed aws-chunked framing When uploaded Then S3 rejects the request", func(t *testing.T) {
+		response := do(http.MethodPut, "/chunk-errors-bdd", nil, "")
+		response.Body.Close()
+		raw := "5\r\nhello\r\n0\r\n\r\n"
+		request, err := http.NewRequest(http.MethodPut, ts.URL+"/chunk-errors-bdd/object", strings.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Encoding", "aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		response, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("malformed stream: %d %s", response.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a cancelled chunked part When retried Then S3 stores only the valid part", func(t *testing.T) {
+		response := do(http.MethodPut, "/chunk-part-bdd", nil, "")
+		response.Body.Close()
+		response = do(http.MethodPost, "/chunk-part-bdd/object?uploads", nil, "")
+		var upload struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(response.Body).Decode(&upload); err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		path := "/chunk-part-bdd/object?partNumber=1&uploadId=" + url.QueryEscape(upload.UploadID)
+		put := func(raw string) *http.Response {
+			request, _ := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(raw))
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "10")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response
+		}
+		response = put("\r\nHello Blob\r\n0;chunk-signature=invalid\r\n")
+		response.Body.Close()
+		if response.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("cancelled part: %s", response.Status)
+		}
+		response = put("a;chunk-signature=first\r\nHello Blob\r\n0;chunk-signature=last\r\n")
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("valid retry: %s", response.Status)
+		}
+	})
+
+	t.Run("Given aws-chunked transport encoding When stored Then S3 preserves only content encodings", func(t *testing.T) {
+		response := do(http.MethodPut, "/chunk-encoding-bdd", nil, "")
+		response.Body.Close()
+		request, err := http.NewRequest(http.MethodPut, ts.URL+"/chunk-encoding-bdd/object", strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Encoding", "gzip, aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+		response, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		request, _ = http.NewRequest(http.MethodGet, ts.URL+"/chunk-encoding-bdd/object", nil)
+		request.Header.Set("Accept-Encoding", "identity")
+		response, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || string(body) != "hello" || response.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("stored encoding: %d %q %q", response.StatusCode, response.Header.Get("Content-Encoding"), body)
+		}
+	})
+
+	t.Run("Given an object When fetched Then S3 emits exact ETag header casing", func(t *testing.T) {
+		response := do(http.MethodPut, "/etag-casing-bdd", nil, "")
+		response.Body.Close()
+		response = do(http.MethodPut, "/etag-casing-bdd/object", []byte("body"), "")
+		response.Body.Close()
+		conn, err := net.Dial("tcp", ts.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if _, err := io.WriteString(conn, "GET /etag-casing-bdd/object HTTP/1.1\r\nHost: "+ts.Listener.Addr().String()+"\r\nConnection: close\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(raw, []byte("\r\nETag: \"")) || bytes.Contains(raw, []byte("\r\nEtag:")) {
+			t.Fatalf("raw response:\n%s", raw)
+		}
+	})
+
 	t.Run("Given signature validation is enabled When a signature is tampered Then S3 rejects it", func(t *testing.T) {
 		target := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)
 		response, err := http.Get(ts.URL + target)
@@ -157,6 +1851,30 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		strictServer := httptest.NewServer(edge.New(strict, strictDeps, strictReg, "test").Handler())
 		defer strictServer.Close()
+		unsignedTarget := "/signed/object?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=8752c43939826ec5e949abb74845c6ac5a92ea98f5114bbdc6db1e78fe2b7e5e"
+		unsignedRequest, _ := http.NewRequest(http.MethodGet, strictServer.URL+unsignedTarget, nil)
+		unsignedRequest.Host = "s3.localhost.localstack.cloud"
+		unsignedRequest.Header.Set("X-Amz-User-Agent", "test")
+		response, err = http.DefaultClient.Do(unsignedRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("unsigned x-amz header %d %s", response.StatusCode, body)
+		}
+		malformedRequest, _ := http.NewRequest(http.MethodGet, strictServer.URL+strings.ReplaceAll(unsignedTarget, "%2F", "%252F"), nil)
+		malformedRequest.Host = "s3.localhost.localstack.cloud"
+		response, err = http.DefaultClient.Do(malformedRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>AuthorizationQueryParametersError</Code>")) || !bytes.Contains(body, []byte("Credential is mal-formed")) {
+			t.Fatalf("malformed credential %d %s", response.StatusCode, body)
+		}
 		for name, strictTarget := range map[string]string{
 			"sigv2":  "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
 			"sigv4":  target,
@@ -258,6 +1976,65 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			stream.Header.Set("X-Amz-Date", "20990101T000000Z")
 			stream.Header.Set("X-Amz-Decoded-Content-Length", "5")
 			stream.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length,Signature=d32bab45d70b05d89ada2e57acc27c4117cf31f7ce3de470cf916b8f89558054")
+			response, err = http.DefaultClient.Do(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != tc.status {
+				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+			}
+		}
+		createV4A, _ := http.NewRequest(http.MethodPut, strictServer.URL+"/v4a", nil)
+		response, err = http.DefaultClient.Do(createV4A)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		for name, tc := range map[string]struct {
+			payload string
+			status  int
+		}{"valid SigV4A stream": {"hello", http.StatusOK}, "tampered SigV4A stream": {"jello", http.StatusForbidden}} {
+			raw := "5;chunk-signature=**304502201ba0be85f07d901a715f28fbcd6d4ee4d14ab70abe11f5cfaff93a3c1961e4ae022100f5693b9c34d100107df15bd06cbc5c1a608d467761f97f26e048c240b21cc256\r\n" + tc.payload + "\r\n0;chunk-signature=**304502202bed57aec7b9b53cfebdf5163fbc5c61009c0f0b1e1b50848ac50641c6d0d14a022100806a00edfb80226cf9f2761851cd38cb9f33ee3fdafb597c723086655aad5cb9\r\n\r\n"
+			stream, _ := http.NewRequest(http.MethodPut, strictServer.URL+"/v4a/object", strings.NewReader(raw))
+			stream.Host = "s3.localhost.localstack.cloud:4566"
+			stream.Header.Set("Content-Encoding", "aws-chunked")
+			stream.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD")
+			stream.Header.Set("X-Amz-Date", "20990101T000000Z")
+			stream.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			stream.Header.Set("X-Amz-Region-Set", "us-east-1")
+			stream.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set,Signature=30450220292f2afead2f51323260a06fdfed3d88e0998b54f024a175f65e19bdbf970425022100e28adec0e230329184badd9bf335b18c8ad5373000bad0c47223b173ecd16d11")
+			response, err = http.DefaultClient.Do(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != tc.status {
+				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+			}
+		}
+		createV4AUnsigned, _ := http.NewRequest(http.MethodPut, strictServer.URL+"/v4a-unsigned", nil)
+		response, err = http.DefaultClient.Do(createV4AUnsigned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		for name, tc := range map[string]struct {
+			checksum string
+			status   int
+		}{"valid SigV4A unsigned trailer": {"mnG7TA==", http.StatusOK}, "bad SigV4A unsigned checksum": {"AAAAAA==", http.StatusBadRequest}} {
+			raw := "5\r\nhello\r\n0\r\nx-amz-checksum-crc32c:" + tc.checksum + "\r\n\r\n"
+			stream, _ := http.NewRequest(http.MethodPut, strictServer.URL+"/v4a-unsigned/object", strings.NewReader(raw))
+			stream.Host = "s3.localhost.localstack.cloud:4566"
+			stream.Header.Set("Content-Encoding", "aws-chunked")
+			stream.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+			stream.Header.Set("X-Amz-Date", "20990101T000000Z")
+			stream.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			stream.Header.Set("X-Amz-Region-Set", "us-east-1")
+			stream.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+			stream.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set;x-amz-trailer,Signature=304402201f09d982734f868ab87f6e305473f7ef74a6882095dbf5d0f0b97bede169993402204a4c59017095e2ffaf861e04fc6c73b5d1c9b0d8c041b7fd2acb05d0a4c356f3")
 			response, err = http.DefaultClient.Do(stream)
 			if err != nil {
 				t.Fatal(err)
@@ -386,6 +2163,24 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if response, body := request(http.MethodPut, "/kms-validation-bdd/enabled", enabledARN); response.StatusCode != http.StatusOK {
 			t.Fatalf("enabled key %d %s", response.StatusCode, body)
 		}
+		copyRequest, _ := http.NewRequest(http.MethodPut, ts.URL+"/kms-validation-bdd/copied", nil)
+		copyRequest.Header.Set("Authorization", auth)
+		copyRequest.Header.Set("x-amz-copy-source", "/kms-validation-bdd/enabled")
+		copyRequest.Header.Set("x-amz-server-side-encryption", "aws:kms")
+		copyRequest.Header.Set("x-amz-server-side-encryption-aws-kms-key-id", enabledARN)
+		copyRequest.Header.Set("x-amz-server-side-encryption-bucket-key-enabled", "true")
+		copied, err := http.DefaultClient.Do(copyRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		copyBody, _ := io.ReadAll(copied.Body)
+		copied.Body.Close()
+		if copied.StatusCode != http.StatusOK || copied.Header.Get("x-amz-server-side-encryption") != "aws:kms" || copied.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || copied.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || !bytes.Contains(copyBody, []byte("<CopyObjectResult>")) {
+			t.Fatalf("kms copy %d %#v %s", copied.StatusCode, copied.Header, copyBody)
+		}
+		if response, body := request(http.MethodGet, "/kms-validation-bdd/copied", ""); response.StatusCode != http.StatusOK || string(body) != "body" || response.Header.Get("x-amz-server-side-encryption") != "aws:kms" || response.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || response.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("stored kms copy %d %#v %s", response.StatusCode, response.Header, body)
+		}
 		if response, body := request(http.MethodPut, "/kms-validation-bdd/missing", "arn:aws:kms:us-east-1:000000000000:key/missing"); response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>KMS.NotFoundException</Code>")) {
 			t.Fatalf("missing key %d %s", response.StatusCode, body)
 		}
@@ -438,6 +2233,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		req.Header.Set("Authorization", auth)
 		req.Header.Set("x-amz-meta-non-ascii", "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=")
 		req.Header.Set("x-amz-meta-fake-encoded", "=?UTF-8?Q?actually-ascii?=")
+		req.Header.Set("x-amz-meta-TEST_META_1", "foo")
+		req.Header.Set("x-amz-meta-__meta_2", "bar")
 		res, err = http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -448,7 +2245,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		res = do(http.MethodHead, "/rfc2047-bdd/object", nil, "")
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || res.Header.Get("x-amz-meta-fake-encoded") != "actually-ascii" {
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || res.Header.Get("x-amz-meta-fake-encoded") != "actually-ascii" || res.Header.Get("x-amz-meta-test_meta_1") != "foo" || res.Header.Get("x-amz-meta-__meta_2") != "bar" {
 			t.Fatalf("head metadata %d %v", res.StatusCode, res.Header)
 		}
 
@@ -665,6 +2462,241 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given copy source preconditions When copying Then LocalStack order and exact ETags are preserved", func(t *testing.T) {
+		res := do(http.MethodPut, "/copy-conditions", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/copy-conditions?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("enable copy versioning %d", res.StatusCode)
+		}
+		request := func(key string, headers map[string]string) (*http.Response, []byte) {
+			t.Helper()
+			req, _ := http.NewRequest(http.MethodPut, ts.URL+"/copy-conditions/"+key, nil)
+			req.Header.Set("Authorization", auth)
+			for name, value := range headers {
+				req.Header.Set(name, value)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, body
+		}
+		source, _ := request("source", nil)
+		if source.StatusCode != http.StatusOK {
+			t.Fatalf("put source %d", source.StatusCode)
+		}
+		invalid, invalidBody := request("invalid", map[string]string{"x-amz-copy-source": "wrongformat"})
+		if invalid.StatusCode != http.StatusBadRequest || !bytes.Contains(invalidBody, []byte("<Code>InvalidArgument</Code>")) {
+			t.Fatalf("invalid copy source %d %s", invalid.StatusCode, invalidBody)
+		}
+		copySource := "/copy-conditions/source"
+		listed, listedBody := request("listed", map[string]string{"x-amz-copy-source": copySource, "x-amz-copy-source-if-match": `"wrong", ` + source.Header.Get("ETag")})
+		if listed.StatusCode != http.StatusPreconditionFailed || !bytes.Contains(listedBody, []byte("At least one of the pre-conditions you specified did not hold")) || !bytes.Contains(listedBody, []byte("x-amz-copy-source-If-Match")) {
+			t.Fatalf("listed source condition %d %s", listed.StatusCode, listedBody)
+		}
+		future, _ := request("future", map[string]string{
+			"x-amz-copy-source":                   copySource,
+			"x-amz-copy-source-if-modified-since": time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat),
+		})
+		if future.StatusCode != http.StatusOK {
+			t.Fatalf("future modified-since copy %d", future.StatusCode)
+		}
+		past := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
+		ordered, _ := request("ordered", map[string]string{
+			"x-amz-copy-source":                     copySource,
+			"x-amz-copy-source-if-match":            source.Header.Get("ETag"),
+			"x-amz-copy-source-if-none-match":       source.Header.Get("ETag"),
+			"x-amz-copy-source-if-modified-since":   past,
+			"x-amz-copy-source-if-unmodified-since": past,
+		})
+		if ordered.StatusCode != http.StatusOK {
+			t.Fatalf("ordered copy %d", ordered.StatusCode)
+		}
+	})
+
+	t.Run("Given multipart copy ranges and source conditions When uploading a part Then AWS outcomes are preserved", func(t *testing.T) {
+		res := do(http.MethodPut, "/upload-part-copy-bdd", nil, "")
+		res.Body.Close()
+		source := do(http.MethodPut, "/upload-part-copy-bdd/source", []byte("0123456789"), "")
+		source.Body.Close()
+		etag := source.Header.Get("ETag")
+		head := do(http.MethodHead, "/upload-part-copy-bdd/source", nil, "")
+		modified, err := http.ParseTime(head.Header.Get("Last-Modified"))
+		head.Body.Close()
+		if err != nil || !strings.HasSuffix(head.Header.Get("Last-Modified"), " GMT") {
+			t.Fatalf("Last-Modified = %q: %v", head.Header.Get("Last-Modified"), err)
+		}
+		_ = deps.Clock.Advance(2 * time.Second)
+		defer deps.Clock.Advance(-2 * time.Second)
+		createUpload := func(key string) string {
+			t.Helper()
+			response := do(http.MethodPost, "/upload-part-copy-bdd/"+key+"?uploads", nil, "")
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			var created struct {
+				UploadID string `xml:"UploadId"`
+			}
+			if response.StatusCode != http.StatusOK || xml.Unmarshal(body, &created) != nil || created.UploadID == "" {
+				t.Fatalf("create upload %s: %d %s", key, response.StatusCode, body)
+			}
+			return created.UploadID
+		}
+		copyPart := func(name string, headers map[string]string) (*http.Response, []byte) {
+			t.Helper()
+			path := "/upload-part-copy-bdd/" + name + "?partNumber=1&uploadId=" + url.QueryEscape(createUpload(name))
+			request, _ := http.NewRequest(http.MethodPut, ts.URL+path, nil)
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("x-amz-copy-source", "/upload-part-copy-bdd/source")
+			for key, value := range headers {
+				request.Header.Set(key, value)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, body
+		}
+		for _, tc := range []struct {
+			name, copyRange, errorText string
+			status                     int
+		}{
+			{name: "no-range", status: http.StatusOK},
+			{name: "small-range", copyRange: "bytes=0-8", status: http.StatusOK},
+			{name: "malformed", copyRange: "0-8", status: http.StatusBadRequest, errorText: "x-amz-copy-source-range value must be of the form"},
+			{name: "past-end", copyRange: "bytes=0-100", status: http.StatusBadRequest, errorText: "Range specified is not valid for source object of size: 10"},
+			{name: "after-object", copyRange: "bytes=100-200", status: http.StatusBadRequest, errorText: "specified copy range is invalid for the source object size"},
+		} {
+			headers := map[string]string{}
+			if tc.copyRange != "" {
+				headers["x-amz-copy-source-range"] = tc.copyRange
+			}
+			response, body := copyPart(tc.name, headers)
+			if response.StatusCode != tc.status || tc.errorText != "" && !bytes.Contains(body, []byte(tc.errorText)) {
+				t.Fatalf("%s range = %d %s", tc.name, response.StatusCode, body)
+			}
+		}
+		past, future := modified.Add(-time.Second).Format(http.TimeFormat), modified.Add(time.Second).Format(http.TimeFormat)
+		for _, tc := range []struct {
+			name, condition, value, errorCondition string
+			status                                 int
+		}{
+			{name: "if-match", condition: "x-amz-copy-source-if-match", value: etag, status: http.StatusOK},
+			{name: "if-none-match", condition: "x-amz-copy-source-if-none-match", value: `"not-matching"`, status: http.StatusOK},
+			{name: "if-unmodified-since", condition: "x-amz-copy-source-if-unmodified-since", value: future, status: http.StatusOK},
+			{name: "if-modified-since", condition: "x-amz-copy-source-if-modified-since", value: past, status: http.StatusOK},
+			{name: "failed-if-match", condition: "x-amz-copy-source-if-match", value: `"not-matching"`, status: http.StatusPreconditionFailed, errorCondition: "x-amz-copy-source-If-Match"},
+			{name: "failed-if-none-match", condition: "x-amz-copy-source-if-none-match", value: etag, status: http.StatusPreconditionFailed, errorCondition: "x-amz-copy-source-If-None-Match"},
+			{name: "failed-if-unmodified-since", condition: "x-amz-copy-source-if-unmodified-since", value: past, status: http.StatusPreconditionFailed, errorCondition: "x-amz-copy-source-If-Unmodified-Since"},
+			{name: "failed-if-modified-since", condition: "x-amz-copy-source-if-modified-since", value: modified.Format(http.TimeFormat), status: http.StatusPreconditionFailed, errorCondition: "x-amz-copy-source-If-Modified-Since"},
+		} {
+			response, body := copyPart(tc.name, map[string]string{tc.condition: tc.value})
+			if response.StatusCode != tc.status || tc.errorCondition != "" && !bytes.Contains(body, []byte(tc.errorCondition)) {
+				t.Fatalf("%s condition = %d %s", tc.name, response.StatusCode, body)
+			}
+		}
+		matched, body := copyPart("match-overrides-unmodified", map[string]string{"x-amz-copy-source-if-match": etag, "x-amz-copy-source-if-unmodified-since": past})
+		if matched.StatusCode != http.StatusOK {
+			t.Fatalf("matched condition precedence = %d %s", matched.StatusCode, body)
+		}
+		rejected, body := copyPart("none-match-and-unmodified", map[string]string{"x-amz-copy-source-if-none-match": `"not-matching"`, "x-amz-copy-source-if-unmodified-since": past})
+		if rejected.StatusCode != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("x-amz-copy-source-If-Unmodified-Since")) {
+			t.Fatalf("rejected condition precedence = %d %s", rejected.StatusCode, body)
+		}
+	})
+
+	t.Run("Given versioned copy destinations When conditionally copying Then current versions and delete markers govern writes", func(t *testing.T) {
+		res := do(http.MethodPut, "/copy-write-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/copy-write-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/copy-write-bdd/source", []byte("source"), "")
+		sourceETag := res.Header.Get("ETag")
+		res.Body.Close()
+		copyObject := func(key string, headers map[string]string) (*http.Response, []byte) {
+			t.Helper()
+			req, _ := http.NewRequest(http.MethodPut, ts.URL+"/copy-write-bdd/"+key, nil)
+			req.Header.Set("Authorization", auth)
+			req.Header.Set("x-amz-copy-source", "/copy-write-bdd/source")
+			for name, value := range headers {
+				req.Header.Set(name, value)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, body
+		}
+		if copied, _ := copyObject("destination", map[string]string{"If-None-Match": "*"}); copied.StatusCode != http.StatusOK {
+			t.Fatalf("first If-None-Match copy %d", copied.StatusCode)
+		}
+		if copied, _ := copyObject("destination", map[string]string{"If-None-Match": "*"}); copied.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("existing If-None-Match copy %d", copied.StatusCode)
+		}
+		res = do(http.MethodDelete, "/copy-write-bdd/destination", nil, "")
+		res.Body.Close()
+		if copied, _ := copyObject("destination", map[string]string{"If-None-Match": "*"}); copied.StatusCode != http.StatusOK {
+			t.Fatalf("delete-marker If-None-Match copy %d", copied.StatusCode)
+		}
+		if copied, _ := copyObject("destination", map[string]string{"If-Match": `"wrong"`}); copied.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("wrong If-Match copy %d", copied.StatusCode)
+		}
+		if copied, _ := copyObject("destination", map[string]string{"If-Match": sourceETag}); copied.StatusCode != http.StatusOK {
+			t.Fatalf("matching If-Match copy %d", copied.StatusCode)
+		}
+		res = do(http.MethodDelete, "/copy-write-bdd/destination", nil, "")
+		res.Body.Close()
+		if copied, body := copyObject("destination", map[string]string{"If-Match": sourceETag}); copied.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) {
+			t.Fatalf("delete-marker If-Match copy %d %s", copied.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/copy-write-bdd/destination", []byte("current"), "")
+		currentETag := res.Header.Get("ETag")
+		res.Body.Close()
+		if copied, _ := copyObject("destination", map[string]string{"If-Match": currentETag}); copied.StatusCode != http.StatusOK {
+			t.Fatalf("current If-Match copy %d", copied.StatusCode)
+		}
+		storage := map[string]string{"If-None-Match": "*", "x-amz-storage-class": "STANDARD"}
+		if copied, _ := copyObject("source", storage); copied.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("in-place If-None-Match copy %d", copied.StatusCode)
+		}
+		storage["If-Match"], storage["If-None-Match"] = sourceETag, ""
+		if copied, _ := copyObject("source", storage); copied.StatusCode != http.StatusOK {
+			t.Fatalf("in-place If-Match copy %d", copied.StatusCode)
+		}
+	})
+
+	t.Run("Given a future If-Modified-Since When reading Then S3 ignores the condition", func(t *testing.T) {
+		for _, path := range []string{"/future-read-bdd", "/future-read-bdd/object"} {
+			response := do(http.MethodPut, path, nil, "")
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("put %s: %d", path, response.StatusCode)
+			}
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/future-read-bdd/object", nil)
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("If-Modified-Since", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat))
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("future read = %d", response.StatusCode)
+		}
+	})
+
 	t.Run("Given KMS multipart encryption When completing the upload Then every stage preserves its headers", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-encryption", nil, "")
 		io.Copy(io.Discard, res.Body)
@@ -694,7 +2726,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s encryption headers %v", name, response.Header)
 			}
 		}
-		created, createdBody := request(http.MethodPost, "/multipart-encryption/object?uploads", "", map[string]string{"x-amz-server-side-encryption": "aws:kms", "x-amz-server-side-encryption-aws-kms-key-id": keyID, "x-amz-server-side-encryption-bucket-key-enabled": "true"})
+		created, createdBody := request(http.MethodPost, "/multipart-encryption/object?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC64NVME", "x-amz-server-side-encryption": "aws:kms", "x-amz-server-side-encryption-aws-kms-key-id": keyID, "x-amz-server-side-encryption-bucket-key-enabled": "true"})
 		var upload struct {
 			ID string `xml:"UploadId"`
 		}
@@ -708,13 +2740,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		assertEncryption("part", part)
 		manifest := "<CompleteMultipartUpload><Part><ETag>" + part.Header.Get("ETag") + "</ETag><PartNumber>1</PartNumber></Part></CompleteMultipartUpload>"
-		completed, _ := request(http.MethodPost, "/multipart-encryption/object?uploadId="+upload.ID, manifest, nil)
-		if completed.StatusCode != http.StatusOK {
+		completed, completedBody := request(http.MethodPost, "/multipart-encryption/object?uploadId="+upload.ID, manifest, nil)
+		if completed.StatusCode != http.StatusOK || completed.Header.Get("x-amz-checksum-crc64nvme") != "" || completed.Header.Get("x-amz-checksum-type") != "" || bytes.Contains(completedBody, []byte("ChecksumCRC64NVME")) || bytes.Contains(completedBody, []byte("ChecksumType")) {
 			t.Fatalf("complete upload %d", completed.StatusCode)
 		}
 		assertEncryption("complete", completed)
-		stored, body := request(http.MethodGet, "/multipart-encryption/object", "", nil)
-		if stored.StatusCode != http.StatusOK || string(body) != "body" {
+		stored, body := request(http.MethodGet, "/multipart-encryption/object", "", map[string]string{"x-amz-checksum-mode": "ENABLED"})
+		if stored.StatusCode != http.StatusOK || string(body) != "body" || stored.Header.Get("x-amz-checksum-crc64nvme") == "" || stored.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" {
 			t.Fatalf("stored object %d %q", stored.StatusCode, body)
 		}
 		assertEncryption("get", stored)
@@ -764,8 +2796,16 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		assertEncryption("create", created)
 		partPath := "/multipart-customer-encryption/object?partNumber=1&uploadId=" + upload.ID
-		if part, _ := request(http.MethodPut, partPath, "body", nil); part.StatusCode != http.StatusBadRequest {
-			t.Fatalf("part without customer key %d", part.StatusCode)
+		if part, faultBody := request(http.MethodPut, partPath, "body", nil); part.StatusCode != http.StatusBadRequest || !bytes.Contains(faultBody, []byte("The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters.")) {
+			t.Fatalf("part without customer key %d %s", part.StatusCode, faultBody)
+		}
+		otherKey := bytes.Repeat([]byte{'b'}, 32)
+		otherDigest := md5.Sum(otherKey)
+		wrongHeaders := maps.Clone(headers)
+		wrongHeaders["x-amz-server-side-encryption-customer-key"] = base64.StdEncoding.EncodeToString(otherKey)
+		wrongHeaders["x-amz-server-side-encryption-customer-key-MD5"] = base64.StdEncoding.EncodeToString(otherDigest[:])
+		if part, faultBody := request(http.MethodPut, partPath, "body", wrongHeaders); part.StatusCode != http.StatusBadRequest || !bytes.Contains(faultBody, []byte("The provided encryption parameters did not match the ones used originally.")) {
+			t.Fatalf("part with mismatched customer key %d %s", part.StatusCode, faultBody)
 		}
 		part, _ := request(http.MethodPut, partPath, "body", headers)
 		if part.StatusCode != http.StatusOK || part.Header.Get("ETag") == "" {
@@ -858,6 +2898,32 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusConflict || !bytes.Contains(fault, []byte("BucketAlreadyOwnedByYou")) {
 			t.Fatalf("tagged recreation %d %s", res.StatusCode, fault)
 		}
+		emptyConfiguration := []byte(`<CreateBucketConfiguration><Tags></Tags></CreateBucketConfiguration>`)
+		res = do(http.MethodPut, "/create-tagged", emptyConfiguration, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("empty-tag recreation %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/create-tagged?tagging", nil, "")
+		tags, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(tags, []byte("<Key>team</Key>")) {
+			t.Fatalf("tags after empty recreation %d %s", res.StatusCode, tags)
+		}
+		emptyTagging := []byte(`<Tagging><TagSet></TagSet></Tagging>`)
+		res = do(http.MethodPut, "/create-tagged?tagging", emptyTagging, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			t.Fatalf("empty bucket tags %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/create-tagged?tagging", nil, "")
+		fault, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(fault, []byte("NoSuchTagSet")) {
+			t.Fatalf("tags after empty put %d %s", res.StatusCode, fault)
+		}
 		invalid := []byte(`<CreateBucketConfiguration><Tags><Tag><Key>duplicate</Key><Value>one</Value></Tag><Tag><Key>duplicate</Key><Value>two</Value></Tag></Tags></CreateBucketConfiguration>`)
 		res = do(http.MethodPut, "/invalid-create-tags", invalid, "")
 		fault, _ = io.ReadAll(res.Body)
@@ -869,6 +2935,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusNotFound {
 			t.Fatalf("invalid tags reserved bucket: %d", res.StatusCode)
+		}
+		reserved := []byte(`<CreateBucketConfiguration><Tags><Tag><Key>aws:team</Key><Value>storage</Value></Tag></Tags></CreateBucketConfiguration>`)
+		res = do(http.MethodPut, "/reserved-create-tags", reserved, "")
+		fault, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte(`User-defined tag keys can't start with "aws:".`)) || bytes.Contains(fault, []byte("<TagKey>")) {
+			t.Fatalf("reserved create tag %d %s", res.StatusCode, fault)
 		}
 	})
 
@@ -885,16 +2958,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(controls, []byte("<Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule>")) || bytes.Contains(controls, []byte("<member>")) {
 			t.Fatalf("created ownership %d %s", res.StatusCode, controls)
 		}
-		res = do(http.MethodPut, "/invalid-create-owned", nil, "")
-		fault, _ := io.ReadAll(res.Body)
-		res.Body.Close()
-		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("InvalidArgument")) {
-			t.Fatalf("invalid ownership %d %s", res.StatusCode, fault)
-		}
-		res = do(http.MethodHead, "/invalid-create-owned", nil, "")
-		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound {
-			t.Fatalf("invalid ownership reserved bucket: %d", res.StatusCode)
+		for _, invalid := range []struct{ path, value string }{{"/invalid-create-owned", ""}, {"/invalid-create-owned-random", "RandomValue"}} {
+			res = do(http.MethodPut, invalid.path, nil, "")
+			fault, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			message := "<Message>Invalid x-amz-object-ownership header: " + invalid.value + "</Message>"
+			if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(fault, []byte(message)) ||
+				!bytes.Contains(fault, []byte("<ArgumentName>x-amz-object-ownership</ArgumentName>")) || bytes.Contains(fault, []byte("<ArgumentValue>")) {
+				t.Fatalf("invalid ownership %q = %d %s", invalid.value, res.StatusCode, fault)
+			}
+			res = do(http.MethodHead, invalid.path, nil, "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound {
+				t.Fatalf("invalid ownership %q reserved bucket: %d", invalid.value, res.StatusCode)
+			}
 		}
 	})
 
@@ -942,7 +3019,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/ownership-controls?ownershipControls", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("OwnershipControlsNotFoundError")) {
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("OwnershipControlsNotFoundError")) || !bytes.Contains(body, []byte("<BucketName>ownership-controls</BucketName>")) {
 			t.Fatalf("get deleted ownership controls %d %s", res.StatusCode, body)
 		}
 	})
@@ -954,9 +3031,17 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("create public-access-block bucket %d", res.StatusCode)
 		}
+		res = do(http.MethodGet, "/public-access-block?publicAccessBlock", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<BlockPublicAcls>true</BlockPublicAcls>")) ||
+			!bytes.Contains(body, []byte("<BlockPublicPolicy>true</BlockPublicPolicy>")) || !bytes.Contains(body, []byte("<IgnorePublicAcls>true</IgnorePublicAcls>")) ||
+			!bytes.Contains(body, []byte("<RestrictPublicBuckets>true</RestrictPublicBuckets>")) {
+			t.Fatalf("default public access block = %d %s", res.StatusCode, body)
+		}
 		valid := []byte(`<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls></PublicAccessBlockConfiguration>`)
 		res = do(http.MethodPut, "/public-access-block?publicAccessBlock", valid, "")
-		body, _ := io.ReadAll(res.Body)
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || len(body) != 0 {
 			t.Fatalf("put public access block %d %s", res.StatusCode, body)
@@ -991,7 +3076,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/public-access-block?publicAccessBlock", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchPublicAccessBlockConfiguration")) {
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchPublicAccessBlockConfiguration")) || !bytes.Contains(body, []byte("<BucketName>public-access-block</BucketName>")) {
 			t.Fatalf("get deleted public access block %d %s", res.StatusCode, body)
 		}
 	})
@@ -1065,6 +3150,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("put CORS %d", res.StatusCode)
 		}
+		preflight, _ := http.NewRequest(http.MethodOptions, ts.URL+"/key", nil)
+		preflight.Host = "cors-bdd.s3.us-east-1.amazonaws.com"
+		preflight.Header.Set("Origin", "https://example.test")
+		preflight.Header.Set("Access-Control-Request-Method", http.MethodGet)
+		res, err = http.DefaultClient.Do(preflight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Access-Control-Allow-Origin") != "https://example.test" || res.Header.Get("Access-Control-Allow-Methods") != "GET, HEAD" || res.Header.Get("Access-Control-Max-Age") != "300" {
+			t.Fatalf("CORS preflight %d %#v", res.StatusCode, res.Header)
+		}
 		res = do(http.MethodGet, "/cors-bdd?cors", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
@@ -1097,6 +3195,18 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchCORSConfiguration")) {
 			t.Fatalf("get deleted CORS %d %s", res.StatusCode, body)
+		}
+		defaultPreflight, _ := http.NewRequest(http.MethodOptions, ts.URL+"/key", nil)
+		defaultPreflight.Host = "cors-bdd.s3.us-east-1.amazonaws.com"
+		defaultPreflight.Header.Set("Origin", "https://app.localstack.cloud")
+		res, err = http.DefaultClient.Do(defaultPreflight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" || res.Header.Get("Vary") != "Origin" {
+			t.Fatalf("LocalStack default CORS %d %#v", res.StatusCode, res.Header)
 		}
 	})
 
@@ -1241,6 +3351,24 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("x-amz-expiration"), `rule-id="expire"`) {
 			t.Fatalf("head lifecycle object %d headers=%v", res.StatusCode, res.Header)
 		}
+		res = do(http.MethodPost, "/lifecycle-bdd/multipart?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/lifecycle-bdd/multipart?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("body"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, "/lifecycle-bdd/multipart?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("x-amz-expiration"), `rule-id="expire"`) {
+			t.Fatalf("complete lifecycle object %d %s headers=%v", res.StatusCode, body, res.Header)
+		}
 		invalid := []byte(`<LifecycleConfiguration><Rule><ID>invalid</ID><Filter><Prefix>a</Prefix><ObjectSizeGreaterThan>1</ObjectSizeGreaterThan></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>`)
 		res = do(http.MethodPut, "/lifecycle-bdd?lifecycle", invalid, "")
 		body, _ = io.ReadAll(res.Body)
@@ -1311,7 +3439,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/acl-bdd?acl", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Owner>")) || !bytes.Contains(body, []byte("<Permission>FULL_CONTROL</Permission>")) || bytes.Contains(body, []byte("GetBucketAclResult")) {
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Owner>")) || !bytes.Contains(body, []byte("<Permission>FULL_CONTROL</Permission>")) || bytes.Contains(body, []byte("<DisplayName>")) || bytes.Contains(body, []byte("GetBucketAclResult")) {
 			t.Fatalf("default bucket ACL %d %s", res.StatusCode, body)
 		}
 		public := []byte(`<AccessControlPolicy><Owner><ID>000000000000</ID><DisplayName>mirror</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>000000000000</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>`)
@@ -1353,7 +3481,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("Given an object delete marker When reading or writing its ACL Then S3 returns LocalStack faults", func(t *testing.T) {
+	t.Run("Given an object delete marker When reading or writing its ACL or tags Then S3 returns LocalStack faults", func(t *testing.T) {
 		for _, request := range []struct {
 			method, path, body string
 		}{
@@ -1390,6 +3518,44 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s %s = %d %s", request.method, request.path, res.StatusCode, body)
 			}
 		}
+		for _, suffix := range []string{"", "&versionId=" + url.QueryEscape(versionID)} {
+			for _, request := range []struct {
+				method, body string
+			}{
+				{http.MethodPut, "<Tagging><TagSet></TagSet></Tagging>"},
+				{http.MethodGet, ""},
+				{http.MethodDelete, ""},
+			} {
+				res = do(request.method, "/acl-marker-bdd/object?tagging"+suffix, []byte(request.body), "")
+				body, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "DELETE" ||
+					!bytes.Contains(body, []byte("<Code>MethodNotAllowed</Code>")) || !bytes.Contains(body, []byte("<Method>"+request.method+"</Method>")) ||
+					!bytes.Contains(body, []byte("<ResourceType>DeleteMarker</ResourceType>")) {
+					t.Fatalf("%s tagging%s = %d %#v %s", request.method, suffix, res.StatusCode, res.Header, body)
+				}
+			}
+		}
+		for _, request := range []struct {
+			method, body, key string
+		}{
+			{http.MethodPut, "<Tagging><TagSet></TagSet></Tagging>", "missing"},
+			{http.MethodGet, "", "acl-marker-bdd/missing"},
+			{http.MethodDelete, "", "missing"},
+		} {
+			res = do(request.method, "/acl-marker-bdd/missing?tagging", []byte(request.body), "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) || !bytes.Contains(body, []byte("<Key>"+request.key+"</Key>")) {
+				t.Fatalf("%s missing tags = %d %s", request.method, res.StatusCode, body)
+			}
+		}
+		res = do(http.MethodGet, "/acl-marker-bdd/object?tagging&versionId=missing", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchVersion</Code>")) || !bytes.Contains(body, []byte("<VersionId>missing</VersionId>")) {
+			t.Fatalf("missing tag version = %d %s", res.StatusCode, body)
+		}
 	})
 
 	t.Run("Given a bucket policy When replacing it Then S3 validates and returns the exact JSON", func(t *testing.T) {
@@ -1402,15 +3568,43 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchBucketPolicy")) {
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchBucketPolicy</Code>")) ||
+			!bytes.Contains(body, []byte("<Message>The bucket policy does not exist</Message>")) || !bytes.Contains(body, []byte("<BucketName>policy-bdd</BucketName>")) {
 			t.Fatalf("missing policy %d %s", res.StatusCode, body)
 		}
 		policy := []byte(`{"Version":"2012-10-17", "Statement":[{"Effect":"Allow","Principal":"*"}]}`)
 		res = do(http.MethodPut, "/policy-bdd?policy", policy, "")
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK {
+		if res.StatusCode != http.StatusNoContent {
 			t.Fatalf("put policy %d", res.StatusCode)
+		}
+		withOwner := func(method, owner string, payload []byte) (int, []byte) {
+			t.Helper()
+			request, _ := http.NewRequest(method, ts.URL+"/policy-bdd?policy", bytes.NewReader(payload))
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("x-amz-expected-bucket-owner", owner)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responseBody, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, responseBody
+		}
+		if status, body := withOwner(http.MethodGet, "000000000000", nil); status != http.StatusOK || !bytes.Equal(body, policy) {
+			t.Fatalf("matching policy owner %d %s", status, body)
+		}
+		for _, request := range []struct {
+			method string
+			body   []byte
+		}{{http.MethodGet, nil}, {http.MethodPut, []byte(`{}`)}, {http.MethodDelete, nil}} {
+			if status, body := withOwner(request.method, "999999999999", request.body); status != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>AccessDenied</Code>")) {
+				t.Fatalf("%s mismatched policy owner %d %s", request.method, status, body)
+			}
+		}
+		if status, body := withOwner(http.MethodGet, "invalid", nil); status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidBucketOwnerAWSAccountID</Code>")) {
+			t.Fatalf("invalid policy owner %d %s", status, body)
 		}
 		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
 		body, _ = io.ReadAll(res.Body)
@@ -1437,6 +3631,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			if res.StatusCode != http.StatusNoContent {
 				t.Fatalf("delete policy %d", res.StatusCode)
 			}
+		}
+		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchBucketPolicy</Code>")) ||
+			!bytes.Contains(body, []byte("<Message>The bucket policy does not exist</Message>")) || !bytes.Contains(body, []byte("<BucketName>policy-bdd</BucketName>")) {
+			t.Fatalf("deleted policy %d %s", res.StatusCode, body)
 		}
 	})
 
@@ -1467,10 +3668,21 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/encryption-bdd?encryption", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || len(body) != 0 {
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<SSEAlgorithm>AES256</SSEAlgorithm>")) || !bytes.Contains(body, []byte("<BucketKeyEnabled>false</BucketKeyEnabled>")) {
 			t.Fatalf("default encryption %d %s", res.StatusCode, body)
 		}
-		valid := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/bdd</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`)
+		aes := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`)
+		res = do(http.MethodPut, "/encryption-bdd?encryption", aes, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put AES encryption %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/encryption-bdd/aes", []byte("body"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "AES256" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "" {
+			t.Fatalf("AES encryption %d %v", res.StatusCode, res.Header)
+		}
+		valid := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/encryption-bdd</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`)
 		res = do(http.MethodPut, "/encryption-bdd?encryption", valid, "")
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
@@ -1491,10 +3703,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("invalid encryption %d %s", res.StatusCode, body)
 		}
 		res = do(http.MethodPut, "/encryption-bdd/object", []byte("body"), "")
-		io.Copy(io.Discard, res.Body)
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/bdd" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
-			t.Fatalf("inherited encryption %d %v", res.StatusCode, res.Header)
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/encryption-bdd" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("inherited encryption %d %v %s", res.StatusCode, res.Header, body)
 		}
 		for range 2 {
 			res = do(http.MethodDelete, "/encryption-bdd?encryption", nil, "")
@@ -1544,6 +3756,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		if err != nil || len(messages) != 2 || !matched {
 			t.Fatalf("notification messages = %#v, err=%v", messages, err)
+		}
+		for _, test := range []struct{ name, rule, code, message string }{
+			{"missing fields", `<FilterRule></FilterRule>`, "MalformedXML", "The XML you provided was not well-formed or did not validate against our published schema"},
+			{"missing value", `<FilterRule><Name>prefix</Name></FilterRule>`, "MalformedXML", "The XML you provided was not well-formed or did not validate against our published schema"},
+			{"missing name", `<FilterRule><Value>test</Value></FilterRule>`, "MalformedXML", "The XML you provided was not well-formed or did not validate against our published schema"},
+			{"invalid name", `<FilterRule><Name>INVALID</Name><Value>test</Value></FilterRule>`, "InvalidArgument", "filter rule name must be either prefix or suffix"},
+		} {
+			configuration := []byte(`<NotificationConfiguration><QueueConfiguration><Queue>arn:aws:sqs:us-east-1:000000000000:notification-queue</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key>` + test.rule + `</S3Key></Filter></QueueConfiguration></NotificationConfiguration>`)
+			res = do(http.MethodPut, "/notification-bdd?notification", configuration, "")
+			body, _ = io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>"+test.code+"</Code>")) || !bytes.Contains(body, []byte("<Message>"+test.message+"</Message>")) {
+				t.Fatalf("%s notification filter %d %s", test.name, res.StatusCode, body)
+			}
 		}
 		invalid := []byte(`<NotificationConfiguration><QueueConfiguration><Queue>arn:aws:sqs:us-east-1:000000000000:missing</Queue><Event>s3:ObjectCreated:*</Event></QueueConfiguration></NotificationConfiguration>`)
 		res = do(http.MethodPut, "/notification-bdd?notification", invalid, "")
@@ -1608,9 +3834,15 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("create accelerate bucket %d", res.StatusCode)
 		}
+		res = do(http.MethodGet, "/accelerate-bdd?accelerate", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Contains(body, []byte("<Status>")) {
+			t.Fatalf("default acceleration %d %s", res.StatusCode, body)
+		}
 		valid := []byte(`<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>`)
 		res = do(http.MethodPut, "/accelerate-bdd?accelerate", valid, "")
-		body, _ := io.ReadAll(res.Body)
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || len(body) != 0 {
 			t.Fatalf("put acceleration %d %s", res.StatusCode, body)
@@ -1621,12 +3853,14 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) || bytes.Contains(body, []byte("GetBucketAccelerateConfigurationResult")) {
 			t.Fatalf("get acceleration %d %s", res.StatusCode, body)
 		}
-		invalid := []byte(`<AccelerateConfiguration><Status>Invalid</Status></AccelerateConfiguration>`)
-		res = do(http.MethodPut, "/accelerate-bdd?accelerate", invalid, "")
-		body, _ = io.ReadAll(res.Body)
-		res.Body.Close()
-		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
-			t.Fatalf("invalid acceleration %d %s", res.StatusCode, body)
+		for _, status := range []string{"enabled", "random"} {
+			invalid := []byte(`<AccelerateConfiguration><Status>` + status + `</Status></AccelerateConfiguration>`)
+			res = do(http.MethodPut, "/accelerate-bdd?accelerate", invalid, "")
+			body, _ = io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>MalformedXML</Code>")) || !bytes.Contains(body, []byte("<Message>The XML you provided was not well-formed or did not validate against our published schema</Message>")) {
+				t.Fatalf("invalid acceleration %q: %d %s", status, res.StatusCode, body)
+			}
 		}
 		res = do(http.MethodGet, "/accelerate-bdd?accelerate", nil, "")
 		body, _ = io.ReadAll(res.Body)
@@ -1634,14 +3868,77 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) {
 			t.Fatalf("acceleration after invalid put %d %s", res.StatusCode, body)
 		}
+		suspended := []byte(`<AccelerateConfiguration><Status>Suspended</Status></AccelerateConfiguration>`)
+		res = do(http.MethodPut, "/accelerate-bdd?accelerate", suspended, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		res = do(http.MethodGet, "/accelerate-bdd?accelerate", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Suspended</Status>")) {
+			t.Fatalf("suspended acceleration %d %s", res.StatusCode, body)
+		}
 		res = do(http.MethodPut, "/accelerate.with.period", nil, "")
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
-		res = do(http.MethodPut, "/accelerate.with.period?accelerate", valid, "")
+		invalid := []byte(`<AccelerateConfiguration><Status>random</Status></AccelerateConfiguration>`)
+		res = do(http.MethodPut, "/accelerate.with.period?accelerate", invalid, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidRequest")) {
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>S3 Transfer Acceleration is not supported for buckets with periods (.) in their names</Message>")) {
 			t.Fatalf("period bucket acceleration %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given bucket metrics When managing configurations Then S3 persists and reports missing IDs", func(t *testing.T) {
+		res := do(http.MethodPut, "/metrics-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create metrics bucket %d", res.StatusCode)
+		}
+		configuration := []byte(`<MetricsConfiguration><Id>metrics</Id><Filter><Prefix>logs/</Prefix></Filter></MetricsConfiguration>`)
+		res = do(http.MethodPut, "/metrics-bdd?metrics&id=metrics", configuration, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("put metrics %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/metrics-bdd?metrics&id=metrics", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Id>metrics</Id>")) || !bytes.Contains(body, []byte("<Prefix>logs/</Prefix>")) {
+			t.Fatalf("get metrics %d %s", res.StatusCode, body)
+		}
+		overwrite := []byte(`<MetricsConfiguration><Id>metrics</Id><Filter><Prefix>logs/new-prefix</Prefix></Filter></MetricsConfiguration>`)
+		res = do(http.MethodPut, "/metrics-bdd?metrics&id=metrics", overwrite, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		res = do(http.MethodGet, "/metrics-bdd?metrics&id=metrics", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Prefix>logs/new-prefix</Prefix>")) {
+			t.Fatalf("overwritten metrics %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/metrics-bdd?metrics", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ListBucketMetricsConfigurationsResult")) || !bytes.Contains(body, []byte("<MetricsConfiguration>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
+			t.Fatalf("list metrics %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodDelete, "/metrics-bdd?metrics&id=metrics", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete metrics %d", res.StatusCode)
+		}
+		for _, method := range []string{http.MethodGet, http.MethodDelete} {
+			res = do(method, "/metrics-bdd?metrics&id=metrics", nil, "")
+			body, _ = io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchConfiguration</Code>")) || !bytes.Contains(body, []byte("<Message>The specified configuration does not exist.</Message>")) {
+				t.Fatalf("missing metrics %s %d %s", method, res.StatusCode, body)
+			}
 		}
 	})
 
@@ -1774,13 +4071,14 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		} {
 			res := request(http.MethodPut, "/"+bucket.name, bucket.region, bucket.body)
 			res.Body.Close()
-			if res.StatusCode != http.StatusOK {
+			if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-arn") != "arn:aws:s3:::"+bucket.name {
 				t.Fatalf("create %s: %d", bucket.name, res.StatusCode)
 			}
 		}
 		type page struct {
 			Buckets []struct {
 				Name         string `xml:"Name"`
+				BucketArn    string `xml:"BucketArn"`
 				BucketRegion string `xml:"BucketRegion"`
 			} `xml:"Buckets>Bucket"`
 			Prefix            string `xml:"Prefix"`
@@ -1797,11 +4095,11 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			return got
 		}
 		first := list("/?max-buckets=1&prefix=list-behavior")
-		if len(first.Buckets) != 1 || first.Buckets[0].Name != "list-behavior-east" || first.Buckets[0].BucketRegion != "us-east-1" || first.Prefix != "list-behavior" || first.ContinuationToken == "" {
+		if len(first.Buckets) != 1 || first.Buckets[0].Name != "list-behavior-east" || first.Buckets[0].BucketArn != "arn:aws:s3:::list-behavior-east" || first.Buckets[0].BucketRegion != "us-east-1" || first.Prefix != "list-behavior" || first.ContinuationToken == "" {
 			t.Fatalf("first page: %#v", first)
 		}
 		second := list("/?max-buckets=1&prefix=list-behavior&continuation-token=" + url.QueryEscape(first.ContinuationToken))
-		if len(second.Buckets) != 1 || second.Buckets[0].Name != "list-behavior-west" || second.Buckets[0].BucketRegion != "us-west-2" || second.ContinuationToken != "" {
+		if len(second.Buckets) != 1 || second.Buckets[0].Name != "list-behavior-west" || second.Buckets[0].BucketArn != "arn:aws:s3:::list-behavior-west" || second.Buckets[0].BucketRegion != "us-west-2" || second.ContinuationToken != "" {
 			t.Fatalf("second page: %#v", second)
 		}
 	})
@@ -1824,6 +4122,12 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("IllegalVersioningConfigurationException")) {
 			t.Fatalf("missing versioning status %d %s", res.StatusCode, body)
 		}
+		res = do(http.MethodPut, "/versioning-state?versioning", []byte("<VersioningConfiguration><Status>enabled</Status></VersioningConfiguration>"), "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>MalformedXML</Code>")) || !bytes.Contains(body, []byte("<Message>The XML you provided was not well-formed or did not validate against our published schema</Message>")) {
+			t.Fatalf("invalid versioning status %d %s", res.StatusCode, body)
+		}
 		res = do(http.MethodPut, "/versioning-state?versioning", []byte("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"), "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
@@ -1835,6 +4139,122 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) {
 			t.Fatalf("enabled versioning %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/versioning-state/version-format", []byte("body"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(res.Header.Get("x-amz-version-id")) != 32 {
+			t.Fatalf("version id %d %q", res.StatusCode, res.Header.Get("x-amz-version-id"))
+		}
+	})
+
+	t.Run("Given suspended versioning When objects are replaced Then one null version remains", func(t *testing.T) {
+		for _, request := range []struct {
+			method, path, body string
+		}{
+			{http.MethodPut, "/suspended-version", ""},
+			{http.MethodPut, "/suspended-version/key", "unversioned"},
+			{http.MethodPut, "/suspended-version?versioning", "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"},
+		} {
+			res := do(request.method, request.path, []byte(request.body), "")
+			res.Body.Close()
+			if res.StatusCode >= 300 {
+				t.Fatalf("%s %s = %d", request.method, request.path, res.StatusCode)
+			}
+		}
+		enabled := do(http.MethodPut, "/suspended-version/key", []byte("enabled"), "")
+		enabled.Body.Close()
+		enabledVersion := enabled.Header.Get("x-amz-version-id")
+		if enabled.StatusCode != http.StatusOK || enabledVersion == "" {
+			t.Fatalf("enabled version = %d %v", enabled.StatusCode, enabled.Header)
+		}
+		suspend := do(http.MethodPut, "/suspended-version?versioning", []byte("<VersioningConfiguration><Status>Suspended</Status></VersioningConfiguration>"), "")
+		suspend.Body.Close()
+		if suspend.StatusCode != http.StatusOK {
+			t.Fatalf("suspend = %d", suspend.StatusCode)
+		}
+		for _, body := range []string{"first null", "second null"} {
+			put := do(http.MethodPut, "/suspended-version/key", []byte(body), "")
+			put.Body.Close()
+			if put.StatusCode != http.StatusOK {
+				t.Fatalf("suspended put = %d", put.StatusCode)
+			}
+		}
+		listed := do(http.MethodGet, "/suspended-version?versions", nil, "")
+		listedBody, _ := io.ReadAll(listed.Body)
+		listed.Body.Close()
+		if listed.StatusCode != http.StatusOK || bytes.Count(listedBody, []byte("<VersionId>null</VersionId>")) != 1 || !bytes.Contains(listedBody, []byte("<VersionId>"+enabledVersion+"</VersionId>")) {
+			t.Fatalf("suspended versions = %d %s", listed.StatusCode, listedBody)
+		}
+		nullObject := do(http.MethodGet, "/suspended-version/key?versionId=null", nil, "")
+		nullBody, _ := io.ReadAll(nullObject.Body)
+		nullObject.Body.Close()
+		if nullObject.StatusCode != http.StatusOK || string(nullBody) != "second null" || nullObject.Header.Get("x-amz-version-id") != "null" {
+			t.Fatalf("null object = %d %q %v", nullObject.StatusCode, nullBody, nullObject.Header)
+		}
+		marker := do(http.MethodDelete, "/suspended-version/key", nil, "")
+		marker.Body.Close()
+		if marker.StatusCode != http.StatusNoContent || marker.Header.Get("x-amz-delete-marker") != "true" || marker.Header.Get("x-amz-version-id") != "null" {
+			t.Fatalf("null marker = %d %v", marker.StatusCode, marker.Header)
+		}
+		deleted := do(http.MethodDelete, "/suspended-version/key?versionId=null", nil, "")
+		deleted.Body.Close()
+		if deleted.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete null marker = %d", deleted.StatusCode)
+		}
+		restored := do(http.MethodGet, "/suspended-version/key", nil, "")
+		restoredBody, _ := io.ReadAll(restored.Body)
+		restored.Body.Close()
+		if restored.StatusCode != http.StatusOK || string(restoredBody) != "enabled" || restored.Header.Get("x-amz-version-id") != enabledVersion {
+			t.Fatalf("restored object = %d %q %v", restored.StatusCode, restoredBody, restored.Header)
+		}
+	})
+
+	t.Run("Given object versions and ranges When reads fail Then AWS error details are returned", func(t *testing.T) {
+		for _, request := range []struct {
+			method, path, body string
+		}{{http.MethodPut, "/crud-read-bdd", ""}, {http.MethodPut, "/crud-read-bdd/key", "0123456789"}} {
+			res := do(request.method, request.path, []byte(request.body), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("%s %s = %d", request.method, request.path, res.StatusCode)
+			}
+		}
+		nullRead := do(http.MethodGet, "/crud-read-bdd/key?versionId=null", nil, "")
+		nullBody, _ := io.ReadAll(nullRead.Body)
+		nullRead.Body.Close()
+		if nullRead.StatusCode != http.StatusOK || string(nullBody) != "0123456789" || nullRead.Header.Get("x-amz-version-id") != "" {
+			t.Fatalf("unversioned null read = %d %q %v", nullRead.StatusCode, nullBody, nullRead.Header)
+		}
+		invalid := do(http.MethodGet, "/crud-read-bdd/key?versionId=missing", nil, "")
+		invalidBody, _ := io.ReadAll(invalid.Body)
+		invalid.Body.Close()
+		if invalid.StatusCode != http.StatusBadRequest || !bytes.Contains(invalidBody, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(invalidBody, []byte("<ArgumentName>versionId</ArgumentName>")) || !bytes.Contains(invalidBody, []byte("<ArgumentValue>missing</ArgumentValue>")) {
+			t.Fatalf("invalid version read = %d %s", invalid.StatusCode, invalidBody)
+		}
+		rangeRequest, _ := http.NewRequest(http.MethodGet, ts.URL+"/crud-read-bdd/key", nil)
+		rangeRequest.Header.Set("Authorization", auth)
+		rangeRequest.Header.Set("Range", "bytes=-0")
+		unsatisfied, err := http.DefaultClient.Do(rangeRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unsatisfiedBody, _ := io.ReadAll(unsatisfied.Body)
+		unsatisfied.Body.Close()
+		if unsatisfied.StatusCode != http.StatusRequestedRangeNotSatisfiable || unsatisfied.Header.Get("Content-Range") != "bytes */10" || !bytes.Contains(unsatisfiedBody, []byte("<ActualObjectSize>10</ActualObjectSize>")) || !bytes.Contains(unsatisfiedBody, []byte("<RangeRequested>bytes=-0</RangeRequested>")) {
+			t.Fatalf("unsatisfied range = %d %s %v", unsatisfied.StatusCode, unsatisfiedBody, unsatisfied.Header)
+		}
+		versioning := do(http.MethodPut, "/crud-read-bdd?versioning", []byte("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"), "")
+		versioning.Body.Close()
+		versioned := do(http.MethodPut, "/crud-read-bdd/key", []byte("versioned"), "")
+		versioned.Body.Close()
+		version := versioned.Header.Get("x-amz-version-id")
+		deleted := do(http.MethodDelete, "/crud-read-bdd/key?versionId="+version, nil, "")
+		deleted.Body.Close()
+		missing := do(http.MethodGet, "/crud-read-bdd/key?versionId="+version, nil, "")
+		missingBody, _ := io.ReadAll(missing.Body)
+		missing.Body.Close()
+		if versioning.StatusCode != http.StatusOK || versioned.StatusCode != http.StatusOK || version == "" || deleted.StatusCode != http.StatusNoContent || missing.StatusCode != http.StatusNotFound || !bytes.Contains(missingBody, []byte("<Code>NoSuchVersion</Code>")) || !bytes.Contains(missingBody, []byte("<Key>key</Key>")) || !bytes.Contains(missingBody, []byte("<VersionId>"+version+"</VersionId>")) {
+			t.Fatalf("deleted version read = %d %s", missing.StatusCode, missingBody)
 		}
 	})
 
@@ -1935,6 +4355,26 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		restored.Body.Close()
 		if restored.StatusCode != http.StatusOK || string(body) != "old" || restored.Header.Get("x-amz-version-id") == version {
 			t.Fatalf("restored = %d %q %v", restored.StatusCode, body, restored.Header)
+		}
+	})
+
+	t.Run("Given a plain bucket When object lock is requested Then AWS faults are preserved", func(t *testing.T) {
+		created := do(http.MethodPut, "/object-lock-plain", nil, "")
+		created.Body.Close()
+		if created.StatusCode >= 300 {
+			t.Fatalf("create plain bucket = %d", created.StatusCode)
+		}
+		missing := do(http.MethodGet, "/object-lock-plain?object-lock", nil, "")
+		missingBody, _ := io.ReadAll(missing.Body)
+		missing.Body.Close()
+		if missing.StatusCode != http.StatusNotFound || !bytes.Contains(missingBody, []byte("ObjectLockConfigurationNotFoundError")) || !bytes.Contains(missingBody, []byte("does not exist for this bucket")) {
+			t.Fatalf("missing configuration = %d %s", missing.StatusCode, missingBody)
+		}
+		bulk := do(http.MethodPost, "/object-lock-plain?delete", []byte("<Delete><Object><Key>key</Key></Object></Delete>"), "")
+		bulkBody, _ := io.ReadAll(bulk.Body)
+		bulk.Body.Close()
+		if bulk.StatusCode != http.StatusBadRequest || !bytes.Contains(bulkBody, []byte("InvalidArgument")) || !bytes.Contains(bulkBody, []byte("only applicable to Object Lock enabled buckets")) {
+			t.Fatalf("invalid bulk bypass = %d %s", bulk.StatusCode, bulkBody)
 		}
 	})
 
@@ -2132,6 +4572,62 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("BadDigest")) {
 			t.Fatalf("bad xxhash %d %s", res.StatusCode, fault)
+		}
+	})
+
+	t.Run("Given a checksummed object When copying it Then the checksum is preserved", func(t *testing.T) {
+		res := do(http.MethodPut, "/copy-checksum-behavior", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		body := []byte("copy-checksum")
+		digest := sha256.Sum256(body)
+		checksum := base64.StdEncoding.EncodeToString(digest[:])
+		request := func(method, path string, headers map[string]string) *http.Response {
+			t.Helper()
+			payload := body
+			if method == http.MethodHead || headers["x-amz-copy-source"] != "" {
+				payload = nil
+			}
+			req, err := http.NewRequest(method, ts.URL+path, bytes.NewReader(payload))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			for name, value := range headers {
+				req.Header.Set(name, value)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response
+		}
+		res = request(http.MethodPut, "/copy-checksum-behavior/source", map[string]string{"x-amz-checksum-sha256": checksum})
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put source %d", res.StatusCode)
+		}
+		res = request(http.MethodPut, "/copy-checksum-behavior/destination", map[string]string{"x-amz-copy-source": "copy-checksum-behavior/source"})
+		copyResult, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(copyResult, []byte("<ChecksumSHA256>"+checksum+"</ChecksumSHA256>")) || !bytes.Contains(copyResult, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
+			t.Fatalf("copy result %d %s", res.StatusCode, copyResult)
+		}
+		var copied struct {
+			LastModified string `xml:"LastModified"`
+		}
+		if err := xml.Unmarshal(copyResult, &copied); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := time.Parse(time.RFC3339, copied.LastModified); err != nil {
+			t.Fatalf("copy LastModified %q: %v", copied.LastModified, err)
+		}
+		res = request(http.MethodHead, "/copy-checksum-behavior/destination", map[string]string{"x-amz-checksum-mode": "ENABLED"})
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-checksum-sha256") != checksum || res.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+			t.Fatalf("copied checksum %d %v", res.StatusCode, res.Header)
 		}
 	})
 

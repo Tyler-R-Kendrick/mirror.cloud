@@ -36,6 +36,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if name == "" {
 		name = RouteName(r)
 	}
+	if name == "" && svc.ID == "aws.s3" && r.Method == http.MethodOptions && svc.OperationByName("GetObject") != nil {
+		name = "GetObject"
+	}
 	if name != "" {
 		if op := svc.OperationByName(name); op != nil {
 			return op, nil
@@ -521,8 +524,17 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 	case "CompleteMultipartUpload":
 		var completed struct {
 			Part []struct {
-				ETag       string `xml:"ETag"`
-				PartNumber int    `xml:"PartNumber"`
+				ETag              string `xml:"ETag"`
+				PartNumber        int    `xml:"PartNumber"`
+				ChecksumCRC32     string `xml:"ChecksumCRC32"`
+				ChecksumCRC32C    string `xml:"ChecksumCRC32C"`
+				ChecksumCRC64NVME string `xml:"ChecksumCRC64NVME"`
+				ChecksumMD5       string `xml:"ChecksumMD5"`
+				ChecksumSHA1      string `xml:"ChecksumSHA1"`
+				ChecksumSHA256    string `xml:"ChecksumSHA256"`
+				ChecksumXXHASH64  string `xml:"ChecksumXXHASH64"`
+				ChecksumXXHASH3   string `xml:"ChecksumXXHASH3"`
+				ChecksumXXHASH128 string `xml:"ChecksumXXHASH128"`
 			} `xml:"Part"`
 		}
 		if xml.Unmarshal(raw, &completed) != nil {
@@ -531,7 +543,13 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		}
 		parts := make([]any, 0, len(completed.Part))
 		for _, part := range completed.Part {
-			parts = append(parts, map[string]any{"ETag": part.ETag, "PartNumber": part.PartNumber})
+			item := map[string]any{"ETag": part.ETag, "PartNumber": part.PartNumber}
+			for name, value := range map[string]string{"ChecksumCRC32": part.ChecksumCRC32, "ChecksumCRC32C": part.ChecksumCRC32C, "ChecksumCRC64NVME": part.ChecksumCRC64NVME, "ChecksumMD5": part.ChecksumMD5, "ChecksumSHA1": part.ChecksumSHA1, "ChecksumSHA256": part.ChecksumSHA256, "ChecksumXXHASH64": part.ChecksumXXHASH64, "ChecksumXXHASH3": part.ChecksumXXHASH3, "ChecksumXXHASH128": part.ChecksumXXHASH128} {
+				if value != "" {
+					item[name] = value
+				}
+			}
+			parts = append(parts, item)
 		}
 		in["MultipartUpload"] = map[string]any{"Parts": parts}
 	case "RestoreObject":
@@ -1131,8 +1149,8 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			Filter        *struct {
 				Key *struct {
 					Rules []struct {
-						Name  string `xml:"Name"`
-						Value string `xml:"Value"`
+						Name  *string `xml:"Name"`
+						Value *string `xml:"Value"`
 					} `xml:"FilterRule"`
 				} `xml:"S3Key"`
 			} `xml:"Filter"`
@@ -1164,7 +1182,14 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 					if source.Filter.Key != nil {
 						rules := make([]any, 0, len(source.Filter.Key.Rules))
 						for _, rule := range source.Filter.Key.Rules {
-							rules = append(rules, map[string]any{"Name": rule.Name, "Value": rule.Value})
+							decoded := map[string]any{}
+							if rule.Name != nil {
+								decoded["Name"] = *rule.Name
+							}
+							if rule.Value != nil {
+								decoded["Value"] = *rule.Value
+							}
+							rules = append(rules, decoded)
 						}
 						filter["Key"] = map[string]any{"FilterRules": rules}
 					}
@@ -1249,6 +1274,10 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		status = 200
 	}
 	for k, vs := range resp.Headers {
+		if strings.EqualFold(k, "ETag") {
+			w.Header()["ETag"] = append(w.Header()["ETag"], vs...)
+			continue
+		}
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
@@ -1626,14 +1655,19 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})
 	case "ListMultipartUploads":
 		writeFlattened(resp.Output, &b, [][2]string{{"Uploads", "Upload"}, {"CommonPrefixes", "CommonPrefixes"}})
+	case "ListObjectVersions":
+		writeFlattened(resp.Output, &b, [][2]string{{"Versions", "Version"}, {"DeleteMarkers", "DeleteMarker"}, {"CommonPrefixes", "CommonPrefixes"}})
+	case "ListObjects", "ListObjectsV2":
+		writeFlattened(resp.Output, &b, [][2]string{{"Contents", "Contents"}, {"CommonPrefixes", "CommonPrefixes"}})
 	case "GetObjectAttributes":
-		top := make(map[string]any, len(resp.Output)-1)
-		for key, value := range resp.Output {
-			if key != "ObjectParts" {
-				top[key] = value
+		writeFields := func(keys ...string) {
+			for _, key := range keys {
+				if value, ok := resp.Output[key]; ok {
+					write(map[string]any{key: value}, &b)
+				}
 			}
 		}
-		write(top, &b)
+		writeFields("ETag", "Checksum")
 		if parts, ok := resp.Output["ObjectParts"].(map[string]any); ok {
 			b.WriteString("<ObjectParts>")
 			encoded := make(map[string]any, len(parts))
@@ -1647,6 +1681,7 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			writeFlattened(encoded, &b, [][2]string{{"Parts", "Part"}})
 			b.WriteString("</ObjectParts>")
 		}
+		writeFields("StorageClass", "ObjectSize")
 	case "GetObjectTagging", "GetBucketTagging":
 		b.WriteString("<TagSet>")
 		for _, item := range resp.Output["TagSet"].([]any) {
@@ -1765,6 +1800,12 @@ func write(v any, b *strings.Builder) {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
+			if values, ok := t[k].([]any); ok && k == "ChecksumAlgorithm" {
+				for _, value := range values {
+					fmt.Fprintf(b, "<ChecksumAlgorithm>%s</ChecksumAlgorithm>", xmlEscape(fmt.Sprint(value)))
+				}
+				continue
+			}
 			fmt.Fprintf(b, "<%s>", k)
 			write(t[k], b)
 			fmt.Fprintf(b, "</%s>", k)
@@ -1829,8 +1870,12 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
+	message := f.Message
+	if message == "" && f.Code == "MalformedXML" {
+		message = "The XML you provided was not well-formed or did not validate against our published schema"
+	}
 	var body strings.Builder
-	fmt.Fprintf(&body, `<Error><Code>%s</Code><Message>%s</Message>`, xmlEscape(f.Code), xmlEscape(f.Message))
+	fmt.Fprintf(&body, `<Error><Code>%s</Code><Message>%s</Message>`, xmlEscape(f.Code), xmlEscape(message))
 	write(f.Fields, &body)
 	fmt.Fprintf(&body, `<RequestId>%s</RequestId><HostId>mirror</HostId></Error>`, xmlEscape(requestID))
 	_, err := io.WriteString(w, body.String())

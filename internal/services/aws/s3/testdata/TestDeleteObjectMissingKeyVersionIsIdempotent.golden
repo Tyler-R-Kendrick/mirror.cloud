@@ -1,0 +1,14 @@
+[
+  {
+    "headers": {},
+    "httpStatus": 204,
+    "status": "Enabled",
+    "version": "missing-version"
+  },
+  {
+    "headers": {},
+    "httpStatus": 204,
+    "status": "Suspended",
+    "version": "null"
+  }
+]

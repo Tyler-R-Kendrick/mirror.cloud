@@ -1,0 +1,28 @@
+{
+  "unversioned": {
+    "afterDeleteETag": "\"b9c85951b6b5b37f61c27703cb0ff262\"",
+    "blocked": {
+      "code": "PreconditionFailed",
+      "fields": {
+        "Condition": "If-None-Match"
+      },
+      "message": "At least one of the pre-conditions you specified did not hold",
+      "status": 412
+    },
+    "firstETag": "\"8b04d5e3775d298e78455efc5ca404d5\""
+  },
+  "versioned": {
+    "afterDeleteETag": "\"b9c85951b6b5b37f61c27703cb0ff262\"",
+    "blocked": {
+      "code": "PreconditionFailed",
+      "fields": {
+        "Condition": "If-None-Match"
+      },
+      "message": "At least one of the pre-conditions you specified did not hold",
+      "status": 412
+    },
+    "deleteMarkers": 1,
+    "firstETag": "\"8b04d5e3775d298e78455efc5ca404d5\"",
+    "versions": 2
+  }
+}

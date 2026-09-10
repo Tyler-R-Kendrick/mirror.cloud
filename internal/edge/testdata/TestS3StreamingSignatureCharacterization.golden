@@ -37,6 +37,43 @@
   "unsigned_trailer_valid": {
     "status": 200
   },
+  "v4a-trailers_stored": {
+    "body": "hello",
+    "status": 200
+  },
+  "v4a-unsigned_stored": {
+    "body": "hello",
+    "status": 200
+  },
+  "v4a_stored": {
+    "body": "hello",
+    "status": 200
+  },
+  "v4a_stream_tampered": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "v4a_stream_valid": {
+    "status": 200
+  },
+  "v4a_trailer_tampered": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "v4a_trailer_valid": {
+    "status": 200
+  },
+  "v4a_unsigned_trailer_bad_checksum": {
+    "code": "BadDigest",
+    "status": 400
+  },
+  "v4a_unsigned_trailer_signed_chunk": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "v4a_unsigned_trailer_valid": {
+    "status": 200
+  },
   "valid": {
     "status": 200
   }

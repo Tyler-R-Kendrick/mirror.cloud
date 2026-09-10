@@ -1,0 +1,20 @@
+{
+  "Messages": [
+    {
+      "Attributes": {
+        "AWSTraceHeader": "Root=1-3152b799-8954dae64eda91bc9a23a7e8;Parent=7fa8c0f79203be72;Sampled=1"
+      },
+      "Body": "test",
+      "MD5OfBody": "098f6bcd4621d373cade4e832627b4f6",
+      "MD5OfMessageAttributes": "235c5c510d26fb653d073faed50ae77c",
+      "MessageAttributes": {
+        "timestamp": {
+          "DataType": "Number",
+          "StringValue": "1493147359900"
+        }
+      },
+      "MessageId": "7c5891299f6489f8",
+      "ReceiptHandle": "5f59f223d7974d142efbc70e360dac9bd91fc24a55cb61c9216632095f55fd84"
+    }
+  ]
+}

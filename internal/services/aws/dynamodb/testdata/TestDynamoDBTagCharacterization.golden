@@ -1,0 +1,34 @@
+{
+  "afterDelete": [],
+  "initial": [
+    {
+      "Key": "Name",
+      "Value": "test"
+    },
+    {
+      "Key": "env",
+      "Value": "dev"
+    }
+  ],
+  "remaining": [
+    {
+      "Key": "env",
+      "Value": "prod"
+    }
+  ],
+  "tableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T",
+  "updated": [
+    {
+      "Key": "Name",
+      "Value": "test"
+    },
+    {
+      "Key": "env",
+      "Value": "prod"
+    },
+    {
+      "Key": "team",
+      "Value": "storage"
+    }
+  ]
+}

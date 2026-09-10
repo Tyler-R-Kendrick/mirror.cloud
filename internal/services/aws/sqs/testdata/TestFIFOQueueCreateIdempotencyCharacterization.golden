@@ -1,0 +1,10 @@
+{
+  "conflict": {
+    "Code": "QueueAlreadyExists",
+    "HTTPStatus": 400,
+    "Message": "A queue already exists with the same name and a different value for attribute ContentBasedDeduplication"
+  },
+  "same": {
+    "QueueUrl": "http://127.0.0.1:4566/123456789012/same.fifo"
+  }
+}

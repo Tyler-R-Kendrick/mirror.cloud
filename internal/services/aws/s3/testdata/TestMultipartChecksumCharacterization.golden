@@ -1,6 +1,12 @@
 {
+  "alternate": {
+    "code": "BadDigest",
+    "message": "The sha256 you specified did not match the calculated checksum.",
+    "status": 400
+  },
   "complete": {
     "checksum": "lqO4Pw4bCAVpiCS4ITdT8Pwb+k8gptYqB2Yqy6oE9/s=-1",
+    "supplied": "AA==",
     "type": "COMPOSITE"
   },
   "create": {
@@ -9,12 +15,31 @@
     "tags": "env=snapshot",
     "type": "COMPOSITE"
   },
+  "fullObjectType": {
+    "code": "BadDigest",
+    "message": "The crc32 you specified did not match the calculated checksum.",
+    "status": 400
+  },
   "list": {
     "algorithm": "SHA256",
     "part": "FqDusHkbbJJFH9KE3Z9Zngp9vn9uvqbi0tBsf3SuwRI=",
     "type": "COMPOSITE"
   },
+  "mismatch": {
+    "code": "InvalidRequest",
+    "message": "The upload was created using the COMPOSITE checksum mode. The complete request must use the same checksum mode.",
+    "status": 400
+  },
+  "missing": {
+    "code": "InvalidRequest",
+    "message": "The upload was created using a sha256 checksum. The complete request must include the checksum for each part. It was missing for part 1 in the request.",
+    "status": 400
+  },
   "object": {
+    "cacheControl": "max-age=120",
+    "contentType": "application/json",
+    "metadata": "snapshot",
+    "redirect": "/snapshot",
     "storageClass": "STANDARD_IA",
     "tags": [
       {

@@ -1,0 +1,6 @@
+{
+  "Code": "AWS.SimpleQueueService.TooManyEntriesInBatchRequest",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "Maximum number of entries per request are 10. You have sent 20."
+}

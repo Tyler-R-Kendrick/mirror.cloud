@@ -1,0 +1,6 @@
+{
+  "Code": "AWS.SimpleQueueService.PurgeQueueInProgress",
+  "Fault": "client",
+  "HTTPStatus": 403,
+  "Message": "Only one PurgeQueue operation on purge is allowed every 60 seconds."
+}

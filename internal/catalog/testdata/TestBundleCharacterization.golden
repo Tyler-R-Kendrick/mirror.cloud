@@ -1224,7 +1224,10 @@
       "UpdateMaxRecordSize",
       "UpdateShardCount",
       "UpdateStreamMode",
-      "UpdateStreamWarmThroughput"
+      "UpdateStreamWarmThroughput",
+      "TagResource",
+      "UntagResource",
+      "ListTagsForResource"
     ]
   },
   {

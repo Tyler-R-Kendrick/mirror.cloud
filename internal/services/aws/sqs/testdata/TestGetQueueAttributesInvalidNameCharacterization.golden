@@ -1,0 +1,6 @@
+{
+  "Code": "InvalidAttributeName",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "Unknown Attribute Foobar."
+}

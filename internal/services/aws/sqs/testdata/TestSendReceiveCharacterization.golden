@@ -1,0 +1,16 @@
+{
+  "received": {
+    "Messages": [
+      {
+        "Body": "message",
+        "MD5OfBody": "78e731027d8fd50ed642340b7c9a63b3",
+        "MessageId": "7c5891299f6489f8",
+        "ReceiptHandle": "5f59f223d7974d142efbc70e360dac9bd91fc24a55cb61c9216632095f55fd84"
+      }
+    ]
+  },
+  "sent": {
+    "MD5OfMessageBody": "78e731027d8fd50ed642340b7c9a63b3",
+    "MessageId": "7c5891299f6489f8"
+  }
+}

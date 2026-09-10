@@ -1,0 +1,6 @@
+{
+  "Code": "InvalidParameterValue",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "One or more parameters are invalid. Reason: Message must be shorter than 1048576 bytes."
+}

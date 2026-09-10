@@ -1,0 +1,12 @@
+{
+  "create": "success",
+  "delete": "success",
+  "duplicateCreate": {
+    "code": "ResourceInUseException",
+    "message": "Table already exists: T"
+  },
+  "missingDelete": {
+    "code": "ResourceNotFoundException",
+    "message": "Requested resource not found: Table: T not found"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "Tags": {
+    "MyTag": "value1",
+    "mytag": "value2"
+  }
+}

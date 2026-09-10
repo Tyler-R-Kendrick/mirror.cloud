@@ -1,0 +1,6 @@
+{
+  "Code": "InvalidMessageContents",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "The message contains characters outside the allowed set."
+}

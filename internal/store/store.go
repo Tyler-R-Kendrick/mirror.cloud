@@ -58,6 +58,34 @@ func (s *scope) Collection(name string) spi.Collection {
 	return &coll{s: s, name: name}
 }
 
+func (s *scope) Txn(_ context.Context, fn func(spi.ScopeTx) error) error {
+	return s.runTxn(func() error { return fn(scopeTx{s}) })
+}
+
+type scopeTx struct{ *scope }
+
+func (s scopeTx) Collection(name string) spi.Tx { return &tx{c: &coll{s: s.scope, name: name}} }
+
+func (s *scope) runTxn(fn func() error) error {
+	s.m.mu.Lock()
+	defer s.m.mu.Unlock()
+	sk := scopeKey(s.account, s.region)
+	before, existed := s.m.data[sk]
+	backup := make(map[string][]byte, len(before))
+	for key, value := range before {
+		backup[key] = append([]byte(nil), value...)
+	}
+	if err := fn(); err != nil {
+		if existed {
+			s.m.data[sk] = backup
+		} else {
+			delete(s.m.data, sk)
+		}
+		return err
+	}
+	return nil
+}
+
 type coll struct {
 	s    *scope
 	name string
@@ -134,9 +162,7 @@ func (c *coll) listLocked(prefix, after string, limit int) ([]spi.KV, bool, erro
 }
 
 func (c *coll) Txn(_ context.Context, fn func(spi.Tx) error) error {
-	c.s.m.mu.Lock()
-	defer c.s.m.mu.Unlock()
-	return fn(&tx{c: c})
+	return c.s.runTxn(func() error { return fn(&tx{c: c}) })
 }
 
 type tx struct{ c *coll }

@@ -1,0 +1,10 @@
+{
+  "allAttributes": {
+    "code": "ValidationException",
+    "message": "Select type ALL_ATTRIBUTES is not supported for global secondary index keys because its projection type is not ALL"
+  },
+  "missingIndex": {
+    "code": "ValidationException",
+    "message": "The table does not have the specified index: missing"
+  }
+}

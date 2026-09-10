@@ -3,6 +3,7 @@ package identity
 import (
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,5 +23,48 @@ func FuzzParse(f *testing.F) {
 		v2 := httptest.NewRequest("GET", "/x?AWSAccessKeyId=test&Expires="+url.QueryEscape(cred), nil)
 		_, _ = PresignedExpiry(v2)
 		_ = PresignedAuthFault(v2)
+	})
+}
+
+func FuzzLocalhostRegion(f *testing.F) {
+	f.Add(true, "eu-west-1", "")
+	f.Add(false, "ap-southeast-2", "custom-region")
+	f.Fuzz(func(t *testing.T, header bool, fallback, override string) {
+		if len(fallback) > 64 || len(override) > 64 {
+			t.Skip()
+		}
+		request := httptest.NewRequest("POST", "/", nil)
+		credential := "test/20200101/localhost/dynamodb/aws4_request"
+		if header {
+			request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+credential+", SignedHeaders=host, Signature=00")
+		} else {
+			request.URL.RawQuery = "X-Amz-Credential=" + url.QueryEscape(credential)
+		}
+		if override != "" {
+			request.Header.Set("X-Mirror-Region", override)
+		}
+		want := "us-east-1"
+		if override != "" {
+			want = override
+		}
+		if got := Parse(request, "", fallback, time.Unix(0, 0)).Region; got != want {
+			t.Fatalf("localhost region %q want %q", got, want)
+		}
+	})
+}
+
+func FuzzPresignedCredentialSyntax(f *testing.F) {
+	f.Add("test/20200101/us-east-1/s3/aws4_request")
+	f.Add("test%2F20200101%2Fus-east-1%2Fs3%2Faws4_request")
+	f.Fuzz(func(t *testing.T, credential string) {
+		target := "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=" + url.QueryEscape(credential) + "&X-Amz-Signature=00&X-Amz-Date=20200101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host"
+		fault := PresignedAuthFault(httptest.NewRequest("GET", target, nil))
+		if len(strings.Split(credential, "/")) == 5 {
+			if fault != nil {
+				t.Fatalf("valid credential rejected: %#v", fault)
+			}
+		} else if fault == nil || fault.Code != "AuthorizationQueryParametersError" {
+			t.Fatalf("malformed credential accepted: %#v", fault)
+		}
 	})
 }

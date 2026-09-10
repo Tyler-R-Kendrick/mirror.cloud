@@ -2,16 +2,22 @@
   "complete": {
     "algorithm": "aws:kms",
     "bucketKey": "true",
+    "checksum": "",
+    "checksumType": "",
     "key": "arn:aws:kms:us-east-1:123456789012:key/multipart"
   },
   "create": {
     "algorithm": "aws:kms",
     "bucketKey": "true",
+    "checksum": "",
+    "checksumType": "FULL_OBJECT",
     "key": "arn:aws:kms:us-east-1:123456789012:key/multipart"
   },
   "head": {
     "algorithm": "aws:kms",
     "bucketKey": "true",
+    "checksum": "mI+Ji1NHP80=",
+    "checksumType": "FULL_OBJECT",
     "key": "arn:aws:kms:us-east-1:123456789012:key/multipart"
   },
   "invalid": {
@@ -21,6 +27,8 @@
   "part": {
     "algorithm": "aws:kms",
     "bucketKey": "true",
+    "checksum": "mI+Ji1NHP80=",
+    "checksumType": "",
     "key": "arn:aws:kms:us-east-1:123456789012:key/multipart"
   }
 }

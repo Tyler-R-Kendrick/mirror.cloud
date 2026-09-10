@@ -1,0 +1,33 @@
+{
+  "expiration": {
+    "ExpiredItems": 1
+  },
+  "expired": {},
+  "remaining": {
+    "Count": 3,
+    "Items": [
+      {
+        "id": {
+          "S": "future"
+        },
+        "ttl": {
+          "N": "9999999999"
+        }
+      },
+      {
+        "id": {
+          "S": "invalid"
+        },
+        "ttl": {
+          "S": "yesterday"
+        }
+      },
+      {
+        "id": {
+          "S": "unset"
+        }
+      }
+    ],
+    "ScannedCount": 3
+  }
+}

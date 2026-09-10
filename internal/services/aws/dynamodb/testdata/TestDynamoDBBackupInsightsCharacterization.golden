@@ -1,0 +1,47 @@
+{
+  "described": {
+    "ContinuousBackupsDescription": {
+      "ContinuousBackupsStatus": "ENABLED",
+      "PointInTimeRecoveryDescription": {
+        "EarliestRestorableDateTime": 0,
+        "LatestRestorableDateTime": 3600,
+        "PointInTimeRecoveryStatus": "ENABLED",
+        "RecoveryPeriodInDays": 35
+      }
+    }
+  },
+  "enabled": {
+    "ContinuousBackupsDescription": {
+      "ContinuousBackupsStatus": "ENABLED",
+      "PointInTimeRecoveryDescription": {
+        "EarliestRestorableDateTime": 0,
+        "LatestRestorableDateTime": 0,
+        "PointInTimeRecoveryStatus": "ENABLED",
+        "RecoveryPeriodInDays": 35
+      }
+    }
+  },
+  "initial": {
+    "ContinuousBackupsDescription": {
+      "ContinuousBackupsStatus": "ENABLED",
+      "PointInTimeRecoveryDescription": {
+        "PointInTimeRecoveryStatus": "DISABLED"
+      }
+    }
+  },
+  "insights": {
+    "ContributorInsightsStatus": "DISABLED",
+    "TableName": "T"
+  },
+  "reenabled": {
+    "ContinuousBackupsDescription": {
+      "ContinuousBackupsStatus": "ENABLED",
+      "PointInTimeRecoveryDescription": {
+        "EarliestRestorableDateTime": 0,
+        "LatestRestorableDateTime": 3600,
+        "PointInTimeRecoveryStatus": "ENABLED",
+        "RecoveryPeriodInDays": 35
+      }
+    }
+  }
+}

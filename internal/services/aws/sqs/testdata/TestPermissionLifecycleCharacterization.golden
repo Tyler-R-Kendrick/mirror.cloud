@@ -1,0 +1,29 @@
+{
+  "duplicate": {
+    "Code": "InvalidParameterValue",
+    "HTTPStatus": 400,
+    "Message": "Value crossaccountpermission for parameter Label is invalid. Reason: Already exists."
+  },
+  "id": "arn:aws:sqs:us-east-1:111111111111:permission/SQSDefaultPolicy",
+  "missing": {
+    "Code": "InvalidParameterValue",
+    "HTTPStatus": 400,
+    "Message": "Value crossaccountpermission for parameter Label is invalid. Reason: can't find label."
+  },
+  "policyAfterRemoval": {},
+  "statement": [
+    {
+      "Action": "SQS:ReceiveMessage",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::111111111111:root",
+          "arn:aws:iam::668614515564:root"
+        ]
+      },
+      "Resource": "arn:aws:sqs:us-east-1:111111111111:permission",
+      "Sid": "crossaccountpermission"
+    }
+  ],
+  "version": "2008-10-17"
+}

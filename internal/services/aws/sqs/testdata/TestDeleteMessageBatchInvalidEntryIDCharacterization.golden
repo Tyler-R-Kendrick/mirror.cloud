@@ -1,0 +1,6 @@
+{
+  "Code": "AWS.SimpleQueueService.InvalidBatchEntryId",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long."
+}

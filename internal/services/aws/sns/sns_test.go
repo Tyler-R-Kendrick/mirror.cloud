@@ -1226,6 +1226,62 @@ func TestSNSPublishBatchFIFOValidation(t *testing.T) {
 	}
 }
 
+func TestSNSPublishBatchSQSDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "batch-sqs"}).Output["TopicArn"])
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-sqs"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:batch-sqs", "RawMessageDelivery": "true",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
+		"TopicArn": topic,
+		"Entries": []any{
+			map[string]any{"Id": "one", "Message": "two attributes", "Subject": "Subject", "MessageAttributes": map[string]any{
+				"attr1": map[string]any{"DataType": "Number", "StringValue": "99.12"},
+				"attr2": map[string]any{"DataType": "Number", "StringValue": "109.12"},
+			}},
+			map[string]any{"Id": "two", "Message": "one attribute", "MessageAttributes": map[string]any{"attr1": map[string]any{"DataType": "Number", "StringValue": "19.12"}}},
+			map[string]any{"Id": "three", "Message": "without attribute"},
+			map[string]any{"Id": "four", "Message": "without subject"},
+			map[string]any{"Id": "five", "Message": `{"default":"test default","sqs":"test sqs"}`, "MessageStructure": "json"},
+		},
+	}})
+	if err != nil || len(asSlice(response.Output["Successful"])) != 5 {
+		t.Fatalf("batch response=%#v err=%v", response, err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{
+		"QueueName": "batch-sqs", "MaxNumberOfMessages": 10, "MessageAttributeNames": []any{"All"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := asSlice(received.Output["Messages"])
+	if len(messages) != 5 {
+		t.Fatalf("batch messages=%#v", received.Output)
+	}
+	seen := map[string]bool{}
+	for _, raw := range messages {
+		message := asMap(raw)
+		body := str(message["Body"])
+		seen[body] = true
+		if body == "two attributes" && len(asMap(message["MessageAttributes"])) != 2 {
+			t.Fatalf("raw attributes=%#v", message)
+		}
+	}
+	for _, body := range []string{"two attributes", "one attribute", "without attribute", "without subject", "test sqs"} {
+		if !seen[body] {
+			t.Fatalf("missing batch body %q: %#v", body, seen)
+		}
+	}
+}
+
 func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

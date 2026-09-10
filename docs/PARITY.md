@@ -8,6 +8,35 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## Vercel baseline
+
+Authority: official Vercel REST (`api.vercel.com` `/vN/...`) plus Upstash Redis JSON-array KV on `*.kv.vercel-storage.com`. There is no LocalStack Vercel inventory; rows are operation → Mirror evidence, not a live `api.vercel.com` differential.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated Vercel slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Vercel operations routed to emulation | 15 / 15 |
+| Live Vercel probe | none (not required) |
+
+| Vercel operation | Mirror evidence |
+|---|---|
+| `GET /v2/user` (`GetUser`) | `TestBootedServerVercelAPI` returns username `test`; `TestVercelLifecycleCharacterization` golden; restJson1 `TestRESTJSONServiceRoutes` |
+| `POST /v11/projects` (`CreateProject`) | Atomic create + empty-name 400 + duplicate 409; BDD create; chaos `TestVercelConcurrentDuplicateProjectNames`; mutants `vercel-accept-empty-project-name` and `vercel-accept-duplicate-project-name` |
+| `GET /v9/projects` (`ListProjects`) | `TestProjectDeploymentEnvAndKV` lists one project; characterization golden `list`; BDD lists after create |
+| `GET /v9/projects/{id\|name}` (`GetProject`) | Booted create/get round-trips the same `id`; get-by-name in atomic; missing project HTTP 404 `{error.code: not_found}` |
+| `DELETE /v9/projects/{id\|name}` (`DeleteProject`) | `TestDeleteProjectByNameRemovesLookup` drops the `name:` index so the name can be reused |
+| `POST /v10/projects/{id}/env` (`CreateProjectEnv`) | Atomic env create; empty key 400; characterization `env`/`env_empty`; mutant `vercel-accept-empty-env-key` |
+| `GET /v9/projects/{id}/env` (`ListProjectEnv`) | Atomic list after create; characterization `envs` |
+| `DELETE /v9/projects/{id}/env/{envId}` (`DeleteProjectEnv`) | `TestProjectDeploymentEnvAndKV` deletes the env then lists zero |
+| `POST /v10/projects/{id}/domains` (`AddProjectDomain`) | Atomic domain create; empty name 400; characterization `domain` |
+| `GET /v10/projects/{id}/domains` (`ListProjectDomains`) | Characterization golden `domains` |
+| `POST /v13/deployments` (`CreateDeployment`) | Booted + BDD `readyState` `READY`; empty name 400; characterization `deploy` |
+| `GET /v6/deployments` (`ListDeployments`) | Characterization golden `deploys` |
+| `GET /v13/deployments/{id}` (`GetDeployment`) | `TestProjectDeploymentEnvAndKV` fetches the created deployment id; characterization `get_deploy` |
+| `DELETE /v13/deployments/{id}` (`DeleteDeployment`) | Atomic delete of the created deployment; missing id 404; mutant `vercel-delete-missing-deployment` |
+| `POST /` on `*.kv.vercel-storage.com` (`KvCommand` SET/GET/DEL) | Booted SET/GET/DEL on `id.kv.vercel-storage.com`; BDD SET/GET/DEL; atomic numeric SET/GET and DEL; fuzz `FuzzKvCommand`; chaos concurrent SET/GET; mutants `vercel-route-root-as-unknown` and `vercel-skip-kv-del` |
+| Unknown REST path | restJson1 routes to `Unknown` (not KV); `FuzzVercelRoute` |
+
 ## SNS baseline
 
 Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-08.

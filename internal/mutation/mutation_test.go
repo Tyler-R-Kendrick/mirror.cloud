@@ -21556,6 +21556,14 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSONServiceRoutes",
 	},
+	{
+		name: "vercel-skip-kv-del",
+		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
+		old:  "_, ok, _ := col.Get(ctx, str(cmd[1]))\n\t\t_ = col.Delete(ctx, str(cmd[1]))",
+		new:  "_, ok, _ := col.Get(ctx, str(cmd[1]))\n\t\t_ = col.Get(ctx, str(cmd[1]))",
+		pkg:  "./internal/services/vercel/api",
+		run:  "TestProjectDeploymentEnvAndKV",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

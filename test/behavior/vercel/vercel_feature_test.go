@@ -87,6 +87,14 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		if code != 200 || get["result"] != "v" {
 			t.Fatalf("get %d %#v", code, get)
 		}
+		code, del := call(http.MethodPost, "/", `["DEL","k"]`, "kv.vercel-storage.com")
+		if code != 200 || del["result"] != float64(1) {
+			t.Fatalf("del %d %#v", code, del)
+		}
+		code, gone := call(http.MethodPost, "/", `["GET","k"]`, "kv.vercel-storage.com")
+		if code != 200 || gone["result"] != nil {
+			t.Fatalf("get after del %d %#v", code, gone)
+		}
 	})
 	t.Run("Given a missing project When fetched Then not_found is returned", func(t *testing.T) {
 		code, body := call(http.MethodGet, "/v9/projects/nope", "", "")

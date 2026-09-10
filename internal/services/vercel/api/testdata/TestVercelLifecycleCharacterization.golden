@@ -107,6 +107,24 @@
     "name": "snap",
     "updatedAt": 0
   },
+  "get_deploy": {
+    "created": 0,
+    "createdAt": 0,
+    "id": "dpl_9c8e2cb00724681e",
+    "name": "snap",
+    "projectId": "prj_7c5891299f64",
+    "readyState": "READY",
+    "state": "READY",
+    "type": "LAMBDAS",
+    "uid": "dpl_9c8e2cb00724681e",
+    "url": "snap-33f6fc.vercel.app"
+  },
+  "kv_after_del": {
+    "result": null
+  },
+  "kv_del": {
+    "result": 1
+  },
   "kv_get": {
     "result": "v"
   },

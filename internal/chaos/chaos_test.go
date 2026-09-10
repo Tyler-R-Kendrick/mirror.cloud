@@ -58,9 +58,17 @@ type observedChaosClock struct {
 	after chan time.Duration
 }
 
-func (c *observedChaosClock) After(delay time.Duration) <-chan time.Time {
+// AfterTime reports how far ahead the wait was, so this test can still assert
+// the length of a long poll now that the pack parks on an instant rather than a
+// delay. It has to observe the same method the pack calls: an observer on
+// After, while the pack waits with AfterTime, never fires -- and the symptom is
+// this test blocking forever rather than failing, which is how a ten-minute
+// package timeout gets mistaken for a slow suite.
+func (c *observedChaosClock) AfterTime(at time.Time) <-chan time.Time {
+	delay := at.Sub(c.Clock.Now())
+	result := c.Clock.AfterTime(at)
 	c.after <- delay
-	return c.Clock.After(delay)
+	return result
 }
 
 func TestConcurrentDynamoDBTableCreatesHaveOneWinner(t *testing.T) {

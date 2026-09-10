@@ -77,9 +77,7 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if strings.Contains(r.URL.Path, "/_aws/sns/SimpleNotificationService") && strings.HasSuffix(r.URL.Path, ".pem") {
-		w.Header().Set("Content-Type", "application/x-pem-file")
-		_, _ = w.Write(cert.Certificate())
+	if s.handleAWSInternal(w, r) {
 		return
 	}
 	var awsChunks [][]byte
@@ -573,6 +571,160 @@ func (s *Server) diag(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) handleAWSInternal(w http.ResponseWriter, r *http.Request) bool {
+	path := r.URL.Path
+	if strings.Contains(path, "/_aws/sns/SimpleNotificationService") && strings.HasSuffix(path, ".pem") {
+		w.Header().Set("Content-Type", "application/x-pem-file")
+		_, _ = w.Write(cert.Certificate())
+		return true
+	}
+	switch {
+	case path == "/_aws/ses" || strings.HasPrefix(path, "/_aws/ses/"):
+		s.sesMailbox(w, r)
+		return true
+	case strings.HasPrefix(path, "/_aws/sns/phone-opt-outs"):
+		s.snsPhoneOptOut(w, r)
+		return true
+	case strings.HasPrefix(path, "/_aws/sns/sms-messages"):
+		s.snsJSONList(w, r, "snssms", "sms_messages", "phoneNumber")
+		return true
+	case strings.HasPrefix(path, "/_aws/sns/platform-endpoint-messages"):
+		s.snsJSONList(w, r, "snsplat", "platform_endpoint_messages", "endpointArn")
+		return true
+	case strings.HasPrefix(path, "/_aws/sns/subscription-tokens"):
+		s.snsSubscriptionToken(w, r)
+		return true
+	}
+	return false
+}
+
+func (s *Server) internalIdentity(r *http.Request) spi.Identity {
+	q := r.URL.Query()
+	account, region := q.Get("accountId"), q.Get("region")
+	if account == "" {
+		account = s.cfg.DefaultAccount
+	}
+	if region == "" {
+		region = s.cfg.DefaultRegion
+		if region == "" {
+			region = "us-east-1"
+		}
+	}
+	return spi.Identity{Account: account, Region: region}
+}
+
+func (s *Server) sesMailbox(w http.ResponseWriter, r *http.Request) {
+	id := s.internalIdentity(r)
+	col := s.deps.Store.Scope(id.Account, id.Region).Collection("sesmsg")
+	switch r.Method {
+	case http.MethodDelete:
+		kvs, _, _ := col.List(r.Context(), "", "", 0)
+		for _, kv := range kvs {
+			_ = col.Delete(r.Context(), kv.Key)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		kvs, _, _ := col.List(r.Context(), "", "", 0)
+		var messages []any
+		for _, kv := range kvs {
+			var rec map[string]any
+			if json.Unmarshal(kv.Value, &rec) == nil {
+				messages = append(messages, rec)
+			}
+		}
+		if messages == nil {
+			messages = []any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"messages": messages})
+	}
+}
+
+func (s *Server) snsPhoneOptOut(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	phone, _ := body["phoneNumber"].(string)
+	account, _ := body["accountId"].(string)
+	if phone == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if account == "" {
+		account = s.internalIdentity(r).Account
+	}
+	region := r.URL.Query().Get("region")
+	if region == "" {
+		region = s.cfg.DefaultRegion
+		if region == "" {
+			region = "us-east-1"
+		}
+	}
+	_ = s.deps.Store.Scope(account, region).Collection("smsopt").Put(r.Context(), phone, []byte("true"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) snsJSONList(w http.ResponseWriter, r *http.Request, colName, field, filterKey string) {
+	id := s.internalIdentity(r)
+	col := s.deps.Store.Scope(id.Account, id.Region).Collection(colName)
+	filter := r.URL.Query().Get(filterKey)
+	switch r.Method {
+	case http.MethodDelete:
+		if filter != "" {
+			_ = col.Delete(r.Context(), filter)
+		} else {
+			kvs, _, _ := col.List(r.Context(), "", "", 0)
+			for _, kv := range kvs {
+				_ = col.Delete(r.Context(), kv.Key)
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		kvs, _, _ := col.List(r.Context(), "", "", 0)
+		out := map[string]any{}
+		for _, kv := range kvs {
+			if filter != "" && kv.Key != filter {
+				continue
+			}
+			var list []any
+			_ = json.Unmarshal(kv.Value, &list)
+			out[kv.Key] = list
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{field: out, "region": id.Region})
+	}
+}
+
+func (s *Server) snsSubscriptionToken(w http.ResponseWriter, r *http.Request) {
+	arn := strings.TrimPrefix(r.URL.Path, "/_aws/sns/subscription-tokens/")
+	w.Header().Set("Content-Type", "application/json")
+	if !strings.HasPrefix(arn, "arn:") || strings.Count(arn, ":") < 5 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "The provided SubscriptionARN is invalid", "subscription_arn": arn})
+		return
+	}
+	parts := strings.Split(arn, ":")
+	id := s.internalIdentity(r)
+	if len(parts) > 3 && parts[3] != "" {
+		id.Region = parts[3]
+	}
+	if len(parts) > 4 && parts[4] != "" {
+		id.Account = parts[4]
+	}
+	b, ok, _ := s.deps.Store.Scope(id.Account, id.Region).Collection("subs").Get(r.Context(), arn)
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "The provided SubscriptionARN is not found", "subscription_arn": arn})
+		return
+	}
+	var rec map[string]any
+	_ = json.Unmarshal(b, &rec)
+	_ = json.NewEncoder(w).Encode(map[string]any{"subscription_token": rec["Token"], "subscription_arn": arn})
 }
 
 func contains(xs []string, v string) bool {

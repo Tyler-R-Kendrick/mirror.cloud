@@ -23,7 +23,10 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ses"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	awssns "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 )
 
@@ -47,6 +50,98 @@ func TestSNSCertificateEndpoint(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	if err != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("BEGIN CERTIFICATE")) {
 		t.Fatalf("certificate response status=%d err=%v body=%q", response.StatusCode, err, body)
+	}
+	localstack, err := http.Get(ts.URL + "/_aws/sns/SimpleNotificationService-6c6f63616c737461636b69736e696365.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer localstack.Body.Close()
+	body, err = io.ReadAll(localstack.Body)
+	if err != nil || localstack.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("BEGIN CERTIFICATE")) {
+		t.Fatalf("localstack cert path status=%d err=%v", localstack.StatusCode, err)
+	}
+}
+
+func TestSNSInternalOptOutAndRetrospectEndpoints(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sns", "aws.ses", "aws.sqs"}
+	cfg.DefaultAccount = "1"
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	p := awssns.New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"PhoneNumber": "+15555550999", "Message": "hello-sms"}}); err != nil {
+		t.Fatal(err)
+	}
+	opt, err := http.Post(ts.URL+"/_aws/sns/phone-opt-outs", "application/json", strings.NewReader(`{"phoneNumber":"+15555550999","accountId":"1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt.Body.Close()
+	if opt.StatusCode != http.StatusNoContent {
+		t.Fatalf("opt-out status %d", opt.StatusCode)
+	}
+	chk, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CheckIfPhoneNumberIsOptedOut", Input: map[string]any{"PhoneNumber": "+15555550999"}})
+	if err != nil || chk.Output["isOptedOut"] != true {
+		t.Fatalf("opted out %#v err=%v", chk, err)
+	}
+	sms, err := http.Get(ts.URL + "/_aws/sns/sms-messages?accountId=1&region=us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sms.Body.Close()
+	var payload map[string]any
+	if json.NewDecoder(sms.Body).Decode(&payload) != nil {
+		t.Fatal("sms json")
+	}
+	msgs := payload["sms_messages"].(map[string]any)
+	if payload["region"] != "us-east-1" || msgs["+15555550999"] == nil {
+		t.Fatalf("sms retrospect %#v", payload)
+	}
+	topic, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "token-topic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "email", "Endpoint": "token@example.com", "ReturnSubscriptionArn": true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := sub.Output["SubscriptionArn"].(string)
+	tokRes, err := http.Get(ts.URL + "/_aws/sns/subscription-tokens/" + arn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tokRes.Body.Close()
+	var tok map[string]any
+	if tokRes.StatusCode != http.StatusOK || json.NewDecoder(tokRes.Body).Decode(&tok) != nil || tok["subscription_token"] == nil {
+		t.Fatalf("token %#v status=%d", tok, tokRes.StatusCode)
+	}
+	bad, err := http.Get(ts.URL + "/_aws/sns/subscription-tokens/randomarnhere")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid arn status %d", bad.StatusCode)
+	}
+	sesRes, err := http.Get(ts.URL + "/_aws/ses?accountId=1&region=us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sesRes.Body.Close()
+	var mailbox map[string]any
+	if json.NewDecoder(sesRes.Body).Decode(&mailbox) != nil {
+		t.Fatal("ses json")
+	}
+	if _, ok := mailbox["messages"].([]any); !ok {
+		t.Fatalf("ses mailbox %#v", mailbox)
 	}
 }
 

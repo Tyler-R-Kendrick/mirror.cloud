@@ -319,10 +319,18 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		app := str(req.Input["PlatformApplicationArn"])
 		_ = col.Delete(ctx, app)
 		endpoints := p.col(req, "platend")
+		subs := p.col(req, "subs")
 		kvs, _, _ := endpoints.List(ctx, "", "", 0)
 		for _, kv := range kvs {
 			var endpoint map[string]any
 			if json.Unmarshal(kv.Value, &endpoint) == nil && str(endpoint["PlatformApplicationArn"]) == app {
+				subKVs, _, _ := subs.List(ctx, "", "", 0)
+				for _, subKV := range subKVs {
+					var sub map[string]any
+					if json.Unmarshal(subKV.Value, &sub) == nil && str(sub["Endpoint"]) == str(endpoint["EndpointArn"]) {
+						_ = subs.Delete(ctx, subKV.Key)
+					}
+				}
 				_ = endpoints.Delete(ctx, kv.Key)
 			}
 		}

@@ -23,7 +23,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ses"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	awssns "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
@@ -65,7 +64,7 @@ func TestSNSCertificateEndpoint(t *testing.T) {
 func TestSNSInternalOptOutAndRetrospectEndpoints(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
-	cfg.Services = []string{"aws.sns", "aws.ses", "aws.sqs"}
+	cfg.Services = []string{"aws.sns", "aws.sqs"}
 	cfg.DefaultAccount = "1"
 	reg, err := registry.New(deps, cfg.Services, nil)
 	if err != nil {

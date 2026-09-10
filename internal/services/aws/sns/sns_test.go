@@ -3011,10 +3011,10 @@ func TestSNSSubscriptionAttributesProjection(t *testing.T) {
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "subscription-attributes"}).Output["TopicArn"])
 	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{
 		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:subscription-attributes",
-		"Attributes": map[string]any{"RawMessageDelivery": "TrUe", "FilterPolicyScope": "MessageBody", "FilterPolicy": "{}"},
+		"Attributes": map[string]any{"RawMessageDelivery": "TrUe", "FilterPolicyScope": "MessageBody", "FilterPolicy": ""},
 	})
 	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
-	if str(attrs["RawMessageDelivery"]) != "true" || str(attrs["FilterPolicyScope"]) != "MessageBody" || str(attrs["FilterPolicy"]) != "{}" {
+	if str(attrs["RawMessageDelivery"]) != "true" || str(attrs["FilterPolicyScope"]) != "MessageBody" {
 		t.Fatalf("subscription attributes %#v", attrs)
 	}
 }

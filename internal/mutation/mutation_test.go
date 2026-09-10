@@ -18048,6 +18048,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformEndpointListProjection",
 		},
 		{
+			name: "sns-drop-fifo-content-dedup-default",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if fifo && attrs["ContentBasedDeduplication"] == nil {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSFIFOAttributesDefault",
+		},
+		{
 			name: "sns-leak-subscription-list-record",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `subs = append(subs, subscriptionSummary(req, m))`,

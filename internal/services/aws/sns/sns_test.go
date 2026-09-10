@@ -1603,6 +1603,11 @@ func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
 		"PlatformApplicationArn": appARN, "Token": "token", "Attributes": map[string]any{"Enabled": "false"},
 	}); err == nil {
 		t.Fatal("accepted endpoint idempotency request with different attributes")
+	} else {
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidParameter" || fault.Message != "Endpoint "+str(first.Output["EndpointArn"])+" already exists with the same Token, but different attributes." {
+			t.Fatalf("endpoint idempotency fault=%v", err)
+		}
 	}
 	if _, err := call("SetEndpointAttributes", map[string]any{"EndpointArn": appARN + "/endpoint/missing"}); err == nil {
 		t.Fatal("set attributes for missing endpoint")

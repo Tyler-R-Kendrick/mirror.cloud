@@ -2693,6 +2693,26 @@ func TestSNSSubscriptionIdempotency(t *testing.T) {
 	}
 }
 
+func TestSNSListSubscriptionsByTopicPagination(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "sns-sub-page"}).Output["TopicArn"])
+	for i := 0; i < 120; i++ {
+		invokeSNS(t, p, id, "Subscribe", map[string]any{
+			"TopicArn": topic, "Protocol": "email", "Endpoint": fmt.Sprintf("user-%03d@example.com", i),
+		})
+	}
+	first := invokeSNS(t, p, id, "ListSubscriptionsByTopic", map[string]any{"TopicArn": topic})
+	if len(asSlice(first.Output["Subscriptions"])) != 100 || str(first.Output["NextToken"]) == "" {
+		t.Fatalf("first subscription page=%#v", first.Output)
+	}
+	second := invokeSNS(t, p, id, "ListSubscriptionsByTopic", map[string]any{"TopicArn": topic, "NextToken": first.Output["NextToken"]})
+	if len(asSlice(second.Output["Subscriptions"])) != 20 || second.Output["NextToken"] != nil {
+		t.Fatalf("second subscription page=%#v", second.Output)
+	}
+}
+
 func TestSNSHTTPSubscriptionRedrive(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

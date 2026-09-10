@@ -3018,3 +3018,21 @@ func TestSNSSubscriptionAttributesProjection(t *testing.T) {
 		t.Fatalf("subscription attributes %#v", attrs)
 	}
 }
+
+func TestSNSSetSubscriptionAttributesAfterUnsubscribe(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "deleted-subscription"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "deleted-subscription"}).Output["TopicArn"])
+	sub := str(invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:deleted-subscription"}).Output["SubscriptionArn"])
+	invokeSNS(t, p, id, "Unsubscribe", map[string]any{"SubscriptionArn": sub})
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": sub, "AttributeName": "RawMessageDelivery", "AttributeValue": "true"}})
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.Code != "NotFound" {
+		t.Fatalf("set attributes after unsubscribe fault=%v", err)
+	}
+}

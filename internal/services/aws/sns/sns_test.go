@@ -1166,6 +1166,39 @@ func TestSNSPlatformEndpointAttributesProjection(t *testing.T) {
 	}
 }
 
+func TestSNSPlatformEndpointListProjection(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "endpoint-list", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformEndpoint", Input: map[string]any{
+		"PlatformApplicationArn": app.Output["PlatformApplicationArn"], "Token": "token",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListEndpointsByPlatformApplication", Input: map[string]any{"PlatformApplicationArn": app.Output["PlatformApplicationArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints := asSlice(listed.Output["Endpoints"])
+	if len(endpoints) != 1 {
+		t.Fatalf("endpoints %#v", listed.Output)
+	}
+	entry := asMap(endpoints[0])
+	if _, leaked := entry["PlatformApplicationArn"]; leaked {
+		t.Fatalf("endpoint leaked application ARN: %#v", entry)
+	}
+	if !reflect.DeepEqual(entry["Attributes"], map[string]any{"Enabled": "true", "Token": "token"}) {
+		t.Fatalf("endpoint attributes %#v", entry)
+	}
+}
+
 func TestSNSPlatformApplicationValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

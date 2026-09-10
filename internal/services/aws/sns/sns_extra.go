@@ -489,7 +489,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 			if str(rec["PlatformApplicationArn"]) != app {
 				continue
 			}
-			out = append(out, rec)
+			out = append(out, map[string]any{"EndpointArn": rec["EndpointArn"], "Attributes": endpointAttributes(rec)})
 		}
 		return &spi.Response{Output: map[string]any{"Endpoints": out}}, nil
 	default:
@@ -500,12 +500,16 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
-		attrs := map[string]any{"Enabled": str(rec["Enabled"]), "Token": str(rec["Token"])}
-		if customUserData := str(rec["CustomUserData"]); customUserData != "" {
-			attrs["CustomUserData"] = customUserData
-		}
-		return &spi.Response{Output: map[string]any{"Attributes": attrs}}, nil
+		return &spi.Response{Output: map[string]any{"Attributes": endpointAttributes(rec)}}, nil
 	}
+}
+
+func endpointAttributes(rec map[string]any) map[string]any {
+	attrs := map[string]any{"Enabled": str(rec["Enabled"]), "Token": str(rec["Token"])}
+	if customUserData := str(rec["CustomUserData"]); customUserData != "" {
+		attrs["CustomUserData"] = customUserData
+	}
+	return attrs
 }
 
 func validateEndpointAttributes(attrs map[string]any) *spi.Fault {

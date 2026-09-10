@@ -25,6 +25,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/aws/smithy"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/gcp/discovery"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/openapi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specdiff"
 )
 
@@ -131,7 +132,10 @@ func loadBundle(ctx context.Context, specsDir string, forceCatalog bool) (model.
 }
 
 func ingestSpecs(ctx context.Context, specsDir string) ([][]model.Service, int, error) {
-	recvs := []receiver.Receiver{smithy.Receiver{}, discovery.Receiver{}}
+	// Order matters only in that each Detect is exclusive: Smithy documents
+	// declare `smithy`, Discovery declares `discoveryVersion`, OpenAPI declares
+	// `openapi`, and no document carries two.
+	recvs := []receiver.Receiver{smithy.Receiver{}, discovery.Receiver{}, openapi.Receiver{}}
 	var groups [][]model.Service
 	n := 0
 	if _, err := os.Stat(specsDir); err != nil {

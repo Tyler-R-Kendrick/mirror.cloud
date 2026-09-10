@@ -43,4 +43,17 @@ func TestAWSSDKSNSPublishLifecycleContract(t *testing.T) {
 	if err != nil || len(listed.Topics) != 1 || aws.ToString(listed.Topics[0].TopicArn) != aws.ToString(topic.TopicArn) {
 		t.Fatalf("list topics %#v: %v", listed, err)
 	}
+	_, err = client.Subscribe(context.Background(), &sns.SubscribeInput{
+		TopicArn: topic.TopicArn, Protocol: aws.String("sms"), Endpoint: aws.String("+15555550111"),
+		Attributes: map[string]string{"FilterPolicy": "not-json"},
+	})
+	if err == nil {
+		t.Fatal("sdk accepted invalid filter policy")
+	}
+	_, err = client.ConfirmSubscription(context.Background(), &sns.ConfirmSubscriptionInput{
+		TopicArn: topic.TopicArn, Token: aws.String("randomtoken"),
+	})
+	if err == nil {
+		t.Fatal("sdk accepted unissued confirm token")
+	}
 }

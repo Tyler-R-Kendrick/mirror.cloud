@@ -18253,6 +18253,18 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSTopicTagLifecycle",
 		},
 		{
+			name: "sns-ignore-publish-batch-entry-validation",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if fault := p.validatePublishTarget(ctx, &entryReq, topicARN(entryInput)); fault != nil {
+				return nil, fault
+			}`,
+			new:  `if false {
+				return nil, fault
+			}`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPublishBatchFIFOValidation",
+		},
+		{
 			name: "sns-ignore-cross-region-sqs-owner",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "targetReq.Identity.Region = parts[3]",

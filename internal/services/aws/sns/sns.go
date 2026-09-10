@@ -331,7 +331,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			entryReq.Input = entryInput
 			entryReq.Operation = "Publish"
 			if fault := p.validatePublishTarget(ctx, &entryReq, topicARN(entryInput)); fault != nil {
-				continue
+				return nil, fault
 			}
 			resp, err := p.publishOne(ctx, &entryReq, str(m["Message"]), attrs)
 			if err != nil {

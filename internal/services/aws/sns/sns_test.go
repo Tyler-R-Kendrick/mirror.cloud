@@ -1205,6 +1205,27 @@ func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
 	}
 }
 
+func TestSNSPublishBatchFIFOValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{
+		"Name": "batch-validation.fifo", "Attributes": map[string]any{"FifoTopic": "true"},
+	}).Output["TopicArn"])
+	for name, entry := range map[string]any{
+		"missing group": map[string]any{"Id": "one", "Message": "message"},
+		"missing dedup": map[string]any{"Id": "two", "Message": "message", "MessageGroupId": "group"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
+				"TopicArn": topic, "Entries": []any{entry},
+			}}); err == nil {
+				t.Fatalf("accepted invalid FIFO batch entry: %#v", entry)
+			}
+		})
+	}
+}
+
 func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

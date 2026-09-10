@@ -794,6 +794,20 @@
     ]
   },
   {
+    "ID": "azure.blobs",
+    "Protocol": "restXml",
+    "Ops": [
+      "CreateContainer",
+      "GetContainer",
+      "ListContainers",
+      "DeleteContainer",
+      "PutBlob",
+      "GetBlob",
+      "ListBlobs",
+      "DeleteBlob"
+    ]
+  },
+  {
     "ID": "aws.kms",
     "Protocol": "awsJson1_1",
     "Ops": [

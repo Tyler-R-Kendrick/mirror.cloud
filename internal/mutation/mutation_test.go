@@ -21660,6 +21660,38 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/gcp/gcprest",
 		run:  "TestGCPRESTDecodeEncodeAndFault",
 	},
+	{
+		name: "azure-accept-empty-container",
+		file: filepath.Join("internal", "services", "azure", "blobs", "blobs.go"),
+		old:  "if name == \"\" {\n\t\treturn nil, azFault(\"InvalidResourceName\", \"The specified resource name contains invalid characters.\", 400)",
+		new:  "if false {\n\t\treturn nil, azFault(\"InvalidResourceName\", \"The specified resource name contains invalid characters.\", 400)",
+		pkg:  "./internal/services/azure/blobs",
+		run:  "TestCreateContainerRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "azure-accept-duplicate-container",
+		file: filepath.Join("internal", "services", "azure", "blobs", "blobs.go"),
+		old:  `if _, exists, _ := p.col(req, "azctr").Get(ctx, name); exists {`,
+		new:  `if _, exists, _ := p.col(req, "azctr").Get(ctx, name); false {`,
+		pkg:  "./internal/services/azure/blobs",
+		run:  "TestCreateContainerRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "azure-get-missing-blob-as-empty",
+		file: filepath.Join("internal", "services", "azure", "blobs", "blobs.go"),
+		old:  "if !ok {\n\t\treturn nil, azFault(\"BlobNotFound\", \"The specified blob does not exist.\", 404)\n\t}\n\tvar data []byte",
+		new:  "if false {\n\t\treturn nil, azFault(\"BlobNotFound\", \"The specified blob does not exist.\", 404)\n\t}\n\tvar data []byte",
+		pkg:  "./internal/services/azure/blobs",
+		run:  "TestContainerAndBlobLifecycle",
+	},
+	{
+		name: "azure-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  "if svc.ID == \"azure.blobs\" {\n\t\tw.Header().Set(\"Content-Type\", \"application/xml\")\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
+		new:  "if false && svc.ID == \"azure.blobs\" {\n\t\tw.Header().Set(\"Content-Type\", \"application/xml\")\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestRESTXML",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

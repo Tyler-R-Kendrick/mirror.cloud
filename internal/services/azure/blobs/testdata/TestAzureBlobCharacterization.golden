@@ -1,0 +1,73 @@
+{
+  "blobs": {
+    "output": {
+      "_kind": "blobs",
+      "_list": [
+        {
+          "container": "snap",
+          "name": "o"
+        }
+      ],
+      "container": "snap"
+    },
+    "status": 0
+  },
+  "create": {
+    "output": {
+      "name": "snap"
+    },
+    "status": 201
+  },
+  "delete": {
+    "output": null,
+    "status": 202
+  },
+  "duplicate": {
+    "error": "ContainerAlreadyExists",
+    "message": "The specified container already exists.",
+    "status": 409
+  },
+  "empty": {
+    "error": "InvalidResourceName",
+    "message": "The specified resource name contains invalid characters.",
+    "status": 400
+  },
+  "get": {
+    "output": {
+      "name": "snap"
+    },
+    "status": 0
+  },
+  "list": {
+    "output": {
+      "_kind": "containers",
+      "_list": [
+        {
+          "name": "snap"
+        }
+      ]
+    },
+    "status": 0
+  },
+  "media": {
+    "body": "hello",
+    "status": 200
+  },
+  "missing": {
+    "error": "BlobNotFound",
+    "message": "The specified blob does not exist.",
+    "status": 404
+  },
+  "nobucket": {
+    "error": "ContainerNotFound",
+    "message": "The specified container does not exist.",
+    "status": 404
+  },
+  "put": {
+    "output": {
+      "container": "snap",
+      "name": "o"
+    },
+    "status": 201
+  }
+}

@@ -150,6 +150,16 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"digitalocean.v2", http.MethodGet, "/v2/domains/ex.test", "", "GetDomain"},
 		{"digitalocean.v2", http.MethodDelete, "/v2/domains/ex.test", "", "DeleteDomain"},
 		{"digitalocean.v2", http.MethodGet, "/v2/unknown", "", "Unknown"},
+
+		{"hetzner.v1", http.MethodPost, "/v1/servers", "", "CreateServer"},
+		{"hetzner.v1", http.MethodGet, "/v1/servers", "", "ListServers"},
+		{"hetzner.v1", http.MethodGet, "/v1/servers/1", "", "GetServer"},
+		{"hetzner.v1", http.MethodDelete, "/v1/servers/1", "", "DeleteServer"},
+		{"hetzner.v1", http.MethodPost, "/v1/ssh_keys", "", "CreateSSHKey"},
+		{"hetzner.v1", http.MethodGet, "/v1/ssh_keys", "", "ListSSHKeys"},
+		{"hetzner.v1", http.MethodGet, "/v1/ssh_keys/1", "", "GetSSHKey"},
+		{"hetzner.v1", http.MethodDelete, "/v1/ssh_keys/1", "", "DeleteSSHKey"},
+		{"hetzner.v1", http.MethodGet, "/v1/unknown", "", "Unknown"},
 	} {
 		request := httptest.NewRequest(test.method, test.path, nil)
 		if test.target != "" {
@@ -347,5 +357,28 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"id":"not_found"`) {
 		t.Fatalf("do fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+
+	hz := &model.Service{ID: "hetzner.v1"}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(hz, &model.Operation{Name: "ListServers"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"name": "web"}}, "_wrap": "servers"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"servers"`) || !strings.Contains(w.Body.String(), `"total_entries":1`) || strings.Contains(w.Body.String(), `"_list"`) {
+		t.Fatalf("hz list encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(hz, &model.Operation{Name: "GetSSHKey"}, w, &spi.Response{Output: map[string]any{"_wrap": "ssh_key", "ssh_key": map[string]any{"name": "laptop"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"ssh_key"`) {
+		t.Fatalf("hz encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(hz, &model.Operation{Name: "GetServer"}, w, &spi.Fault{Code: "not_found", Message: "Server not found", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"not_found"`) || !strings.Contains(w.Body.String(), `"error"`) {
+		t.Fatalf("hz fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 }

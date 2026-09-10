@@ -8,6 +8,28 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## Hetzner baseline
+
+Authority: official Hetzner Cloud API v1 (`api.hetzner.cloud` `/v1/servers` and `/v1/ssh_keys`). There is no LocalStack Hetzner inventory; rows are operation → Mirror evidence, not a live `api.hetzner.cloud` differential. Volumes, load balancers, networks, server actions, and DNS are not in this denominator.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated Hetzner slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Core Hetzner v1 operations routed to emulation | 8 / 8 |
+| Live Hetzner probe | none (not required) |
+
+| Hetzner operation | Mirror evidence |
+|---|---|
+| `POST /v1/servers` (`CreateServer`) | Booted create returns `{server}`; atomic empty 400 `invalid_input` and duplicate 409 `uniqueness_error`; BDD create; chaos `TestHetznerConcurrentDuplicateServers`; mutants `hetzner-accept-empty-server` and `hetzner-accept-duplicate-server` |
+| `GET /v1/servers` (`ListServers`) | Booted list wraps `{servers, meta.pagination.total_entries}`; characterization `list`; BDD lists after create |
+| `GET /v1/servers/{id}` (`GetServer`) | Booted get-after-set; missing server HTTP 404 `{error.code:not_found}` without `x-amzn-errortype`; mutant `hetzner-get-missing-server-as-empty` |
+| `DELETE /v1/servers/{id}` (`DeleteServer`) | Atomic delete then get is 404; characterization `delete` |
+| `POST /v1/ssh_keys` (`CreateSSHKey`) | Atomic create; duplicate fingerprint 409; BDD create |
+| `GET /v1/ssh_keys` (`ListSSHKeys`) | Characterization `keys` |
+| `GET /v1/ssh_keys/{id}` (`GetSSHKey`) | Booted POST then GET returns the stored key; missing key 404 |
+| `DELETE /v1/ssh_keys/{id}` (`DeleteSSHKey`) | Atomic delete of missing is 404 |
+| Hetzner faults vs AWS faults | restJson1 `Encode` wraps singular/plural keys plus `meta.pagination.total_entries`; `EncodeFault` uses `{error:{code,message}}` and omits `x-amzn-errortype`; mutant `hetzner-encode-aws-fault` |
+
 ## DigitalOcean baseline
 
 Authority: official DigitalOcean API v2 (`api.digitalocean.com` `/v2/droplets` and `/v2/domains`). There is no LocalStack DigitalOcean inventory; rows are operation → Mirror evidence, not a live `api.digitalocean.com` differential. Apps, Kubernetes, Spaces, domain records, and droplet actions are not in this denominator.

@@ -18205,12 +18205,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-drop-lambda-delivery-feedback-log",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `p.recordLambdaDelivery(ctx, req, sub, messageID, err)
+			old: `p.recordLambdaDelivery(ctx, req, sub, messageID, err)
 	return err == nil`,
-			new:  `if false { p.recordLambdaDelivery(ctx, req, sub, messageID, err) }
+			new: `if false { p.recordLambdaDelivery(ctx, req, sub, messageID, err) }
 	return err == nil`,
-			pkg:  "./internal/services/aws/sns",
-			run:  "TestSNSLambdaSuccessFeedbackDeliveryLog",
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSLambdaSuccessFeedbackDeliveryLog",
 		},
 		{
 			name: "sns-ignore-cross-account-topic-owner",
@@ -18255,14 +18255,14 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-ignore-publish-batch-entry-validation",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `if fault := p.validatePublishTarget(ctx, &entryReq, topicARN(entryInput)); fault != nil {
+			old: `if fault := p.validatePublishTarget(ctx, &entryReq, topicARN(entryInput)); fault != nil {
 				return nil, fault
 			}`,
-			new:  `if false {
+			new: `if false {
 				return nil, fault
 			}`,
-			pkg:  "./internal/services/aws/sns",
-			run:  "TestSNSPublishBatchFIFOValidation",
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSPublishBatchFIFOValidation",
 		},
 		{
 			name: "sns-reject-sms-separator-validation",
@@ -18283,14 +18283,14 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-remove-missing-permission-succeeds",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-			old:  `if !found {
+			old: `if !found {
 		return nil, &spi.Fault{Code: "NotFound", Message: "Label", HTTPStatus: 404, Fault: "client"}
 	}`,
-			new:  `if false {
+			new: `if false {
 		return nil, &spi.Fault{Code: "NotFound", Message: "Label", HTTPStatus: 404, Fault: "client"}
 	}`,
-			pkg:  "./internal/services/aws/sns",
-			run:  "TestSNSTopicPermissionLifecycle",
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSTopicPermissionLifecycle",
 		},
 		{
 			name: "sns-ignore-cross-region-sqs-owner",

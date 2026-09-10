@@ -294,6 +294,29 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invokeSNSQueue(t, qp, id, "CreateQueue", map[string]any{"QueueName": "standard-group"})
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "standard-group"}).Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:standard-group",
+	})
+	invokeSNS(t, p, id, "Publish", map[string]any{
+		"TopicArn": topic, "Message": "fair-queue", "MessageGroupId": "my-group-id-1",
+		"MessageAttributes": map[string]any{"attr1": map[string]any{"DataType": "Number", "StringValue": "1"}},
+	})
+	received := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{
+		"QueueName": "standard-group", "WaitTimeSeconds": 1, "AttributeNames": []any{"All"},
+	})
+	messages := asSlice(received.Output["Messages"])
+	if len(messages) != 1 || str(asMap(asMap(messages[0])["Attributes"])["MessageGroupId"]) != "my-group-id-1" {
+		t.Fatalf("standard fair-queue delivery=%#v", received.Output)
+	}
+}
+
 func TestSNSFlattenedBinaryMessageAttributeDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

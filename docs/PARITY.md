@@ -724,7 +724,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green across 221 packages. The current 2,571-entry inventory has focused green shards for newly added mutants; a full four-shard rerun remains pending because the prior four-way harness exceeded its 35-minute bound. Serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green across 221 packages. The current 2,602-entry inventory has focused green shards for newly added mutants; a full four-shard rerun remains pending because the prior four-way harness exceeded its 35-minute bound. Serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 Real-clock timestamps use a monotonic process anchor so wall-clock steps cannot extend delayed-message or visibility windows; the delayed long-poll characterization and 30-run HTTP behavior probe are green.
 

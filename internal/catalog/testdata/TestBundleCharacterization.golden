@@ -770,6 +770,18 @@
     ]
   },
   {
+    "ID": "cloudflare.kv",
+    "Protocol": "restJson1",
+    "Ops": [
+      "CreateNamespace",
+      "ListNamespaces",
+      "GetNamespace",
+      "PutValue",
+      "GetValue",
+      "DeleteValue"
+    ]
+  },
+  {
     "ID": "aws.kms",
     "Protocol": "awsJson1_1",
     "Ops": [

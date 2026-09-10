@@ -124,6 +124,14 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"vercel.api", http.MethodDelete, "/v13/deployments/dpl_1", "", "DeleteDeployment"},
 		{"vercel.api", http.MethodPost, "/", "", "KvCommand"},
 		{"vercel.api", http.MethodGet, "/v9/unknown", "", "Unknown"},
+
+		{"cloudflare.kv", http.MethodPost, "/client/v4/accounts/a/storage/kv/namespaces", "", "CreateNamespace"},
+		{"cloudflare.kv", http.MethodGet, "/client/v4/accounts/a/storage/kv/namespaces", "", "ListNamespaces"},
+		{"cloudflare.kv", http.MethodGet, "/client/v4/accounts/a/storage/kv/namespaces/nid", "", "GetNamespace"},
+		{"cloudflare.kv", http.MethodPut, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "PutValue"},
+		{"cloudflare.kv", http.MethodGet, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "GetValue"},
+		{"cloudflare.kv", http.MethodDelete, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "DeleteValue"},
+		{"cloudflare.kv", http.MethodGet, "/client/v4/unknown", "", "Unknown"},
 	} {
 		request := httptest.NewRequest(test.method, test.path, nil)
 		if test.target != "" {
@@ -240,5 +248,33 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"not_found"`) {
 		t.Fatalf("vercel fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+
+	cf := &model.Service{ID: "cloudflare.kv"}
+	putReq := httptest.NewRequest(http.MethodPut, "/client/v4/accounts/a/storage/kv/namespaces/n/values/k", strings.NewReader("hello"))
+	decoded, err = codec.Decode(cf, &model.Operation{Name: "PutValue"}, putReq)
+	if err != nil || decoded.Input["value"] != "hello" {
+		t.Fatalf("put decode %#v %v", decoded, err)
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(cf, &model.Operation{Name: "CreateNamespace"}, w, &spi.Response{Output: map[string]any{"id": "n1", "title": "t"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"success":true`) || !strings.Contains(w.Body.String(), `"id":"n1"`) {
+		t.Fatalf("cf encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(cf, &model.Operation{Name: "GetValue"}, w, &spi.Response{Output: map[string]any{"_raw": "hello"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || w.Body.String() != "hello" {
+		t.Fatalf("cf raw %d %q", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(cf, &model.Operation{Name: "GetNamespace"}, w, &spi.Fault{Code: "10013", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":10013`) || !strings.Contains(w.Body.String(), `"success":false`) {
+		t.Fatalf("cf fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 }

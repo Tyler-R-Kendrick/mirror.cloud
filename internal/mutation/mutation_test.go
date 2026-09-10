@@ -21564,6 +21564,38 @@ var mutants = []mutant{
 		pkg:  "./internal/services/vercel/api",
 		run:  "TestProjectDeploymentEnvAndKV",
 	},
+	{
+		name: "cloudflare-accept-empty-namespace-title",
+		file: filepath.Join("internal", "services", "cloudflare", "api", "api.go"),
+		old:  "if title == \"\" {\n\t\treturn nil, cfFault(\"10007\", \"Title is required\", 400)",
+		new:  "if false {\n\t\treturn nil, cfFault(\"10007\", \"Title is required\", 400)",
+		pkg:  "./internal/services/cloudflare/api",
+		run:  "TestCreateNamespaceRejectsEmptyAndDuplicateTitles",
+	},
+	{
+		name: "cloudflare-accept-duplicate-namespace-title",
+		file: filepath.Join("internal", "services", "cloudflare", "api", "api.go"),
+		old:  `if _, exists, _ := p.col(req, "cfkvns").Get(ctx, "title:"+title); exists {`,
+		new:  `if _, exists, _ := p.col(req, "cfkvns").Get(ctx, "title:"+title); false {`,
+		pkg:  "./internal/services/cloudflare/api",
+		run:  "TestCreateNamespaceRejectsEmptyAndDuplicateTitles",
+	},
+	{
+		name: "cloudflare-get-missing-value-as-empty",
+		file: filepath.Join("internal", "services", "cloudflare", "api", "api.go"),
+		old:  "if !ok {\n\t\treturn nil, cfFault(\"10009\", \"key not found\", 404)\n\t}\n\treturn &spi.Response{Output: map[string]any{\"_raw\": string(b)}}",
+		new:  "if false {\n\t\treturn nil, cfFault(\"10009\", \"key not found\", 404)\n\t}\n\treturn &spi.Response{Output: map[string]any{\"_raw\": string(b)}}",
+		pkg:  "./internal/services/cloudflare/api",
+		run:  "TestNamespaceAndValueLifecycle",
+	},
+	{
+		name: "cloudflare-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if svc.ID == \"cloudflare.kv\" {\n\t\tvar code any = f.Code",
+		new:  "if false && svc.ID == \"cloudflare.kv\" {\n\t\tvar code any = f.Code",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

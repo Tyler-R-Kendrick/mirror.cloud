@@ -234,6 +234,7 @@ func Bundle() *model.Bundle {
 		"CreateDeployment", "ListDeployments", "GetDeployment", "DeleteDeployment",
 		"KvCommand",
 	}
+	cloudflare := []string{"CreateNamespace", "ListNamespaces", "GetNamespace", "PutValue", "GetValue", "DeleteValue"}
 	gcs := []string{"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list",
 		"storage.buckets.delete", "storage.buckets.patch",
 		"storage.objects.insert", "storage.objects.get", "storage.objects.list",
@@ -1291,6 +1292,7 @@ func Bundle() *model.Bundle {
 			svc("aws.secretsmanager", "secretsmanager", model.ProtoAWSJSON11, "secretsmanager", "", "", mk(sm)),
 			svc("gcp.storage", "storage", model.ProtoGCPRESTSON, "", "", "", mk(gcs)),
 			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", mk(vercel)),
+			svc("cloudflare.kv", "cloudflare", model.ProtoRESTJSON1, "", "", "", mk(cloudflare)),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),
 			svc("aws.events", "events", model.ProtoAWSJSON11, "AWSEvents", "", "", mk(ev)),

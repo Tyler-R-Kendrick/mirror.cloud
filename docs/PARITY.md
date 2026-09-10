@@ -8,6 +8,26 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## Cloudflare baseline
+
+Authority: official Cloudflare REST v4 (`api.cloudflare.com` `/client/v4/...`) plus Workers KV namespace and value APIs. There is no LocalStack Cloudflare inventory; rows are operation → Mirror evidence, not a live `api.cloudflare.com` differential.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated Cloudflare slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Cloudflare operations routed to emulation | 6 / 6 |
+| Live Cloudflare probe | none (not required) |
+
+| Cloudflare operation | Mirror evidence |
+|---|---|
+| `POST /client/v4/accounts/{account_id}/storage/kv/namespaces` (`CreateNamespace`) | Booted create returns `success: true` and `result.id`; atomic empty title 400/`10007` and duplicate 400/`10014`; BDD create; chaos `TestCloudflareConcurrentDuplicateNamespaceTitles`; mutants `cloudflare-accept-empty-namespace-title` and `cloudflare-accept-duplicate-namespace-title` |
+| `GET /client/v4/accounts/{account_id}/storage/kv/namespaces` (`ListNamespaces`) | Atomic lists one namespace; characterization `list`; BDD lists after create |
+| `GET /client/v4/accounts/{account_id}/storage/kv/namespaces/{id}` (`GetNamespace`) | Atomic get by id; missing namespace HTTP 404 `success: false` with numeric `errors[].code`; characterization `get`/`missing_ns`; BDD missing-namespace envelope |
+| `PUT .../namespaces/{id}/values/{key}` (`PutValue`) | Booted PUT then GET round-trips the raw body; atomic put; characterization `put`; fuzz `FuzzKVValue`; chaos concurrent put/get |
+| `GET .../namespaces/{id}/values/{key}` (`GetValue`) | Booted GET returns stored bytes (not a JSON envelope); missing key HTTP 404; mutant `cloudflare-get-missing-value-as-empty` |
+| `DELETE .../namespaces/{id}/values/{key}` (`DeleteValue`) | Booted DELETE then GET is 404; atomic delete; characterization `del`/`after_del`; BDD delete |
+| v4 envelope vs AWS faults | restJson1 `Encode` wraps `{success,errors,messages,result}`; `EncodeFault` uses numeric `errors[].code` and omits `x-amzn-errortype`; mutant `cloudflare-encode-aws-fault` |
+
 ## Vercel baseline
 
 Authority: official Vercel REST (`api.vercel.com` `/vN/...`) plus Upstash Redis JSON-array KV on `*.kv.vercel-storage.com`. There is no LocalStack Vercel inventory; rows are operation → Mirror evidence, not a live `api.vercel.com` differential.

@@ -21516,6 +21516,46 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSConfirmSubscriptionTokenValidation",
 	},
+	{
+		name: "vercel-accept-empty-project-name",
+		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
+		old:  "name := str(req.Input[\"name\"])\n\tif name == \"\" {\n\t\treturn nil, &spi.Fault{Code: \"bad_request\", Message: \"Project name is required\", HTTPStatus: 400, Fault: \"client\"}",
+		new:  "name := str(req.Input[\"name\"])\n\tif false {\n\t\treturn nil, &spi.Fault{Code: \"bad_request\", Message: \"Project name is required\", HTTPStatus: 400, Fault: \"client\"}",
+		pkg:  "./internal/services/vercel/api",
+		run:  "TestCreateProjectRejectsEmptyAndDuplicateNames",
+	},
+	{
+		name: "vercel-accept-duplicate-project-name",
+		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
+		old:  `if _, exists, _ := p.col(req, "vproj").Get(ctx, "name:"+name); exists {`,
+		new:  `if _, exists, _ := p.col(req, "vproj").Get(ctx, "name:"+name); false {`,
+		pkg:  "./internal/services/vercel/api",
+		run:  "TestCreateProjectRejectsEmptyAndDuplicateNames",
+	},
+	{
+		name: "vercel-accept-empty-env-key",
+		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
+		old:  `if str(req.Input["key"]) == "" {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/vercel/api",
+		run:  "TestEnvDomainAndKVRejectBadInput",
+	},
+	{
+		name: "vercel-delete-missing-deployment",
+		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
+		old:  `if _, err := p.getJSON(ctx, req, "vdeploy", id); err != nil {`,
+		new:  `if _, err := p.getJSON(ctx, req, "vdeploy", id); false && err != nil {`,
+		pkg:  "./internal/services/vercel/api",
+		run:  "TestDeleteDeploymentMissingIsNotFound",
+	},
+	{
+		name: "vercel-route-root-as-unknown",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if path == \"\" {\n\t\treturn \"KvCommand\"",
+		new:  "if path == \"\" {\n\t\treturn \"Unknown\"",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSONServiceRoutes",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

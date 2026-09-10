@@ -1,0 +1,37 @@
+{
+  "bareString": {
+    "Code": "InvalidParameter",
+    "HTTPStatus": 400,
+    "Message": "Invalid parameter: FilterPolicy: \"key_a\" must be an object or an array"
+  },
+  "dualOperator": {
+    "Code": "InvalidParameter",
+    "HTTPStatus": 400,
+    "Message": "Invalid parameter: FilterPolicy"
+  },
+  "nestedList": {
+    "Code": "InvalidParameter",
+    "HTTPStatus": 400,
+    "Message": "Invalid parameter: FilterPolicy"
+  },
+  "nestedWithoutScope": {
+    "Code": "InvalidParameter",
+    "HTTPStatus": 400,
+    "Message": "Invalid parameter: FilterPolicy: nested filter policy requires FilterPolicyScope=MessageBody"
+  },
+  "tooManyKeys": {
+    "Code": "InvalidParameter",
+    "HTTPStatus": 400,
+    "Message": "Invalid parameter: FilterPolicy"
+  },
+  "tooManyValues": {
+    "Code": "InvalidParameter",
+    "HTTPStatus": 400,
+    "Message": "Invalid parameter: FilterPolicy"
+  },
+  "unknownOperator": {
+    "Code": "InvalidParameter",
+    "HTTPStatus": 400,
+    "Message": "Invalid parameter: FilterPolicy"
+  }
+}

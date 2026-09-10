@@ -2978,3 +2978,22 @@ func TestSNSSubscriptionAttributeValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSNSSubscriptionAttributesProjection(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "subscription-attributes"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "subscription-attributes"}).Output["TopicArn"])
+	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:subscription-attributes",
+		"Attributes": map[string]any{"RawMessageDelivery": "TrUe", "FilterPolicyScope": "MessageBody", "FilterPolicy": "{}"},
+	})
+	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
+	if str(attrs["RawMessageDelivery"]) != "true" || str(attrs["FilterPolicyScope"]) != "MessageBody" || str(attrs["FilterPolicy"]) != "{}" {
+		t.Fatalf("subscription attributes %#v", attrs)
+	}
+}

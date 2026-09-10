@@ -297,7 +297,6 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)
-	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invokeSNSQueue(t, qp, id, "CreateQueue", map[string]any{"QueueName": "standard-group"})
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "standard-group"}).Output["TopicArn"])

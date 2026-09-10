@@ -18016,6 +18016,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSControlPlaneOperations",
 		},
 		{
+			name: "sns-hardcode-aws-partition",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `snsPartition(req.Identity.Region)`,
+			new:  `"aws"`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPartitionARNs",
+		},
+		{
 			name: "sns-wrap-raw-http-subscription-body",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `body = payload`,

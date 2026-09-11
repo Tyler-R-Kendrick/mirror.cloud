@@ -548,6 +548,46 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 200 || h.Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("no-origin no-cors %d %#v", code, h)
 	}
+
+	// Tier and blob leases on the wire, on a dedicated blob so the later
+	// sections keep their fixture.
+	code, raw, h = do(http.MethodHead, "/ctr/o", "", nil)
+	if code != 200 || h.Get("x-ms-access-tier") != "Hot" || h.Get("x-ms-access-tier-inferred") != "true" {
+		t.Fatalf("default tier %d %#v", code, h)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/l1", "leased", nil)
+	if code != 201 {
+		t.Fatalf("put l1 %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/l1?comp=tier", "", map[string]string{"x-ms-access-tier": "Archive"})
+	if code != 200 {
+		t.Fatalf("set tier %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/l1", "", nil)
+	if code != 409 || h.Get("x-ms-error-code") != "BlobArchived" {
+		t.Fatalf("archive download %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/l1?comp=tier", "", map[string]string{"x-ms-access-tier": "Hot"})
+	if code != 200 {
+		t.Fatalf("rehydrate %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/ap?comp=tier", "", map[string]string{"x-ms-access-tier": "Cool"})
+	if code != 400 || h.Get("x-ms-error-code") != "AccessTierNotSupportedForBlobType" {
+		t.Fatalf("append tier %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/l1?comp=lease", "", map[string]string{"x-ms-lease-action": "acquire", "x-ms-lease-duration": "-1"})
+	lid := h.Get("x-ms-lease-id")
+	if code != 201 || lid == "" {
+		t.Fatalf("acquire blob lease %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/ctr/l1", "", nil)
+	if code != 412 || h.Get("x-ms-error-code") != "LeaseIdMissing" {
+		t.Fatalf("delete leased %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodDelete, "/ctr/l1", "", map[string]string{"x-ms-lease-id": lid})
+	if code != 202 {
+		t.Fatalf("delete with lease %d %s", code, raw)
+	}
 	code, raw, h = do(http.MethodHead, "/ctr/missing", "", nil)
 	if code != 404 || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("Content-Type") != "" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("head missing %d %#v %s", code, h, raw)

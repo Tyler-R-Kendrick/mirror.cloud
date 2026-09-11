@@ -163,6 +163,22 @@ errors:
     code: InvalidXmlDocument
     http: 400
     fault: client
+  BlobArchived:
+    code: BlobArchived
+    http: 409
+    fault: client
+  AccessTierNotSupportedForBlobType:
+    code: AccessTierNotSupportedForBlobType
+    http: 400
+    fault: client
+  LeaseIdMissing:
+    code: LeaseIdMissing
+    http: 412
+    fault: client
+  LeaseIdMismatchWithBlobOperation:
+    code: LeaseIdMismatchWithBlobOperation
+    http: 409
+    fault: client
 
 operations:
   CreateContainer:
@@ -217,6 +233,8 @@ operations:
       - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
       - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!existing_found || !('lease_status' in existing && string(existing.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!existing_found || !('lease_status' in existing && string(existing.lease_status) == 'locked') || string(existing.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
     effects:
       - put:
           resource: blob
@@ -232,6 +250,12 @@ operations:
             content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
             content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
             blob_type: "('blob_type' in input && input.blob_type != null && string(input.blob_type) != '') ? string(input.blob_type) : 'BlockBlob'"
+            access_tier: "('access_tier' in input && input.access_tier != null) ? string(input.access_tier) : ''"
+            access_tier_inferred: "('access_tier' in input && input.access_tier != null) ? 'false' : 'true'"
+            lease_id: "(existing_found && 'lease_id' in existing && existing.lease_id != null) ? string(existing.lease_id) : ''"
+            lease_status: "(existing_found && 'lease_status' in existing && existing.lease_status != null) ? string(existing.lease_status) : ''"
+            lease_state: "(existing_found && 'lease_state' in existing && existing.lease_state != null) ? string(existing.lease_state) : ''"
+            lease_duration: "(existing_found && 'lease_duration' in existing && existing.lease_duration != null) ? string(existing.lease_duration) : ''"
             tags: "('tags' in input && input.tags != null) ? input.tags : {}"
       # The FilterBlobs index mirrors this blob's tags at account level; an
       # overwrite replaces the entry wholesale, tags or no tags.
@@ -256,6 +280,7 @@ operations:
       - { cond: "rec_found || !('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "('snapshot' in input && input.snapshot != null) || !('access_tier' in rec && string(rec.access_tier) == 'Archive')", error: BlobArchived, message: "This operation is not permitted on an archived blob." }
       # Read conditions (Azurite ReadConditionalHeadersValidator).
       - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
       - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || string(input.if_match_list[0]) == '*' || input.if_match_list.exists(m, string(m) == etag)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
@@ -334,6 +359,10 @@ operations:
             blob_type: "('blob_type' in srcrec && srcrec.blob_type != null) ? string(srcrec.blob_type) : 'BlockBlob'"
             sequence_number: "('sequence_number' in srcrec && srcrec.sequence_number != null) ? string(srcrec.sequence_number) : '0'"
             append_count: "'0'"
+            lease_id: "(dst_found && 'lease_id' in dst && dst.lease_id != null) ? string(dst.lease_id) : ''"
+            lease_status: "(dst_found && 'lease_status' in dst && dst.lease_status != null) ? string(dst.lease_status) : ''"
+            lease_state: "(dst_found && 'lease_state' in dst && dst.lease_state != null) ? string(dst.lease_state) : ''"
+            lease_duration: "(dst_found && 'lease_duration' in dst && dst.lease_duration != null) ? string(dst.lease_duration) : ''"
             tags: stags
       - patch:
           resource: account
@@ -385,6 +414,10 @@ operations:
             blob_type: "('blob_type' in srcrec && srcrec.blob_type != null) ? string(srcrec.blob_type) : 'BlockBlob'"
             sequence_number: "('sequence_number' in srcrec && srcrec.sequence_number != null) ? string(srcrec.sequence_number) : '0'"
             append_count: "'0'"
+            lease_id: "(dst_found && 'lease_id' in dst && dst.lease_id != null) ? string(dst.lease_id) : ''"
+            lease_status: "(dst_found && 'lease_status' in dst && dst.lease_status != null) ? string(dst.lease_status) : ''"
+            lease_state: "(dst_found && 'lease_state' in dst && dst.lease_state != null) ? string(dst.lease_state) : ''"
+            lease_duration: "(dst_found && 'lease_duration' in dst && dst.lease_duration != null) ? string(dst.lease_duration) : ''"
             tags: stags
       - patch:
           resource: account
@@ -458,6 +491,11 @@ operations:
       content_length: "string(blen(string(src.value)))"
       sequence_number: "('sequence_number' in src && src.sequence_number != null) ? string(src.sequence_number) : ''"
       tag_count: "string(size(('tags' in src && src.tags != null) ? src.tags : {}))"
+      access_tier: "('access_tier' in src && src.access_tier != null && string(src.access_tier) != '') ? string(src.access_tier) : 'Hot'"
+      access_tier_inferred: "('access_tier' in src && src.access_tier != null && string(src.access_tier) != '') ? 'false' : 'true'"
+      lease_status: "('lease_status' in src && src.lease_status != null && string(src.lease_status) != '') ? string(src.lease_status) : 'unlocked'"
+      lease_state: "('lease_state' in src && src.lease_state != null && string(src.lease_state) != '') ? string(src.lease_state) : 'available'"
+      lease_duration: "('lease_duration' in src && src.lease_duration != null) ? string(src.lease_duration) : ''"
       etag: "rec_found ? '\"' + etag + '\"' : ''"
       last_modified: "string(last_mod)"
 
@@ -496,6 +534,8 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
       - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'InvalidXmlDocument')", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
       - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
       - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
@@ -522,6 +562,7 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == (('lease_id' in input && input.lease_id != null) ? string(input.lease_id) : '')", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
       - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in src && src.tags != null) ? src.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
@@ -753,6 +794,8 @@ operations:
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "('snapshot' in input && input.snapshot != null) || !('snapshots' in rec && rec.snapshots != null && size(rec.snapshots) > 0) || ('delete_snapshots' in input && input.delete_snapshots != null)", error: SnapshotsPresent, message: "The blob has one or more snapshots. Specify the x-ms-delete-snapshots header." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
       # Write conditions (Azurite WriteConditionalHeadersValidator):
       # combination 400s, then the first present condition type decides.
       - { cond: "!('if_match_list' in input && size(input.if_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
@@ -821,6 +864,8 @@ operations:
       - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
       - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
       - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     select: { binding: staged, resource: block }
     effects:
       - put:
@@ -838,6 +883,207 @@ operations:
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"
+
+
+  SetBlobTier:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'access_tier' in input && input.access_tier != null && ['Hot', 'Cool', 'Cold', 'Archive'].exists(tier, tier == string(input.access_tier))", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "string(rec.blob_type) == 'BlockBlob'", error: AccessTierNotSupportedForBlobType, message: "The access tier is not supported for this blob type." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            access_tier: "string(input.access_tier)"
+            access_tier_inferred: "'false'"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  AcquireBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked')", error: LeaseAlreadyPresent, message: "There is already a lease present." }
+    effects:
+      - generate: { bind: leaseid, kind: hex, bytes: 16 }
+      - patch:
+          resource: blob
+          record:
+            lease_id: "('proposed_lease_id' in input && string(input.proposed_lease_id) != '') ? string(input.proposed_lease_id) : fx.leaseid"
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+            lease_duration: "('lease_duration' in input && string(input.lease_duration) == '-1') ? 'infinite' : 'fixed'"
+    output:
+      lease_id: "('proposed_lease_id' in input && string(input.proposed_lease_id) != '') ? string(input.proposed_lease_id) : fx.leaseid"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+      lease_duration: "('lease_duration' in input && string(input.lease_duration) == '-1') ? 'infinite' : 'fixed'"
+
+  ReleaseBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            lease_id: "''"
+            lease_status: "'unlocked'"
+            lease_state: "'available'"
+            lease_duration: "''"
+    output:
+      lease_status: "'unlocked'"
+      lease_state: "'available'"
+
+  RenewBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+    output:
+      lease_id: "string(rec.lease_id)"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+
+  BreakBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            lease_id: "''"
+            lease_status: "'unlocked'"
+            lease_state: "'broken'"
+            lease_duration: "''"
+    output:
+      lease_status: "'unlocked'"
+      lease_state: "'broken'"
+
+  ChangeBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+      - { cond: "'proposed_lease_id' in input && string(input.proposed_lease_id) != ''", error: InvalidResourceName, message: "The proposed lease ID is invalid." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            lease_id: "string(input.proposed_lease_id)"
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+    output:
+      lease_id: "string(input.proposed_lease_id)"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+
+  PutPageFromURL:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'page_write' in input && string(input.page_write) == 'update'", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'range_start' in input && int(input.range_start) % 512 == 0 && (int(input.range_end) + 1) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_end) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+    let:
+      chunk: "src_found ? (('source_range_start' in input) ? substr(string(src.value), int(input.source_range_start), int(input.source_range_end) + 1) : string(src.value)) : ''"
+    effects:
+      # The src read resolved this resource's id to the source; key the patch
+      # back to the destination, same as the copy puts.
+      - patch:
+          resource: blob
+          key: "string(input.blob)"
+          record:
+            value: "substr(string(rec.value), 0, int(input.range_start)) + chunk + substr(string(rec.value), int(input.range_end) + 1, blen(string(rec.value)))"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  AppendBlockFromURL:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'AppendBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    let:
+      chunk: "src_found ? (('source_range_start' in input) ? substr(string(src.value), int(input.source_range_start), int(input.source_range_end) + 1) : string(src.value)) : ''"
+      offset: "rec_found ? blen(string(rec.value)) : 0"
+      count: "rec_found ? ((('append_count' in rec && rec.append_count != null) ? int(rec.append_count) : 0) + 1) : 0"
+    effects:
+      - patch:
+          resource: blob
+          key: "string(input.blob)"
+          record:
+            value: "string(rec.value) + chunk"
+            append_count: "string(count)"
+    output:
+      append_offset: "string(offset)"
+      committed_block_count: "string(count)"
+
+  # Get Page Ranges Diff: pages whose current bytes differ from the named
+  # snapshot (missing pages in the snapshot read as zeros).
+  GetPageRangesDiff:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "('prevsnapshot' in input && input.prevsnapshot != null) && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.prevsnapshot))) > 0", error: BlobNotFound, message: "The specified snapshot does not exist." }
+    let:
+      # Guard the snapshot index: an unknown prevsnapshot must 404 via the
+      # require, not fault the let before requires run.
+      snapval: "(rec_found && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.prevsnapshot))) > 0) ? string(rec.snapshots.filter(s, s.id == string(input.prevsnapshot))[0].value) : ''"
+      npages: "blen(string(rec.value)) / 512"
+      changed: "rec_found ? series(npages).filter(i, substr(string(rec.value), i * 512, i * 512 + 512) != (i * 512 + 512 <= blen(snapval) ? substr(snapval, i * 512, i * 512 + 512) : zeros(512))) : []"
+      starts: "changed.filter(i, i == 0 || !changed.exists(j, j == i - 1))"
+      ends: "changed.filter(i, !changed.exists(j, j == i + 1))"
+      all: "series(size(starts)).map(j, {'start': starts[j] * 512, 'end': ends[j] * 512 + 511})"
+    output:
+      ranges: all
 
   UnsupportedQuery:
     require:
@@ -1025,6 +1271,8 @@ operations:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "string(rec.blob_type) == 'AppendBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
       - { cond: "'body' in input && input.body != null && blen(string(input.body)) > 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: "blen(string(input.body)) <= 4194304", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
       - { cond: "!('append_count' in rec && rec.append_count != null) || int(rec.append_count) < 50000", error: BlockCountExceedsLimit, message: "The committed block count has exceeded the maximum permissible limit." }

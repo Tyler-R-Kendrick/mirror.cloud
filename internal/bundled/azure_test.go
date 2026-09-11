@@ -870,3 +870,117 @@ func FuzzBlobBytes(f *testing.F) {
 		_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteBlob", Input: map[string]any{"container": "b", "blob": name}})
 	})
 }
+
+func TestAzureTierLeaseFromURL(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	fault := func(op string, in map[string]any, status int, code string) {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		f, ok := err.(*spi.Fault)
+		if !ok || f.HTTPStatus != status || f.Code != code {
+			t.Fatalf("%s: got %#v, want %d %s", op, err, status, code)
+		}
+	}
+
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "hello"})
+
+	// Tier: default Hot+inferred, explicit set moves it, archive blocks download.
+	props := inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "o"})
+	if props.Output["access_tier"] != "Hot" || props.Output["access_tier_inferred"] != "true" {
+		t.Fatalf("default tier %#v", props.Output)
+	}
+	inv("SetBlobTier", map[string]any{"container": "ctr", "blob": "o", "access_tier": "Cool"})
+	props = inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "o"})
+	if props.Output["access_tier"] != "Cool" || props.Output["access_tier_inferred"] != "false" {
+		t.Fatalf("cool tier %#v", props.Output)
+	}
+	inv("SetBlobTier", map[string]any{"container": "ctr", "blob": "o", "access_tier": "Archive"})
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o"}, 409, "BlobArchived")
+	inv("SetBlobTier", map[string]any{"container": "ctr", "blob": "o", "access_tier": "Hot"})
+	fault("SetBlobTier", map[string]any{"container": "ctr", "blob": "o", "access_tier": "Lukewarm"}, 400, "InvalidHeaderValue")
+	inv("CreateAppendBlob", map[string]any{"container": "ctr", "blob": "a"})
+	fault("SetBlobTier", map[string]any{"container": "ctr", "blob": "a", "access_tier": "Cool"}, 400, "AccessTierNotSupportedForBlobType")
+	// Upload with an explicit tier is born not-inferred.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "t1", "body": "x", "access_tier": "Cold"})
+	props = inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "t1"})
+	if props.Output["access_tier"] != "Cold" || props.Output["access_tier_inferred"] != "false" {
+		t.Fatalf("upload tier %#v", props.Output)
+	}
+
+	// Blob leases: acquire locks, writes need the id, release frees.
+	lease := inv("AcquireBlobLease", map[string]any{"container": "ctr", "blob": "o", "lease_duration": "-1"})
+	lid := fmt.Sprint(lease.Output["lease_id"])
+	if lid == "" || lease.Output["lease_duration"] != "infinite" {
+		t.Fatalf("acquire %#v", lease.Output)
+	}
+	fault("AcquireBlobLease", map[string]any{"container": "ctr", "blob": "o", "lease_duration": "-1"}, 409, "LeaseAlreadyPresent")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o"}, 412, "LeaseIdMissing")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "lease_id": "wrong"}, 409, "LeaseIdMismatchWithBlobOperation")
+	_ = inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "t1", "lease_id": lid})
+	inv("AcquireBlobLease", map[string]any{"container": "ctr", "blob": "a", "lease_duration": "-1"})
+	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "a", "body": "x"}, 412, "LeaseIdMissing")
+	inv("BreakBlobLease", map[string]any{"container": "ctr", "blob": "a"})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "new", "lease_id": lid})
+	// Overwrite refreshes (keeps) the lease.
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o"}, 412, "LeaseIdMissing")
+	inv("SetTags", map[string]any{"container": "ctr", "blob": "o", "tags": map[string]any{"k": "v"}, "lease_id": lid})
+	fault("GetTags", map[string]any{"container": "ctr", "blob": "o", "lease_id": "wrong"}, 409, "LeaseIdMismatchWithBlobOperation")
+	inv("RenewBlobLease", map[string]any{"container": "ctr", "blob": "o", "lease_id": lid})
+	newID := inv("ChangeBlobLease", map[string]any{"container": "ctr", "blob": "o", "lease_id": lid, "proposed_lease_id": "prop-1"})
+	if newID.Output["lease_id"] != "prop-1" {
+		t.Fatalf("change %#v", newID.Output)
+	}
+	fault("ReleaseBlobLease", map[string]any{"container": "ctr", "blob": "o", "lease_id": lid}, 409, "LeaseIdMismatchWithLeaseOperation")
+	inv("ReleaseBlobLease", map[string]any{"container": "ctr", "blob": "o", "lease_id": "prop-1"})
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "o"})
+
+	// Break frees immediately here.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "t2", "body": "x"})
+	inv("AcquireBlobLease", map[string]any{"container": "ctr", "blob": "t2", "lease_duration": "30"})
+	inv("BreakBlobLease", map[string]any{"container": "ctr", "blob": "t2"})
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "t2"})
+
+	// Put Page From URL splices source bytes; Append Block From URL appends.
+	inv("CreatePageBlob", map[string]any{"container": "ctr", "blob": "pg", "content_length": "1024"})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "src", "body": "0123456789"})
+	inv("PutPageFromURL", map[string]any{"container": "ctr", "blob": "pg", "page_write": "update",
+		"range_start": int64(512), "range_end": int64(1023), "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src",
+		"source_range_start": int64(0), "source_range_end": int64(9), "body": ""})
+	dl := inv("GetBlob", map[string]any{"container": "ctr", "blob": "pg"})
+	raw := fmt.Sprint(dl.Output["_raw"])
+	if raw[:512] != "" && raw[:512] != string(make([]byte, 512)) {
+		t.Fatalf("page prefix %q", raw[:8])
+	}
+	if raw[512:522] != "0123456789" {
+		t.Fatalf("page splice %q", raw[512:530])
+	}
+	inv("AppendBlockFromURL", map[string]any{"container": "ctr", "blob": "a", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src", "body": ""})
+	dl = inv("GetBlob", map[string]any{"container": "ctr", "blob": "a"})
+	if fmt.Sprint(dl.Output["_raw"]) != "0123456789" {
+		t.Fatalf("append from url %#v", dl.Output)
+	}
+
+	// Page ranges diff against a snapshot: changed pages only.
+	inv("PutPage", map[string]any{"container": "ctr", "blob": "pg", "page_write": "update", "range_start": int64(0), "range_end": int64(511), "body": strings.Repeat("a", 512)})
+	snap := inv("CreateSnapshot", map[string]any{"container": "ctr", "blob": "pg"})
+	sid := fmt.Sprint(snap.Output["snapshot"])
+	inv("PutPage", map[string]any{"container": "ctr", "blob": "pg", "page_write": "update", "range_start": int64(0), "range_end": int64(511), "body": strings.Repeat("b", 512)})
+	_ = sid
+	diff := inv("GetPageRangesDiff", map[string]any{"container": "ctr", "blob": "pg", "prevsnapshot": sid})
+	ranges, _ := diff.Output["ranges"].([]any)
+	if len(ranges) != 1 || fmt.Sprint(ranges[0].(map[string]any)["start"]) != "0" {
+		t.Fatalf("diff %#v", diff.Output)
+	}
+	fault("GetPageRangesDiff", map[string]any{"container": "ctr", "blob": "pg", "prevsnapshot": "nope"}, 404, "BlobNotFound")
+}

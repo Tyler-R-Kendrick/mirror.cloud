@@ -850,6 +850,8 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		{http.MethodGet, "/c?restype=container&comp=blobs", "FilterBlobs"},
 		{http.MethodPost, "/?comp=batch", "SubmitBatch"},
 		{http.MethodPost, "/c?restype=container&comp=batch", "SubmitBatch"},
+		{http.MethodPut, "/c/o?comp=tier", "SetBlobTier"},
+		{http.MethodGet, "/c/o?comp=pagelist&prevsnapshot=abc", "GetPageRangesDiff"},
 		{http.MethodPut, "/c?restype=container&comp=metadata", "SetContainerMetadata"},
 		{http.MethodGet, "/c?restype=container&comp=metadata", "GetContainerMetadata"},
 		{http.MethodPut, "/c?restype=container&comp=acl", "SetContainerAcl"},
@@ -875,6 +877,31 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		if err != nil || op.Name != want {
 			t.Errorf("azure lease %s: %#v %v, want %s", action, op, err, want)
 		}
+	}
+	for action, want := range map[string]string{
+		"acquire": "AcquireBlobLease",
+		"release": "ReleaseBlobLease",
+		"renew":   "RenewBlobLease",
+		"break":   "BreakBlobLease",
+		"change":  "ChangeBlobLease",
+	} {
+		req := httptest.NewRequest(http.MethodPut, "/c/o?comp=lease", nil)
+		req.Header.Set("x-ms-lease-action", action)
+		op, err := codec.Route(az, req)
+		if err != nil || op.Name != want {
+			t.Errorf("azure blob lease %s: %#v %v, want %s", action, op, err, want)
+		}
+	}
+	copyReq := httptest.NewRequest(http.MethodPut, "/c/o?comp=appendblock", nil)
+	copyReq.Header.Set("x-ms-copy-source", "http://acct.blob.core.windows.net/c/s")
+	if op, err := codec.Route(az, copyReq); err != nil || op.Name != "AppendBlockFromURL" {
+		t.Errorf("azure append from url: %#v %v", op, err)
+	}
+	pageReq := httptest.NewRequest(http.MethodPut, "/c/o?comp=page", nil)
+	pageReq.Header.Set("x-ms-page-write", "update")
+	pageReq.Header.Set("x-ms-copy-source", "http://acct.blob.core.windows.net/c/s")
+	if op, err := codec.Route(az, pageReq); err != nil || op.Name != "PutPageFromURL" {
+		t.Errorf("azure page from url: %#v %v", op, err)
 	}
 	for name, test := range map[string]struct {
 		path, header, value, want string

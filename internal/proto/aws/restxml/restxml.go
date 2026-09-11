@@ -470,7 +470,30 @@ func azureRoute(r *http.Request) string {
 			}
 			return "UnsupportedQuery"
 		case "appendblock":
+			if r.Header.Get("x-ms-copy-source") != "" {
+				return "AppendBlockFromURL"
+			}
 			return "AppendBlock"
+		case "tier":
+			if m == http.MethodPut {
+				return "SetBlobTier"
+			}
+			return "UnsupportedQuery"
+		case "lease":
+			switch strings.ToLower(r.Header.Get("x-ms-lease-action")) {
+			case "acquire":
+				return "AcquireBlobLease"
+			case "release":
+				return "ReleaseBlobLease"
+			case "renew":
+				return "RenewBlobLease"
+			case "break":
+				return "BreakBlobLease"
+			case "change":
+				return "ChangeBlobLease"
+			default:
+				return "UnsupportedQuery"
+			}
 		case "tags":
 			if m == http.MethodPut {
 				return "SetTags"
@@ -501,10 +524,16 @@ func azureRoute(r *http.Request) string {
 			if r.Header.Get("x-ms-page-write") == "clear" {
 				return "ClearPages"
 			}
+			if r.Header.Get("x-ms-copy-source") != "" {
+				return "PutPageFromURL"
+			}
 			return "PutPage"
 		case "pagelist":
 			if m != http.MethodGet {
 				return "UnsupportedQuery"
+			}
+			if q.Get("prevsnapshot") != "" {
+				return "GetPageRangesDiff"
 			}
 			return "GetPageRanges"
 		case "":
@@ -661,6 +690,8 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 			in["seq_lt"] = vs[0]
 		case "x-ms-if-sequence-number-le":
 			in["seq_le"] = vs[0]
+		case "x-ms-access-tier":
+			in["access_tier"] = vs[0]
 		case "x-ms-blob-condition-appendpos":
 			in["append_pos"] = vs[0]
 		case "x-ms-blob-condition-maxsize":
@@ -2913,6 +2944,12 @@ func writeAzureBlobHeaders(w http.ResponseWriter, resp *spi.Response) {
 	}
 	if s := strAny(out["tag_count"]); s != "" {
 		w.Header().Set("x-ms-tag-count", s)
+	}
+	if s := strAny(out["access_tier"]); s != "" {
+		w.Header().Set("x-ms-access-tier", s)
+	}
+	if s := strAny(out["access_tier_inferred"]); s != "" {
+		w.Header().Set("x-ms-access-tier-inferred", s)
 	}
 	writeAzureEntityHeaders(w, out)
 }

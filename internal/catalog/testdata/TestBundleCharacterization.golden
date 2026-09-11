@@ -845,7 +845,16 @@
       "SetTags",
       "GetTags",
       "FilterBlobs",
-      "SubmitBatch"
+      "SubmitBatch",
+      "SetBlobTier",
+      "AcquireBlobLease",
+      "ReleaseBlobLease",
+      "RenewBlobLease",
+      "BreakBlobLease",
+      "ChangeBlobLease",
+      "PutPageFromURL",
+      "AppendBlockFromURL",
+      "GetPageRangesDiff"
     ]
   },
   {

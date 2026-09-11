@@ -323,6 +323,15 @@ func Bundle() *model.Bundle {
 		op("GetTags", "GET", "/{container}/{blob}?comp=tags", 200, true),
 		op("FilterBlobs", "GET", "/?comp=blobs", 200, true),
 		op("SubmitBatch", "POST", "/?comp=batch", 202, false),
+		op("SetBlobTier", "PUT", "/{container}/{blob}?comp=tier", 200, false),
+		op("AcquireBlobLease", "PUT", "/{container}/{blob}?comp=lease&acquire", 201, false),
+		op("ReleaseBlobLease", "PUT", "/{container}/{blob}?comp=lease&release", 200, false),
+		op("RenewBlobLease", "PUT", "/{container}/{blob}?comp=lease&renew", 200, false),
+		op("BreakBlobLease", "PUT", "/{container}/{blob}?comp=lease&break", 202, false),
+		op("ChangeBlobLease", "PUT", "/{container}/{blob}?comp=lease&change", 200, false),
+		op("PutPageFromURL", "PUT", "/{container}/{blob}?comp=page", 201, false),
+		op("AppendBlockFromURL", "PUT", "/{container}/{blob}?comp=appendblock", 201, false),
+		op("GetPageRangesDiff", "GET", "/{container}/{blob}?comp=pagelist", 200, true),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
@@ -365,6 +374,15 @@ func Bundle() *model.Bundle {
 	azureSvc.OperationByName("SetTags").Output = "Blob"
 	azureSvc.OperationByName("GetTags").Output = "Blob"
 	azureSvc.OperationByName("FilterBlobs").Output = "FilterBlobResult"
+	azureSvc.OperationByName("SetBlobTier").Output = "Blob"
+	azureSvc.OperationByName("AcquireBlobLease").Output = "Blob"
+	azureSvc.OperationByName("ReleaseBlobLease").Output = "Blob"
+	azureSvc.OperationByName("RenewBlobLease").Output = "Blob"
+	azureSvc.OperationByName("BreakBlobLease").Output = "Blob"
+	azureSvc.OperationByName("ChangeBlobLease").Output = "Blob"
+	azureSvc.OperationByName("PutPageFromURL").Output = "Blob"
+	azureSvc.OperationByName("AppendBlockFromURL").Output = "Blob"
+	azureSvc.OperationByName("GetPageRangesDiff").Output = "PageRangeList"
 	azureSvc.Shapes = map[string]model.Shape{
 		"String": {ID: "String", Kind: model.KindString},
 		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
@@ -403,6 +421,12 @@ func Bundle() *model.Bundle {
 			"last_modified":       {Shape: "String"},
 			"tags":                {Shape: "Map"},
 			"tag_count":           {Shape: "String"},
+			"access_tier":         {Shape: "String"},
+			"access_tier_inferred": {Shape: "String"},
+			"lease_id":            {Shape: "String"},
+			"lease_status":        {Shape: "String"},
+			"lease_state":         {Shape: "String"},
+			"lease_duration":      {Shape: "String"},
 		}},
 		"FilterBlob": {ID: "FilterBlob", Kind: model.KindStructure, Members: map[string]model.Member{
 			"name":      {Shape: "String"},

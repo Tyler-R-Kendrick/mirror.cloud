@@ -21949,6 +21949,109 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
+	{
+		// The advertise URL reached the Server struct and stopped there for the
+		// life of the flag. Dropping the assignment restores that.
+		name: "edge-drop-the-advertise-url",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  "\treq.AdvertiseURL = s.advertise",
+		new:  "\treq.AdvertiseURL = \"\"",
+		pkg:  "./internal/spine",
+		run:  "TestBootedServerSQSPathEndpointStrategy",
+	},
+	{
+		// A query request naming no action is answered before routing. Falling
+		// through leaves the generic NotImplemented, which is a 501 where AWS
+		// sends 404 and a different body.
+		name: "edge-route-a-query-request-with-no-action",
+		file: filepath.Join("internal", "edge", "sqsquery.go"),
+		old:  "const sqsUnknownOperation = `<UnknownOperationException/>`",
+		new:  "const sqsUnknownOperation = `<ErrorResponse><Code>UnknownOperationException</Code></ErrorResponse>`",
+		pkg:  "./internal/edge",
+		run:  "TestUnknownOperationIsTheBareAWSElement",
+	},
+	{
+		// GetQueueUrl is the one action without a QueueUrl that a queue
+		// endpoint serves. Without the exception a client cannot look a queue
+		// up from a URL it already holds.
+		name: "edge-reject-getqueueurl-at-a-queue-endpoint",
+		file: filepath.Join("internal", "edge", "sqsquery.go"),
+		old:  "\tif action == \"GetQueueUrl\" {\n\t\treturn nil\n\t}",
+		new:  "\tif false {\n\t\treturn nil\n\t}",
+		pkg:  "./internal/edge",
+		run:  "TestAQueueURLEndpointServesQueueActions",
+	},
+	{
+		// Accepting every action at a queue endpoint is the state this
+		// replaced: CreateQueue and ListQueues answered there, against the
+		// queue in the path.
+		name: "edge-accept-any-action-at-a-queue-endpoint",
+		file: filepath.Join("internal", "edge", "sqsquery.go"),
+		old:  "\t\tif _, declared := shape.Members[\"QueueUrl\"]; declared {\n\t\t\treturn nil\n\t\t}",
+		new:  "\t\tif _, declared := shape.Members[\"QueueUrl\"]; !declared || declared {\n\t\t\treturn nil\n\t\t}",
+		pkg:  "./internal/edge",
+		run:  "TestAQueueURLEndpointServesQueueActions",
+	},
+	{
+		// Failing closed on a model that records no shapes rejects every queue
+		// action, which is worse than not having the check at all.
+		name: "edge-reject-when-the-model-cannot-answer",
+		file: filepath.Join("internal", "edge", "sqsquery.go"),
+		old:  "\t\tshape, ok := svc.Shapes[op.Input]\n\t\tif !ok {\n\t\t\treturn nil\n\t\t}",
+		new:  "\t\tshape, ok := svc.Shapes[op.Input]\n\t\tif !ok {\n\t\t\t_ = ok\n\t\t}",
+		pkg:  "./internal/edge",
+		run:  "TestTheQueueEndpointRuleReadsTheModel",
+	},
+	{
+		// `*/*` is not a request for JSON. Reading it as one switches every
+		// default client off the XML it has always parsed.
+		name: "awsquery-read-any-accept-as-json",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "json.go"),
+		old:  "if media, _, _ := strings.Cut(part, \";\"); strings.EqualFold(strings.TrimSpace(media), \"application/json\") {",
+		new:  "if media, _, _ := strings.Cut(part, \";\"); strings.Contains(strings.TrimSpace(media), \"json\") || media == \"*/*\" {",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestWantsJSONNeedsAnExplicitMediaType",
+	},
+	{
+		// A repeated element is a list. Overwriting instead of promoting loses
+		// every element but the last.
+		name: "awsquery-json-keeps-only-the-last-repeat",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "json.go"),
+		old:  "\tif list, ok := existing.([]any); ok {\n\t\tinto[name] = append(list, value)\n\t\treturn\n\t}\n\tinto[name] = []any{existing, value}",
+		new:  "\tif list, ok := existing.([]any); ok {\n\t\tinto[name] = append(list, value)\n\t\treturn\n\t}\n\tinto[name] = value",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestXMLToJSONPromotesRepeatedElements",
+	},
+	{
+		// A single element is not a one-element list; a client reading the JSON
+		// dialect distinguishes them.
+		name: "awsquery-json-wraps-a-single-element",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "json.go"),
+		old:  "\texisting, seen := into[name]\n\tif !seen {\n\t\tinto[name] = value\n\t\treturn\n\t}",
+		new:  "\texisting, seen := into[name]\n\tif !seen {\n\t\tinto[name] = []any{value}\n\t\treturn\n\t}",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestXMLToJSONPromotesRepeatedElements",
+	},
+	{
+		// An empty result is self-closing. The pair says the same thing to a
+		// parser and a different thing to a client matching on bytes.
+		name: "awsquery-write-an-empty-result-as-a-pair",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+		old:  "\t\tif body.Len() == 0 {",
+		new:  "\t\tif false {",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestAnEmptyResultIsSelfClosing",
+	},
+	{
+		// `xmlns=\"\"` undeclares the default namespace rather than leaving it
+		// unset, which is what every service without the trait was serving.
+		name: "awsquery-declare-an-empty-namespace",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+		old:  "\tif ns := svc.XMLNamespace; ns != \"\" {",
+		new:  "\tif ns := svc.XMLNamespace; true {",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestAnAbsentNamespaceIsNotAnEmptyOne",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

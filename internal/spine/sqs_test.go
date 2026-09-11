@@ -119,7 +119,19 @@ func TestBootedServerSQSQueryTags(t *testing.T) {
 	call(url.Values{"Action": {"CreateQueue"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}, "Tag.1.Key": {"first"}, "Tag.1.Value": {"one"}})
 	call(url.Values{"Action": {"TagQueue"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}, "Tags.member.1.Key": {"second"}, "Tags.member.1.Value": {"two"}})
 	body := call(url.Values{"Action": {"ListQueueTags"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}})
-	if !strings.Contains(string(body), "<first>one</first>") || !strings.Contains(string(body), "<second>two</second>") {
+	// The tag map serializes the way its specification says, not the way a map
+	// literal would. sqs-2012-11-05.json puts `xmlFlattened` and
+	// `xmlName: Tag` on ListQueueTagsResult$Tags and `xmlName: Key`/`Value` on
+	// TagMap's key and value -- traits that exist for no purpose but this
+	// document, since the modern SQS API is awsJson1_0 and has no XML at all.
+	//
+	// This asserted `<first>one</first>` when it landed, which is the older
+	// encoder's output: it walked the response map and used each key as an
+	// element name, so a tag called `Key` and a tag called `first` were
+	// indistinguishable from members. That is the defect C30 was about, and
+	// the form here is what AWS returns.
+	if !strings.Contains(string(body), "<Tag><Key>first</Key><Value>one</Value></Tag>") ||
+		!strings.Contains(string(body), "<Tag><Key>second</Key><Value>two</Value></Tag>") {
 		t.Fatalf("query tags response %s", body)
 	}
 }

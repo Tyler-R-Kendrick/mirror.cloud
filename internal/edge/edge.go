@@ -235,7 +235,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Amz-Target") != "" {
 			codec = s.codecs[model.ProtoAWSJSON10]
 		} else {
-			codec = s.codecs[model.ProtoAWSQuery]
+			codec = awsquery.Codec{JSON: awsquery.WantsJSON(r)}
+			if err := r.ParseForm(); err == nil {
+				action := r.Form.Get("Action")
+				if action == "" {
+					// Answered before a codec sees it, because there is no
+					// operation to route to and no envelope to put a modelled
+					// fault in. See sqsUnknownOperation.
+					w.Header().Set("x-mirror-fidelity", "emulate")
+					w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = io.WriteString(w, sqsUnknownOperation)
+					return
+				}
+				if sqsQueuePath(r.URL.Path) {
+					if err := sqsQueueEndpointAction(svc, action); err != nil {
+						s.fault(w, codec, svc, &model.Operation{Name: action}, err, rid)
+						return
+					}
+				}
+			}
 		}
 	}
 
@@ -252,6 +271,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req.Identity = id
 	req.HTTP = r
 	req.S3ValidateSignatures = svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures
+	// The configured advertise URL reaches packs here, which is the one place
+	// every decoded request passes through. It used to reach the Server struct
+	// and stop: `advertise` was assigned in New and read nowhere, so
+	// `--advertise-url` was accepted, documented and silently discarded, and
+	// four packs that ask for it (sqs, sns signing, cloudformation, s3
+	// location) always fell through to the request's own Host. A self-
+	// referencing URL that names the container's address is exactly the case
+	// the flag exists to fix.
+	req.AdvertiseURL = s.advertise
 
 	if !s.serviceEnabled(svc.ID) {
 		s.fault(w, codec, svc, op, spi.NotImplemented(svc.ID, op.Name, "emulate"), rid)

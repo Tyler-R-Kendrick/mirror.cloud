@@ -14,7 +14,13 @@ import (
 )
 
 // Codec implements proto.Codec for awsQuery.
-type Codec struct{}
+//
+// JSON selects the protocol's JSON dialect for responses: the same document,
+// transcoded (see json.go). It is a field rather than a sniff inside Encode
+// because content negotiation reads the request, and Encode is handed only the
+// response -- and because the edge is already where SQS's other dialect choice
+// is made, between the query and JSON protocols.
+type Codec struct{ JSON bool }
 
 func (Codec) Protocol() model.Protocol { return model.ProtoAWSQuery }
 
@@ -55,26 +61,60 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	return &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}, nil
 }
 
-func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWriter, resp *spi.Response) error {
+func (c Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWriter, resp *spi.Response) error {
 	status := resp.Status
 	if status == 0 {
 		status = 200
 	}
-	w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
-	w.WriteHeader(status)
-	ns := svc.XMLNamespace
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	fmt.Fprintf(&b, `<%sResponse xmlns="%s">`, op.Name, ns)
+	// A model with no xmlNamespace gets no attribute. `xmlns=""` is not an
+	// absent namespace: it explicitly *undeclares* the default one, which is a
+	// different document and a different thing for a strict parser to read.
+	// Four services reach here without the trait, SQS among them -- its
+	// current specification describes awsJson1_0 and no longer carries the
+	// query dialect's namespace -- so every one of them was serving `xmlns=""`.
+	if ns := svc.XMLNamespace; ns != "" {
+		fmt.Fprintf(&b, `<%sResponse xmlns="%s">`, op.Name, ns)
+	} else {
+		fmt.Fprintf(&b, `<%sResponse>`, op.Name)
+	}
 	e := enc{svc: svc}
 	if svc.Protocol == model.ProtoEC2Query {
 		e.value(&b, op.Output, resp.Output)
 		fmt.Fprintf(&b, `<requestId>mirror</requestId></%sResponse>`, op.Name)
 	} else {
-		fmt.Fprintf(&b, `<%sResult>`, op.Name)
-		e.value(&b, op.Output, resp.Output)
-		fmt.Fprintf(&b, `</%sResult><ResponseMetadata><RequestId>mirror</RequestId></ResponseMetadata></%sResponse>`, op.Name, op.Name)
+		// An operation that produced nothing gets a self-closing result
+		// element, which is what AWS returns for an empty ReceiveMessage and
+		// what a client matching on `<ReceiveMessageResult/>` is looking for.
+		// The open/close pair says the same thing to an XML parser and a
+		// different thing to everything else reading the bytes.
+		var body strings.Builder
+		e.value(&body, op.Output, resp.Output)
+		if body.Len() == 0 {
+			fmt.Fprintf(&b, `<%sResult/>`, op.Name)
+		} else {
+			fmt.Fprintf(&b, `<%sResult>%s</%sResult>`, op.Name, body.String(), op.Name)
+		}
+		fmt.Fprintf(&b, `<ResponseMetadata><RequestId>mirror</RequestId></ResponseMetadata></%sResponse>`, op.Name)
 	}
+	// The JSON dialect is the same document, so it is transcoded from the one
+	// just built rather than encoded a second time. See json.go. A document
+	// that will not parse is a defect in the encoder above, not something to
+	// hide from the client by silently serving XML to a request that asked for
+	// JSON, so the failure is returned.
+	if c.JSON {
+		encoded, err := xmlToJSON(b.String())
+		if err != nil {
+			return err
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, err = w.Write(encoded)
+		return err
+	}
+	w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
+	w.WriteHeader(status)
 	_, err := io.WriteString(w, b.String())
 	return err
 }

@@ -103,15 +103,120 @@ Authority: official DigitalOcean API v2 (`api.digitalocean.com` `/v2/droplets` a
 | `DELETE /v2/domains/{name}` (`DeleteDomain`) | Atomic 204; characterization `del_domain`; booted and BDD DELETE of missing name are HTTP 404 `{id:"not_found"}`; characterization `del_miss_n`; mutant `digitalocean-delete-missing-domain-as-success` |
 | DigitalOcean faults vs AWS faults | restJson1 `Encode` wraps singular/plural keys plus `meta.total`; `EncodeFault` uses `{id,message}` and omits `x-amzn-errortype`; mutant `digitalocean-encode-aws-fault` |
 
-## Azure Blob baseline
+## Azure Storage baseline
 
-Authority: official Azure Blob REST (`{account}.blob.core.windows.net`, `restype=container`, `comp=list`, `x-ms-blob-type: BlockBlob`). There is no LocalStack Azure inventory; rows are operation → Mirror evidence, not a live `*.blob.core.windows.net` differential. Queue/Table/File, page/append blobs, leases, snapshots, copy, and SAS are not in this denominator.
+Authority: Azurite commit `b1f480ed345d032eced096d475f40c76466fd954` (`https://github.com/Azure/Azurite`, audited 2026-09-11), API version 2026-06-06. This is the LocalStack analogue for Azure Storage: Blob + Queue + Table. The vendor swagger Azurite generates from is pinned under `specs/azure/` (`blob-storage.json`, `queue-storage.json`, `table/table.json`). Census: `specs/azure/azurite-inventory.json`, reproduced by `python3 scripts/count-azurite-tests.py --azurite <clone> --check`.
+
+This is a source-level inventory map, not a live `*.core.windows.net` differential. Completeness is row count against the pinned Azurite tests, the same way S3 is 463/463 LocalStack functions — not “the eight Blob CRUD ops we already had are well tested.”
+
+**Not in this denominator** (unclaimed, like LocalStack-skipped S3 rows): Azure Files (`file.core.windows.net`), Data Lake Gen2 (`dfs.core.windows.net`), ARM `management.azure.com`, and REST APIs Azurite itself marks unsupported at this pin (soft delete/undelete, blob versions, query blob, encryption scope, object replication, Put Blob From URL, static website, incremental copy, SharedKey Lite). Each such API gets an explicit unclaimed row when traced; they do not shrink the census.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the emulated Azure Blob slice | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Core Azure Blob REST operations routed to emulation | 8 / 8 |
-| Live Azure probe | none (not required) |
+| Requested test forms wired for the **currently implemented** 8 Blob CRUD ops | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 8 / 59 |
+| Queue REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 0 / 11 |
+| Table REST ops in pinned swagger (`paths`) routed to emulation | 0 / 12 |
+| Azurite test functions explicitly traced | 0 / 806 (0%) |
+| Azurite test functions not yet traced | 806 / 806 (100%) |
+| Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
+
+### Pinned inventory
+
+Direct `it()`/`test()` calls, params unexpanded. Harness-only files (Azurite unit/store/https/sql/utils/upgrade/startup/environment/keepAlive) are named in `specs/azure/azurite-inventory.json` `excludedFiles` (111 tests) and are **not** in the 806.
+
+| Tree | Direct test functions |
+|---|---:|
+| `tests/blob` | 521 |
+| `tests/queue` | 85 |
+| `tests/table` | 200 |
+| **Total** | **806** |
+
+| File | Direct test functions |
+|---|---:|
+| `blob/apis/blob.test.ts` | 98 |
+| `blob/apis/blockblob.test.ts` | 60 |
+| `blob/apis/pageblob.test.ts` | 58 |
+| `blob/apis/container.test.ts` | 48 |
+| `blob/sas.test.ts` | 47 |
+| `blob/apis/appendblob.test.ts` | 38 |
+| `blob/conditions.test.ts` | 37 |
+| `blob/apis/service.test.ts` | 25 |
+| `blob/specialnaming.test.ts` | 24 |
+| `blob/oauth.test.ts` | 18 |
+| `blob/blockblob.highlevel.test.ts` | 15 |
+| `blob/pagewithdelimiter.test.ts` | 14 |
+| `blob/blobCorsRequest.test.ts` | 13 |
+| `blob/apis/blobbatch.test.ts` | 13 |
+| `blob/handlers/AppendBlobHandler.test.ts` | 7 |
+| `blob/authentication.test.ts` | 5 |
+| `blob/handlers/PageBlobRangesManager.test.ts` | 1 |
+| `queue/queueSas.test.ts` | 16 |
+| `queue/oauth.test.ts` | 12 |
+| `queue/queueCorsRequest.test.ts` | 12 |
+| `queue/apis/queue.test.ts` | 9 |
+| `queue/apis/messages.test.ts` | 9 |
+| `queue/apis/queueService.test.ts` | 7 |
+| `queue/queueSpecialnaming.test.ts` | 6 |
+| `queue/apis/messageid.test.ts` | 5 |
+| `queue/queueAuthentication.test.ts` | 5 |
+| `queue/queueEnvironment.test.ts` | 3 |
+| `queue/queueKeepAliveTimeout.test.ts` | 1 |
+| `table/apis/table.entity.test.ts` | 38 |
+| `table/apis/table.entity.azure.data-tables.test.ts` | 31 |
+| `table/apis/table.entity.query.test.ts` | 24 |
+| `table/apis/table.test.ts` | 15 |
+| `table/apis/table.entity.rest.test.ts` | 14 |
+| `table/auth/oauth.test.ts` | 12 |
+| `table/auth/sas.test.ts` | 12 |
+| `table/auth/tableCorsRequest.test.ts` | 12 |
+| `table/apis/table.entity.issues.test.ts` | 11 |
+| `table/apis/table.validation.rest.test.ts` | 10 |
+| `table/apis/table.batch.errorhandling.test.ts` | 9 |
+| `table/apis/table.service.test.ts` | 4 |
+| `table/tableEnvironment.test.ts` | 3 |
+| `table/apis/table.entity.apostrophe.data-tables.test.ts` | 2 |
+| `table/apis/table.entity.apostrophe.azure-storage.test.ts` | 2 |
+| `table/KeepAlive/tableKeepAliveTimeout.test.ts` | 1 |
+| **Total** | **806** |
+
+### Pinned swagger vs Mirror
+
+Declared surface is `x-ms-paths` (Blob 59, Queue 11) and Table `paths` (12), counted from the vendored documents. Azurite implements a subset (its README support matrix); unimplemented-by-Azurite APIs stay unclaimed rows, they do not shrink these denominators. Implemented today: Create/Get/List/Delete Container, Put/Get/List/Delete Blob (8).
+
+| Azurite Blob REST | Mirror |
+|---|---|
+| List Containers | implemented (8-op slice) |
+| Create Container | implemented |
+| Get Container Properties | implemented as GetContainer |
+| Delete Container | implemented |
+| List Blobs | implemented |
+| Put Blob | implemented (block blob bytes only; `x-ms-blob-type` not read) |
+| Get Blob | implemented |
+| Delete Blob | implemented |
+| Set/Get Service Properties | not implemented |
+| Get Stats | not implemented |
+| Get Account Information | not implemented |
+| Get/Set Container Metadata | not implemented |
+| Get/Set Container ACL | not implemented |
+| Lease Container | not implemented |
+| Put Block / Put Block From URL / Put Block List / Get Block List | not implemented |
+| Get/Set Blob Properties | not implemented |
+| Get/Set Blob Metadata | not implemented |
+| Create Append Blob / Append Block | not implemented |
+| Put Page / Get Page Ranges | not implemented |
+| Lease Blob | not implemented |
+| Snapshot Blob | not implemented |
+| Copy Blob / Abort Copy Blob / Copy Blob From URL | not implemented |
+| CORS / Preflight | not implemented |
+
+Queue (16): List/Create/Delete Queue, Get/Set Service Properties, Get Stats, Preflight, Get/Set Metadata, Get/Set ACL, Put/Get/Peek/Update/Delete/Clear Messages — **none implemented**.
+
+Table (9): List/Create/Delete Table, Insert/Update/Merge/Query/Delete Entity, Batch — **none implemented**.
+
+### Currently implemented 8-op slice (not the inventory)
+
+The seven-form evidence below covers only the eight ops already in `internal/services/azure/blobs`. It is not Azurite-inventory completeness.
 
 | Azure Blob operation | Mirror evidence |
 |---|---|

@@ -114,7 +114,7 @@ This is a source-level inventory map, not a live `*.core.windows.net` differenti
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the **currently implemented** 8 Blob CRUD ops | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 11 / 59 |
+| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 12 / 59 |
 | Queue REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 6 / 11 |
 | Table REST ops in pinned swagger (`paths`) routed to emulation | 6 / 12 |
 | Azurite test functions explicitly traced | 0 / 806 (0%) |
@@ -195,6 +195,7 @@ Declared surface is `x-ms-paths` (Blob 59, Queue 11) and Table `paths` (12), cou
 | Get Blob | implemented |
 | Delete Blob | implemented |
 | Put Block / Put Block List / Get Block List | implemented (authored; PutBlockList commits the request body as the blob) |
+| Create Append Blob / Append Block | AppendBlock implemented (concatenates onto the blob; missing blob is created) |
 | Set/Get Service Properties | not implemented |
 | Get Stats | not implemented |
 | Get Account Information | not implemented |

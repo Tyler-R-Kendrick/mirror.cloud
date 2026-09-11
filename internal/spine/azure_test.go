@@ -110,6 +110,18 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 200 || string(raw) != "AB" {
 		t.Fatalf("get assembled %d %s", code, raw)
 	}
+	code, raw, _ = do(http.MethodPut, "/ctr/log?comp=appendblock", "one", nil)
+	if code >= 300 {
+		t.Fatalf("append %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/log?comp=appendblock", "two", nil)
+	if code >= 300 {
+		t.Fatalf("append 2 %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/log", "", nil)
+	if code != 200 || string(raw) != "onetwo" {
+		t.Fatalf("get append %d %s", code, raw)
+	}
 }
 
 func TestBootedServerAzureQueue(t *testing.T) {

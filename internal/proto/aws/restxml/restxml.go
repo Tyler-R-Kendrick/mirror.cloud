@@ -388,6 +388,8 @@ func azureRoute(r *http.Request) string {
 		switch q.Get("comp") {
 		case "block":
 			return "PutBlock"
+		case "appendblock":
+			return "AppendBlock"
 		case "blocklist":
 			if m == http.MethodGet || m == http.MethodHead {
 				return "GetBlockList"
@@ -486,7 +488,7 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 			in["blockid"] = bid
 		}
 		req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
-		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList") && r.Body != nil {
+		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList" || op.Name == "AppendBlock") && r.Body != nil {
 			body, _ := io.ReadAll(r.Body)
 			in["body"] = string(body)
 			req.Body = io.NopCloser(bytes.NewReader(body))

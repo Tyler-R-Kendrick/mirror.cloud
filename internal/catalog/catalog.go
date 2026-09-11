@@ -288,6 +288,7 @@ func Bundle() *model.Bundle {
 		op("PutBlock", "PUT", "/{container}/{blob}?comp=block", 201, false),
 		op("PutBlockList", "PUT", "/{container}/{blob}?comp=blocklist", 201, false),
 		op("GetBlockList", "GET", "/{container}/{blob}?comp=blocklist", 200, true),
+		op("AppendBlock", "PUT", "/{container}/{blob}?comp=appendblock", 201, false),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
@@ -298,6 +299,7 @@ func Bundle() *model.Bundle {
 	azureSvc.OperationByName("ListBlobs").Output = "BlobList"
 	azureSvc.OperationByName("PutBlockList").Output = "Blob"
 	azureSvc.OperationByName("GetBlockList").Output = "BlockList"
+	azureSvc.OperationByName("AppendBlock").Output = "Blob"
 	azureSvc.Shapes = map[string]model.Shape{
 		"String": {ID: "String", Kind: model.KindString},
 		"Container": {ID: "Container", Kind: model.KindStructure, Members: map[string]model.Member{

@@ -164,3 +164,20 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
     list: { resource: block, member: _list }
+
+  AppendBlock:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - put:
+          resource: blob
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "(rec_found ? string(rec.value) : '') + (('body' in input && input.body != null) ? string(input.body) : '')"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"

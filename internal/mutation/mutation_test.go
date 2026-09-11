@@ -12071,10 +12071,15 @@ var mutants = []mutant{
 	{
 		name: "httpuri-label-spans-a-separator",
 		file: filepath.Join("internal", "proto", "aws", "httpuri", "httpuri.go"),
-		old:  `	if len(parts) != len(p.segments) {`,
-		new:  `		if false {`,
-		pkg:  "./internal/proto/aws/httpuri",
-		run:  "TestPatternMatch",
+		// Retargeted when a greedy label stopped consuming the whole tail: the
+		// pattern and the path now advance independently, so the check that
+		// every segment was accounted for compares the path cursor rather than
+		// the two lengths. The behaviour it defends is the same -- a path with
+		// segments the pattern never matched must not route.
+		old: `	if at != len(parts) {`,
+		new: `	if false {`,
+		pkg: "./internal/proto/aws/httpuri",
+		run: "TestPatternMatch",
 	},
 	{
 		name: "httpuri-prefer-the-first-pattern-listed",

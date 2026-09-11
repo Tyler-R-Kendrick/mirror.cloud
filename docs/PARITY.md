@@ -114,9 +114,9 @@ This is a source-level inventory map, not a live `*.core.windows.net` differenti
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the **currently implemented** 8 Blob CRUD ops | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Azurite Blob REST ops routed to emulation | 8 / 28 |
-| Azurite Queue REST ops routed to emulation | 0 / 16 |
-| Azurite Table REST ops routed to emulation | 0 / 9 |
+| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 8 / 59 |
+| Queue REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 0 / 11 |
+| Table REST ops in pinned swagger (`paths`) routed to emulation | 0 / 12 |
 | Azurite test functions explicitly traced | 0 / 806 (0%) |
 | Azurite test functions not yet traced | 806 / 806 (100%) |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
@@ -180,9 +180,9 @@ Direct `it()`/`test()` calls, params unexpanded. Harness-only files (Azurite uni
 | `table/KeepAlive/tableKeepAliveTimeout.test.ts` | 1 |
 | **Total** | **806** |
 
-### Azurite-supported REST vs Mirror
+### Pinned swagger vs Mirror
 
-Blob (28). Implemented today: Create/Get/List/Delete Container, Put/Get/List/Delete Blob.
+Declared surface is `x-ms-paths` (Blob 59, Queue 11) and Table `paths` (12), counted from the vendored documents. Azurite implements a subset (its README support matrix); unimplemented-by-Azurite APIs stay unclaimed rows, they do not shrink these denominators. Implemented today: Create/Get/List/Delete Container, Put/Get/List/Delete Blob (8).
 
 | Azurite Blob REST | Mirror |
 |---|---|

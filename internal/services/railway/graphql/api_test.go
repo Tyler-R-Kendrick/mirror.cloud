@@ -66,6 +66,16 @@ func TestProjectCreateRejectsEmptyName(t *testing.T) {
 	}
 }
 
+func TestServiceCreateRejectsEmptyName(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceCreate", Input: map[string]any{}})
+	if f, ok := err.(*spi.Fault); !ok || f.Code != "BAD_USER_INPUT" {
+		t.Fatalf("empty service %#v", err)
+	}
+}
+
 func TestDeleteMissingProject(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

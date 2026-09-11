@@ -21781,6 +21781,14 @@ var mutants = []mutant{
 		run:  "TestProjectCreateRejectsEmptyName",
 	},
 	{
+		name: "railway-accept-empty-service-name",
+		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
+		old:  "if name == \"\" {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"service name is required\", 200)",
+		new:  "if false {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"service name is required\", 200)",
+		pkg:  "./internal/services/railway/graphql",
+		run:  "TestServiceCreateRejectsEmptyName",
+	},
+	{
 		name: "railway-get-missing-project-as-data",
 		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
 		old:  "b, ok, _ := p.col(req, \"rwproj\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Project not found\", 200)",
@@ -21811,6 +21819,14 @@ var mutants = []mutant{
 		new:  "if false && svc.ID == \"railway.graphql\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"errors\": []any{map[string]any{\"message\": f.Message, \"extensions\": map[string]any{\"code\": f.Code}}}})",
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
+	},
+	{
+		name: "fly-accept-empty-image",
+		file: filepath.Join("internal", "services", "fly", "machines", "api.go"),
+		old:  "if img == \"\" {\n\t\treturn nil, flyFault(\"invalid\", \"image is required\", 400)",
+		new:  "if false {\n\t\treturn nil, flyFault(\"invalid\", \"image is required\", 400)",
+		pkg:  "./internal/services/fly/machines",
+		run:  "TestCreateMachineRejectsEmptyImage",
 	},
 	{
 		name: "fly-accept-empty-app-name",

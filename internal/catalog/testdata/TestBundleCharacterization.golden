@@ -770,15 +770,18 @@
     ]
   },
   {
-    "ID": "cloudflare.kv",
+    "ID": "cloudflare.api",
     "Protocol": "restJson1",
     "Ops": [
-      "CreateNamespace",
-      "ListNamespaces",
-      "GetNamespace",
-      "PutValue",
-      "GetValue",
-      "DeleteValue"
+      "WorkersKvNamespaceCreateANamespace",
+      "WorkersKvNamespaceListNamespaces",
+      "WorkersKvNamespaceGetANamespace",
+      "WorkersKvNamespaceRenameANamespace",
+      "WorkersKvNamespaceRemoveANamespace",
+      "WorkersKvNamespaceListANamespace'SKeys",
+      "WorkersKvNamespaceWriteKeyValuePairWithMetadata",
+      "WorkersKvNamespaceReadKeyValuePair",
+      "WorkersKvNamespaceDeleteKeyValuePair"
     ]
   },
   {

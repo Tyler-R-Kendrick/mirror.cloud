@@ -12681,10 +12681,13 @@ var mutants = []mutant{
 	{
 		name: "lambda-ignore-raw-array-payload",
 		file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
-		old:  "if req.Body != nil {",
-		new:  "if req.Body == nil {",
-		pkg:  "./internal/services/aws/lambda",
-		run:  "TestInvokeAcceptsRawArrayPayload",
+		// Retargeted when the `if` became a `switch`: the behaviour it defends
+		// -- a body that is a bare JSON array reaches the handler as itself --
+		// is the same, and it is now the first arm rather than the if.
+		old: "case req.Body != nil:",
+		new: "case req.Body == nil:",
+		pkg: "./internal/services/aws/lambda",
+		run: "TestInvokeAcceptsRawArrayPayload",
 	},
 	{
 		name: "pipes-ignore-updated-state",
@@ -21632,35 +21635,68 @@ var mutants = []mutant{
 		pkg:  "./internal/services/vercel/api",
 		run:  "TestProjectDeploymentEnvAndKV",
 	},
+	// The three mutants that guarded the Cloudflare pack's empty-title,
+	// duplicate-title and missing-key branches are gone with the Go they
+	// rewrote, the same way Hostinger's were. The behaviour is `require` rules
+	// in behavior/cloudflare/api/service.yaml, and the equivalence recording
+	// replays all three on every run -- an empty or absent title answers
+	// 10007/400, a duplicate answers 10014/400, and a missing key answers
+	// 10009/404, each as its own step.
+	//
+	// What replaced them here is better placed. Two of the branches those
+	// mutants covered were never about Cloudflare: the codec now reads the
+	// model to decide whether a payload member is the body, and answers `_raw`
+	// for any operation whose response is opaque bytes. Those are Go, they are
+	// generic, and a defect in either would be silent for every provider that
+	// reaches them -- so they are mutated instead.
 	{
-		name: "cloudflare-accept-empty-namespace-title",
-		file: filepath.Join("internal", "services", "cloudflare", "api", "api.go"),
-		old:  "if title == \"\" {\n\t\treturn nil, cfFault(\"10007\", \"Title is required\", 400)",
-		new:  "if false {\n\t\treturn nil, cfFault(\"10007\", \"Title is required\", 400)",
-		pkg:  "./internal/services/cloudflare/api",
-		run:  "TestCreateNamespaceRejectsEmptyAndDuplicateTitles",
+		name: "restjson-ignore-payload-member",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if name, ok := svc.PayloadMember(op); ok {",
+		new:  "if name, ok := svc.PayloadMember(op); false && ok {",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
 	},
 	{
-		name: "cloudflare-accept-duplicate-namespace-title",
-		file: filepath.Join("internal", "services", "cloudflare", "api", "api.go"),
-		old:  `if _, exists, _ := p.col(req, "cfkvns").Get(ctx, "title:"+title); exists {`,
-		new:  `if _, exists, _ := p.col(req, "cfkvns").Get(ctx, "title:"+title); false {`,
-		pkg:  "./internal/services/cloudflare/api",
-		run:  "TestCreateNamespaceRejectsEmptyAndDuplicateTitles",
+		// Without the scalar check every payload member claims the body, so a
+		// structure arrives as the JSON text of itself and every member a pack
+		// reads is absent.
+		name: "restjson-payload-swallows-structures",
+		file: filepath.Join("internal", "model", "model.go"),
+		old:  `if m.Binding.Location != "payload" || !s.ScalarBody(m.Shape) {`,
+		new:  `if m.Binding.Location != "payload" {`,
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestStructuredPayloadStillDecodesAsAStructure",
 	},
 	{
-		name: "cloudflare-get-missing-value-as-empty",
-		file: filepath.Join("internal", "services", "cloudflare", "api", "api.go"),
-		old:  "if !ok {\n\t\treturn nil, cfFault(\"10009\", \"key not found\", 404)\n\t}\n\treturn &spi.Response{Output: map[string]any{\"_raw\": string(b)}}",
-		new:  "if false {\n\t\treturn nil, cfFault(\"10009\", \"key not found\", 404)\n\t}\n\treturn &spi.Response{Output: map[string]any{\"_raw\": string(b)}}",
-		pkg:  "./internal/services/cloudflare/api",
-		run:  "TestNamespaceAndValueLifecycle",
+		// The other end of the payload rule. Lambda's pack used to rebuild the
+		// event out of whatever input members were not FunctionName,
+		// InvocationType, LogType or Qualifier, because the codec never handed
+		// it the body; with the body arriving under `Payload` it reads that
+		// instead, and without this branch an invocation over HTTP sees an
+		// event it was never sent.
+		name: "lambda-ignore-payload-input",
+		file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
+		old:  `case raw != "":`,
+		new:  `case false && raw != "":`,
+		pkg:  "./internal/services/aws/lambda",
+		run:  "TestBootedServerLambdaPythonInvoke",
+	},
+	{
+		// An opaque body that goes through the JSON encoder is a quoted string
+		// where a client expects the bytes it stored.
+		name: "restjson-encode-raw-as-json",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if raw, ok := rawBody(resp); ok {",
+		new:  "if raw, ok := rawBody(resp); false && ok {",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
 	},
 	{
 		name: "cloudflare-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "if svc.ID == \"cloudflare.kv\" {\n\t\tvar code any = f.Code",
-		new:  "if false && svc.ID == \"cloudflare.kv\" {\n\t\tvar code any = f.Code",
+		old:  "if svc.ID == \"cloudflare.api\" {\n\t\tvar code any = f.Code",
+		new:  "if false && svc.ID == \"cloudflare.api\" {\n\t\tvar code any = f.Code",
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},

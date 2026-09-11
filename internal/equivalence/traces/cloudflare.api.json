@@ -1,0 +1,518 @@
+{
+  "schema": "trace/1",
+  "service": "cloudflare.api",
+  "source": "pack:internal/services/cloudflare/api",
+  "steps": [
+    {
+      "operation": "WorkersKvNamespaceCreateANamespace",
+      "recorded_as": "CreateNamespace",
+      "input": {
+        "account_id": "acct1",
+        "title": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "7c5891299f6489f8",
+        "supports_url_encoding": true,
+        "title": "docs"
+      },
+      "superseded": "The pack answered a bare body and let a branch of the REST/JSON codec wrap it in Cloudflare's {success, errors, messages, result} envelope. The document declares that envelope as the operation's own response shape, so the bundle projects it and the codec branch is gone -- and no member of the recorded body sits where it used to. Identical bytes on the wire, no member left to compare."
+    },
+    {
+      "operation": "WorkersKvNamespaceCreateANamespace",
+      "recorded_as": "CreateNamespace",
+      "input": {
+        "account_id": "acct1",
+        "title": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10014",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceCreateANamespace",
+      "recorded_as": "CreateNamespace",
+      "input": {
+        "account_id": "acct1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10007",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceCreateANamespace",
+      "recorded_as": "CreateNamespace",
+      "input": {
+        "account_id": "acct1",
+        "title": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10007",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceListNamespaces",
+      "recorded_as": "ListNamespaces",
+      "input": {
+        "account_id": "acct1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "id": "7c5891299f6489f8",
+            "supports_url_encoding": true,
+            "title": "docs"
+          }
+        ]
+      },
+      "superseded": "The pack answered `_list`, its codec branch's private name for \"the body is this array\", which that branch then placed under `result` inside the envelope. The document declares `result` and `result_info` outright, so the listing is projected into them and `_list` is gone. The step still runs, so every later step is still gated on the state it leaves."
+    },
+    {
+      "operation": "WorkersKvNamespaceCreateANamespace",
+      "recorded_as": "CreateNamespace",
+      "input": {
+        "account_id": "acct1",
+        "title": "cache"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "5f59f223d7974d14",
+        "supports_url_encoding": true,
+        "title": "cache"
+      },
+      "superseded": "The pack answered a bare body and let a branch of the REST/JSON codec wrap it in Cloudflare's {success, errors, messages, result} envelope. The document declares that envelope as the operation's own response shape, so the bundle projects it and the codec branch is gone -- and no member of the recorded body sits where it used to. Identical bytes on the wire, no member left to compare."
+    },
+    {
+      "operation": "WorkersKvNamespaceListNamespaces",
+      "recorded_as": "ListNamespaces",
+      "input": {
+        "account_id": "acct1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "id": "5f59f223d7974d14",
+            "supports_url_encoding": true,
+            "title": "cache"
+          },
+          {
+            "id": "7c5891299f6489f8",
+            "supports_url_encoding": true,
+            "title": "docs"
+          }
+        ]
+      },
+      "superseded": "The pack answered `_list`, its codec branch's private name for \"the body is this array\", which that branch then placed under `result` inside the envelope. The document declares `result` and `result_info` outright, so the listing is projected into them and `_list` is gone. The step still runs, so every later step is still gated on the state it leaves."
+    },
+    {
+      "operation": "WorkersKvNamespaceGetANamespace",
+      "recorded_as": "GetNamespace",
+      "input": {
+        "account_id": "acct1",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "7c5891299f6489f8",
+        "supports_url_encoding": true,
+        "title": "docs"
+      },
+      "superseded": "The pack answered a bare body and let a branch of the REST/JSON codec wrap it in Cloudflare's {success, errors, messages, result} envelope. The document declares that envelope as the operation's own response shape, so the bundle projects it and the codec branch is gone -- and no member of the recorded body sits where it used to. Identical bytes on the wire, no member left to compare."
+    },
+    {
+      "operation": "WorkersKvNamespaceGetANamespace",
+      "recorded_as": "GetNamespace",
+      "input": {
+        "account_id": "acct1",
+        "namespace_id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10013",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceGetANamespace",
+      "recorded_as": "GetNamespace",
+      "input": {
+        "account_id": "acct1",
+        "namespace_id": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10013",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceWriteKeyValuePairWithMetadata",
+      "recorded_as": "PutValue",
+      "input": {
+        "account_id": "acct1",
+        "body": "v1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        },
+        "value": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_null": true
+      },
+      "superseded": "The pack answered `_null`, its codec branch's private name for \"result is null\". The document declares this operation's result as an object with no members, so the bundle answers an empty one inside the declared envelope and `_null` is gone."
+    },
+    {
+      "operation": "WorkersKvNamespaceWriteKeyValuePairWithMetadata",
+      "recorded_as": "PutValue",
+      "input": {
+        "account_id": "acct1",
+        "body": "v1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": "absent",
+        "value": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10013",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceWriteKeyValuePairWithMetadata",
+      "recorded_as": "PutValue",
+      "input": {
+        "account_id": "acct1",
+        "body": "v1",
+        "key": "",
+        "key_name": "",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        },
+        "value": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10007",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceReadKeyValuePair",
+      "recorded_as": "GetValue",
+      "input": {
+        "account_id": "acct1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_raw": "v1"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceReadKeyValuePair",
+      "recorded_as": "GetValue",
+      "input": {
+        "account_id": "acct1",
+        "key": "nope",
+        "key_name": "nope",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10009",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceReadKeyValuePair",
+      "recorded_as": "GetValue",
+      "input": {
+        "account_id": "acct1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10013",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceWriteKeyValuePairWithMetadata",
+      "recorded_as": "PutValue",
+      "input": {
+        "account_id": "acct1",
+        "body": "v2",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        },
+        "value": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_null": true
+      },
+      "superseded": "The pack answered `_null`, its codec branch's private name for \"result is null\". The document declares this operation's result as an object with no members, so the bundle answers an empty one inside the declared envelope and `_null` is gone."
+    },
+    {
+      "operation": "WorkersKvNamespaceReadKeyValuePair",
+      "recorded_as": "GetValue",
+      "input": {
+        "account_id": "acct1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_raw": "v2"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceDeleteKeyValuePair",
+      "recorded_as": "DeleteValue",
+      "input": {
+        "account_id": "acct1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_null": true
+      },
+      "superseded": "The pack answered `_null`, its codec branch's private name for \"result is null\". The document declares this operation's result as an object with no members, so the bundle answers an empty one inside the declared envelope and `_null` is gone."
+    },
+    {
+      "operation": "WorkersKvNamespaceReadKeyValuePair",
+      "recorded_as": "GetValue",
+      "input": {
+        "account_id": "acct1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10009",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceDeleteKeyValuePair",
+      "recorded_as": "DeleteValue",
+      "input": {
+        "account_id": "acct1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": {
+          "$fromPath": "result.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10009",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "WorkersKvNamespaceDeleteKeyValuePair",
+      "recorded_as": "DeleteValue",
+      "input": {
+        "account_id": "acct1",
+        "key": "k1",
+        "key_name": "k1",
+        "namespace_id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "10013",
+        "http_status": 404,
+        "fault": "client"
+      }
+    }
+  ],
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Workers KV API; a probe run replaces cells with observed evidence and cites the cassette.\n\nEvery step carries recorded_as, and so does the service. The pack registered itself as cloudflare.kv and named all six operations itself -- CreateNamespace, PutValue -- while the document names them workers-kv_namespace_create_a_namespace and so on, which the receiver exports as WorkersKvNamespaceCreateANamespace. The generated model's id is cloudflare.api, because that is what the document is, so the bundle is served under that id and this file is named for it.\n\nEach value step carries its key twice, as `key` and as `key_name`, and each write carries its value twice, as `value` and as `body`. The pack read the first spelling of each; the document declares the second -- `key_name` a path label, `body` the request payload. An input member no shape declares is ignored, so writing both keeps the recording replayable against either side without rewriting what the pack was asked.\n\nNamespace ids are referenced rather than written literally, because the service issues them. They are hex, so they unify: the comparison substitutes token-shaped strings and every generated id here is one.\n\nWhat is still gated: the nine faults and their precedence -- a duplicate title is 10014/400, an absent or empty title is 10007/400, an unknown namespace is 10013/404, an unknown key is 10009/404, and both a write and a read under a missing namespace fail on the namespace before they look at the key -- and both reads of a stored value, including the value itself, because a KV read answers the bytes with no envelope to rename and the bundle answers them the same way. What is not is the twelve success bodies whose envelope the document moves out of the codec and into the response shape.\n\nThe namespace reference names `result.id`, not the `id` the pack answered: a reference resolves against the answer being replayed, and the document nests every result inside the envelope."
+}

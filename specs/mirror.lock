@@ -21,6 +21,10 @@
     "fly.machines": {
       "source": "https://docs.machines.dev/spec/openapi3.json",
       "ref": "2026-09-11T06:04:02Z"
+    },
+    "cloudflare.api": {
+      "source": "https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json",
+      "ref": "2026-09-11T07:32:38Z"
     }
   },
   "files": [
@@ -1207,6 +1211,14 @@
       "path": "aws/xray/service/2016-04-12/xray-2016-04-12.json",
       "sha256": "ab1a0cfc7a244eb934542d67949631b6b353d1165e263e8cd2dcaff84c9f554c",
       "ingested": "2026-08-28T18:51:00Z"
+    },
+    {
+      "serviceId": "cloudflare.api",
+      "source": "https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json",
+      "ref": "2026-09-11T07:32:38Z",
+      "path": "cloudflare/api.json",
+      "sha256": "f92eb6d9c9c26ccdea47a8fc0fbb5c7d7c3bf278f8619e92c4f8006d241f93f4",
+      "ingested": "2026-09-11T07:32:38Z"
     },
     {
       "serviceId": "fly.machines",

@@ -9,8 +9,11 @@
 # mirror serves is a few dozen. The whole document is still vendored and
 # hashed -- the lock pins the vendor's bytes, never a copy we trimmed -- so the
 # narrowing is a declared property of this file rather than an edit to the
-# input. A service that declares no prefixes is generated whole, which is all
-# of them today.
+# input. A service that declares no prefixes is generated whole, which is every
+# entry here but cloudflare.api.
+#
+# The prefix is matched against the model's URI, which carries the document's
+# server path: Cloudflare's base is /client/v4, so the selector names it.
 # emulate-tier (behavior packs in internal/services)
 aws.s3 emulate
 aws.dynamodb emulate
@@ -168,3 +171,4 @@ aws.kinesisanalyticsv2 emulate
 hostinger.api emulate
 hetzner.v1 emulate
 fly.machines emulate
+cloudflare.api emulate paths=/client/v4/accounts/{account_id}/storage/kv

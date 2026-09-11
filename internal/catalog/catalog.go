@@ -234,7 +234,28 @@ func Bundle() *model.Bundle {
 		"CreateDeployment", "ListDeployments", "GetDeployment", "DeleteDeployment",
 		"KvCommand",
 	}
-	cloudflare := []string{"CreateNamespace", "ListNamespaces", "GetNamespace", "PutValue", "GetValue", "DeleteValue"}
+	// Cloudflare is served from behavior/cloudflare/api now, under the id its
+	// document produces -- cloudflare.api -- and the names that document
+	// declares, rather than the six the deleted pack invented. adoptGenerated
+	// replaces this list with the generated model's fourteen; what it cannot
+	// do is invent the entry, so the ID has to be the one the bundle
+	// registers under.
+	//
+	// Real bindings rather than mk(), which binds everything to POST /: the
+	// REST/JSON codec's hand-written Cloudflare route table went away with the
+	// pack, and internal/conformance reads this catalog directly, without
+	// adoptGenerated. The base path is the document's server URL.
+	cloudflare := []model.Operation{
+		op("WorkersKvNamespaceCreateANamespace", "POST", "/client/v4/accounts/{account_id}/storage/kv/namespaces", 200, false),
+		op("WorkersKvNamespaceListNamespaces", "GET", "/client/v4/accounts/{account_id}/storage/kv/namespaces", 200, true),
+		op("WorkersKvNamespaceGetANamespace", "GET", "/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}", 200, true),
+		op("WorkersKvNamespaceRenameANamespace", "PUT", "/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}", 200, false),
+		op("WorkersKvNamespaceRemoveANamespace", "DELETE", "/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}", 200, false),
+		op("WorkersKvNamespaceListANamespace'SKeys", "GET", "/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/keys", 200, true),
+		op("WorkersKvNamespaceWriteKeyValuePairWithMetadata", "PUT", "/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}", 200, false),
+		op("WorkersKvNamespaceReadKeyValuePair", "GET", "/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}", 200, true),
+		op("WorkersKvNamespaceDeleteKeyValuePair", "DELETE", "/client/v4/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}", 200, false),
+	}
 	// Hostinger is served from behavior/hostinger/api now, under the names its
 	// specification declares rather than the six the deleted pack invented.
 	// adoptGenerated replaces this list with the generated model's 377; what
@@ -1343,7 +1364,7 @@ func Bundle() *model.Bundle {
 			svc("aws.secretsmanager", "secretsmanager", model.ProtoAWSJSON11, "secretsmanager", "", "", mk(sm)),
 			svc("gcp.storage", "storage", model.ProtoGCPRESTSON, "", "", "", mk(gcs)),
 			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", mk(vercel)),
-			svc("cloudflare.kv", "cloudflare", model.ProtoRESTJSON1, "", "", "", mk(cloudflare)),
+			svc("cloudflare.api", "cloudflare", model.ProtoRESTJSON1, "", "", "", cloudflare),
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
 			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", mk(digitalocean)),

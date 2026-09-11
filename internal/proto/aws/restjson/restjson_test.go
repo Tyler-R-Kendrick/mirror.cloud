@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
+	generatedpp "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/aws/pinpoint"
+	generatedcf "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/cloudflare/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -126,13 +129,10 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"vercel.api", http.MethodPost, "/", "", "KvCommand"},
 		{"vercel.api", http.MethodGet, "/v9/unknown", "", "Unknown"},
 
-		{"cloudflare.kv", http.MethodPost, "/client/v4/accounts/a/storage/kv/namespaces", "", "CreateNamespace"},
-		{"cloudflare.kv", http.MethodGet, "/client/v4/accounts/a/storage/kv/namespaces", "", "ListNamespaces"},
-		{"cloudflare.kv", http.MethodGet, "/client/v4/accounts/a/storage/kv/namespaces/nid", "", "GetNamespace"},
-		{"cloudflare.kv", http.MethodPut, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "PutValue"},
-		{"cloudflare.kv", http.MethodGet, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "GetValue"},
-		{"cloudflare.kv", http.MethodDelete, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "DeleteValue"},
-		{"cloudflare.kv", http.MethodGet, "/client/v4/unknown", "", "Unknown"},
+		// Cloudflare's rows are gone with its route table, exactly as
+		// Hostinger's were. TestCloudflareRoutesFromItsGeneratedModel below
+		// routes the same URIs against the model instead, which is what the
+		// edge does now.
 
 		// Hostinger's rows are gone with its route table. It is served from a
 		// bundle now, so the URIs come from the generated model and
@@ -273,28 +273,43 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		t.Fatalf("vercel fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 
-	cf := &model.Service{ID: "cloudflare.kv"}
+	// The bundle is served from the generated model, so the codec is handed
+	// the real shapes: `body` is the payload member and `workers-kv_value` is
+	// a union of a string and a blob, which is what makes it the body rather
+	// than something to parse.
+	cf := generatedcf.Model()
 	putReq := httptest.NewRequest(http.MethodPut, "/client/v4/accounts/a/storage/kv/namespaces/n/values/k", strings.NewReader("hello"))
-	decoded, err = codec.Decode(cf, &model.Operation{Name: "PutValue"}, putReq)
-	if err != nil || decoded.Input["value"] != "hello" {
+	decoded, err = codec.Decode(cf, cf.OperationByName("WorkersKvNamespaceWriteKeyValuePairWithMetadata"), putReq)
+	if err != nil || decoded.Input["body"] != "hello" {
 		t.Fatalf("put decode %#v %v", decoded, err)
 	}
+	// The path labels still bind: a payload member takes the body and nothing
+	// else, where the branch this replaced returned early and left the
+	// namespace and the key unbound.
+	if decoded.Input["namespace_id"] != "n" || decoded.Input["key_name"] != "k" {
+		t.Fatalf("put labels %#v", decoded.Input)
+	}
+	// No envelope is synthesized any more: the document declares
+	// {success, errors, messages, result} as the response shape, so whatever
+	// the bundle projects is what the body is.
 	w = httptest.NewRecorder()
-	if err := codec.Encode(cf, &model.Operation{Name: "CreateNamespace"}, w, &spi.Response{Output: map[string]any{"id": "n1", "title": "t"}}); err != nil {
+	if err := codec.Encode(cf, cf.OperationByName("WorkersKvNamespaceCreateANamespace"), w,
+		&spi.Response{Output: map[string]any{"success": true, "errors": []any{}, "messages": []any{}, "result": map[string]any{"id": "n1", "title": "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"success":true`) || !strings.Contains(w.Body.String(), `"id":"n1"`) {
 		t.Fatalf("cf encode %d %s", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()
-	if err := codec.Encode(cf, &model.Operation{Name: "GetValue"}, w, &spi.Response{Output: map[string]any{"_raw": "hello"}}); err != nil {
+	if err := codec.Encode(cf, cf.OperationByName("WorkersKvNamespaceReadKeyValuePair"), w,
+		&spi.Response{Output: map[string]any{bir.TopLevelRaw: "hello"}}); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != 200 || w.Body.String() != "hello" {
-		t.Fatalf("cf raw %d %q", w.Code, w.Body.String())
+	if w.Code != 200 || w.Body.String() != "hello" || w.Header().Get("Content-Type") != "application/octet-stream" {
+		t.Fatalf("cf raw %d %q %q", w.Code, w.Body.String(), w.Header().Get("Content-Type"))
 	}
 	w = httptest.NewRecorder()
-	if err := codec.EncodeFault(cf, &model.Operation{Name: "GetNamespace"}, w, &spi.Fault{Code: "10013", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+	if err := codec.EncodeFault(cf, cf.OperationByName("WorkersKvNamespaceGetANamespace"), w, &spi.Fault{Code: "10013", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":10013`) || !strings.Contains(w.Body.String(), `"success":false`) {
@@ -425,4 +440,69 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 func jsonQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// TestCloudflareRoutesFromItsGeneratedModel replaces the six route-table rows
+// that went with the pack. The URIs are the same; what answers them is
+// httpuri.Match over the model's own patterns, which is how every modelled
+// service routes. A key carrying a slash must arrive percent-encoded, and that
+// is asserted here rather than left to be discovered: the deleted table joined
+// every remaining segment into the key and this does not.
+func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
+	cf := generatedcf.Model()
+	const base = "/client/v4/accounts/a/storage/kv/namespaces"
+	for _, test := range []struct{ method, path, want string }{
+		{http.MethodPost, base, "WorkersKvNamespaceCreateANamespace"},
+		{http.MethodGet, base, "WorkersKvNamespaceListNamespaces"},
+		{http.MethodGet, base + "/nid", "WorkersKvNamespaceGetANamespace"},
+		{http.MethodPut, base + "/nid", "WorkersKvNamespaceRenameANamespace"},
+		{http.MethodDelete, base + "/nid", "WorkersKvNamespaceRemoveANamespace"},
+		{http.MethodGet, base + "/nid/keys", "WorkersKvNamespaceListANamespace'SKeys"},
+		{http.MethodPut, base + "/nid/values/k", "WorkersKvNamespaceWriteKeyValuePairWithMetadata"},
+		{http.MethodGet, base + "/nid/values/k", "WorkersKvNamespaceReadKeyValuePair"},
+		{http.MethodDelete, base + "/nid/values/k", "WorkersKvNamespaceDeleteKeyValuePair"},
+		{http.MethodGet, base + "/nid/values/a%2Fb", "WorkersKvNamespaceReadKeyValuePair"},
+	} {
+		req := httptest.NewRequest(test.method, "http://api.cloudflare.com"+test.path, nil)
+		op, err := (Codec{}).Route(cf, req)
+		if err != nil || op == nil || op.Name != test.want {
+			t.Fatalf("%s %s: op %v err %v, want %s", test.method, test.path, op, err, test.want)
+		}
+	}
+	// An unencoded slash is two segments, and no pattern has that shape.
+	req := httptest.NewRequest(http.MethodGet, "http://api.cloudflare.com"+base+"/nid/values/a/b", nil)
+	if op, err := (Codec{}).Route(cf, req); err == nil && op != nil && op.Name == "WorkersKvNamespaceReadKeyValuePair" {
+		t.Fatal("an unencoded slash in a key should not route to the read")
+	}
+}
+
+// TestStructuredPayloadStillDecodesAsAStructure is the other half of the
+// payload rule, and the reason it is not simply "a payload member takes the
+// body".
+//
+// Both spellings live in the same protocol. Cloudflare's KV write binds `body`
+// to a union of a string and a blob and means "these bytes"; Pinpoint's
+// CreateApp binds `CreateApplicationRequest` to a structure and means "this
+// object, serialized". Twenty-two operations across nine generated models are
+// the first kind and a hundred and thirty-two the second, so reading them the
+// same way would either drop the structure or hand a pack a JSON string where
+// it expects members.
+func TestStructuredPayloadStillDecodesAsAStructure(t *testing.T) {
+	pp := generatedpp.Model()
+	op := pp.OperationByName("CreateApp")
+	if op == nil {
+		t.Fatal("pinpoint has no CreateApp")
+	}
+	if _, ok := pp.PayloadMember(op); ok {
+		t.Fatal("a structured payload member must not claim the body")
+	}
+	body := `{"CreateApplicationRequest":{"Name":"app"}}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/apps", strings.NewReader(body))
+	decoded, err := (Codec{}).Decode(pp, op, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded.Input["CreateApplicationRequest"].(map[string]any); !ok {
+		t.Fatalf("structured payload arrived as %T: %#v", decoded.Input["CreateApplicationRequest"], decoded.Input)
+	}
 }

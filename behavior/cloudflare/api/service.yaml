@@ -1,0 +1,328 @@
+schema: bir/1
+service: cloudflare.api
+
+# Extracted from internal/services/cloudflare/api (201 lines of Go), which
+# served six operations under the service id `cloudflare.kv`. The model this
+# bundle is served from is generated out of Cloudflare's own document, so the
+# served id is now `cloudflare.api` -- the id the document produces -- and
+# every operation has the document's name. The recording carries both.
+#
+# Every cell is `authored`: transcribed from that pack, not established against
+# the real Workers KV API. Where the document contradicts the pack the document
+# wins, and each of those is stated per operation and in `quirks`.
+provenance: authored
+
+# The pack answered a missing title with code 10007 / 400 before looking at
+# anything else. The document marks title, namespace_id, key_name and
+# account_id required, so the engine's model check now runs first -- and it has
+# to fail with Cloudflare's name for that failure rather than the
+# ValidationException default.
+missing_input_error: InvalidInput
+
+resources:
+  namespace:
+    collection: cfkvns
+    id:
+      # Sixteen hex characters, which is what the pack drew and well inside
+      # the 32 workers-kv_namespace_identifier allows.
+      generate: { kind: hex, bytes: 16 }
+      input_members: [namespace_id]
+    record:
+      id: id
+      title: "string(input.title)"
+      # The document describes this as "true if keys written on the URL will be
+      # URL-decoded before storing". Answered true because the router
+      # percent-decodes a path label before it reaches the engine, so a key
+      # written as `a%2Fb` is stored as `a/b` -- which is the behavior the
+      # member advertises.
+      supports_url_encoding: "true"
+
+  # Titles are unique per account, and the pack enforced that with a second row
+  # in the namespace collection keyed `title:<title>`, skipped when listing. It
+  # is a separate collection here: uniqueness is a lookup by the title, a
+  # listing should not have to know which of its rows are really an index, and
+  # a namespace whose title begins with `title:` was indistinguishable from one
+  # in the pack's layout.
+  namespace_title:
+    collection: cfkvtitle
+    id:
+      # Total: the expression is evaluated wherever the resource is addressed,
+      # and a request carrying no title must yield an empty key rather than an
+      # evaluation error.
+      derive: "('title' in input && input.title != null) ? string(input.title) : ''"
+
+  entry:
+    # Parent-scoped: each namespace's keys are their own collection, named for
+    # the namespace, exactly as the pack's `cfkv:<namespace_id>` was.
+    collection: "cfkv:{namespace.id}"
+    parent: namespace
+    id:
+      input_members: [key_name]
+    record:
+      name: id
+      # `body` is what the document calls the request payload, and the REST
+      # codec binds it from the raw bytes because the member's shape is a
+      # union of a string and a blob. The pack read `value`, which was its own
+      # codec branch's name for the same bytes.
+      value: "('body' in input && input.body != null) ? string(input.body) : ''"
+
+errors:
+  # Cloudflare's codes are integers on the wire; the fault encoder converts a
+  # numeric code back to a number when it writes the envelope.
+  InvalidInput:
+    code: "10007"
+    http: 400
+    fault: client
+  NamespaceNotFound:
+    code: "10013"
+    http: 404
+    fault: client
+  KeyNotFound:
+    code: "10009"
+    http: 404
+    fault: client
+  NamespaceTitleTaken:
+    code: "10014"
+    # 400, not 409: this is the status the pack answered and the one the real
+    # API answers. Cloudflare carries the distinction in the code, not the
+    # status.
+    http: 400
+    fault: client
+
+operations:
+  WorkersKvNamespaceCreateANamespace:
+    reads:
+      taken: { resource: namespace_title }
+    require:
+      # `cond` is a precondition: the error fires when it does NOT hold. An
+      # explicitly empty title reaches here, because the engine's model check
+      # asks whether a required member is present, not whether it is non-empty.
+      - { cond: "string(input.title) != ''", error: InvalidInput, message: "Title is required" }
+      - { cond: "!taken_found", error: NamespaceTitleTaken, message: "A namespace with this account ID and title already exists" }
+    effects:
+      # The title index is written before the namespace, and the order matters:
+      # every write effect rebinds `rec` and `id`, and the output projects the
+      # namespace from `rec`. Reversing these two answers with the index row.
+      - put:
+          resource: namespace_title
+          record:
+            title: id
+      - create: { resource: namespace }
+    output:
+      # The envelope is the document's, not the codec's. Every Cloudflare v4
+      # response carries {success, errors, messages, result}, and the response
+      # shape declares all four -- so the bundle projects them, where the pack
+      # had a branch of the REST/JSON codec synthesize them around a bare body.
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: rec
+
+  WorkersKvNamespaceListNamespaces:
+    list: { resource: namespace, member: result }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      # Unpaginated -- see the quirk. Every namespace is on page one, whatever
+      # `page` and `per_page` the request asked for; per_page is answered as
+      # Cloudflare's documented default rather than as the count, so a client
+      # reading it to size its next request sees a real page size.
+      result_info: "{'count': double(size(items)), 'page': 1.0, 'per_page': 20.0, 'total_count': double(size(items))}"
+
+  WorkersKvNamespaceGetANamespace:
+    reads:
+      ns: { resource: namespace }
+    require:
+      - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: ns
+
+  WorkersKvNamespaceRenameANamespace:
+    reads:
+      ns: { resource: namespace }
+      taken: { resource: namespace_title }
+    require:
+      - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
+      - { cond: "string(input.title) != ''", error: InvalidInput, message: "Title is required" }
+      # Renaming a namespace to the title it already has is not a collision
+      # with itself.
+      - { cond: "!taken_found || string(ns.title) == string(input.title)", error: NamespaceTitleTaken, message: "A namespace with this account ID and title already exists" }
+    effects:
+      # The old title is freed first and the new one claimed second; `id` in a
+      # write's record is that resource's own key, so the put here writes the
+      # title the request named, not the one just deleted. The patch is last so
+      # `rec` is the updated namespace the output projects.
+      - delete: { resource: namespace_title, key: "string(ns.title)" }
+      - put:
+          resource: namespace_title
+          record:
+            title: id
+      - patch:
+          resource: namespace
+          record:
+            title: "string(input.title)"
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: rec
+
+  WorkersKvNamespaceRemoveANamespace:
+    reads:
+      ns: { resource: namespace }
+    require:
+      - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
+    effects:
+      - delete: { resource: namespace }
+      # Keyed off the stored record, not the request: a delete addresses the
+      # namespace by id and never carries its title.
+      - delete: { resource: namespace_title, key: "string(ns.title)" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      # The document declares `result` an object with no members, so an empty
+      # one is what it can hold. The real API answers null here.
+      result: "{}"
+
+  WorkersKvNamespaceWriteKeyValuePairWithMetadata:
+    reads:
+      ns: { resource: namespace }
+    require:
+      # Precedence is the pack's: an unknown namespace fails before the key is
+      # looked at, so writing to a namespace that does not exist is 10013 and
+      # never 10007.
+      - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
+      - { cond: "string(input.key_name) != ''", error: InvalidInput, message: "Key is required" }
+    effects:
+      - put: { resource: entry }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "{}"
+
+  WorkersKvNamespaceReadKeyValuePair:
+    reads:
+      ns: { resource: namespace }
+      entry: { resource: entry }
+    require:
+      - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
+      - { cond: entry_found, error: KeyNotFound, message: "key not found" }
+    output:
+      # `_raw` is bir.TopLevelRaw: the body is the stored value itself, with no
+      # envelope around it. The document answers this operation as
+      # application/octet-stream, which is the one Cloudflare operation here
+      # that is not enveloped, and the only reason the convention exists.
+      _raw: "string(entry.value)"
+
+  WorkersKvNamespaceDeleteKeyValuePair:
+    reads:
+      ns: { resource: namespace }
+      entry: { resource: entry }
+    require:
+      - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
+      - { cond: entry_found, error: KeyNotFound, message: "key not found" }
+    effects:
+      - delete: { resource: entry }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "{}"
+
+  "WorkersKvNamespaceListANamespace'SKeys":
+    reads:
+      ns: { resource: namespace }
+    require:
+      - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
+    list: { resource: entry, member: result }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      # The stored record carries the value as well as the name, and a key
+      # listing must not answer with it: the projection replaces the list the
+      # `list` spec placed in `result` with one key object per entry, which is
+      # what workers-kv_key declares.
+      result: "items.map(i, {'name': string(i.name)})"
+      result_info: "{'count': double(size(items)), 'cursor': ''}"
+
+quirks:
+  - operation: WorkersKvNamespaceCreateANamespace
+    note: >
+      The envelope moved from Go into the model. The pack answered a bare
+      {id, title, supports_url_encoding} and a branch of the REST/JSON codec
+      wrapped every Cloudflare answer in {success, errors, messages, result}.
+      The document declares that envelope as each operation's response shape,
+      so the bundle projects it and the codec branch is gone. Nothing on the
+      wire changes; what changes is where the shape is written down.
+
+      `jurisdiction` is accepted by the document at creation time and ignored
+      here, exactly as the pack ignored it. A namespace created with
+      jurisdiction: eu is stored with no jurisdiction and answers without one,
+      so a client that sets it and reads it back sees it disappear.
+  - operation: WorkersKvNamespaceGetANamespace
+    note: >
+      A request that omits namespace_id entirely now fails the engine's model
+      check with 10007 / 400, where the pack answered 10013 / 404 for it: the
+      document marks the label required, and the engine checks required members
+      before any rule here runs. A request that carries an empty namespace_id
+      still reaches the rule and still answers 10013 / 404, which is what a
+      request over HTTP produces -- an absent label cannot be expressed in a
+      URL that routed to this operation at all.
+  - operation: WorkersKvNamespaceReadKeyValuePair
+    note: >
+      A key containing a slash must be percent-encoded, where the pack accepted
+      a literal one. The pack routed by joining every path segment after
+      `values/` into the key, so `values/a/b` addressed the key `a/b`; routing
+      is the model's now, `{key_name}` binds exactly one segment, and `a/b`
+      matches no operation. The document says so in the member's own
+      documentation -- "use percent-encoding to define key names as part of a
+      URL" -- so this follows the document and breaks a client that relied on
+      the pack being lax.
+
+      The body is answered as application/octet-stream, where the pack answered
+      text/plain. The document declares the former; neither is in the model, so
+      the codec states one for every `_raw` operation rather than per provider.
+  - operation: WorkersKvNamespaceRemoveANamespace
+    note: >
+      Deleting a namespace leaves its keys behind. Nothing reads them -- the
+      collection is named for a namespace id that can no longer be resolved --
+      but a namespace later created with the same id would inherit them, and
+      the real API does not do that. The pack could not delete a namespace at
+      all, so this is new surface rather than a transcribed defect.
+  - operation: WorkersKvNamespaceListNamespaces
+    note: >
+      Unpaginated: page, per_page and total_count describe a single page
+      holding every namespace, whatever the request asked for. The pack ignored
+      those parameters too. `direction` and `order` are ignored as well, so the
+      listing is in store order rather than by title.
+  - operation: "WorkersKvNamespaceListANamespace'SKeys"
+    note: >
+      New surface: the pack served no key listing. `prefix`, `limit` and
+      `cursor` are accepted and ignored, and the cursor answered in result_info
+      is always empty, so a client that pages on it stops after one page and
+      sees every key. Expiration and metadata are never answered, because the
+      write operation stores neither: the document takes metadata only in the
+      multipart form of the request body, which this does not parse.
+  - operation: WorkersKvNamespaceWriteKeyValuePairWithMetadata
+    note: >
+      expiration and expiration_ttl are accepted by the document and ignored
+      here, as they were by the pack. A value written with expiration_ttl=60
+      never expires, and a client that writes one and waits for it to vanish
+      waits forever.
+
+      The multipart form of the request body is not parsed: whatever bytes
+      arrive become the value, so a multipart write stores the MIME envelope
+      rather than the value inside it. The pack had the same behavior for the
+      same reason.
+  - operation: WorkersKvNamespaceRenameANamespace
+    note: >
+      New surface: the pack served no rename. Renaming to the namespace's own
+      title is allowed and is a no-op; renaming to a title another namespace
+      holds is 10014, which is the code a colliding create answers.

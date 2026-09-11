@@ -345,3 +345,38 @@ func TestIngestDropsATemplatedServerBasePath(t *testing.T) {
 		t.Errorf("URI = %q, want /servers", got)
 	}
 }
+
+// TestServiceIDIgnoresTheSerialization pins that a document's identity is its
+// path, not how the vendor spelled it.
+//
+// serviceID trimmed only `.json`, so the first YAML document the ingest walk
+// accepted became `digitalocean.v2.yaml` -- an ID no line of specs/mirror.set
+// names, so the service was ingested and then dropped for want of a
+// declaration. The run reported it, which is C42's repair working; this stops
+// it happening at all.
+func TestServiceIDIgnoresTheSerialization(t *testing.T) {
+	const body = `{"openapi":"3.0.0","info":{"title":"Demo"},"paths":{}}`
+	for _, path := range []string{
+		"digitalocean/v2.json",
+		"digitalocean/v2.yaml",
+		"digitalocean/v2.yml",
+		"digitalocean/V2.YAML",
+	} {
+		t.Run(path, func(t *testing.T) {
+			svcs, err := (openapi.Receiver{}).Ingest(context.Background(),
+				model.SourceRef{Path: path}, []byte(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(svcs) != 1 {
+				t.Fatalf("want one service, got %d", len(svcs))
+			}
+			if svcs[0].ID != "digitalocean.v2" {
+				t.Fatalf("ID = %q, want digitalocean.v2", svcs[0].ID)
+			}
+			if svcs[0].EndpointPrefix != "digitalocean" {
+				t.Fatalf("EndpointPrefix = %q, want digitalocean", svcs[0].EndpointPrefix)
+			}
+		})
+	}
+}

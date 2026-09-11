@@ -273,7 +273,19 @@ func Bundle() *model.Bundle {
 		op("DeleteSshKey", "DELETE", "/v1/ssh_keys/{id}", 204, false),
 	}
 	railway := []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"}
-	fly := []string{"CreateApp", "ListApps", "GetApp", "DeleteApp", "CreateMachine", "ListMachines", "GetMachine", "DeleteMachine"}
+	// Real bindings, not mk(): mk() binds every operation to POST /, and
+	// internal/conformance builds its request from this catalog rather than
+	// from the generated model. The names are the document's.
+	fly := []model.Operation{
+		op("AppsCreate", "POST", "/v1/apps", 201, false),
+		op("AppsList", "GET", "/v1/apps", 200, true),
+		op("AppsShow", "GET", "/v1/apps/{app_name}", 200, true),
+		op("AppsDelete", "DELETE", "/v1/apps/{app_name}", 202, false),
+		op("MachinesCreate", "POST", "/v1/apps/{app_name}/machines", 200, false),
+		op("MachinesList", "GET", "/v1/apps/{app_name}/machines", 200, true),
+		op("MachinesShow", "GET", "/v1/apps/{app_name}/machines/{machine_id}", 200, true),
+		op("MachinesDelete", "DELETE", "/v1/apps/{app_name}/machines/{machine_id}", 200, false),
+	}
 	gcs := []string{"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list",
 		"storage.buckets.delete", "storage.buckets.patch",
 		"storage.objects.insert", "storage.objects.get", "storage.objects.list",
@@ -1337,7 +1349,7 @@ func Bundle() *model.Bundle {
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", mk(digitalocean)),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", hetzner),
 			svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", mk(railway)),
-			svc("fly.machines", "fly", model.ProtoRESTJSON1, "", "", "", mk(fly)),
+			svc("fly.machines", "fly", model.ProtoRESTJSON1, "", "", "", fly),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),
 			svc("aws.events", "events", model.ProtoAWSJSON11, "AWSEvents", "", "", mk(ev)),

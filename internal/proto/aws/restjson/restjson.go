@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/awsjson"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/httpuri"
@@ -44,9 +45,6 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	}
 	if svc.ID == "railway.graphql" {
 		return railwayOp(svc, r), nil
-	}
-	if svc.ID == "fly.machines" {
-		return flyOp(svc, r), nil
 	}
 	// An X-Amz-Target names an operation outright, and an explicit statement
 	// beats one inferred from a path. No SDK sends it for a restJson1 service,
@@ -350,48 +348,6 @@ func opensearchOp(svc *model.Service, r *http.Request) *model.Operation {
 	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
 }
 
-func flyOp(svc *model.Service, r *http.Request) *model.Operation {
-	name := flyRoute(r)
-	if op := svc.OperationByName(name); op != nil {
-		return op
-	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
-}
-
-func flyRoute(r *http.Request) string {
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	m := r.Method
-	if len(parts) >= 2 && parts[0] == "v1" && parts[1] == "apps" {
-		if len(parts) == 2 && m == http.MethodPost {
-			return "CreateApp"
-		}
-		if len(parts) == 2 && m == http.MethodGet {
-			return "ListApps"
-		}
-		if len(parts) == 3 && m == http.MethodGet {
-			return "GetApp"
-		}
-		if len(parts) == 3 && m == http.MethodDelete {
-			return "DeleteApp"
-		}
-		if len(parts) >= 4 && parts[3] == "machines" {
-			if len(parts) == 4 && m == http.MethodPost {
-				return "CreateMachine"
-			}
-			if len(parts) == 4 && m == http.MethodGet {
-				return "ListMachines"
-			}
-			if len(parts) >= 5 && m == http.MethodGet {
-				return "GetMachine"
-			}
-			if len(parts) >= 5 && m == http.MethodDelete {
-				return "DeleteMachine"
-			}
-		}
-	}
-	return "Unknown"
-}
-
 func railwayOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := railwayRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -619,17 +575,11 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if svc.ID == "cloudflare.kv" {
 		return encodeCloudflare(w, status, resp)
 	}
-	if svc.ID == "hostinger.api" {
-		return encodeHostinger(w, status, resp)
-	}
 	if svc.ID == "digitalocean.v2" {
 		return encodeDigitalOcean(w, status, resp)
 	}
 	if svc.ID == "railway.graphql" {
 		return encodeRailway(w, status, resp)
-	}
-	if svc.ID == "fly.machines" {
-		return encodeFly(w, status, resp)
 	}
 	// A status that forbids a body gets none. An engine-served operation
 	// always projects an output map -- empty when its response shape declares
@@ -651,6 +601,16 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	}
 	if resp.Output == nil {
 		return nil
+	}
+	// `_list` is the engine's name for an operation whose whole body is an
+	// array -- bir.TopLevelList -- and it is a convention of the engine and
+	// this codec, not of any one provider. Hostinger had a branch here that
+	// was the generic encoder plus these two lines; Fly's machine listing is
+	// the second such operation, and a third branch would have made it a
+	// pattern. The member cannot collide with a real one: the loader checks
+	// every output member against the model, and no shape declares `_list`.
+	if lst, ok := resp.Output[bir.TopLevelList]; ok {
+		return json.NewEncoder(w).Encode(lst)
 	}
 	return json.NewEncoder(w).Encode(resp.Output)
 }
@@ -717,34 +677,6 @@ func encodeRailway(w http.ResponseWriter, status int, resp *spi.Response) error 
 	return json.NewEncoder(w).Encode(map[string]any{"data": resp.Output})
 }
 
-func encodeFly(w http.ResponseWriter, status int, resp *spi.Response) error {
-	if resp.Output == nil {
-		w.WriteHeader(status)
-		return nil
-	}
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-	}
-	w.WriteHeader(status)
-	wrap, _ := resp.Output["_wrap"].(string)
-	if lst, ok := resp.Output["_list"]; ok {
-		items, _ := lst.([]any)
-		if items == nil {
-			items = []any{}
-		}
-		if wrap == "machines" {
-			return json.NewEncoder(w).Encode(items)
-		}
-		return json.NewEncoder(w).Encode(map[string]any{"apps": items, "total_apps": len(items)})
-	}
-	if wrap != "" {
-		if rec, ok := resp.Output[wrap]; ok {
-			return json.NewEncoder(w).Encode(rec)
-		}
-	}
-	return json.NewEncoder(w).Encode(resp.Output)
-}
-
 func encodeDigitalOcean(w http.ResponseWriter, status int, resp *spi.Response) error {
 	if status == 204 {
 		w.WriteHeader(status)
@@ -772,20 +704,6 @@ func encodeDigitalOcean(w http.ResponseWriter, status int, resp *spi.Response) e
 		if rec, ok := resp.Output[wrap]; ok {
 			return json.NewEncoder(w).Encode(map[string]any{wrap: rec})
 		}
-	}
-	return json.NewEncoder(w).Encode(resp.Output)
-}
-
-func encodeHostinger(w http.ResponseWriter, status int, resp *spi.Response) error {
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-	}
-	w.WriteHeader(status)
-	if resp.Output == nil {
-		return nil
-	}
-	if lst, ok := resp.Output["_list"]; ok {
-		return json.NewEncoder(w).Encode(lst)
 	}
 	return json.NewEncoder(w).Encode(resp.Output)
 }

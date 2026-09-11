@@ -11,7 +11,10 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/fly/machines"
+	// Links the bundle's registration in. Without it the registry has no pack
+	// for fly.machines and the edge answers from the mock tier -- which looks
+	// like a working service returning synthesized data, not like a failure.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestBootedServerFlyMachines(t *testing.T) {

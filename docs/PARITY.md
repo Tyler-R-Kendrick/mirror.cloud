@@ -10,25 +10,29 @@ The current checkout's ordinary gate is green: 2,798 tests across 221 Go package
 
 ## Fly Machines baseline
 
-Authority: official Fly Machines API v1 (`api.machines.dev` `/v1/apps` and `/v1/apps/{app_name}/machines`). There is no LocalStack Fly inventory; rows are operation → Mirror evidence, not a live `api.machines.dev` differential. Volumes, certificates, tokens, secrets, and GraphQL `api.fly.io` are not in this denominator.
+Authority: the official Fly Machines OpenAPI document (`https://docs.machines.dev/spec/openapi3.json`), vendored at `specs/fly/machines.json` and pinned in `specs/mirror.lock`. Rows are operation → Mirror evidence, not a live `api.machines.dev` differential; there is no LocalStack Fly inventory. The document describes 98 operations and the bundle answers eight: volumes, secrets, certificates, leases, metadata and every machine action are not in this denominator.
+
+Served from `behavior/fly/machines/service.yaml` since the hand-written pack was deleted.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the emulated Fly slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Requested test forms wired for the emulated Fly slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden`; overlay mutation covers the fault envelope only) |
 | Core Fly Machines operations routed to emulation | 8 / 8 |
 | Live Fly probe | none (not required) |
 
 | Fly operation | Mirror evidence |
 |---|---|
-| `POST /v1/apps` (`CreateApp`) | Booted create returns `{id, created_at}` HTTP 201; atomic empty 400 and duplicate 422; BDD create; chaos `TestFlyConcurrentDuplicateApps`; mutants `fly-accept-empty-app-name` and `fly-accept-duplicate-app` |
-| `GET /v1/apps` (`ListApps`) | Booted list wraps `{apps, total_apps}`; characterization `list`; BDD lists after create |
-| `GET /v1/apps/{app_name}` (`GetApp`) | Booted get-after-set; missing app HTTP 404 `{error}` without `x-amzn-errortype`; mutant `fly-get-missing-app-as-empty` |
-| `DELETE /v1/apps/{app_name}` (`DeleteApp`) | Atomic delete then get is 404; `TestDeleteMissingAppAndMachine` and booted DELETE of missing app are HTTP 404 `{error}`; characterization `delete`/`del_miss_a`; mutant `fly-delete-missing-app-as-success` |
-| `POST /v1/apps/{app_name}/machines` (`CreateMachine`) | Booted create then GET round-trips; characterization `machine` |
-| `GET /v1/apps/{app_name}/machines` (`ListMachines`) | Characterization `machines` (JSON array) |
-| `GET /v1/apps/{app_name}/machines/{id}` (`GetMachine`) | Booted get-after-set; missing machine 404 |
-| `DELETE /v1/apps/{app_name}/machines/{id}` (`DeleteMachine`) | Atomic delete then get is 404; booted DELETE of missing machine is HTTP 404 `{error}`; characterization `del_mach`/`del_miss_m`; mutant `fly-delete-missing-machine-as-success` |
-| Fly faults vs AWS faults | restJson1 `Encode` writes create `{id,created_at}`, list `{apps,total_apps}` or a machines array, and GET as the resource object; `EncodeFault` uses `{error: message}` and omits `x-amzn-errortype`; mutant `fly-encode-aws-fault` |
+| `POST /v1/apps` (`AppsCreate`) | 201 with `{id, created_at}`, which is all the document declares on it; a duplicate name is 422 `taken` and a nameless create 400 `invalid`, both replayed from the recording and asserted in `TestFlyBundleBehaves`; chaos `TestFlyConcurrentDuplicateApps` -- sixteen concurrent creates, one winner |
+| `GET /v1/apps` (`AppsList`) | `{apps, total_apps}`; `org_slug` is required by the document and ignored by the bundle (see the quirk); recording replays the empty, one-entry and post-delete lists |
+| `GET /v1/apps/{app_name}` (`AppsShow`) | The App object itself, unwrapped; a missing app is 404 `{error: ...}` without `x-amzn-errortype` |
+| `DELETE /v1/apps/{app_name}` (`AppsDelete`) | 202 with no body; deleting twice is 404; the name is free again afterwards. Machines are left behind -- see the quirk |
+| `POST /v1/apps/{app_name}/machines` (`MachinesCreate`) | The Machine object; a missing app is 404 and that check runs before the image check; no `config.image` is 400 `invalid`; an unnamed machine takes its own id as its name |
+| `GET /v1/apps/{app_name}/machines` (`MachinesList`) | A bare JSON array, which is what the document declares; scoped to the app by the stored record, and 404 when the app is missing |
+| `GET /v1/apps/{app_name}/machines/{machine_id}` (`MachinesShow`) | The Machine object; a missing id is 404. The lookup is by id alone -- see the quirk |
+| `DELETE /v1/apps/{app_name}/machines/{machine_id}` (`MachinesDelete`) | 200 with no body; deleting twice is 404 |
+| Fly faults vs AWS faults | `EncodeFault` answers `{error: <message>}` and omits `x-amzn-errortype`; mutant `fly-encode-aws-fault`. The route table and the response encoder are gone: the bundle answers the document's own members, so the generic restJson1 encoder serializes them |
+
+Three answers changed with the extraction, each recorded as a quirk in the bundle: an App and a Machine are the body rather than something nested under `app` or `machine`; `created_at` is answered by the create and not by the show, because App does not declare it; and the image is read only from `config.image`, where the pack also accepted it at the top level. Three known divergences from the real API are recorded rather than fixed: `org_slug` is required and ignored, a machine is looked up by id without checking it belongs to the named app, and deleting an app does not delete its machines.
 
 ## Railway baseline
 

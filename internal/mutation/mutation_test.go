@@ -12098,6 +12098,29 @@ var mutants = []mutant{
 		run:  "TestTheHostWinsOverTheCredentialScope",
 	},
 	{
+		// Without the guard, a provider's path guess takes any AWS service
+		// whose route it happens to overlap -- and it runs before the model,
+		// so the service that was addressed never gets asked.
+		name: "demux-let-a-provider-guess-take-an-addressed-aws-service",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  "\tif !awsAddressed(r) || s.resolveByModel(r) == nil {",
+		new:  "\tif true {",
+		pkg:  "./internal/edge",
+		run:  "TestAProviderPathGuessDoesNotTakeAnAddressedAWSService",
+	},
+	{
+		// A FIPS endpoint suffixes the service label. Leaving the marker on
+		// matches no prefix in the model, so the request falls past it to the
+		// path-style S3 default and a client gets the wrong service's answer
+		// without anything saying so.
+		name: "demux-keep-the-fips-marker-on-the-service-label",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "\treturn strings.ReplaceAll(host, \"-fips.\", \".\")",
+		new:  "\treturn host",
+		pkg:  "./internal/edge",
+		run:  "TestEveryEndpointVariantReachesItsService",
+	},
+	{
 		// Without the whole-prefix match, a host leading with a generic label
 		// resolves by that label -- and any service whose short name is that
 		// word answers for it. That is how api.ecr and api.iotwireless became

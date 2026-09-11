@@ -577,8 +577,13 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 		}
 		return
 	}
-	if _, ok := shape.Members[member]; !ok {
-		known := sortedKeys(shape.Members)
+	// Not shape.Members: an output that is a union carries one of its arms on
+	// the wire, and the arms' members are what a response may hold. Asking the
+	// union itself would offer only the synthetic option0/option1 names, so
+	// every real member of DigitalOcean's droplet create would read as unknown.
+	body := svc.BodyMembers(op.Output)
+	if _, ok := body[member]; !ok {
+		known := sortedKeys(body)
 		*problems = append(*problems, fmt.Errorf("%s: %s: %q is not a member of %s (have: %s)",
 			s.ServiceID, where, member, op.Output, strings.Join(known, ", ")))
 	}

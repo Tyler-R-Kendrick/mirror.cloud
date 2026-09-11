@@ -458,6 +458,96 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 202 || !strings.Contains(string(raw), "HTTP/1.1 202") {
 		t.Fatalf("batch in scope %d %s", code, raw)
 	}
+
+	// Credential parsing: no credential is 403, the SharedKey account must
+	// match the host, SAS is checked for expiry and method-class permissions.
+	rawDo := func(method, path string, hdr map[string]string) (int, []byte, http.Header) {
+		t.Helper()
+		req, err := http.NewRequest(method, ts.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = "acct.blob.core.windows.net"
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		return res.StatusCode, b, res.Header
+	}
+	code, raw, h = rawDo(http.MethodGet, "/ctr/o", nil)
+	if code != 403 || h.Get("x-ms-error-code") != "AuthenticationFailed" {
+		t.Fatalf("no credential %d %#v %s", code, h, raw)
+	}
+	code, raw, h = rawDo(http.MethodGet, "/ctr/o", map[string]string{"Authorization": "SharedKey otheracct:AAAA"})
+	if code != 403 || h.Get("x-ms-error-code") != "AuthenticationFailed" {
+		t.Fatalf("wrong sharedkey account %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = rawDo(http.MethodGet, "/?comp=list", map[string]string{"Authorization": "SharedKey acct:AAAA"})
+	if code != 200 {
+		t.Fatalf("sharedkey parsed %d %s", code, raw)
+	}
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	code, raw, h = rawDo(http.MethodGet, "/ctr/o?sv=2020-10-02&sp=r&se="+url.QueryEscape(past)+"&sig=AAAA", nil)
+	if code != 403 || h.Get("x-ms-error-code") != "AuthenticationFailed" {
+		t.Fatalf("expired sas %d %#v %s", code, h, raw)
+	}
+	code, raw, h = rawDo(http.MethodGet, "/ctr/o?sv=2020-10-02&sp=w&se="+url.QueryEscape(future)+"&sig=AAAA", nil)
+	if code != 403 || h.Get("x-ms-error-code") != "AuthorizationPermissionMismatch" {
+		t.Fatalf("sas permission %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = rawDo(http.MethodGet, "/ctr/o?sv=2020-10-02&sp=r&se="+url.QueryEscape(future)+"&sig=AAAA", nil)
+	if code != 200 {
+		t.Fatalf("sas read %d %s", code, raw)
+	}
+
+	// CORS: the P3 section stored one rule (example.com, GET). Preflight
+	// honors it; actual responses carry allow-origin only with an Origin.
+	opt := func(origin, method string) (int, http.Header) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodOptions, ts.URL+"/ctr/o", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = "acct.blob.core.windows.net"
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Access-Control-Request-Method", method)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode, res.Header
+	}
+	code, h = opt("example.com", "GET")
+	if code != 200 || h.Get("Access-Control-Allow-Origin") != "example.com" || h.Get("Access-Control-Allow-Methods") != "GET" || h.Get("Access-Control-Max-Age") != "1" {
+		t.Fatalf("preflight %d %#v", code, h)
+	}
+	code, h = opt("other.com", "GET")
+	if code != 403 || h.Get("x-ms-error-code") != "CorsPreflightFailure" {
+		t.Fatalf("preflight wrong origin %d %#v", code, h)
+	}
+	code, h = opt("example.com", "DELETE")
+	if code != 403 {
+		t.Fatalf("preflight wrong method %d %#v", code, h)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/o", "", map[string]string{"Origin": "example.com"})
+	if code != 200 || h.Get("Access-Control-Allow-Origin") != "example.com" || h.Get("Vary") != "Origin" {
+		t.Fatalf("actual cors %d %#v", code, h)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/missing", "", map[string]string{"Origin": "example.com"})
+	if code != 404 || h.Get("Access-Control-Allow-Origin") != "example.com" {
+		t.Fatalf("fault cors %d %#v", code, h)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/o", "", nil)
+	if code != 200 || h.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("no-origin no-cors %d %#v", code, h)
+	}
 	code, raw, h = do(http.MethodHead, "/ctr/missing", "", nil)
 	if code != 404 || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("Content-Type") != "" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("head missing %d %#v %s", code, h, raw)
@@ -656,6 +746,46 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	code, raw, _ = do(http.MethodGet, "/?restype=service&comp=properties", "", nil)
 	if code != 200 || !strings.Contains(string(raw), "StorageServiceProperties") {
 		t.Fatalf("queue service properties %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/?restype=service&comp=properties", "<StorageServiceProperties><Cors><CorsRule><AllowedOrigins>*</AllowedOrigins><AllowedMethods>GET</AllowedMethods><MaxAgeInSeconds>60</MaxAgeInSeconds></CorsRule></Cors></StorageServiceProperties>", nil)
+	if code != 202 {
+		t.Fatalf("queue set service properties %d %s", code, raw)
+	}
+	// CORS on the queue host: preflight matches the wildcard rule, and a
+	// request with an Origin carries allow-origin.
+	optReq, err := http.NewRequest(http.MethodOptions, ts.URL+"/q1/messages", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	optReq.Host = "acct.queue.core.windows.net"
+	optReq.Header.Set("Origin", "anywhere.example")
+	optReq.Header.Set("Access-Control-Request-Method", "GET")
+	optRes, err := http.DefaultClient.Do(optReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	optRes.Body.Close()
+	if optRes.StatusCode != 200 || optRes.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("queue preflight %d %#v", optRes.StatusCode, optRes.Header)
+	}
+	code, raw, h = do(http.MethodGet, "/q1/messages?peekonly=true", "", map[string]string{"Origin": "anywhere.example"})
+	if code != 200 || h.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("queue actual cors %d %#v", code, h)
+	}
+	// No credential is a 403 on the queue host too.
+	noAuth, err := http.NewRequest(http.MethodGet, ts.URL+"/q1/messages?peekonly=true", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noAuth.Host = "acct.queue.core.windows.net"
+	noAuthRes, err := http.DefaultClient.Do(noAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noAuthBody, _ := io.ReadAll(noAuthRes.Body)
+	noAuthRes.Body.Close()
+	if noAuthRes.StatusCode != 403 || !strings.Contains(string(noAuthBody), "AuthenticationFailed") {
+		t.Fatalf("queue no credential %d %s", noAuthRes.StatusCode, noAuthBody)
 	}
 	code, raw, h = do(http.MethodGet, "/?restype=service&comp=stats", "", nil)
 	if code != 400 || h.Get("x-ms-error-code") != "InvalidQueryParameterValue" {

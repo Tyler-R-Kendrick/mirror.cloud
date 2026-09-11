@@ -60,8 +60,6 @@ resources:
     collection: azqacct
     id:
       derive: "'default'"
-    record:
-      properties: "('body' in input && input.body != null) ? string(input.body) : ''"
 
 errors:
   QueueAlreadyExists:
@@ -178,11 +176,14 @@ operations:
     reads:
       rec: { resource: account }
     output:
-      properties: "rec_found && rec.properties != null && string(rec.properties) != '' ? string(rec.properties) : ''"
+      properties: "rec_found && 'properties' in rec && rec.properties != null && string(rec.properties) != '' ? string(rec.properties) : ''"
 
   SetServiceProperties:
     effects:
-      - put: { resource: account }
+      - put:
+          resource: account
+          record:
+            properties: "('body' in input && input.body != null) ? string(input.body) : ''"
     output:
       properties: "('body' in input && input.body != null) ? string(input.body) : ''"
 

@@ -87,7 +87,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	awsChunkedDecoded := false
 	awsChunkedInvalid := false
 	if r.Method == http.MethodOptions {
-		if svc := s.demux(r); svc == nil || svc.ID != "aws.s3" {
+		demuxed := s.demux(r)
+		if demuxed != nil && isAzureStorage(demuxed.ID) {
+			id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
+			s.azureCorsPreflight(w, r, id, demuxed, idgen.Next(s.deps.Rand))
+			return
+		}
+		if demuxed == nil || demuxed.ID != "aws.s3" {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Headers", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "*")
@@ -169,6 +175,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "Request has expired", http.StatusForbidden)
 		return
+	}
+	if svc != nil && isAzureStorage(svc.ID) {
+		if fault := azureAuthFault(r, s.deps.Clock.Now()); fault != nil {
+			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
+			return
+		}
+		if h := s.azureCorsResponseHeaders(r, id, svc.ID); h != nil {
+			w = &azureCorsResponseWriter{ResponseWriter: w, headers: h}
+		}
 	}
 	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures {
 		secret := "test"

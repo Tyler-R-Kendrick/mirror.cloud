@@ -131,7 +131,7 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Blob keys accounted (routed + unclaim) | 49 / 59 |
 | Queue keys accounted | 11 / 11 |
 | Table method+paths accounted (routed + unclaim) | 11 / 12 |
-| Azurite test functions traced | 394 / 806 (49%) |
+| Azurite test functions traced | 515 / 806 (64%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -736,6 +736,167 @@ Direct `it()` names from `table/apis/table.entity.test.ts` (38) and `table/apis/
 | `table/apis/table.batch.errorhandling.test.ts::07. Batch API should return valid batch failure index for Azure.Data.Tables` | Failure index reporting unclaimed | Partial |
 | `table/apis/table.batch.errorhandling.test.ts::08. Batch API Etag should be rolled back after transaction failure on update` | No rollback | Partial |
 | `table/apis/table.batch.errorhandling.test.ts::09. Batch API should fail to insert duplicate Entity with correct 400 Status and InvalidDuplicateRow error` | The part faults 409 `EntityAlreadyExists`, not the batch-mapped 400 | Partial |
+
+Direct `it()` names from `blob/blobCorsRequest.test.ts` (13). Preflight and response CORS live at the edge (`internal/edge/azurecors.go`): rules come from the service properties the account stored, first match wins, and the headers wrap every answer including faults.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/blobCorsRequest.test.ts::OPTIONS request without cors rules in server should be fail` | No stored rules -> 403 `CorsPreflightFailure`; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should not work without matching cors rules` | Non-matching origin -> 403; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should not work without Origin header or matching allowedOrigins` | Missing Origin -> 403 | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should not work without requestMethod header or matching allowedMethods` | Method outside AllowedMethods -> 403; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should check the defined requestHeaders` | Request headers must be a subset of AllowedHeaders | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should work with matching rule containing Origin *` | Wildcard rule preflights 200 with allow headers | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should work with matching rule containing wildcard in Origin` | Prefix/suffix wildcard origins match | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Response of request to service without cors rules should not contains cors info` | No rule -> no CORS headers at all; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Service with mismatching cors rules should response header Vary` | `Vary: Origin` is only sent on a match, not on a mismatch | Partial |
+| `blob/blobCorsRequest.test.ts::Request Match rule exists that allows all origins (*)` | Actual response carries `Access-Control-Allow-Origin: *` with an Origin, nothing without; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Request Match rule exists for exact origin` | Exact match echoes the origin + `Vary: Origin`; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Requests with error response should apply for CORS` | Faults carry the allow-origin header too; booted 404 case | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Request Match rule in sequence` | First matching rule wins | Mapped and green |
+
+Direct `it()` names from `blob/authentication.test.ts` (5). Credential parsing is parse-only by plan: presence, SharedKey account, and SAS expiry/not-before/method-class are enforced; HMAC is never verified.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/authentication.test.ts::Should not work without credential` | No Authorization and no SAS -> 403 `AuthenticationFailed`; booted | Mapped and green |
+| `blob/authentication.test.ts::Should not work without correct account name` | SharedKey account must equal the host account; booted | Mapped and green |
+| `blob/authentication.test.ts::Should not work without correct account key` | SharedKey is parsed, never HMAC-verified: a wrong key is accepted | Partial |
+| `blob/authentication.test.ts::Should work with correct shared key` | Well-formed SharedKey dispatches; booted | Mapped and green |
+| `blob/authentication.test.ts::Should authenticate SharedKey when both Date and x-ms-date headers are present` | Date headers are not consulted in parse-only mode | Mapped and green |
+
+Direct `it()` names from `blob/sas.test.ts` (47). SAS is parsed for `se`/`st` (RFC3339, checked against the clock) and coarse method-class permissions (blob racwdl); signature, ss/sr scope, stored access policies, and response-header overrides are unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/sas.test.ts::generateAccountSASQueryParameters should generate correct hashes` | SAS is parsed, never HMAC-verified | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work` | Well-formed SAS dispatches | Mapped and green |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work for set blob tier` | Blob tier is unclaim | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should not work with invalid permission` | A permission string with no letter for the method class 403s | Mapped and green |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should not work with invalid service` | Signed-services (ss) is not parsed | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should not work with invalid resource type` | Signed-resource (sr) is not parsed | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should reject duplicate SAS signature query` | Duplicate-parameter rejection unclaimed | Partial |
+| `blob/sas.test.ts::Synchronized copy blob should work with write permission in account SAS to override an existing blob` | PUT class accepts w/c/a; atomic conditions cover the override | Mapped and green |
+| `blob/sas.test.ts::Synchronized copy blob shouldn't work without write permission in account SAS to override an existing blob` | sp without w/c/a on PUT is 403 `AuthorizationPermissionMismatch`; booted (GET case) | Mapped and green |
+| `blob/sas.test.ts::Synchronized copy blob should work without write permission in account SAS to an nonexisting blob` | Coarse classes accept the write | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work with write permission in account SAS to override an existing blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work when the source blob declares Content-Encoding: gzip` | Source headers copied verbatim | Mapped and green |
+| `blob/sas.test.ts::Copy blob shouldn't work without write permission in account SAS to override an existing blob` | Same 403 class check | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work without write permission in account SAS to an nonexisting blob` | Same | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for container` | Well-formed SAS dispatches | Mapped and green |
+| `blob/sas.test.ts::Container operations on container should fail with container SAS` | sr scoping unparsed | Partial |
+| `blob/sas.test.ts::Container operations on container should fail with Blob SAS` | sr scoping unparsed | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should NOT work for blob using unknown key when the account has second key provided in AZURITE_ACCOUNTS` | Multi-key accounts + HMAC unclaimed | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for blob using the second key provided in AZURITE_ACCOUNTS` | Multi-key accounts unclaimed | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for page blob with original headers` | Response header overrides (rscc etc.) unparsed but accepted | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for page blob and rscd arguments for filenames with spaces and special characters` | Same | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for page blob and override headers` | rscd/rscc/rscd content overrides not applied to responses | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for append blob with original headers` | Same | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for append blob and override headers` | Same | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for blob with special naming` | URL-decoded names dispatch | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for blob with access policy` | Stored access policies (si) unclaimed | Partial |
+| `blob/sas.test.ts::Synchronized copy blob should work with write permission in blob SAS to override an existing blob` | Same class check | Mapped and green |
+| `blob/sas.test.ts::Synchronized copy blob shouldn't work without write permission in blob SAS to override an existing blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Synchronized copy blob should work without write permission in account SAS to an nonexisting blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work with write permission in blob SAS to override an existing blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Copy blob shouldn't work without write permission in blob SAS to override an existing blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work without write permission in account SAS to an nonexisting blob` | Same | Mapped and green |
+| `blob/sas.test.ts::GenerateUserDelegationSAS should work for blob snapshot` | User-delegation SAS is oauth territory | Later |
+| `blob/sas.test.ts::Copy blob across accounts should require SAS token` | Cross-account copy is a same-container ceiling today | Partial |
+| `blob/sas.test.ts::Copy blob across accounts should error if hosts mismatch` | Same | Partial |
+| `blob/sas.test.ts::Copy blob across accounts should succeed for public blob access` | Public-access reads unclaimed (no anonymous public path) | Partial |
+| `blob/sas.test.ts::Copy blob across accounts should succeed for public container access` | Same | Partial |
+| `blob/sas.test.ts::Copy blob across accounts should honor metadata when provided` | Metadata override path exists | Mapped and green |
+| `blob/sas.test.ts::Copy blob across accounts should fail if source is archived` | Blob tier unclaim | Partial |
+| `blob/sas.test.ts::Sync Copy blob across accounts should work and honor metadata when provided` | Same-container sync copy honors metadata | Mapped and green |
+| `blob/sas.test.ts::ContainerClient.generateSasUrl should work with filtertag permission` | The f (filter) letter is not in the coarse classes | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work with filtertag permission against service` | Same | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work with filtertag permission against container` | Same | Partial |
+| `blob/sas.test.ts::BlobClient.generateSasUrl should work with get/set tags permission` | The t (tags) letter is not in the coarse classes | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work with should work with get/set tags permission` | Same | Partial |
+
+Direct `it()` names from `queue/queueCorsRequest.test.ts` (12). Same edge middleware as blob CORS, rules from the queue account record (`azqacct`); queue boot covers the wildcard preflight and the response header.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueCorsRequest.test.ts::OPTIONS request without cors rules in server should be fail` | No stored rules -> 403 `CorsPreflightFailure`; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should not work without matching cors rules` | Non-matching origin -> 403; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should not work without Origin header or matching allowedOrigins` | Missing Origin -> 403 | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should not work without requestMethod header or matching allowedMethods` | Method outside AllowedMethods -> 403; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should check the defined requestHeaders` | Request headers must be a subset of AllowedHeaders | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should work with matching rule containing Origin *` | Wildcard rule preflights 200 with allow headers | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should work with matching rule containing wildcard in Origin` | Prefix/suffix wildcard origins match | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Response of request to service without cors rules should not contains cors info` | No rule -> no CORS headers at all; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Service with mismatching cors rules should response header Vary` | `Vary: Origin` is only sent on a match, not on a mismatch | Partial |
+| `queue/queueCorsRequest.test.ts::Request Match rule exists that allows all origins (*)` | Actual response carries `Access-Control-Allow-Origin: *` with an Origin, nothing without; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Request Match rule exists for exact origin` | Exact match echoes the origin + `Vary: Origin`; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Requests with error response should apply for CORS` | Faults carry the allow-origin header too; queue booted where named 404 case | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Request Match rule in sequence` | First matching rule wins | Mapped and green |
+
+Direct `it()` names from `queue/queueAuthentication.test.ts` (5). Same parse-only credential middleware on the queue host; no-credential 403 is queue-booted.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueAuthentication.test.ts::Should not work without credential` | No Authorization and no SAS -> 403 `AuthenticationFailed`; booted | Mapped and green |
+| `queue/queueAuthentication.test.ts::Should not work without correct account name` | SharedKey account must equal the host account; booted | Mapped and green |
+| `queue/queueAuthentication.test.ts::Should not work without correct account key` | SharedKey is parsed, never HMAC-verified: a wrong key is accepted | Partial |
+| `queue/queueAuthentication.test.ts::Should work with correct shared key` | Well-formed SharedKey dispatches; booted | Mapped and green |
+| `queue/queueAuthentication.test.ts::Should authenticate SharedKey when both Date and x-ms-date headers are present` | Date headers are not consulted in parse-only mode | Mapped and green |
+
+Direct `it()` names from `queue/queueSas.test.ts` (16). Queue SAS classes are r/a/u/p; signature and access policies unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should work` | Well-formed SAS dispatches | Mapped and green |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should not work with invalid permission` | No letter for the method class 403s | Mapped and green |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should not work with invalid service` | ss unparsed | Partial |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should not work with invalid resource type` | sr unparsed | Partial |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should not work with invalid signature` | HMAC unclaimed | Partial |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should reject duplicate SAS signature query` | Duplicate rejection unclaimed | Partial |
+| `queue/queueSas.test.ts::Create queue should work with write (w) or create (c) permission in account SAS` | PUT class accepts w/c/a | Mapped and green |
+| `queue/queueSas.test.ts::Create queue shouldn't work without write (w) and create (c) permission in account SAS` | Missing class letters 403 | Mapped and green |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should work for queue` | Well-formed SAS dispatches | Mapped and green |
+| `queue/queueSas.test.ts::Get/Set ACL with AccountSAS is not allowed` | SAS-on-ACL rules unclaimed | Partial |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should work for messages` | POST class accepts a | Mapped and green |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should work for messages` | GET/DELETE classes accept r/p | Mapped and green |
+| `queue/queueSas.test.ts::generateQueueSASQueryParameters should work for queue` | Well-formed SAS dispatches | Mapped and green |
+| `queue/queueSas.test.ts::generateQueueSASQueryParameters should work for messages` | Same | Mapped and green |
+| `queue/queueSas.test.ts::generateQueueSASQueryParameters should work for queue with access policy` | Stored access policies unclaimed | Partial |
+| `queue/queueSas.test.ts::generateQueueSASQueryParameters should work without startTime` | st optional | Mapped and green |
+
+Direct `it()` names from `table/apis/tableCorsRequest.test.ts` (12). Table service properties are unclaimed, so no CORS rule can ever be stored on the table host: negative rows pass trivially, positive rows are unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/tableCorsRequest.test.ts::OPTIONS request without cors rules in server should fail` | Table preflight always 403s today (rules cannot be set) | Mapped and green |
+| `table/apis/tableCorsRequest.test.ts::OPTIONS request should not work without matching cors rules` | Same | Mapped and green |
+| `table/apis/tableCorsRequest.test.ts::OPTIONS request should not work without Origin header or matching allowedOrigins` | Missing Origin -> 403 | Mapped and green |
+| `table/apis/tableCorsRequest.test.ts::OPTIONS request should not work without requestMethod header or matching allowedMethods` | Missing method -> 403 | Mapped and green |
+| `table/apis/tableCorsRequest.test.ts::OPTIONS request should check the defined requestHeaders` | Rules cannot be stored on the table host | Partial |
+| `table/apis/tableCorsRequest.test.ts::OPTIONS request should work with matching rule containing Origin *` | Same | Partial |
+| `table/apis/tableCorsRequest.test.ts::Response of request to service without cors rules should not contain cors info` | No CORS headers without rules | Mapped and green |
+| `table/apis/tableCorsRequest.test.ts::Service with mismatching cors rules should response header Vary` | Vary only on match | Partial |
+| `table/apis/tableCorsRequest.test.ts::Request Match rule exists that allows all origins (*)` | Rules cannot be stored on the table host | Partial |
+| `table/apis/tableCorsRequest.test.ts::Request Match rule exists for exact origin` | Same | Partial |
+| `table/apis/tableCorsRequest.test.ts::Requests with error response should apply for CORS` | Same | Partial |
+| `table/apis/tableCorsRequest.test.ts::Request Match rule in sequence` | Same | Partial |
+
+Direct `it()` names from `table/auth/sas.test.ts` (12). Table SAS classes are r/a/u/d and all twelve map onto the coarse middleware except access-policy revocation and duplicate-signature rejection.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/auth/sas.test.ts::1. insertEntity with Query permission should not work` | POST class accepts only a; r 403s | Mapped and green |
+| `table/auth/sas.test.ts::2. insertEntity with Add permission should work` | a accepted | Mapped and green |
+| `table/auth/sas.test.ts::3. insertEntity Add permission should work` | Same | Mapped and green |
+| `table/auth/sas.test.ts::4. insertEntity expired Add permission should not work` | se in the past -> 403 `AuthenticationFailed`; booted (blob host) | Mapped and green |
+| `table/auth/sas.test.ts::5. deleteEntity with Delete permission should work` | d accepted | Mapped and green |
+| `table/auth/sas.test.ts::6. deleteEntity with Add permission should not work` | DELETE class rejects a | Mapped and green |
+| `table/auth/sas.test.ts::7. Update an Entity that exists,` | u accepted for PUT/PATCH | Mapped and green |
+| `table/auth/sas.test.ts::8. Update an Entity without update permission,` | Missing u 403s | Mapped and green |
+| `table/auth/sas.test.ts::9. Operation using SAS should fail if ACL generating the SAS no longer allow the operation,` | Access-policy revocation unclaimed | Partial |
+| `table/auth/sas.test.ts::10. Upsert succeeds with Update permission,` | u accepted | Mapped and green |
+| `table/auth/sas.test.ts::11. Upsert entity with Add + Update permission should work` | au accepted | Mapped and green |
+| `table/auth/sas.test.ts::12. duplicate SAS signature query should fail authentication` | Duplicate rejection unclaimed | Partial |
 
 ### Shipped YAML evidence (not the inventory)
 

@@ -39,9 +39,6 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "cloudflare.kv" {
 		return cloudflareOp(svc, r), nil
 	}
-	if svc.ID == "hostinger.dns" {
-		return hostingerOp(svc, r), nil
-	}
 	if svc.ID == "digitalocean.v2" {
 		return digitaloceanOp(svc, r), nil
 	}
@@ -522,41 +519,6 @@ func digitaloceanRoute(r *http.Request) string {
 	return "Unknown"
 }
 
-func hostingerOp(svc *model.Service, r *http.Request) *model.Operation {
-	name := hostingerRoute(r)
-	if op := svc.OperationByName(name); op != nil {
-		return op
-	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
-}
-
-func hostingerRoute(r *http.Request) string {
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	m := r.Method
-	if len(parts) >= 4 && parts[0] == "api" && parts[1] == "domains" && parts[2] == "v1" && parts[3] == "portfolio" {
-		if len(parts) == 4 && m == http.MethodPost {
-			return "CreateDomain"
-		}
-		if len(parts) == 4 && m == http.MethodGet {
-			return "ListDomains"
-		}
-		if len(parts) >= 5 && m == http.MethodGet {
-			return "GetDomain"
-		}
-	}
-	if len(parts) >= 5 && parts[0] == "api" && parts[1] == "dns" && parts[2] == "v1" && parts[3] == "zones" {
-		switch m {
-		case http.MethodGet:
-			return "GetDNSRecords"
-		case http.MethodPut:
-			return "UpdateDNSRecords"
-		case http.MethodDelete:
-			return "DeleteDNSRecords"
-		}
-	}
-	return "Unknown"
-}
-
 func cloudflareOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := cloudflareRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -702,7 +664,7 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if svc.ID == "cloudflare.kv" {
 		return encodeCloudflare(w, status, resp)
 	}
-	if svc.ID == "hostinger.dns" {
+	if svc.ID == "hostinger.api" {
 		return encodeHostinger(w, status, resp)
 	}
 	if svc.ID == "digitalocean.v2" {
@@ -920,7 +882,7 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 			"result":   nil,
 		})
 	}
-	if svc.ID == "hostinger.dns" {
+	if svc.ID == "hostinger.api" {
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"message": f.Message, "correlation_id": "mirror"})
 	}

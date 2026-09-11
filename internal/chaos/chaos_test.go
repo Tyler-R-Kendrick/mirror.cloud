@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
@@ -39,7 +40,6 @@ import (
 	flyapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/fly/machines"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	hzapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hetzner/v1"
-	hsapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hostinger/api"
 	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -7670,7 +7670,13 @@ func TestCloudflareConcurrentKVPutGet(t *testing.T) {
 }
 
 func TestHostingerConcurrentDuplicateDomains(t *testing.T) {
-	p := hsapi.New(spitest.Deps(t))
+	// The pack these exercised is gone; the property is not. Exactly one
+	// concurrent create may win, and the engine has to hold that the same way
+	// the hand-written mutex did.
+	p, err := bundled.New("hostinger.api", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7679,7 +7685,7 @@ func TestHostingerConcurrentDuplicateDomains(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDomain", Input: map[string]any{"domain": "race.test"}})
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DomainsPurchaseNewDomainV1", Input: map[string]any{"domain": "race.test", "item_id": "hostingercom-domain"}})
 			errCh <- err
 		}()
 	}
@@ -7702,10 +7708,13 @@ func TestHostingerConcurrentDuplicateDomains(t *testing.T) {
 }
 
 func TestHostingerConcurrentDNSPutGet(t *testing.T) {
-	p := hsapi.New(spitest.Deps(t))
+	p, err := bundled.New("hostinger.api", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDomain", Input: map[string]any{"domain": "race.test"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DomainsPurchaseNewDomainV1", Input: map[string]any{"domain": "race.test", "item_id": "hostingercom-domain"}}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -7715,7 +7724,7 @@ func TestHostingerConcurrentDNSPutGet(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			zone := []any{map[string]any{"name": "@", "type": "A", "ttl": 300, "records": []any{map[string]any{"content": fmt.Sprintf("1.2.3.%d", n)}}}}
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UpdateDNSRecords", Input: map[string]any{"domain": "race.test", "overwrite": true, "zone": zone}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DNSUpdateDNSRecordsV1", Input: map[string]any{"domain": "race.test", "overwrite": true, "zone": zone}}); err != nil {
 				errCh <- err
 			}
 		}(i)
@@ -7725,7 +7734,7 @@ func TestHostingerConcurrentDNSPutGet(t *testing.T) {
 	for err := range errCh {
 		t.Fatal(err)
 	}
-	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetDNSRecords", Input: map[string]any{"domain": "race.test"}})
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DNSGetDNSRecordsV1", Input: map[string]any{"domain": "race.test"}})
 	if err != nil || got.Output["_list"] == nil {
 		t.Fatalf("get after concurrent put %#v %v", got, err)
 	}

@@ -69,7 +69,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/fly/machines"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hetzner/v1"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hostinger/api"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 )

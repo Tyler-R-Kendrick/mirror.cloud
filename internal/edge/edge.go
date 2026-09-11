@@ -511,7 +511,7 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			return s.bundle.ServiceByID("cloudflare.kv")
 		}
 		if hostingerRequest(r) {
-			return s.bundle.ServiceByID("hostinger.dns")
+			return s.bundle.ServiceByID("hostinger.api")
 		}
 		if vercelRequest(r) {
 			return s.bundle.ServiceByID("vercel.api")

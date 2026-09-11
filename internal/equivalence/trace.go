@@ -41,6 +41,25 @@ type StepEntry struct {
 	Identity  spi.Identity   `json:"identity"`
 	Output    map[string]any `json:"output,omitempty"`
 	Fault     *FaultEntry    `json:"fault,omitempty"`
+	// RecordedAs names the operation this expectation was recorded from, when
+	// that is not the operation the replay invokes.
+	//
+	// Every extraction before Hostinger kept its operation names, because the
+	// pack already used the specification's. Hostinger's pack invented six --
+	// CreateDomain, GetDNSRecords -- and bound them to the URIs the document
+	// gives real ones, so the bundle answers DomainsPurchaseNewDomainV1 where
+	// the pack answered CreateDomain. A recording made under the pack's names
+	// cannot be replayed against the bundle at all: the operation is not in
+	// the model.
+	//
+	// `Operation` is therefore the name the replay invokes, and this is the
+	// name the expectation came from. Rewriting the name silently at record
+	// time would leave a file reading as though the pack had always used the
+	// specification's names, and a reviewer could not tell a rename from a
+	// transcription error. A rename is evidence about the migration and
+	// belongs in the record, the same way Superseded keeps a disagreement
+	// visible instead of resolving it quietly.
+	RecordedAs string `json:"recorded_as,omitempty"`
 	// Superseded states why this step's recorded output is known to be wrong
 	// and is deliberately not matched.
 	//
@@ -146,6 +165,15 @@ func LoadFile(fsys fs.FS, name string) (*File, error) {
 	}
 	if len(f.Steps) == 0 {
 		return nil, fmt.Errorf("%s: no steps; a recording that asserts nothing gates nothing", name)
+	}
+	for i, e := range f.Steps {
+		// A rename that renames nothing is noise in a file whose whole job is
+		// to be read: it makes a step look migrated when it is not, and the
+		// next reader has to check every one to find the real ones.
+		if e.RecordedAs != "" && e.RecordedAs == e.Operation {
+			return nil, fmt.Errorf("%s: step %d records %q as itself; drop recorded_as",
+				name, i, e.Operation)
+		}
 	}
 	return &f, nil
 }

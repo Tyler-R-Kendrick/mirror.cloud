@@ -134,13 +134,12 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"cloudflare.kv", http.MethodDelete, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "DeleteValue"},
 		{"cloudflare.kv", http.MethodGet, "/client/v4/unknown", "", "Unknown"},
 
-		{"hostinger.dns", http.MethodPost, "/api/domains/v1/portfolio", "", "CreateDomain"},
-		{"hostinger.dns", http.MethodGet, "/api/domains/v1/portfolio", "", "ListDomains"},
-		{"hostinger.dns", http.MethodGet, "/api/domains/v1/portfolio/ex.test", "", "GetDomain"},
-		{"hostinger.dns", http.MethodGet, "/api/dns/v1/zones/ex.test", "", "GetDNSRecords"},
-		{"hostinger.dns", http.MethodPut, "/api/dns/v1/zones/ex.test", "", "UpdateDNSRecords"},
-		{"hostinger.dns", http.MethodDelete, "/api/dns/v1/zones/ex.test", "", "DeleteDNSRecords"},
-		{"hostinger.dns", http.MethodGet, "/api/unknown", "", "Unknown"},
+		// Hostinger's rows are gone with its route table. It is served from a
+		// bundle now, so the URIs come from the generated model and
+		// httpuri.Match routes them like every other modelled service; the
+		// behaviour is covered end to end by test/behavior/hostinger. A case
+		// here would have to assert against a hand-written table that no
+		// longer exists.
 
 		{"digitalocean.v2", http.MethodPost, "/v2/droplets", "", "CreateDroplet"},
 		{"digitalocean.v2", http.MethodGet, "/v2/droplets", "", "ListDroplets"},
@@ -307,7 +306,7 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		t.Fatalf("cf fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 
-	hs := &model.Service{ID: "hostinger.dns"}
+	hs := &model.Service{ID: "hostinger.api"}
 	w = httptest.NewRecorder()
 	if err := codec.Encode(hs, &model.Operation{Name: "ListDomains"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"domain": "ex.test"}}}}); err != nil {
 		t.Fatal(err)

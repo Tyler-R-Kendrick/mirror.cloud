@@ -1,0 +1,387 @@
+{
+ "schema": "trace/1",
+ "service": "hostinger.api",
+ "source": "pack:internal/services/hostinger/api@3841b62a",
+ "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Hostinger API; a probe run replaces cells with observed evidence and cites the cassette.\n\nEach step carries recorded_as, because this is the first extraction where the operation names change: the pack invented six names and bound them to the URIs the specification gives real ones. `operation` is what the replay invokes; `recorded_as` is the pack operation the expectation came from.\n\nThe domain is written literally rather than as a reference to the step that created it. Reference unification exists for identifiers the service issues -- a generated id that the bundle is free to choose differently -- and a domain name is chosen by the caller. Linking it also happened to be unresolvable here: the bundle answers an order, which carries no domain, so every later step would have addressed a null.",
+ "steps": [
+  {
+   "operation": "DomainsGetDomainListV1",
+   "recorded_as": "ListDomains",
+   "input": {},
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "_list": []
+   }
+  },
+  {
+   "operation": "DomainsGetDomainDetailsV1",
+   "recorded_as": "GetDomain",
+   "input": {
+    "domain": "absent.example"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "fault": {
+    "code": "not_found",
+    "http_status": 404,
+    "fault": "client"
+   }
+  },
+  {
+   "operation": "DomainsPurchaseNewDomainV1",
+   "recorded_as": "CreateDomain",
+   "input": {
+    "domain": "Example.COM",
+    "item_id": "hostingercom-domain"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "domain": "example.com",
+    "status": "active"
+   },
+   "superseded": "The specification makes this a billing operation answering Billing.V1.Order.OrderResource -- id, status, currency, totals -- where the pack invented a create answering {domain, status}. The model is declared evidence and outranks the pack's authored behaviour, so the bundle answers an order and this recorded body is known to be wrong. The outcome class is still compared: a purchase that starts faulting still fails this step."
+  },
+  {
+   "operation": "DomainsPurchaseNewDomainV1",
+   "recorded_as": "CreateDomain",
+   "input": {
+    "domain": "example.com",
+    "item_id": "hostingercom-domain"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "fault": {
+    "code": "conflict",
+    "http_status": 409,
+    "fault": "client"
+   }
+  },
+  {
+   "operation": "DomainsPurchaseNewDomainV1",
+   "recorded_as": "CreateDomain",
+   "input": {
+    "domain": "",
+    "item_id": "hostingercom-domain"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "fault": {
+    "code": "validation_error",
+    "http_status": 422,
+    "fault": "client"
+   }
+  },
+  {
+   "operation": "DomainsGetDomainDetailsV1",
+   "recorded_as": "GetDomain",
+   "input": {
+    "domain": "EXAMPLE.com"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "domain": "example.com",
+    "status": "active"
+   }
+  },
+  {
+   "operation": "DomainsGetDomainListV1",
+   "recorded_as": "ListDomains",
+   "input": {},
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "_list": [
+     {
+      "domain": "example.com",
+      "status": "active"
+     }
+    ]
+   }
+  },
+  {
+   "operation": "DNSGetDNSRecordsV1",
+   "recorded_as": "GetDNSRecords",
+   "input": {
+    "domain": "example.com"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "_list": []
+   }
+  },
+  {
+   "operation": "DNSGetDNSRecordsV1",
+   "recorded_as": "GetDNSRecords",
+   "input": {
+    "domain": "absent.example"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "fault": {
+    "code": "not_found",
+    "http_status": 404,
+    "fault": "client"
+   }
+  },
+  {
+   "operation": "DNSUpdateDNSRecordsV1",
+   "recorded_as": "UpdateDNSRecords",
+   "input": {
+    "domain": "example.com",
+    "zone": [
+     {
+      "name": "@",
+      "type": "A"
+     }
+    ]
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "message": "Request accepted"
+   }
+  },
+  {
+   "operation": "DNSUpdateDNSRecordsV1",
+   "recorded_as": "UpdateDNSRecords",
+   "input": {
+    "domain": "example.com",
+    "zone": [
+     {
+      "name": "www",
+      "type": "A"
+     }
+    ]
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "message": "Request accepted"
+   }
+  },
+  {
+   "operation": "DNSGetDNSRecordsV1",
+   "recorded_as": "GetDNSRecords",
+   "input": {
+    "domain": "example.com"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "_list": [
+     {
+      "name": "@",
+      "type": "A"
+     },
+     {
+      "name": "www",
+      "type": "A"
+     }
+    ]
+   }
+  },
+  {
+   "operation": "DNSUpdateDNSRecordsV1",
+   "recorded_as": "UpdateDNSRecords",
+   "input": {
+    "domain": "example.com",
+    "overwrite": true,
+    "zone": [
+     {
+      "name": "only",
+      "type": "A"
+     }
+    ]
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "message": "Request accepted"
+   }
+  },
+  {
+   "operation": "DNSGetDNSRecordsV1",
+   "recorded_as": "GetDNSRecords",
+   "input": {
+    "domain": "example.com"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "_list": [
+     {
+      "name": "only",
+      "type": "A"
+     }
+    ]
+   }
+  },
+  {
+   "operation": "DNSUpdateDNSRecordsV1",
+   "recorded_as": "UpdateDNSRecords",
+   "input": {
+    "domain": "example.com",
+    "zone": null
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "fault": {
+    "code": "validation_error",
+    "http_status": 422,
+    "fault": "client"
+   }
+  },
+  {
+   "operation": "DNSDeleteDNSRecordsV1",
+   "recorded_as": "DeleteDNSRecords",
+   "input": {
+    "domain": "example.com",
+    "filters": []
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "message": "Request accepted"
+   }
+  },
+  {
+   "operation": "DNSGetDNSRecordsV1",
+   "recorded_as": "GetDNSRecords",
+   "input": {
+    "domain": "example.com"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "_list": []
+   }
+  },
+  {
+   "operation": "DomainsGetDomainDetailsV1",
+   "recorded_as": "GetDomain",
+   "input": {
+    "domain": "example.com"
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "output": {
+    "domain": "example.com",
+    "status": "active"
+   }
+  },
+  {
+   "operation": "DNSDeleteDNSRecordsV1",
+   "recorded_as": "DeleteDNSRecords",
+   "input": {
+    "domain": "absent.example",
+    "filters": []
+   },
+   "identity": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "",
+    "ARN": "",
+    "Project": ""
+   },
+   "fault": {
+    "code": "not_found",
+    "http_status": 404,
+    "fault": "client"
+   }
+  }
+ ]
+}

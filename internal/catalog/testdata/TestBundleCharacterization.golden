@@ -782,15 +782,15 @@
     ]
   },
   {
-    "ID": "hostinger.dns",
+    "ID": "hostinger.api",
     "Protocol": "restJson1",
     "Ops": [
-      "CreateDomain",
-      "ListDomains",
-      "GetDomain",
-      "GetDNSRecords",
-      "UpdateDNSRecords",
-      "DeleteDNSRecords"
+      "DomainsPurchaseNewDomainV1",
+      "DomainsGetDomainListV1",
+      "DomainsGetDomainDetailsV1",
+      "DNSGetDNSRecordsV1",
+      "DNSUpdateDNSRecordsV1",
+      "DNSDeleteDNSRecordsV1"
     ]
   },
   {

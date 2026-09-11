@@ -21664,35 +21664,25 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
-	{
-		name: "hostinger-accept-empty-domain",
-		file: filepath.Join("internal", "services", "hostinger", "api", "api.go"),
-		old:  "if domain == \"\" {\n\t\treturn nil, hsFault(\"validation_error\", \"Domain is required\", 422)",
-		new:  "if false {\n\t\treturn nil, hsFault(\"validation_error\", \"Domain is required\", 422)",
-		pkg:  "./internal/services/hostinger/api",
-		run:  "TestCreateDomainRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "hostinger-accept-duplicate-domain",
-		file: filepath.Join("internal", "services", "hostinger", "api", "api.go"),
-		old:  `if _, exists, _ := p.col(req, "hsdom").Get(ctx, domain); exists {`,
-		new:  `if _, exists, _ := p.col(req, "hsdom").Get(ctx, domain); false {`,
-		pkg:  "./internal/services/hostinger/api",
-		run:  "TestCreateDomainRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "hostinger-get-missing-domain-as-empty",
-		file: filepath.Join("internal", "services", "hostinger", "api", "api.go"),
-		old:  "if !ok {\n\t\treturn nil, hsFault(\"not_found\", \"Domain not found\", 404)\n\t}\n\tvar rec map[string]any",
-		new:  "if false {\n\t\treturn nil, hsFault(\"not_found\", \"Domain not found\", 404)\n\t}\n\tvar rec map[string]any",
-		pkg:  "./internal/services/hostinger/api",
-		run:  "TestDomainAndDNSLifecycle",
-	},
+	// The three mutants that guarded the Hostinger pack's empty-domain,
+	// duplicate-domain and missing-domain branches are gone with the Go they
+	// rewrote. Their behaviour did not go with them: it is `require` rules in
+	// behavior/hostinger/api/service.yaml, and the equivalence recording
+	// asserts all three -- an empty domain answers validation_error/422, a
+	// duplicate answers conflict/409, and a missing one answers not_found/404,
+	// each as its own step replayed against the bundle on every run.
+	//
+	// That is the trade the migration makes. `go test -overlay` substitutes Go
+	// files, so a rule in a YAML bundle is not something this suite can
+	// rewrite; the recording is what gates a bundle, and it gates by example
+	// rather than by mutation. Mutating bundles would need harness support
+	// that does not exist, and is worth building only if recordings turn out
+	// to miss things mutants would have caught.
 	{
 		name: "hostinger-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "if svc.ID == \"hostinger.dns\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"message\": f.Message, \"correlation_id\": \"mirror\"})",
-		new:  "if false && svc.ID == \"hostinger.dns\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"message\": f.Message, \"correlation_id\": \"mirror\"})",
+		old:  "if svc.ID == \"hostinger.api\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"message\": f.Message, \"correlation_id\": \"mirror\"})",
+		new:  "if false && svc.ID == \"hostinger.api\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"message\": f.Message, \"correlation_id\": \"mirror\"})",
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},

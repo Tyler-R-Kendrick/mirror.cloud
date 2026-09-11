@@ -844,7 +844,8 @@
       "StageBlockFromURL",
       "SetTags",
       "GetTags",
-      "FilterBlobs"
+      "FilterBlobs",
+      "SubmitBatch"
     ]
   },
   {

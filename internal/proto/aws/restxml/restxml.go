@@ -392,6 +392,11 @@ func azureRoute(r *http.Request) string {
 			return "ListBlobs"
 		case "blobs":
 			return "FilterBlobs"
+		case "batch":
+			if m == http.MethodPost {
+				return "SubmitBatch"
+			}
+			return "UnsupportedQuery"
 		case "metadata":
 			if m == http.MethodPut {
 				return "SetContainerMetadata"
@@ -436,6 +441,11 @@ func azureRoute(r *http.Request) string {
 			return "ListContainers"
 		case "blobs":
 			return "FilterBlobs"
+		case "batch":
+			if m == http.MethodPost {
+				return "SubmitBatch"
+			}
+			return "UnsupportedQuery"
 		case "":
 			return "Unknown"
 		default:

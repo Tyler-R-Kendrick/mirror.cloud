@@ -1,6 +1,7 @@
 package spine
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -374,6 +375,88 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 200 || !strings.Contains(string(raw), "<Snapshot>") || !strings.Contains(string(raw), "<Tag><Key>c</Key><Value>3</Value></Tag>") {
 		t.Fatalf("include list %d %s", code, raw)
 	}
+
+	// SubmitBatch: multipart fan-out with per-part statuses.
+	batchBody := func(parts ...string) string {
+		var b strings.Builder
+		for i, p := range parts {
+			fmt.Fprintf(&b, "--bb%d\r\nContent-Type: application/http\r\nContent-ID: %d\r\n\r\n%s\r\n", 1, i, p)
+		}
+		fmt.Fprintf(&b, "--bb%d--\r\n", 1)
+		return b.String()
+	}
+	batchCT := "multipart/mixed; boundary=bb1"
+	code, raw, _ = do(http.MethodPut, "/ctr/b1", "one", nil)
+	if code != 201 {
+		t.Fatalf("put b1 %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/b2", "two", nil)
+	if code != 201 {
+		t.Fatalf("put b2 %d %s", code, raw)
+	}
+	body := batchBody(
+		"DELETE https://acct.blob.core.windows.net/ctr/b1 HTTP/1.1\r\nx-ms-version: 2020-10-02\r\n\r\n",
+		"DELETE https://acct.blob.core.windows.net/ctr/ghost HTTP/1.1\r\n\r\n",
+		"DELETE /ctr/b2 HTTP/1.1\r\n\r\n",
+	)
+	code, raw, h = do(http.MethodPost, "/?comp=batch", body, map[string]string{"Content-Type": batchCT})
+	if code != 202 || !strings.Contains(string(raw), "HTTP/1.1 202") || !strings.Contains(string(raw), "HTTP/1.1 404") || !containsFold(string(raw), "x-ms-error-code: BlobNotFound") || !strings.Contains(h.Get("Content-Type"), "multipart/mixed") {
+		t.Fatalf("batch %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/b1", "", nil)
+	if code != 404 {
+		t.Fatalf("batch deleted b1 %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/b2", "", nil)
+	if code != 404 {
+		t.Fatalf("batch deleted b2 %d %s", code, raw)
+	}
+	// Case-insensitive boundary parameter name is accepted.
+	code, raw, _ = do(http.MethodPut, "/ctr/b3", "three", nil)
+	if code != 201 {
+		t.Fatalf("put b3 %d %s", code, raw)
+	}
+	body = batchBody("DELETE /ctr/b3 HTTP/1.1\r\n\r\n")
+	code, raw, _ = do(http.MethodPost, "/?comp=batch", body, map[string]string{"Content-Type": "multipart/mixed; BOUNDARY=bb1"})
+	if code != 202 || !strings.Contains(string(raw), "HTTP/1.1 202") {
+		t.Fatalf("batch boundary case %d %s", code, raw)
+	}
+	// Malformed envelopes fail inside a 202, except a missing Content-Type.
+	code, raw, _ = do(http.MethodPost, "/?comp=batch", body, map[string]string{"Content-Type": "multipart/mixed"})
+	if code != 202 || !containsFold(string(raw), "x-ms-error-code: InvalidHeaderValue") {
+		t.Fatalf("batch no boundary %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPost, "/?comp=batch", body, map[string]string{"Content-Type": "multipart/mixed; boundary=a; boundary=b"})
+	if code != 202 || !containsFold(string(raw), "x-ms-error-code: InvalidInput") {
+		t.Fatalf("batch dup boundary %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPost, "/?comp=batch", body, nil)
+	if code != 400 {
+		t.Fatalf("batch no content-type %d %s", code, raw)
+	}
+	// Container-scoped batch rejects out-of-scope sub-requests per part.
+	code, raw, _ = do(http.MethodPut, "/ctr2?restype=container", "", nil)
+	if code != 201 {
+		t.Fatalf("create ctr2 %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr2/x", "cross", nil)
+	if code != 201 {
+		t.Fatalf("put ctr2 blob %d %s", code, raw)
+	}
+	body = batchBody("DELETE /ctr2/x HTTP/1.1\r\n\r\n")
+	code, raw, _ = do(http.MethodPost, "/ctr?restype=container&comp=batch", body, map[string]string{"Content-Type": batchCT})
+	if code != 202 || !containsFold(string(raw), "x-ms-error-code: InvalidInput") {
+		t.Fatalf("batch cross container %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr2/x", "", nil)
+	if code != 200 {
+		t.Fatalf("cross-container blob survived %d %s", code, raw)
+	}
+	body = batchBody("DELETE /ctr2/x HTTP/1.1\r\n\r\n")
+	code, raw, _ = do(http.MethodPost, "/ctr2?restype=container&comp=batch", body, map[string]string{"Content-Type": batchCT})
+	if code != 202 || !strings.Contains(string(raw), "HTTP/1.1 202") {
+		t.Fatalf("batch in scope %d %s", code, raw)
+	}
 	code, raw, h = do(http.MethodHead, "/ctr/missing", "", nil)
 	if code != 404 || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("Content-Type") != "" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("head missing %d %#v %s", code, h, raw)
@@ -605,4 +688,8 @@ func TestBootedServerAzureTable(t *testing.T) {
 	if code != 404 || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("delete missing table %d %#v %s", code, h, raw)
 	}
+}
+
+func containsFold(s, sub string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
 }

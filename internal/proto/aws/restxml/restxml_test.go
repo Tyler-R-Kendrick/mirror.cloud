@@ -848,6 +848,8 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		{http.MethodGet, "/c/o?comp=tags", "GetTags"},
 		{http.MethodGet, "/?comp=blobs", "FilterBlobs"},
 		{http.MethodGet, "/c?restype=container&comp=blobs", "FilterBlobs"},
+		{http.MethodPost, "/?comp=batch", "SubmitBatch"},
+		{http.MethodPost, "/c?restype=container&comp=batch", "SubmitBatch"},
 		{http.MethodPut, "/c?restype=container&comp=metadata", "SetContainerMetadata"},
 		{http.MethodGet, "/c?restype=container&comp=metadata", "GetContainerMetadata"},
 		{http.MethodPut, "/c?restype=container&comp=acl", "SetContainerAcl"},

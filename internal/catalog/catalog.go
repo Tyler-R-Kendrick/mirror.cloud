@@ -322,6 +322,7 @@ func Bundle() *model.Bundle {
 		op("SetTags", "PUT", "/{container}/{blob}?comp=tags", 204, false),
 		op("GetTags", "GET", "/{container}/{blob}?comp=tags", 200, true),
 		op("FilterBlobs", "GET", "/?comp=blobs", 200, true),
+		op("SubmitBatch", "POST", "/?comp=batch", 202, false),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"

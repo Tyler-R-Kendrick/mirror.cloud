@@ -125,13 +125,13 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Queue swagger `x-ms-paths` keys | 11 |
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
-| Blob keys fully routed | 38 / 59 |
+| Blob keys fully routed | 40 / 59 |
 | Queue keys fully routed | 4 / 11 |
 | Table method+paths routed | 6 / 12 |
-| Blob keys accounted (routed + unclaim) | 47 / 59 |
+| Blob keys accounted (routed + unclaim) | 49 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
-| Azurite test functions traced | 304 / 806 (38%) |
+| Azurite test functions traced | 317 / 806 (39%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -207,13 +207,13 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/?comp=list` | routed | `ListContainers` |
 | `/?restype=service&comp=userdelegationkey` | unclaim | not in Azurite REST matrix; oauth tests parse-only |
 | `/?restype=account&comp=properties` | routed | `GetAccountInfo` headers `StorageV2` / `Standard_RAGRS` / HNS false |
-| `/?comp=batch` | missing | SubmitBatch |
+| `/?comp=batch` | routed | `SubmitBatch` — edge fan-out: each multipart part is parsed as a raw HTTP request and dispatched through the normal pipeline, per-part statuses replayed; malformed envelope is one failed sub-response (missing Content-Type alone is the outer 400); 256 cap; set-tier parts stay tier-unclaimed |
 | `/?comp=blobs` | routed | `FilterBlobs`; `where` tag expressions (incl. `@container`), where-less is empty; items carry only expression-referenced tags; pagination unclaimed |
 | `/{containerName}?restype=container` | routed | `CreateContainer` / `GetContainer` / `DeleteContainer` (HEAD rides GET) |
 | `/{containerName}?restype=container&comp=metadata` | routed | `SetContainerMetadata` / `GetContainerMetadata`; missing container 404 |
 | `/{containerName}?restype=container&comp=acl` | routed | `SetContainerAcl` / `GetContainerAcl`; stores signed-identifier XML and `x-ms-blob-public-access` |
 | `/{containerName}?restype=container&comp=undelete` | unclaim | Azurite: soft delete unsupported |
-| `/{containerName}?restype=container&comp=batch` | missing | Container SubmitBatch |
+| `/{containerName}?restype=container&comp=batch` | routed | `SubmitBatch` container scope; out-of-scope sub-request is a per-part 400 `InvalidInput` |
 | `/{containerName}?restype=container&comp=blobs` | routed | `FilterBlobs` scoped by path container; missing container 404 |
 | `/{containerName}?comp=lease&restype=container&acquire` | routed | `AcquireContainerLease` via `x-ms-lease-action=acquire`; 201 + `x-ms-lease-id` |
 | `/{containerName}?comp=lease&restype=container&release` | routed | `ReleaseContainerLease`; mismatch is 409 `LeaseIdMismatchWithLeaseOperation` |
@@ -629,6 +629,26 @@ Direct `it()` names from `blob/conditions.test.ts` (37). This file unit-tests Az
 | `blob/conditions.test.ts::Should return 412 for if-modified-since equal with lastModifiedSince` | Equal instant fails (`lastModified <= date`); atomic epoch row | Mapped at HTTP |
 | `blob/conditions.test.ts::Should return 412 for failed if-modified-since results` | Future If-Modified-Since on a write is 412; atomic | Mapped at HTTP |
 | `blob/conditions.test.ts::Should return 412 for failed if-unmodified-since results` | Past If-Unmodified-Since on a write is 412; atomic | Mapped at HTTP |
+
+Direct `it()` names from `blob/apis/blobbatch.test.ts` (13). Batch is fanned out at the edge: each `application/http` part runs through the normal dispatch, so any routed op works as a sub-request and per-part statuses (202/404 with `x-ms-error-code`) replay into the 202 multipart body.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/blobbatch.test.ts::SubmitBatch batch deleting` | Booted batch of DELETEs: 202 outer, per-part 202, blobs gone | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch accepts a boundary containing equals signs` | Boundary parser keeps quoted `=` values | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch accepts a case-insensitive boundary parameter` | `BOUNDARY=` accepted; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch accepts whitespace before the boundary value` | Value is trimmed | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch rejects missing Content-Type` | Outer 400 `InvalidHeaderValue`; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch rejects Content-Type without a boundary` | 202 with one failed sub-response `InvalidHeaderValue`; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch rejects an empty boundary` | Same | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch rejects duplicate boundary parameters` | 202 with one failed sub-response `InvalidInput`; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch within container scope - batch set tier` | Blob tier is `unclaim`; the part faults honestly instead of 200 | Partial |
+| `blob/apis/blobbatch.test.ts::SubmitBatch batch set tier` | Same | Partial |
+| `blob/apis/blobbatch.test.ts::SubmitBatch within container scope - batch deleting blob in different container` | Out-of-scope sub-request is a per-part 400 `InvalidInput`; the blob survives; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch with SAS token - batch deleting` | SAS is the auth slice | Later |
+| `blob/apis/blobbatch.test.ts::SubmitBatch batch with SAS token set tier` | SAS slice + tier unclaim | Later |
+| `blob/apis/blobbatch.test.ts::SubmitBatch within containerScope - with SAS token - batch deleting` | SAS slice | Later |
+| `blob/apis/blobbatch.test.ts::SubmitBatch batch with different operations` | Mixed parts dispatch independently (delete covered; tier partial) | Mapped and green |
 
 ### Shipped YAML evidence (not the inventory)
 

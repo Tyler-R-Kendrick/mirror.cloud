@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"cel.dev/cel-go/cel"
 
@@ -44,6 +45,34 @@ type Engine struct {
 	ops      []string
 	programs map[string]cel.Program
 	modelOps map[string]model.Operation
+
+	// mu serializes one request at a time through the evaluation path, which
+	// is the guarantee every hand-written pack provided and the engine
+	// replacing them did not.
+	//
+	// A bundle expresses uniqueness as a read and a precondition -- `reads: {
+	// taken: ... }` then `require: !taken_found` -- and the engine resolved
+	// the read, evaluated the rule and applied the effects as three separate
+	// store operations. Sixteen concurrent creates of one name therefore
+	// produced two or three winners: each read the absence before any of them
+	// wrote. Every pack held `p.mu` across the whole of Invoke, so the same
+	// sixteen produced exactly one, and internal/chaos asserts that per
+	// service. Hostinger's assertion had been failing intermittently since it
+	// was ported to the bundle; it passed at -count=1 and failed at -count=5.
+	//
+	// It is a pointer so that WithDeps clones share it. bundled.New hands out
+	// a fresh clone per caller from one cached prototype, so a mutex held by
+	// value would be a different lock for every caller -- which is to say, no
+	// lock at all.
+	//
+	// Scope: process-local, and per engine rather than per account. The store
+	// offers Txn, but its lock is store-global and non-reentrant, so running
+	// the whole evaluation inside one would serialize every service in the
+	// process and deadlock the moment anything reached another service. A
+	// per-account lock is the obvious refinement and the packs' own comments
+	// said so; the durable answer is a compare-and-set in the store, which is
+	// what a non-memory backend would need anyway.
+	mu *sync.Mutex
 }
 
 var _ spi.BehaviorPack = (*Engine)(nil)
@@ -72,6 +101,7 @@ func New(deps spi.Deps, ir *bir.Service, svc *model.Service) (*Engine, error) {
 		model:    svc,
 		programs: map[string]cel.Program{},
 		modelOps: map[string]model.Operation{},
+		mu:       new(sync.Mutex),
 	}
 	for _, op := range svc.Operations {
 		e.modelOps[op.Name] = op
@@ -130,9 +160,21 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		return nil, fault
 	}
 
-	// A batch operation is its singular sibling, run once per entry.
+	// A batch operation is its singular sibling, run once per entry, and it
+	// delegates through Invoke -- so it must not hold the lock the delegated
+	// calls take. Each entry is serialized on its own, which is what a pack
+	// with a non-reentrant mutex did too.
 	if op.Batch != nil {
 		return e.runBatch(ctx, req, op)
+	}
+
+	// An operation that waits parks on the clock until another request changes
+	// what it is waiting for, so holding the lock across it would guarantee
+	// that change never arrives. SQS ReceiveMessage is the only one, and its
+	// visibility bookkeeping is exactly as concurrent as it was before this.
+	if op.Wait == nil {
+		e.mu.Lock()
+		defer e.mu.Unlock()
 	}
 
 	ev := e.newEval(req, op)

@@ -2,7 +2,10 @@ package engine_test
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/behavior"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/engine"
@@ -242,4 +245,153 @@ func generatedModel(t *testing.T, serviceID string) *model.Service {
 		t.Fatalf("%v\nRun: make specs-sync && make generate", err)
 	}
 	return svc
+}
+
+// TestConcurrentCreatesLeaveOneWinner states the guarantee the packs provided
+// and the engine replacing them did not.
+//
+// Uniqueness in a bundle is a read plus a precondition, and the engine
+// resolved the read, evaluated the rule and applied the effect as three
+// separate store operations. Concurrent creates of one name each read the
+// absence before any of them wrote, so two or three won. Every pack held a
+// mutex across the whole of Invoke and produced exactly one.
+//
+// The interleaving is forced rather than raced for. Left to the scheduler the
+// window between the read and the write is a few microseconds wide, and the
+// unfixed engine loses it on roughly one run in four -- which is a test that
+// reports a guarantee three times out of four without having checked it. The
+// store below holds each reader at the index lookup until its peers arrive or
+// a short timeout passes, so an engine without the lock always produces more
+// than one winner and an engine with it always produces exactly one: the
+// second caller cannot reach the barrier until the first has returned.
+//
+// hetzner.v1 rather than aws.shield, because shield has no uniqueness rule to
+// race: every CreateProtection draws its own id and all of them are supposed
+// to succeed. Only three bundles express uniqueness as `!x_found`, and the
+// other two are covered by internal/chaos.
+func TestConcurrentCreatesLeaveOneWinner(t *testing.T) {
+	const id = "hetzner.v1"
+	const racers = 4
+	svc := generatedModel(t, id)
+	ir, err := behaviors.Load(id, svc)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	deps := spitest.Deps(t)
+	// hzsname is the name index CreateServer reads to decide whether the name
+	// is taken, and writes to claim it.
+	deps.Store = &barrierStore{Store: deps.Store, on: "hzsname", want: racers, wait: 50 * time.Millisecond}
+	e, err := engine.New(deps, ir, svc)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	errs := make(chan error, racers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := e.Invoke(context.Background(), &spi.Request{
+				ServiceID: id,
+				Operation: "CreateServer",
+				Input: map[string]any{
+					"name": "race", "server_type": "cx22", "image": "ubuntu-24.04",
+				},
+				Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"},
+			})
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	winners := 0
+	for err := range errs {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "uniqueness_error" {
+			t.Fatalf("concurrent create: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful creates = %d, want 1; the read, the precondition "+
+			"and the effect have to be one critical section", winners)
+	}
+}
+
+// barrierStore holds readers of one collection at the point where a bundle
+// checks whether a name is taken, so the interleaving a uniqueness rule has to
+// survive is produced on purpose instead of waited for.
+//
+// The wait is bounded: an engine that serializes its requests can only ever
+// have one caller at the barrier, so an unbounded rendezvous would deadlock
+// the very implementation the test is asserting is correct.
+type barrierStore struct {
+	spi.Store
+	on   string
+	want int
+	wait time.Duration
+
+	mu      sync.Mutex
+	arrived int
+	gate    chan struct{}
+}
+
+func (b *barrierStore) Scope(account, region string) spi.Scope {
+	return &barrierScope{Scope: b.Store.Scope(account, region), b: b}
+}
+
+// hold blocks until `want` readers have arrived or `wait` elapses.
+func (b *barrierStore) hold() {
+	b.mu.Lock()
+	if b.gate == nil {
+		b.gate = make(chan struct{})
+	}
+	gate := b.gate
+	b.arrived++
+	full := b.arrived >= b.want
+	if full {
+		close(gate)
+		b.gate = nil
+		b.arrived = 0
+	}
+	b.mu.Unlock()
+	if full {
+		return
+	}
+	select {
+	case <-gate:
+	case <-time.After(b.wait):
+	}
+}
+
+type barrierScope struct {
+	spi.Scope
+	b *barrierStore
+}
+
+func (s *barrierScope) Collection(name string) spi.Collection {
+	c := s.Scope.Collection(name)
+	if name != s.b.on {
+		return c
+	}
+	return &barrierCollection{Collection: c, b: s.b}
+}
+
+type barrierCollection struct {
+	spi.Collection
+	b *barrierStore
+}
+
+func (c *barrierCollection) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	v, ok, err := c.Collection.Get(ctx, key)
+	c.b.hold()
+	return v, ok, err
 }

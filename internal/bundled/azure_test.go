@@ -420,6 +420,112 @@ func TestAzureAppendBlob(t *testing.T) {
 	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "o", "body": "x"}, 409, "InvalidBlobType")
 }
 
+func TestAzureSnapshotCopy(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	fault := func(op string, in map[string]any, status int, code string) {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		f, ok := err.(*spi.Fault)
+		if !ok || f.HTTPStatus != status || f.Code != code {
+			t.Fatalf("%s: got %#v, want %d %s", op, err, status, code)
+		}
+	}
+
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "hello-azure", "content_md5": "b64==", "metadata": map[string]any{"a": "b"}})
+	snap := inv("CreateSnapshot", map[string]any{"container": "ctr", "blob": "o"})
+	sid := fmt.Sprint(snap.Output["snapshot"])
+	if sid == "" {
+		t.Fatalf("snapshot id %#v", snap.Output)
+	}
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "changed"})
+	dl := inv("GetBlob", map[string]any{"container": "ctr", "blob": "o", "snapshot": sid})
+	if fmt.Sprint(dl.Output["_raw"]) != "hello-azure" {
+		t.Fatalf("snapshot download %#v", dl.Output)
+	}
+	props := inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "o", "snapshot": sid})
+	if props.Output["content_length"] != "11" || props.Output["content_md5"] != "b64==" {
+		t.Fatalf("snapshot properties %#v", props.Output)
+	}
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o"}, 409, "SnapshotsPresent")
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "snapshot": sid})
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o", "snapshot": sid}, 404, "BlobNotFound")
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "o"})
+
+	// x-ms-delete-snapshots: only drops snapshots, keeps the base.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "changed", "content_md5": "b64==", "metadata": map[string]any{"a": "b"}})
+	inv("CreateSnapshot", map[string]any{"container": "ctr", "blob": "o"})
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "delete_snapshots": "only"})
+	dl = inv("GetBlob", map[string]any{"container": "ctr", "blob": "o"})
+	if fmt.Sprint(dl.Output["_raw"]) != "changed" {
+		t.Fatalf("base after delete-snapshots-only %#v", dl.Output)
+	}
+
+	src := "http://acct.blob.core.windows.net/ctr/o"
+	cp := inv("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "c2", "copy_source": src, "source_container": "ctr", "source_blob": "o"})
+	if cp.Output["copy_status"] != "success" || fmt.Sprint(cp.Output["copy_id"]) == "" {
+		t.Fatalf("copy %#v", cp.Output)
+	}
+	dl = inv("GetBlob", map[string]any{"container": "ctr", "blob": "c2"})
+	if fmt.Sprint(dl.Output["_raw"]) != "changed" {
+		t.Fatalf("copy download %#v", dl.Output)
+	}
+	props = inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "c2"})
+	if md, _ := props.Output["metadata"].(map[string]any); fmt.Sprint(md["a"]) != "b" {
+		t.Fatalf("copy inherited metadata %#v", props.Output)
+	}
+	inv("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "c3", "copy_source": src, "source_container": "ctr", "source_blob": "o", "metadata": map[string]any{"x": "y"}})
+	props = inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "c3"})
+	if md, _ := props.Output["metadata"].(map[string]any); fmt.Sprint(md["x"]) != "y" || len(md) != 1 {
+		t.Fatalf("copy override metadata %#v", props.Output)
+	}
+
+	// Synchronized copy echoes source Content-MD5 when the source has one.
+	sync := inv("CopyBlobFromURL", map[string]any{"container": "ctr", "blob": "c4", "copy_source": src, "source_container": "ctr", "source_blob": "o"})
+	if sync.Output["content_md5"] != "b64==" {
+		t.Fatalf("sync copy md5 %#v", sync.Output)
+	}
+
+	// Copy from a snapshot source.
+	snap = inv("CreateSnapshot", map[string]any{"container": "ctr", "blob": "o"})
+	sid = fmt.Sprint(snap.Output["snapshot"])
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "newer"})
+	inv("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "c5", "copy_source": src + "?snapshot=" + sid, "source_container": "ctr", "source_blob": "o", "source_snapshot": sid})
+	dl = inv("GetBlob", map[string]any{"container": "ctr", "blob": "c5"})
+	if fmt.Sprint(dl.Output["_raw"]) != "changed" {
+		t.Fatalf("snapshot copy %#v", dl.Output)
+	}
+
+	// Page blob copy preserves type and sequence number.
+	inv("CreatePageBlob", map[string]any{"container": "ctr", "blob": "pg", "content_length": "512", "sequence_number": "7"})
+	inv("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "pg2", "copy_source": "http://acct.blob.core.windows.net/ctr/pg", "source_container": "ctr", "source_blob": "pg"})
+	props = inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "pg2"})
+	if props.Output["blob_type"] != "PageBlob" || props.Output["sequence_number"] != "7" || props.Output["content_length"] != "512" {
+		t.Fatalf("page copy %#v", props.Output)
+	}
+
+	fault("AbortCopy", map[string]any{"container": "ctr", "blob": "c2", "copy_id": "nope", "copy_action": "abort"}, 409, "NoPendingCopyOperation")
+	fault("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "c6", "copy_source": "/devstoreaccount1/ctr/o", "source_invalid": true}, 400, "InvalidHeaderValue")
+	fault("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "c7", "copy_source": "http://acct.blob.core.windows.net/ctr/missing", "source_container": "ctr", "source_blob": "missing"}, 404, "BlobNotFound")
+
+	inv("StageBlockFromURL", map[string]any{"container": "ctr", "blob": "sb", "blockid": "YQ==", "copy_source": src, "source_container": "ctr", "source_blob": "o", "source_range_start": int64(0), "source_range_end": int64(4)})
+	inv("PutBlockList", map[string]any{"container": "ctr", "blob": "sb", "blockids": []any{"YQ=="}})
+	dl = inv("GetBlob", map[string]any{"container": "ctr", "blob": "sb"})
+	if fmt.Sprint(dl.Output["_raw"]) != "newer"[:5] {
+		t.Fatalf("staged from url %#v", dl.Output)
+	}
+}
+
 func TestAzurePutBlockListFoldsInRequestOrder(t *testing.T) {
 	p := azurePack(t)
 	ctx := context.Background()

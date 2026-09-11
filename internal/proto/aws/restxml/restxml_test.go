@@ -874,6 +874,8 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	}{
 		"create page blob": {"/c/o", "x-ms-blob-type", "PageBlob", "CreatePageBlob"},
 		"create append blob": {"/c/o", "x-ms-blob-type", "AppendBlob", "CreateAppendBlob"},
+		"async copy":         {"/c/o", "x-ms-copy-source", "http://acct.blob.core.windows.net/c/s", "StartCopyFromURL"},
+		"stage from url":     {"/c/o?comp=block", "x-ms-copy-source", "http://acct.blob.core.windows.net/c/s", "StageBlockFromURL"},
 		"put page":         {"/c/o?comp=page", "x-ms-page-write", "update", "PutPage"},
 		"clear pages":      {"/c/o?comp=page", "x-ms-page-write", "clear", "ClearPages"},
 		"resize":           {"/c/o?comp=properties", "x-ms-blob-content-length", "512", "ResizePageBlob"},
@@ -891,6 +893,18 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	}
 	if op, err := codec.Route(az, httptest.NewRequest(http.MethodPut, "/c/o?comp=pagelist", nil)); err != nil || op.Name != "UnsupportedQuery" {
 		t.Errorf("azure page ranges put: %#v %v", op, err)
+	}
+	if op, err := codec.Route(az, httptest.NewRequest(http.MethodPut, "/c/o?comp=snapshot", nil)); err != nil || op.Name != "CreateSnapshot" {
+		t.Errorf("azure snapshot: %#v %v", op, err)
+	}
+	if op, err := codec.Route(az, httptest.NewRequest(http.MethodPut, "/c/o?comp=copy&copyid=x", nil)); err != nil || op.Name != "AbortCopy" {
+		t.Errorf("azure abort copy: %#v %v", op, err)
+	}
+	syncReq := httptest.NewRequest(http.MethodPut, "/c/o", nil)
+	syncReq.Header.Set("x-ms-copy-source", "http://acct.blob.core.windows.net/c/s")
+	syncReq.Header.Set("x-ms-requires-sync", "true")
+	if op, err := codec.Route(az, syncReq); err != nil || op.Name != "CopyBlobFromURL" {
+		t.Errorf("azure sync copy: %#v %v", op, err)
 	}
 	w = httptest.NewRecorder()
 	if err := codec.Encode(az, &model.Operation{Name: "GetPageRanges"}, w, &spi.Response{Output: map[string]any{"ranges": []any{map[string]any{"start": 0, "end": 511}}}}); err != nil {

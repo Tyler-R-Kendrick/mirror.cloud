@@ -836,7 +836,12 @@
       "GetPageRanges",
       "ResizePageBlob",
       "SetBlobSequenceNumber",
-      "CreateAppendBlob"
+      "CreateAppendBlob",
+      "CreateSnapshot",
+      "StartCopyFromURL",
+      "CopyBlobFromURL",
+      "AbortCopy",
+      "StageBlockFromURL"
     ]
   },
   {

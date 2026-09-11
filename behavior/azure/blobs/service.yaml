@@ -106,6 +106,14 @@ errors:
     code: BlockCountExceedsLimit
     http: 409
     fault: client
+  SnapshotsPresent:
+    code: SnapshotsPresent
+    http: 409
+    fault: client
+  NoPendingCopyOperation:
+    code: NoPendingCopyOperation
+    http: 409
+    fault: client
 
 operations:
   CreateContainer:
@@ -176,8 +184,129 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
     output:
-      _raw: "string(rec.value)"
+      _raw: "('snapshot' in input && input.snapshot != null) ? string(rec.snapshots.filter(s, s.id == string(input.snapshot))[0].value) : string(rec.value)"
+
+  CreateSnapshot:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    let:
+      snap_id: "rec_found ? string(now) + '-' + string((('snapshots' in rec && rec.snapshots != null) ? size(rec.snapshots) : 0)) : ''"
+      snap: "rec_found ? {'id': snap_id, 'value': string(rec.value), 'metadata': (('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in rec && rec.metadata != null) ? rec.metadata : {})), 'content_type': (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : ''), 'cache_control': (('cache_control' in rec && rec.cache_control != null) ? string(rec.cache_control) : ''), 'content_encoding': (('content_encoding' in rec && rec.content_encoding != null) ? string(rec.content_encoding) : ''), 'content_language': (('content_language' in rec && rec.content_language != null) ? string(rec.content_language) : ''), 'content_disposition': (('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''), 'content_md5': (('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''), 'blob_type': (('blob_type' in rec && rec.blob_type != null) ? string(rec.blob_type) : 'BlockBlob')} : {}"
+    effects:
+      - patch:
+          resource: blob
+          record:
+            snapshots: "(('snapshots' in rec && rec.snapshots != null) ? rec.snapshots : []) + [snap]"
+    output:
+      snapshot: snap_id
+
+  StartCopyFromURL:
+    reads:
+      ctr: { resource: container }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('source_snapshot' in input && input.source_snapshot != null) || ('snapshots' in src && src.snapshots != null && size(src.snapshots.filter(s, s.id == string(input.source_snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+    let:
+      srcrec: "src_found ? (('source_snapshot' in input && input.source_snapshot != null) ? src.snapshots.filter(s, s.id == string(input.source_snapshot))[0] : src) : {}"
+      smeta: "('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in srcrec && srcrec.metadata != null) ? srcrec.metadata : {})"
+    effects:
+      # The src read resolved this resource's id to the source blob; without
+      # an explicit key the put would carry that key and overwrite the source.
+      - put:
+          resource: blob
+          key: "string(input.blob)"
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "string(srcrec.value)"
+            metadata: smeta
+            content_type: "('content_type' in srcrec && srcrec.content_type != null) ? string(srcrec.content_type) : ''"
+            cache_control: "('cache_control' in srcrec && srcrec.cache_control != null) ? string(srcrec.cache_control) : ''"
+            content_encoding: "('content_encoding' in srcrec && srcrec.content_encoding != null) ? string(srcrec.content_encoding) : ''"
+            content_language: "('content_language' in srcrec && srcrec.content_language != null) ? string(srcrec.content_language) : ''"
+            content_disposition: "('content_disposition' in srcrec && srcrec.content_disposition != null) ? string(srcrec.content_disposition) : ''"
+            content_md5: "('content_md5' in srcrec && srcrec.content_md5 != null) ? string(srcrec.content_md5) : ''"
+            blob_type: "('blob_type' in srcrec && srcrec.blob_type != null) ? string(srcrec.blob_type) : 'BlockBlob'"
+            sequence_number: "('sequence_number' in srcrec && srcrec.sequence_number != null) ? string(srcrec.sequence_number) : '0'"
+            append_count: "'0'"
+    output:
+      copy_id: "md5hex(string(input.copy_source) + '|' + string(input.blob))"
+      copy_status: "'success'"
+      content_md5: "('content_md5' in srcrec && srcrec.content_md5 != null) ? string(srcrec.content_md5) : ''"
+
+  CopyBlobFromURL:
+    reads:
+      ctr: { resource: container }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('source_snapshot' in input && input.source_snapshot != null) || ('snapshots' in src && src.snapshots != null && size(src.snapshots.filter(s, s.id == string(input.source_snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+    let:
+      srcrec: "src_found ? (('source_snapshot' in input && input.source_snapshot != null) ? src.snapshots.filter(s, s.id == string(input.source_snapshot))[0] : src) : {}"
+      smeta: "('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in srcrec && srcrec.metadata != null) ? srcrec.metadata : {})"
+    effects:
+      # The src read resolved this resource's id to the source blob; without
+      # an explicit key the put would carry that key and overwrite the source.
+      - put:
+          resource: blob
+          key: "string(input.blob)"
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "string(srcrec.value)"
+            metadata: smeta
+            content_type: "('content_type' in srcrec && srcrec.content_type != null) ? string(srcrec.content_type) : ''"
+            cache_control: "('cache_control' in srcrec && srcrec.cache_control != null) ? string(srcrec.cache_control) : ''"
+            content_encoding: "('content_encoding' in srcrec && srcrec.content_encoding != null) ? string(srcrec.content_encoding) : ''"
+            content_language: "('content_language' in srcrec && srcrec.content_language != null) ? string(srcrec.content_language) : ''"
+            content_disposition: "('content_disposition' in srcrec && srcrec.content_disposition != null) ? string(srcrec.content_disposition) : ''"
+            content_md5: "('content_md5' in srcrec && srcrec.content_md5 != null) ? string(srcrec.content_md5) : ''"
+            blob_type: "('blob_type' in srcrec && srcrec.blob_type != null) ? string(srcrec.blob_type) : 'BlockBlob'"
+            sequence_number: "('sequence_number' in srcrec && srcrec.sequence_number != null) ? string(srcrec.sequence_number) : '0'"
+            append_count: "'0'"
+    output:
+      copy_id: "md5hex(string(input.copy_source) + '|' + string(input.blob))"
+      copy_status: "'success'"
+      content_md5: "('content_md5' in srcrec && srcrec.content_md5 != null) ? string(srcrec.content_md5) : ''"
+
+  AbortCopy:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      # Copies complete synchronously here, so there is never a pending copy
+      # to abort -- Azurite answers the same 409 in that case.
+      - { cond: "false", error: NoPendingCopyOperation, message: "There is currently no pending copy operation." }
+
+  StageBlockFromURL:
+    reads:
+      ctr: { resource: container }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    effects:
+      - put: { resource: blob_slot }
+      - put:
+          resource: block
+          record:
+            id: id
+            value: "('source_range_start' in input) ? substr(string(src.value), int(input.source_range_start), int(input.source_range_end) + 1) : string(src.value)"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
 
   GetBlobProperties:
     reads:
@@ -186,17 +315,20 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+    let:
+      src: "rec_found ? (('snapshot' in input && input.snapshot != null) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
     output:
-      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
-      content_type: "('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : ''"
-      cache_control: "('cache_control' in rec && rec.cache_control != null) ? string(rec.cache_control) : ''"
-      content_encoding: "('content_encoding' in rec && rec.content_encoding != null) ? string(rec.content_encoding) : ''"
-      content_language: "('content_language' in rec && rec.content_language != null) ? string(rec.content_language) : ''"
-      content_disposition: "('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''"
-      content_md5: "('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''"
-      blob_type: "('blob_type' in rec && rec.blob_type != null && string(rec.blob_type) != '') ? string(rec.blob_type) : 'BlockBlob'"
-      content_length: "string(blen(string(rec.value)))"
-      sequence_number: "('sequence_number' in rec && rec.sequence_number != null) ? string(rec.sequence_number) : ''"
+      metadata: "('metadata' in src && src.metadata != null) ? src.metadata : {}"
+      content_type: "('content_type' in src && src.content_type != null) ? string(src.content_type) : ''"
+      cache_control: "('cache_control' in src && src.cache_control != null) ? string(src.cache_control) : ''"
+      content_encoding: "('content_encoding' in src && src.content_encoding != null) ? string(src.content_encoding) : ''"
+      content_language: "('content_language' in src && src.content_language != null) ? string(src.content_language) : ''"
+      content_disposition: "('content_disposition' in src && src.content_disposition != null) ? string(src.content_disposition) : ''"
+      content_md5: "('content_md5' in src && src.content_md5 != null) ? string(src.content_md5) : ''"
+      blob_type: "('blob_type' in src && src.blob_type != null && string(src.blob_type) != '') ? string(src.blob_type) : 'BlockBlob'"
+      content_length: "string(blen(string(src.value)))"
+      sequence_number: "('sequence_number' in src && src.sequence_number != null) ? string(src.sequence_number) : ''"
 
   SetBlobMetadata:
     reads:
@@ -390,8 +522,25 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "('snapshot' in input && input.snapshot != null) || !('snapshots' in rec && rec.snapshots != null && size(rec.snapshots) > 0) || ('delete_snapshots' in input && input.delete_snapshots != null)", error: SnapshotsPresent, message: "The blob has one or more snapshots. Specify the x-ms-delete-snapshots header." }
     effects:
-      - delete: { resource: blob }
+      # Deleting one snapshot removes it from the base record.
+      - patch:
+          when: "('snapshot' in input && input.snapshot != null)"
+          resource: blob
+          record:
+            snapshots: "rec.snapshots.filter(s, s.id != string(input.snapshot))"
+      # x-ms-delete-snapshots: only drops the snapshots, keeps the base.
+      - patch:
+          when: "!('snapshot' in input && input.snapshot != null) && 'delete_snapshots' in input && string(input.delete_snapshots) == 'only'"
+          resource: blob
+          record:
+            snapshots: "[]"
+      # A base delete (with or without include) removes the record outright.
+      - delete:
+          when: "!('snapshot' in input && input.snapshot != null) && !('delete_snapshots' in input && string(input.delete_snapshots) == 'only')"
+          resource: blob
 
   PutBlock:
     reads:

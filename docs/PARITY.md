@@ -125,10 +125,10 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Queue swagger `x-ms-paths` keys | 11 |
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
-| Blob keys fully routed | 28 / 59 |
+| Blob keys fully routed | 33 / 59 |
 | Queue keys fully routed | 4 / 11 |
 | Table method+paths routed | 6 / 12 |
-| Blob keys accounted (routed + unclaim) | 37 / 59 |
+| Blob keys accounted (routed + unclaim) | 42 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
 | Azurite test functions traced | 267 / 806 (33%) |
@@ -239,14 +239,14 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}/{blob}?comp=lease&renew` | missing | Lease Blob renew |
 | `/{containerName}/{blob}?comp=lease&change` | missing | Lease Blob change |
 | `/{containerName}/{blob}?comp=lease&break` | missing | Lease Blob break |
-| `/{containerName}/{blob}?comp=snapshot` | missing | Snapshot Blob |
-| `/{containerName}/{blob}?comp=copy` | missing | Copy Blob (same account) |
-| `/{containerName}/{blob}?comp=copy&sync` | missing | Copy Blob From URL (same account) |
-| `/{containerName}/{blob}?comp=copy&copyid` | missing | Abort Copy Blob |
+| `/{containerName}/{blob}?comp=snapshot` | routed | `CreateSnapshot` — snapshot lives on the base record, inherits properties, metadata overridable; base delete without `x-ms-delete-snapshots` is 409 `SnapshotsPresent`; one snapshot per clock tick per blob is a known ceiling |
+| `/{containerName}/{blob}?comp=copy` | routed | `StartCopyFromURL` — completes synchronously with `x-ms-copy-status: success`; non-URL source 400 `InvalidHeaderValue`; missing source 404; cross-container source reads as missing (same-instance ceiling) |
+| `/{containerName}/{blob}?comp=copy&sync` | routed | `CopyBlobFromURL` via `x-ms-requires-sync: true`; echoes source `Content-MD5` when the source has one |
+| `/{containerName}/{blob}?comp=copy&copyid` | routed | `AbortCopy` — copies complete synchronously, so abort is always 409 `NoPendingCopyOperation` (Azurite's answer when nothing is pending) |
 | `/{containerName}/{blob}?comp=tier` | unclaim | not in Azurite REST matrix |
 | `/{containerName}/{blob}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
 | `/{containerName}/{blob}?comp=block` | routed | `PutBlock` |
-| `/{containerName}/{blob}?comp=block&fromURL` | missing | Put Block From URL (same instance) |
+| `/{containerName}/{blob}?comp=block&fromURL` | routed | `StageBlockFromURL` — stages a block from a local source blob, `x-ms-source-range` spliced via `substr`; commits through `PutBlockList` |
 | `/{containerName}/{blob}?comp=blocklist` | routed | `PutBlockList` folds staged blocks in request order (`TestAzurePutBlockListFoldsInRequestOrder`, booted XML commit); missing id is 400 `InvalidBlockList`; `GetBlockList` lists staged ids |
 | `/{containerName}/{blob}?comp=page&update` | routed | `PutPage` byte splice via `substr`; unaligned range 400, beyond size 416 `RequestedRangeNotSatisfiable`, wrong type 409 `InvalidBlobType`, body-length mismatch 400 |
 | `/{containerName}/{blob}?comp=page&clear` | routed | `ClearPages` zero-fill splice; same 400/409/416 guards |
@@ -414,12 +414,12 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 | `blob/apis/blob.test.ts::delete should work for valid ifUnmodifiedSince *` | Same | Later |
 | `blob/apis/blob.test.ts::delete should not work for invalid ifUnmodifiedSince` | Same | Later |
 | `blob/apis/blob.test.ts::Delete with ifTags should work` | Tags slice | Later |
-| `blob/apis/blob.test.ts::should create a snapshot from a blob` | Snapshot key `missing` until snapshot/copy slice | Later |
+| `blob/apis/blob.test.ts::should create a snapshot from a blob` | Booted PUT `comp=snapshot` 201 with `x-ms-snapshot`; snapshot survives base overwrite; atomic `TestAzureSnapshotCopy` | Mapped and green |
 | `blob/apis/blob.test.ts::Create a snapshot from a blob with ifTags` | Same | Later |
-| `blob/apis/blob.test.ts::should create a snapshot with metadata from a blob` | Same | Later |
-| `blob/apis/blob.test.ts::should not delete base blob without include snapshot header` | 409 `SnapshotsPresent` needs snapshots first | Later |
-| `blob/apis/blob.test.ts::should delete snapshot` | Snapshot slice | Later |
-| `blob/apis/blob.test.ts::should also list snapshots` | Same | Later |
+| `blob/apis/blob.test.ts::should create a snapshot with metadata from a blob` | Snapshot metadata overrides base metadata; inherited otherwise | Mapped and green |
+| `blob/apis/blob.test.ts::should not delete base blob without include snapshot header` | Booted DELETE of snapshotted base is 409 `SnapshotsPresent`; `x-ms-delete-snapshots: only/include` both routed | Mapped and green |
+| `blob/apis/blob.test.ts::should delete snapshot` | Booted DELETE `?snapshot=` 202; snapshot GET then 404s | Mapped and green |
+| `blob/apis/blob.test.ts::should also list snapshots` | Snapshots stored on the base record; List Blobs `include=snapshots` projection is the tags/hierarchy list slice | Partial |
 | `blob/apis/blob.test.ts::should setMetadata with new metadata set` | Booted PUT/GET `comp=metadata` round-trips `x-ms-meta-a`; atomic `TestAzureBlobMetadataPropertiesHead` | Mapped and green |
 | `blob/apis/blob.test.ts::should fail when setMetadata with invalid metadata name with hyphen` | Metadata keys stored verbatim; C# identifier rule unclaimed (same ceiling as container metadata) | Partial |
 | `blob/apis/blob.test.ts::should fail when upload has metadata names that are invalid C# identifiers` | Same | Partial |
@@ -440,22 +440,22 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 | `blob/apis/blob.test.ts::Upload blob with accesstier should get accessTierInferred as false` | Same | Unclaim |
 | `blob/apis/blob.test.ts::setHTTPHeaders with default parameters` | Booted `SetBlobProperties`; atomic `TestAzureBlobMetadataPropertiesHead` | Mapped and green |
 | `blob/apis/blob.test.ts::setHTTPHeaders with all parameters set` | All six `x-ms-blob-*` headers decoded, stored, and re-emitted on HEAD | Mapped and green |
-| `blob/apis/blob.test.ts::Copy blob should work` | Copy key `missing` until snapshot/copy slice | Later |
+| `blob/apis/blob.test.ts::Copy blob should work` | Booted PUT `x-ms-copy-source` 202 `x-ms-copy-status: success`, content round-trips | Mapped and green |
 | `blob/apis/blob.test.ts::Copy blob with ifTags should work` | Same | Later |
-| `blob/apis/blob.test.ts::Copy blob should work to override metadata` | Same | Later |
+| `blob/apis/blob.test.ts::Copy blob should work to override metadata` | Copy inherits source metadata; request `x-ms-meta-*` overrides | Mapped and green |
 | `blob/apis/blob.test.ts::Copy blob should work with source archive blob and accesstier header` | Copy later; tier unclaim | Later |
 | `blob/apis/blob.test.ts::Copy blob should not override destination Lease status` | Copy slice | Later |
-| `blob/apis/blob.test.ts::Copy blob should work for page blob` | Page slice then copy slice | Later |
+| `blob/apis/blob.test.ts::Copy blob should work for page blob` | Page copy preserves `PageBlob` type, content length, and sequence number | Mapped and green |
 | `blob/apis/blob.test.ts::Copy blob should not work for page blob and set tier` | Same | Later |
-| `blob/apis/blob.test.ts::Copy blob should fail with 400 when copy source is invalid` | Copy slice | Later |
+| `blob/apis/blob.test.ts::Copy blob should fail with 400 when copy source is invalid` | Booted path-only source is 400 `InvalidHeaderValue` | Mapped and green |
 | `blob/apis/blob.test.ts::Copy blob should not work with  ifNoneMatch * when dest exist` | Copy then conditions | Later |
-| `blob/apis/blob.test.ts::Synchronized copy blob should work` | `comp=copy&sync` key `missing` | Later |
-| `blob/apis/blob.test.ts::Synchronized copy blob echoes source Content-MD5 in response when supplied` | Same | Later |
-| `blob/apis/blob.test.ts::Synchronized copy blob omits Content-MD5 in response when not supplied` | Same | Later |
-| `blob/apis/blob.test.ts::Synchronized copy blob should work to override metadata` | Same | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work` | `x-ms-requires-sync: true` routes `CopyBlobFromURL`; 202 success | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob echoes source Content-MD5 in response when supplied` | Sync copy echoes source `Content-MD5` header when set | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob omits Content-MD5 in response when not supplied` | No `Content-MD5` header when the source has none | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work to override metadata` | Same metadata override path as async copy | Mapped and green |
 | `blob/apis/blob.test.ts::Synchronized copy blob should not override destination Lease status` | Same | Later |
 | `blob/apis/blob.test.ts::Synchronized copy blob should work to override tag` | Same | Later |
-| `blob/apis/blob.test.ts::Synchronized copy blob should work for page blob` | Same | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work for page blob` | Page copy preserves type and sequence number | Mapped and green |
 | `blob/apis/blob.test.ts::set/get blob tag should work, with base blob or snapshot` | Tags slice | Later |
 | `blob/apis/blob.test.ts::set blob tag should work in put block blob, pubBlockList, and startCopyFromURL on block blob, and getBlobProperties, Download Blob, list blob can get blob tags.` | Same | Later |
 | `blob/apis/blob.test.ts::set blob tag should work in create page/append blob, copyFromURL.` | Same | Later |
@@ -554,10 +554,10 @@ Direct `it()` names from `blob/apis/appendblob.test.ts` (38). Append blobs are b
 | `blob/apis/appendblob.test.ts::Create append blob override existing pageblob` | Create-append overwrites any existing blob; atomic override assertion | Mapped and green |
 | `blob/apis/appendblob.test.ts::Create append blob should fail when metadata names are invalid C# identifiers` | Metadata keys stored verbatim; C# identifier rule unclaimed | Partial |
 | `blob/apis/appendblob.test.ts::Delete append blob should work` | DeleteBlob is type-agnostic | Mapped and green |
-| `blob/apis/appendblob.test.ts::Create append blob snapshot should work` | Snapshot slice | Later |
+| `blob/apis/appendblob.test.ts::Create append blob snapshot should work` | CreateSnapshot is type-agnostic | Mapped and green |
 | `blob/apis/appendblob.test.ts::Create append blob snapshot and seal should work and copy seal` | Seal is `unclaim`; snapshot slice | Later |
-| `blob/apis/appendblob.test.ts::Copy append blob snapshot should work` | Copy slice | Later |
-| `blob/apis/appendblob.test.ts::Synchronized copy append blob snapshot should work` | Same | Later |
+| `blob/apis/appendblob.test.ts::Copy append blob snapshot should work` | Copy with `?snapshot=` source reads the snapshot record | Mapped and green |
+| `blob/apis/appendblob.test.ts::Synchronized copy append blob snapshot should work` | Same snapshot-source path via sync copy | Mapped and green |
 | `blob/apis/appendblob.test.ts::Set append blob metadata should work` | SetBlobMetadata is type-agnostic | Mapped and green |
 | `blob/apis/appendblob.test.ts::Set append blob HTTP headers should work` | SetBlobProperties is type-agnostic | Mapped and green |
 | `blob/apis/appendblob.test.ts::Set tier should not work for append blob` | Tier is `unclaim` in the path table | Unclaim |
@@ -569,8 +569,8 @@ Direct `it()` names from `blob/apis/appendblob.test.ts` (38). Append blobs are b
 | `blob/apis/appendblob.test.ts::AppendBlock with both md5 and crc64 supplied should be rejected` | Same | Checksum unclaimed |
 | `blob/apis/appendblob.test.ts::AppendBlock with ifTags should work` | Tags slice | Later |
 | `blob/apis/appendblob.test.ts::Download append blob should work` | Booted GET `onetwo` | Mapped and green |
-| `blob/apis/appendblob.test.ts::Download append blob should work for snapshot` | Snapshot slice | Later |
-| `blob/apis/appendblob.test.ts::Download append blob should work for copied blob` | Copy slice | Later |
+| `blob/apis/appendblob.test.ts::Download append blob should work for snapshot` | GetBlob `?snapshot=` returns the snapshot bytes | Mapped and green |
+| `blob/apis/appendblob.test.ts::Download append blob should work for copied blob` | Copy destination downloads the source bytes | Mapped and green |
 | `blob/apis/appendblob.test.ts::Append block with invalid blob type should not work` | Booted append to block blob 409 `InvalidBlobType` | Mapped and green |
 | `blob/apis/appendblob.test.ts::Append block with content length 0 should not work` | Empty body 400 `InvalidHeaderValue`; atomic | Mapped and green |
 | `blob/apis/appendblob.test.ts::Append block append position access condition should work` | `x-ms-blob-condition-appendpos` is the conditions slice (412) | Later |

@@ -29,6 +29,9 @@ func FuzzAzureRoute(f *testing.F) {
 	f.Add("PUT", "/c/o?comp=page")
 	f.Add("GET", "/c/o?comp=pagelist")
 	f.Add("PUT", "/c/o?comp=appendblock")
+	f.Add("PUT", "/c/o?comp=snapshot")
+	f.Add("PUT", "/c/o?comp=copy&copyid=x")
+	f.Add("GET", "/c/o?snapshot=2026-01-01T00:00:00Z-0")
 	f.Fuzz(func(t *testing.T, method, path string) {
 		if method == "" {
 			method = http.MethodGet

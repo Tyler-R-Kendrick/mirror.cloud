@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -438,7 +439,20 @@ func azureRoute(r *http.Request) string {
 	if blob != "" {
 		switch comp {
 		case "block":
+			if r.Header.Get("x-ms-copy-source") != "" {
+				return "StageBlockFromURL"
+			}
 			return "PutBlock"
+		case "snapshot":
+			if m == http.MethodPut {
+				return "CreateSnapshot"
+			}
+			return "UnsupportedQuery"
+		case "copy":
+			if m == http.MethodPut && r.URL.Query().Get("copyid") != "" {
+				return "AbortCopy"
+			}
+			return "UnsupportedQuery"
 		case "appendblock":
 			return "AppendBlock"
 		case "blocklist":
@@ -475,6 +489,12 @@ func azureRoute(r *http.Request) string {
 		case "":
 			switch m {
 			case http.MethodPut:
+				if r.Header.Get("x-ms-copy-source") != "" {
+					if strings.EqualFold(r.Header.Get("x-ms-requires-sync"), "true") {
+						return "CopyBlobFromURL"
+					}
+					return "StartCopyFromURL"
+				}
 				if strings.EqualFold(r.Header.Get("x-ms-blob-type"), "PageBlob") {
 					return "CreatePageBlob"
 				}
@@ -554,6 +574,14 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 			in["sequence_number"] = vs[0]
 		case "x-ms-sequence-number-action":
 			in["sequence_number_action"] = vs[0]
+		case "x-ms-requires-sync":
+			in["requires_sync"] = vs[0]
+		case "x-ms-copy-action":
+			in["copy_action"] = vs[0]
+		case "x-ms-delete-snapshots":
+			in["delete_snapshots"] = vs[0]
+		case "x-ms-source-range":
+			in["source_range"] = vs[0]
 		}
 	}
 	if s, ok := in["range"].(string); ok {
@@ -563,6 +591,32 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 		if n, _ := fmt.Sscanf(s, "bytes=%d-%d", &start, &end); n == 2 {
 			in["range_start"] = start
 			in["range_end"] = end
+		}
+	}
+	if s, ok := in["source_range"].(string); ok {
+		var start, end int64
+		if n, _ := fmt.Sscanf(s, "bytes=%d-%d", &start, &end); n == 2 {
+			in["source_range_start"] = start
+			in["source_range_end"] = end
+		}
+	}
+	if cs, ok := in["copy_source"].(string); ok && cs != "" {
+		// Azurite: a copy source that is not an absolute URL is 400
+		// InvalidHeaderValue. The host is not checked -- same-instance
+		// emulation reads every source from the local store.
+		u, err := url.Parse(cs)
+		sp := []string{}
+		if err == nil && u.Host != "" {
+			sp = strings.SplitN(strings.TrimPrefix(u.Path, "/"), "/", 2)
+		}
+		if len(sp) == 2 && sp[0] != "" && sp[1] != "" {
+			in["source_container"] = sp[0]
+			in["source_blob"] = sp[1]
+			if s := u.Query().Get("snapshot"); s != "" {
+				in["source_snapshot"] = s
+			}
+		} else {
+			in["source_invalid"] = true
 		}
 	}
 	if len(meta) > 0 {
@@ -685,6 +739,12 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		}
 		if bid := r.URL.Query().Get("blockid"); bid != "" {
 			in["blockid"] = bid
+		}
+		if s := r.URL.Query().Get("snapshot"); s != "" {
+			in["snapshot"] = s
+		}
+		if s := r.URL.Query().Get("copyid"); s != "" {
+			in["copy_id"] = s
 		}
 		if strings.Contains(strings.ToLower(r.Host), "-secondary") {
 			in["secondary"] = true
@@ -2273,6 +2333,22 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 	if resp != nil && resp.Output != nil && op == "AppendBlock" {
 		w.Header().Set("x-ms-blob-append-offset", strAny(resp.Output["append_offset"]))
 		w.Header().Set("x-ms-blob-committed-block-count", strAny(resp.Output["committed_block_count"]))
+		w.WriteHeader(status)
+		return nil
+	}
+	if resp != nil && resp.Output != nil && op == "CreateSnapshot" {
+		w.Header().Set("x-ms-snapshot", strAny(resp.Output["snapshot"]))
+		w.WriteHeader(status)
+		return nil
+	}
+	if resp != nil && resp.Output != nil && (op == "StartCopyFromURL" || op == "CopyBlobFromURL") {
+		w.Header().Set("x-ms-copy-id", strAny(resp.Output["copy_id"]))
+		w.Header().Set("x-ms-copy-status", strAny(resp.Output["copy_status"]))
+		if op == "CopyBlobFromURL" {
+			if s := strAny(resp.Output["content_md5"]); s != "" {
+				w.Header().Set("Content-MD5", s)
+			}
+		}
 		w.WriteHeader(status)
 		return nil
 	}

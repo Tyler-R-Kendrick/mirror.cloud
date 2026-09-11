@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -308,6 +309,64 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	code, raw, h = do(http.MethodPut, "/ctr/p", "", map[string]string{"x-ms-blob-type": "PageBlob", "x-ms-blob-content-length": "512"})
 	if code != 409 || h.Get("x-ms-error-code") != "BlobAlreadyExists" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("recreate page blob %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/o?comp=snapshot", "", nil)
+	if code != 201 || h.Get("x-ms-snapshot") == "" {
+		t.Fatalf("snapshot %d %#v %s", code, h, raw)
+	}
+	snapID := h.Get("x-ms-snapshot")
+	code, raw, _ = do(http.MethodPut, "/ctr/o", "changed", map[string]string{"x-ms-blob-type": "BlockBlob"})
+	if code != 201 {
+		t.Fatalf("overwrite after snapshot %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/o?snapshot="+url.QueryEscape(snapID), "", nil)
+	if code != 200 || string(raw) != "hello-azure" {
+		t.Fatalf("snapshot download %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/ctr/o", "", nil)
+	if code != 409 || h.Get("x-ms-error-code") != "SnapshotsPresent" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete with snapshots %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodDelete, "/ctr/o?snapshot="+url.QueryEscape(snapID), "", nil)
+	if code != 202 {
+		t.Fatalf("delete snapshot %d %s", code, raw)
+	}
+	code, _, _ = do(http.MethodGet, "/ctr/o?snapshot="+url.QueryEscape(snapID), "", nil)
+	if code != 404 {
+		t.Fatalf("snapshot after delete %d", code)
+	}
+	copySrc := ts.URL + "/ctr/o"
+	code, raw, h = do(http.MethodPut, "/ctr/copy", "", map[string]string{"x-ms-copy-source": copySrc})
+	if code != 202 || h.Get("x-ms-copy-status") != "success" || h.Get("x-ms-copy-id") == "" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("copy %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/copy", "", nil)
+	if code != 200 || string(raw) != "changed" {
+		t.Fatalf("copy download %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/copy2", "", map[string]string{"x-ms-copy-source": copySrc, "x-ms-requires-sync": "true"})
+	if code != 202 || h.Get("x-ms-copy-status") != "success" {
+		t.Fatalf("sync copy %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/copy3", "", map[string]string{"x-ms-copy-source": "/devstoreaccount1/ctr/o"})
+	if code != 400 || h.Get("x-ms-error-code") != "InvalidHeaderValue" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("copy invalid source %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/copy?comp=copy&copyid=nope", "", map[string]string{"x-ms-copy-action": "abort"})
+	if code != 409 || h.Get("x-ms-error-code") != "NoPendingCopyOperation" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("abort copy %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/sb?comp=block&blockid=YQ==", "", map[string]string{"x-ms-copy-source": copySrc, "x-ms-source-range": "bytes=0-3"})
+	if code != 201 {
+		t.Fatalf("stage block from url %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/sb?comp=blocklist", `<?xml version="1.0" encoding="utf-8"?><BlockList><Latest>YQ==</Latest></BlockList>`, nil)
+	if code >= 300 {
+		t.Fatalf("commit staged copy %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/sb", "", nil)
+	if code != 200 || string(raw) != "chan" {
+		t.Fatalf("staged from url download %d %s", code, raw)
 	}
 }
 

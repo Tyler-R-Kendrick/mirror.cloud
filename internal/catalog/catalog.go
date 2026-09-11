@@ -313,6 +313,7 @@ func Bundle() *model.Bundle {
 		op("GetPageRanges", "GET", "/{container}/{blob}?comp=pagelist", 200, true),
 		op("ResizePageBlob", "PUT", "/{container}/{blob}?comp=properties", 200, false),
 		op("SetBlobSequenceNumber", "PUT", "/{container}/{blob}?comp=properties", 200, false),
+		op("CreateAppendBlob", "PUT", "/{container}/{blob}", 201, false),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
@@ -346,6 +347,7 @@ func Bundle() *model.Bundle {
 	azureSvc.OperationByName("ClearPages").Output = "Blob"
 	azureSvc.OperationByName("ResizePageBlob").Output = "Blob"
 	azureSvc.OperationByName("SetBlobSequenceNumber").Output = "Blob"
+	azureSvc.OperationByName("CreateAppendBlob").Output = "Blob"
 	azureSvc.OperationByName("GetPageRanges").Output = "PageRangeList"
 	azureSvc.Shapes = map[string]model.Shape{
 		"String": {ID: "String", Kind: model.KindString},
@@ -374,6 +376,8 @@ func Bundle() *model.Bundle {
 			"content_disposition": {Shape: "String"},
 			"content_md5":         {Shape: "String"},
 			"sequence_number":     {Shape: "String"},
+			"append_offset":       {Shape: "String"},
+			"committed_block_count": {Shape: "String"},
 			"blob_type":           {Shape: "String"},
 			"content_length":      {Shape: "String"},
 		}},

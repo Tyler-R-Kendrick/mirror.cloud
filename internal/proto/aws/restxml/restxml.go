@@ -478,6 +478,9 @@ func azureRoute(r *http.Request) string {
 				if strings.EqualFold(r.Header.Get("x-ms-blob-type"), "PageBlob") {
 					return "CreatePageBlob"
 				}
+				if strings.EqualFold(r.Header.Get("x-ms-blob-type"), "AppendBlob") {
+					return "CreateAppendBlob"
+				}
 				return "PutBlob"
 			case http.MethodHead:
 				return "GetBlobProperties"
@@ -2264,6 +2267,12 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 	}
 	if resp != nil && resp.Output != nil && (op == "GetBlobProperties" || op == "GetBlobMetadata" || op == "SetBlobMetadata" || op == "SetBlobProperties") {
 		writeAzureBlobHeaders(w, resp)
+		w.WriteHeader(status)
+		return nil
+	}
+	if resp != nil && resp.Output != nil && op == "AppendBlock" {
+		w.Header().Set("x-ms-blob-append-offset", strAny(resp.Output["append_offset"]))
+		w.Header().Set("x-ms-blob-committed-block-count", strAny(resp.Output["committed_block_count"]))
 		w.WriteHeader(status)
 		return nil
 	}

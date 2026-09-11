@@ -873,6 +873,7 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		path, header, value, want string
 	}{
 		"create page blob": {"/c/o", "x-ms-blob-type", "PageBlob", "CreatePageBlob"},
+		"create append blob": {"/c/o", "x-ms-blob-type", "AppendBlob", "CreateAppendBlob"},
 		"put page":         {"/c/o?comp=page", "x-ms-page-write", "update", "PutPage"},
 		"clear pages":      {"/c/o?comp=page", "x-ms-page-write", "clear", "ClearPages"},
 		"resize":           {"/c/o?comp=properties", "x-ms-blob-content-length", "512", "ResizePageBlob"},

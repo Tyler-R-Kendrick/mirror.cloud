@@ -365,6 +365,61 @@ func TestAzurePageBlob(t *testing.T) {
 	fault("GetPageRanges", map[string]any{"container": "ctr", "blob": "o"}, 409, "InvalidBlobType")
 }
 
+func TestAzureAppendBlob(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	fault := func(op string, in map[string]any, status int, code string) {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		f, ok := err.(*spi.Fault)
+		if !ok || f.HTTPStatus != status || f.Code != code {
+			t.Fatalf("%s: got %#v, want %d %s", op, err, status, code)
+		}
+	}
+
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	inv("CreateAppendBlob", map[string]any{"container": "ctr", "blob": "log"})
+	props := inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "log"})
+	if props.Output["blob_type"] != "AppendBlob" || props.Output["content_length"] != "0" {
+		t.Fatalf("append properties %#v", props.Output)
+	}
+	app := inv("AppendBlock", map[string]any{"container": "ctr", "blob": "log", "body": "one"})
+	if app.Output["append_offset"] != "0" || app.Output["committed_block_count"] != "1" {
+		t.Fatalf("append %#v", app.Output)
+	}
+	app = inv("AppendBlock", map[string]any{"container": "ctr", "blob": "log", "body": "two"})
+	if app.Output["append_offset"] != "3" || app.Output["committed_block_count"] != "2" {
+		t.Fatalf("append 2 %#v", app.Output)
+	}
+	dl := inv("GetBlob", map[string]any{"container": "ctr", "blob": "log"})
+	if fmt.Sprint(dl.Output["_raw"]) != "onetwo" {
+		t.Fatalf("download %#v", dl.Output)
+	}
+
+	// Azurite: create-append over an existing page blob replaces it.
+	inv("CreatePageBlob", map[string]any{"container": "ctr", "blob": "pg", "content_length": "512"})
+	inv("CreateAppendBlob", map[string]any{"container": "ctr", "blob": "pg"})
+	props = inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "pg"})
+	if props.Output["blob_type"] != "AppendBlob" || props.Output["content_length"] != "0" {
+		t.Fatalf("override %#v", props.Output)
+	}
+
+	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "missing", "body": "x"}, 404, "BlobNotFound")
+	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "log", "body": ""}, 400, "InvalidHeaderValue")
+	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "log", "body": strings.Repeat("a", 4194305)}, 413, "RequestBodyTooLarge")
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "x"})
+	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "o", "body": "x"}, 409, "InvalidBlobType")
+}
+
 func TestAzurePutBlockListFoldsInRequestOrder(t *testing.T) {
 	p := azurePack(t)
 	ctx := context.Background()

@@ -98,6 +98,14 @@ errors:
     code: RequestedRangeNotSatisfiable
     http: 416
     fault: client
+  RequestBodyTooLarge:
+    code: RequestBodyTooLarge
+    http: 413
+    fault: client
+  BlockCountExceedsLimit:
+    code: BlockCountExceedsLimit
+    http: 409
+    fault: client
 
 operations:
   CreateContainer:
@@ -411,6 +419,7 @@ operations:
             container: "lower(string(input.container))"
             name: "string(input.blob)"
             value: "join(input.blockids.map(id, string(staged.filter(b, string(b.id) == string(id))[0].value)), '')"
+            blob_type: "'BlockBlob'"
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"
@@ -596,13 +605,45 @@ operations:
       rec: { resource: blob }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'AppendBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'body' in input && input.body != null && blen(string(input.body)) > 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "blen(string(input.body)) <= 4194304", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
+      - { cond: "!('append_count' in rec && rec.append_count != null) || int(rec.append_count) < 50000", error: BlockCountExceedsLimit, message: "The committed block count has exceeded the maximum permissible limit." }
+    let:
+      offset: "rec_found ? blen(string(rec.value)) : 0"
+      count: "rec_found ? ((('append_count' in rec && rec.append_count != null) ? int(rec.append_count) : 0) + 1) : 0"
+    effects:
+      - patch:
+          resource: blob
+          record:
+            value: "string(rec.value) + string(input.body)"
+            append_count: "string(count)"
+    output:
+      append_offset: "string(offset)"
+      committed_block_count: "string(count)"
+
+  CreateAppendBlob:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
     effects:
       - put:
           resource: blob
           record:
             container: "lower(string(input.container))"
             name: "string(input.blob)"
-            value: "(rec_found ? string(rec.value) : '') + (('body' in input && input.body != null) ? string(input.body) : '')"
+            value: "''"
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+            content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+            cache_control: "('cache_control' in input && input.cache_control != null) ? string(input.cache_control) : ''"
+            content_encoding: "('content_encoding' in input && input.content_encoding != null) ? string(input.content_encoding) : ''"
+            content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
+            content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
+            content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
+            blob_type: "'AppendBlob'"
+            append_count: "'0'"
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"

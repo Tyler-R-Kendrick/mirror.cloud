@@ -125,13 +125,13 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Queue swagger `x-ms-paths` keys | 11 |
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
-| Blob keys fully routed | 26 / 59 |
+| Blob keys fully routed | 28 / 59 |
 | Queue keys fully routed | 4 / 11 |
 | Table method+paths routed | 6 / 12 |
-| Blob keys accounted (routed + unclaim) | 35 / 59 |
+| Blob keys accounted (routed + unclaim) | 37 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
-| Azurite test functions traced | 229 / 806 (28%) |
+| Azurite test functions traced | 267 / 806 (33%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -225,7 +225,7 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
 | `/{containerName}/{blob}` | routed | `PutBlob` / `GetBlob` / `DeleteBlob`; HEAD is `GetBlobProperties` (stored metadata + `x-ms-blob-*` headers, no body; missing is 404 `BlobNotFound` with no XML body) |
 | `/{containerName}/{blob}?PageBlob` | routed | `CreatePageBlob` — born as `zeros(N)`, N must be 512-aligned; stores `x-ms-blob-sequence-number`; duplicate is 409 `BlobAlreadyExists`; size above the engine `zerosMax` (16 MiB) is a known ceiling |
-| `/{containerName}/{blob}?AppendBlob` | missing | AppendBlob_Create (`x-ms-blob-type`) |
+| `/{containerName}/{blob}?AppendBlob` | routed | `CreateAppendBlob` — born empty; overwrites an existing blob of any type (Azurite `override existing pageblob`) |
 | `/{containerName}/{blob}?BlockBlob` | routed | `PutBlob` reads `x-ms-blob-type` and stores it; `GetBlobProperties` returns it |
 | `/{containerName}/{blob}?BlockBlob&fromUrl` | unclaim | Azurite: Put Blob From URL unsupported |
 | `/{containerName}/{blob}?comp=undelete` | unclaim | Azurite: soft delete unsupported |
@@ -256,7 +256,7 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}/{blob}?comp=properties&Resize` | routed | `ResizePageBlob` — grow zero-extends, shrink truncates; 512-aligned or 400 |
 | `/{containerName}/{blob}?comp=properties&UpdateSequenceNumber` | routed | `SetBlobSequenceNumber` — `update` / `max` / `increment`, echoed on HEAD as `x-ms-blob-sequence-number` |
 | `/{containerName}/{blob}?comp=incrementalcopy` | unclaim | Azurite: incremental copy unsupported |
-| `/{containerName}/{blob}?comp=appendblock` | partial | `AppendBlock` concatenates; missing blob is created (Azurite create-append is `?AppendBlob`) |
+| `/{containerName}/{blob}?comp=appendblock` | routed | `AppendBlock` — missing blob 404, wrong type 409 `InvalidBlobType`, empty body 400, >4 MiB 413, 50k block cap 409; echoes `x-ms-blob-append-offset` / `x-ms-blob-committed-block-count` |
 | `/{containerName}/{blob}?comp=appendblock&fromUrl` | missing | Append Block From URL (same instance) |
 | `/{containerName}/{blob}?comp=seal` | unclaim | Azurite: concurrent append / seal not in REST matrix |
 | `/{containerName}/{blob}?comp=query` | unclaim | Azurite: blob query unsupported |
@@ -301,7 +301,7 @@ Host `{account}.table.core.windows.net`. Table `x-ms-paths` service properties/s
 
 ### Traced tests
 
-Direct `it()` names from `blob/apis/container.test.ts` (48), `blob/apis/service.test.ts` (25), `blob/apis/blob.test.ts` (98), and `blob/apis/pageblob.test.ts` (58). Rows marked later-slice still count, as S3 skipped rows do.
+Direct `it()` names from `blob/apis/container.test.ts` (48), `blob/apis/service.test.ts` (25), `blob/apis/blob.test.ts` (98), `blob/apis/pageblob.test.ts` (58), and `blob/apis/appendblob.test.ts` (38). Rows marked later-slice still count, as S3 skipped rows do.
 
 | Azurite test | Mirror evidence | Result |
 |---|---|---|
@@ -544,6 +544,49 @@ Direct `it()` names from `blob/apis/pageblob.test.ts` (58). Page blobs are a fix
 | `blob/apis/pageblob.test.ts::getPageRanges` | Merged ranges clipped to `x-ms-range`: booted `bytes=0-511` returns `<Start>0</Start><End>511</End>` only | Mapped and green |
 | `blob/apis/pageblob.test.ts::updateSequenceNumber` | `increment` → 1, `update` 10 → 10, `max` with lower current keeps 10; echoed on HEAD | Mapped and green |
 | `blob/apis/pageblob.test.ts::setAccessTier for Page blob` | Tier is `unclaim` in the path table | Unclaim |
+
+Direct `it()` names from `blob/apis/appendblob.test.ts` (38). Append blobs are born empty via `?AppendBlob`; Append Block concatenates and echoes the pre-append offset. Seal stays `unclaim` (Azurite concurrent-append/seal is not in its REST matrix).
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/appendblob.test.ts::Create append blob should work` | Booted PUT `x-ms-blob-type: AppendBlob` → 201, HEAD `AppendBlob`/`0`; atomic `TestAzureAppendBlob` | Mapped and green |
+| `blob/apis/appendblob.test.ts::Create append blob with ifTags should work` | Tags slice | Later |
+| `blob/apis/appendblob.test.ts::Create append blob override existing pageblob` | Create-append overwrites any existing blob; atomic override assertion | Mapped and green |
+| `blob/apis/appendblob.test.ts::Create append blob should fail when metadata names are invalid C# identifiers` | Metadata keys stored verbatim; C# identifier rule unclaimed | Partial |
+| `blob/apis/appendblob.test.ts::Delete append blob should work` | DeleteBlob is type-agnostic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Create append blob snapshot should work` | Snapshot slice | Later |
+| `blob/apis/appendblob.test.ts::Create append blob snapshot and seal should work and copy seal` | Seal is `unclaim`; snapshot slice | Later |
+| `blob/apis/appendblob.test.ts::Copy append blob snapshot should work` | Copy slice | Later |
+| `blob/apis/appendblob.test.ts::Synchronized copy append blob snapshot should work` | Same | Later |
+| `blob/apis/appendblob.test.ts::Set append blob metadata should work` | SetBlobMetadata is type-agnostic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Set append blob HTTP headers should work` | SetBlobProperties is type-agnostic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Set tier should not work for append blob` | Tier is `unclaim` in the path table | Unclaim |
+| `blob/apis/appendblob.test.ts::Append block should work` | Booted append 201 with `x-ms-blob-append-offset` 0/3 and `x-ms-blob-committed-block-count` 1/2; download `onetwo` | Mapped and green |
+| `blob/apis/appendblob.test.ts::AppendBlock with correct crc64 should succeed and echo crc64` | CRC64 not computed or echoed (same ceiling as page checksums) | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock with wrong crc64 should throw mismatch` | Same | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock with wrong md5 should throw mismatch` | Same | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock without any checksum header should still echo computed crc64` | Same | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock with both md5 and crc64 supplied should be rejected` | Same | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock with ifTags should work` | Tags slice | Later |
+| `blob/apis/appendblob.test.ts::Download append blob should work` | Booted GET `onetwo` | Mapped and green |
+| `blob/apis/appendblob.test.ts::Download append blob should work for snapshot` | Snapshot slice | Later |
+| `blob/apis/appendblob.test.ts::Download append blob should work for copied blob` | Copy slice | Later |
+| `blob/apis/appendblob.test.ts::Append block with invalid blob type should not work` | Booted append to block blob 409 `InvalidBlobType` | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block with content length 0 should not work` | Empty body 400 `InvalidHeaderValue`; atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block append position access condition should work` | `x-ms-blob-condition-appendpos` is the conditions slice (412) | Later |
+| `blob/apis/appendblob.test.ts::Append block md5 validation should work` | Content-MD5 validation unclaimed | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::Append block access condition should work` | Conditions slice | Later |
+| `blob/apis/appendblob.test.ts::Append block lease condition should work` | Blob lease keys still `missing` | Later |
+| `blob/apis/appendblob.test.ts::Append block should refresh lease state ` | Same | Later |
+| `blob/apis/appendblob.test.ts::Seal append blob should work` | Seal is `unclaim` in the path table | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal already sealed append blob fails` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob not found` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal blob wrong type` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob get blob` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob get blob properties` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob can set blob properties` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob can set blob meta data` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob cannot append` | Same | Unclaim |
 
 ### Shipped YAML evidence (not the inventory)
 

@@ -122,17 +122,29 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 400 || h.Get("x-ms-error-code") != "InvalidBlockList" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("missing block id %d %#v %s", code, h, raw)
 	}
-	code, raw, _ = do(http.MethodPut, "/ctr/log?comp=appendblock", "one", nil)
-	if code >= 300 {
-		t.Fatalf("append %d %s", code, raw)
+	code, raw, _ = do(http.MethodPut, "/ctr/log", "", map[string]string{"x-ms-blob-type": "AppendBlob"})
+	if code != 201 {
+		t.Fatalf("create append blob %d %s", code, raw)
 	}
-	code, raw, _ = do(http.MethodPut, "/ctr/log?comp=appendblock", "two", nil)
-	if code >= 300 {
-		t.Fatalf("append 2 %d %s", code, raw)
+	code, raw, h = do(http.MethodPut, "/ctr/log?comp=appendblock", "one", nil)
+	if code != 201 || h.Get("x-ms-blob-append-offset") != "0" || h.Get("x-ms-blob-committed-block-count") != "1" {
+		t.Fatalf("append %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/log?comp=appendblock", "two", nil)
+	if code != 201 || h.Get("x-ms-blob-append-offset") != "3" || h.Get("x-ms-blob-committed-block-count") != "2" {
+		t.Fatalf("append 2 %d %#v %s", code, h, raw)
 	}
 	code, raw, _ = do(http.MethodGet, "/ctr/log", "", nil)
 	if code != 200 || string(raw) != "onetwo" {
 		t.Fatalf("get append %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/nolog?comp=appendblock", "x", nil)
+	if code != 404 || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("append missing %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/part?comp=appendblock", "x", nil)
+	if code != 409 || h.Get("x-ms-error-code") != "InvalidBlobType" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("append to block blob %d %#v %s", code, h, raw)
 	}
 	code, raw, h = do(http.MethodPut, "/ctr?restype=container&comp=metadata", "", map[string]string{"x-ms-meta-keya": "vala"})
 	if code >= 300 {

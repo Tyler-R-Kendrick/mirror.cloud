@@ -17,7 +17,14 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
-//go:embed all:aws all:gcp
+// The pattern is the layout, not a list of providers. It used to be
+// `all:aws all:gcp`, which was every provider that existed when it was
+// written -- and a bundle under a third one embedded nothing, served nothing
+// and failed no test, because ServiceIDs walks whatever is embedded and an
+// absent directory is indistinguishable from a provider with no bundles.
+// TestEveryBundleOnDiskIsEmbedded is the guard.
+//
+//go:embed */*/service.yaml
 var files embed.FS
 
 // FS exposes the embedded bundles for tools that want to walk them.

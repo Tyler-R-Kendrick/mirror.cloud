@@ -9,6 +9,10 @@
     "gcp.storage": {
       "source": "https://storage.googleapis.com/$discovery/rest?version=v1",
       "ref": "2026-08-28T18:51:00Z"
+    },
+    "hostinger.api": {
+      "source": "https://raw.githubusercontent.com/hostinger/api/main/openapi.json",
+      "ref": "2026-09-11T00:55:54Z"
     }
   },
   "files": [
@@ -1203,6 +1207,14 @@
       "path": "gcp/storage.json",
       "sha256": "ff15c6b8561f3b7b650d0e47f2532dcb55893f8d2c7fbdcad27698aaeaadb246",
       "ingested": "2026-08-28T18:51:00Z"
+    },
+    {
+      "serviceId": "hostinger.api",
+      "source": "https://raw.githubusercontent.com/hostinger/api/main/openapi.json",
+      "ref": "2026-09-11T00:55:54Z",
+      "path": "hostinger/api.json",
+      "sha256": "b0a41fa77d2a6ec50cda065cd28310e057b0fc0fd75c1ea6d8bfb838e983a05c",
+      "ingested": "2026-09-11T00:55:54Z"
     }
   ]
 }

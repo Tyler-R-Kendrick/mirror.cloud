@@ -29,7 +29,7 @@ cd "$ROOT"
 AWS_REPO="${AWS_REPO:-https://github.com/aws/api-models-aws}"
 AWS_REF="${AWS_REF:-main}"
 REFRESH="${SPECS_REFRESH:-}"
-GCS_URL='https://storage.googleapis.com/$discovery/rest?version=v1'
+URLS="$ROOT/specs/urls.tsv"
 LOCK="$ROOT/specs/mirror.lock"
 SET="$ROOT/specs/mirror.set"
 DIRS="$ROOT/specs/aws-dirs.json"
@@ -60,15 +60,24 @@ fetch() {
 
 mkdir -p specs/aws specs/gcp
 
-want_gcp=0
+# The set decides what is fetched. AWS comes from a git repository; everything
+# in specs/urls.tsv comes from its URL. A service in neither is a service the
+# set asks for and nothing can supply, which resolve_specs.py makes fatal.
 want_aws=0
+declare -a want_urls=()
 if [[ -f "$SET" ]]; then
   while read -r id _rest; do
     [[ -z "$id" || "$id" == \#* ]] && continue
-    case "$id" in
-      gcp.storage) want_gcp=1 ;;
-      aws.*) want_aws=1 ;;
-    esac
+    if [[ "$id" == aws.* ]]; then
+      want_aws=1
+      continue
+    fi
+    while IFS=$'\t' read -r uid upath uurl; do
+      [[ -z "$uid" || "$uid" == \#* ]] && continue
+      if [[ "$uid" == "$id" ]]; then
+        want_urls+=("$uid"$'\t'"$upath"$'\t'"$uurl")
+      fi
+    done < "$URLS"
   done < "$SET"
 fi
 
@@ -150,42 +159,41 @@ if the pin is gone upstream, re-pin with SPECS_REFRESH=1 make specs-sync"
   echo "specs-sync: copied ${#copied[@]} aws model(s)" >&2
 fi
 
-gcs_etag=""
-if ((want_gcp)); then
-  gcs_dest="$ROOT/specs/gcp/storage.json"
-  mkdir -p "$ROOT/specs/gcp"
-  # Discovery is served live from a URL with no revision to pin, so the
-  # document itself is the pin: it is committed, and a plain sync uses the
-  # committed copy. Refetching by default would make every build depend on
-  # what Google happened to be serving that minute -- which is exactly the
-  # failure this replaces, where CI went red because the document changed
-  # between two runs an hour apart.
-  if [[ -z "$REFRESH" && -s "$gcs_dest" ]]; then
-    echo "specs-sync: using the committed GCS discovery document (SPECS_REFRESH=1 to refetch)" >&2
+# Each URL-served document, fetched or taken from the committed copy under the
+# same rule the AWS pin follows: reproduce by default, move the pin on request.
+: > "$TMP/urls.tsv"
+fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+for entry in ${want_urls+"${want_urls[@]}"}; do
+  IFS=$'\t' read -r uid upath uurl <<< "$entry"
+  dest="$ROOT/specs/$upath"
+  mkdir -p "$(dirname "$dest")"
+  if [[ -z "$REFRESH" && -s "$dest" ]]; then
+    echo "specs-sync: using the committed $uid document (SPECS_REFRESH=1 to refetch)" >&2
   else
-    echo "specs-sync: fetching GCS discovery JSON…" >&2
-    if ! fetch "$GCS_URL" > "$TMP/storage.json"; then
-      die "failed to fetch $GCS_URL"
+    echo "specs-sync: fetching $uid from $uurl…" >&2
+    if ! fetch "$uurl" > "$TMP/doc.json"; then
+      die "failed to fetch $uurl"
     fi
-    if [[ -s "$gcs_dest" ]] && ! cmp -s "$TMP/storage.json" "$gcs_dest"; then
-      echo "specs-sync: the GCS discovery document changed upstream; review the diff in specs/gcp/" >&2
+    if [[ -s "$dest" ]] && ! cmp -s "$TMP/doc.json" "$dest"; then
+      echo "specs-sync: $uid changed upstream; review the diff in specs/$(dirname "$upath")/" >&2
     fi
-    cp -f "$TMP/storage.json" "$gcs_dest"
+    cp -f "$TMP/doc.json" "$dest"
   fi
   # The hash is the lock; this is the timestamp of the fetch that produced the
-  # content, held steady below while the content is.
-  gcs_etag="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-fi
+  # content, held steady by the writer below while the content is unchanged.
+  printf '%s\t%s\t%s\t%s\n' "$uid" "$upath" "$uurl" "$fetched_at" >> "$TMP/urls.tsv"
+done
 
 ingested="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 touch "$TMP/copied.tsv"
-python3 - "$LOCK" "$AWS_REPO" "$AWS_SHA" "$GCS_URL" "$ingested" "$gcs_etag" "$TMP/copied.tsv" <<'PY'
+touch "$TMP/urls.tsv"
+python3 - "$LOCK" "$AWS_REPO" "$AWS_SHA" "$ingested" "$TMP/copied.tsv" "$TMP/urls.tsv" <<'PY'
 import json, os, sys, hashlib
 
 lock_path = sys.argv[1]
-aws_repo, aws_sha, gcs_url, ingested, gcs_etag = sys.argv[2:7]
-pairs_path = sys.argv[7]
+aws_repo, aws_sha, ingested = sys.argv[2:5]
+pairs_path, urls_path = sys.argv[5], sys.argv[6]
 root = os.path.dirname(os.path.dirname(lock_path))
 
 def sha256(path):
@@ -236,34 +244,41 @@ with open(pairs_path, encoding="utf-8") as fh:
             "sha256": digest,
             "ingested": first_seen(rel, digest),
         })
-gcs = os.path.join(root, "specs", "gcp", "storage.json")
-if os.path.isfile(gcs):
-    digest = sha256(gcs)
-    prior = previous.get("gcp/storage.json")
-    # Discovery is served live and has no upstream revision to pin, so the ref
-    # is the timestamp of the fetch that produced this content. Hold it steady
-    # while the content is: a ref that moves on identical bytes is noise, and
-    # noise is where an unannounced upstream change hides.
-    ref = gcs_etag
-    if prior and prior.get("sha256") == digest and prior.get("ref"):
-        ref = prior["ref"]
-    gcs_etag = ref
-    files.append({
-        "serviceId": "gcp.storage",
-        "source": gcs_url,
-        "ref": ref,
-        "path": "gcp/storage.json",
-        "sha256": digest,
-        "ingested": first_seen("gcp/storage.json", digest),
-    })
+# URL-served documents, from the table the shell loop just wrote. Each has no
+# upstream revision to pin, so the ref is the timestamp of the fetch that
+# produced this content -- held steady while the content is. A ref that moves
+# on identical bytes is noise, and noise is where an unannounced upstream
+# change hides.
+pins = {}
+with open(urls_path, encoding="utf-8") as fh:
+    for line in fh:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        service_id, rel, url, fetched_at = line.split("\t")
+        path = os.path.join(root, "specs", rel)
+        if not os.path.isfile(path):
+            continue
+        digest = sha256(path)
+        prior = previous.get(rel)
+        ref = fetched_at
+        if prior and prior.get("sha256") == digest and prior.get("ref"):
+            ref = prior["ref"]
+        pins[service_id] = {"source": url, "ref": ref}
+        files.append({
+            "serviceId": service_id,
+            "source": url,
+            "ref": ref,
+            "path": rel,
+            "sha256": digest,
+            "ingested": first_seen(rel, digest),
+        })
+
 files.sort(key=lambda x: x["path"])
 doc = {
     "schemaVersion": "1",
     "comment": "Lockfile for vendored provider specs. Fields per file: source, ref, path, sha256, ingested. make specs-sync is the only writer.",
-    "pin": {
-        "aws": {"source": aws_repo, "ref": aws_sha},
-        "gcp.storage": {"source": gcs_url, "ref": gcs_etag},
-    },
+    "pin": dict({"aws": {"source": aws_repo, "ref": aws_sha}}, **pins),
     "files": files,
 }
 os.makedirs(os.path.dirname(lock_path), exist_ok=True)

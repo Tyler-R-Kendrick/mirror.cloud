@@ -103,6 +103,14 @@ func TestValidationRejects(t *testing.T) {
 		want string
 	}{
 		{
+			// `_list` names the body itself, so it is only meaningful when the
+			// body is an array. On a structure it would put a member no reader
+			// looks for into the response.
+			name: "bare-array output on a structure",
+			edit: func(b string) string { return strings.Replace(b, "      ThingId: id", "      _list: id", 1) },
+			want: "projects a bare array but",
+		},
+		{
 			name: "output member not in the model",
 			edit: func(b string) string { return strings.Replace(b, "      ThingId: id", "      Nonsense: id", 1) },
 			want: "is not a member of",

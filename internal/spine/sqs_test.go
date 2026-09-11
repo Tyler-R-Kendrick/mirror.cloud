@@ -119,7 +119,19 @@ func TestBootedServerSQSQueryTags(t *testing.T) {
 	call(url.Values{"Action": {"CreateQueue"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}, "Tag.1.Key": {"first"}, "Tag.1.Value": {"one"}})
 	call(url.Values{"Action": {"TagQueue"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}, "Tags.member.1.Key": {"second"}, "Tags.member.1.Value": {"two"}})
 	body := call(url.Values{"Action": {"ListQueueTags"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}})
-	if !strings.Contains(string(body), "<first>one</first>") || !strings.Contains(string(body), "<second>two</second>") {
+	// The tag map serializes the way its specification says, not the way a map
+	// literal would. sqs-2012-11-05.json puts `xmlFlattened` and
+	// `xmlName: Tag` on ListQueueTagsResult$Tags and `xmlName: Key`/`Value` on
+	// TagMap's key and value -- traits that exist for no purpose but this
+	// document, since the modern SQS API is awsJson1_0 and has no XML at all.
+	//
+	// This asserted `<first>one</first>` when it landed, which is the older
+	// encoder's output: it walked the response map and used each key as an
+	// element name, so a tag called `Key` and a tag called `first` were
+	// indistinguishable from members. That is the defect C30 was about, and
+	// the form here is what AWS returns.
+	if !strings.Contains(string(body), "<Tag><Key>first</Key><Value>one</Value></Tag>") ||
+		!strings.Contains(string(body), "<Tag><Key>second</Key><Value>two</Value></Tag>") {
 		t.Fatalf("query tags response %s", body)
 	}
 }
@@ -691,6 +703,22 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	getRes.Body.Close()
 	if getRes.StatusCode != http.StatusNotFound || !strings.Contains(string(getBody), "<UnknownOperationException") {
 		t.Fatalf("query URL missing action %d %s", getRes.StatusCode, getBody)
+	}
+	// The same request with no Authorization header at all. The one above is
+	// signed, so it reaches SQS through the credential scope no matter how the
+	// path is read; this is the only case where the queue path itself has to
+	// do the work, and without it the demux branch that reads it is untestable
+	// -- which is exactly what the surviving `sqs-query-url-without-action-
+	// stays-sqs` mutant was pointing at once this test went green.
+	anonReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq", nil)
+	anonRes, err := http.DefaultClient.Do(anonReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anonBody, _ := io.ReadAll(anonRes.Body)
+	anonRes.Body.Close()
+	if anonRes.StatusCode != http.StatusNotFound || !strings.Contains(string(anonBody), "<UnknownOperationException") {
+		t.Fatalf("unsigned query URL missing action %d %s", anonRes.StatusCode, anonBody)
 	}
 	if code, body, _ := queryCall(url.Values{"Action": {"CreateQueue"}, "Version": {"2012-11-05"}, "QueueName": {"queryq2"}}); code != http.StatusOK {
 		t.Fatalf("query second create %d %s", code, body)

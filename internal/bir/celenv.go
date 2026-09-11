@@ -82,6 +82,15 @@ func celFuncs() []cel.EnvOption {
 		// amend one.
 		unaryDyn("toJSON", dyn, str),
 		binaryDyn("lastSegment", str, str, str),
+		// lower case-folds a string. CEL's core has no case operation at all,
+		// and a name used as a store key has to be folded somewhere: a provider
+		// that treats `Example.COM` and `example.com` as one domain either does
+		// it here or does it in Go, and doing it in Go is a pack.
+		//
+		// ASCII only, deliberately. Unicode case folding is locale-dependent
+		// (Turkish dotless i is the standard example), and an identifier that
+		// folds differently by locale is a key that does not round-trip.
+		unaryDyn("lower", str, str),
 		// indices answers with 0..n-1 for a list. CEL's `map` binds the
 		// element and never its position, and an AWS batch response is
 		// correlated to its request by position.

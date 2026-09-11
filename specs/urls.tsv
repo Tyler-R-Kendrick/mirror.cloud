@@ -15,6 +15,21 @@
 # original bytes, never the re-serialization, because those are what the lock
 # pins. DigitalOcean publishes only YAML.
 #
+#
+# The URL column may instead be the word `authored`, which says this document
+# has no upstream: nothing fetches it, SPECS_REFRESH cannot move it, and the
+# lock records its source as `authored` rather than a URL. Its sha256 is still
+# the pin, so editing it is a visible diff -- what is gone is the ability to
+# notice that a VENDOR changed something, because no vendor publishes it.
+#
+# That is a real loss and the category is meant to stay almost empty. One entry
+# is in it. vercel.kv is the Vercel KV data plane, which is Upstash Redis on a
+# Vercel host: Upstash publishes OpenAPI for QStash, for Workflow and for the
+# management plane at api.upstash.com/v2, and for the command endpoint nothing;
+# Vercel's own document has blob-store management and no KV commands. Both
+# describe the data plane in prose only. The alternative was deleting a working
+# surface, so the document says in its own description that it is authored, and
+# every cell it feeds is `authored` provenance.
 # format: <service-id>	<path under specs/>	<url>
 cloudflare.api	cloudflare/api.json	https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json
 digitalocean.v2	digitalocean/v2.yaml	https://api-engineering.nyc3.cdn.digitaloceanspaces.com/spec-ci/DigitalOcean-public.v2.yaml
@@ -23,3 +38,4 @@ gcp.storage	gcp/storage.json	https://storage.googleapis.com/$discovery/rest?vers
 hetzner.v1	hetzner/v1.json	https://docs.hetzner.cloud/cloud.spec.json
 hostinger.api	hostinger/api.json	https://raw.githubusercontent.com/hostinger/api/main/openapi.json
 vercel.api	vercel/api.json	https://openapi.vercel.sh/
+vercel.kv	vercel/kv.json	authored

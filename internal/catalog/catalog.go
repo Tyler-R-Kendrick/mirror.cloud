@@ -257,7 +257,21 @@ func Bundle() *model.Bundle {
 	}
 	azure := []string{"CreateContainer", "GetContainer", "ListContainers", "DeleteContainer", "PutBlob", "GetBlob", "ListBlobs", "DeleteBlob"}
 	digitalocean := []string{"CreateDroplet", "ListDroplets", "GetDroplet", "DeleteDroplet", "CreateDomain", "ListDomains", "GetDomain", "DeleteDomain"}
-	hetzner := []string{"CreateServer", "ListServers", "GetServer", "DeleteServer", "CreateSSHKey", "ListSSHKeys", "GetSSHKey", "DeleteSSHKey"}
+	// Real bindings, not mk(): mk() binds every operation to POST /, and
+	// internal/conformance builds its request from this catalog rather than
+	// from the generated model. The names are the document's -- create_ssh_key
+	// exports as CreateSshKey -- because the bundle serves the document's
+	// operations, and a catalog name the model does not carry is a 501.
+	hetzner := []model.Operation{
+		op("CreateServer", "POST", "/v1/servers", 201, false),
+		op("ListServers", "GET", "/v1/servers", 200, true),
+		op("GetServer", "GET", "/v1/servers/{id}", 200, true),
+		op("DeleteServer", "DELETE", "/v1/servers/{id}", 200, false),
+		op("CreateSshKey", "POST", "/v1/ssh_keys", 201, false),
+		op("ListSshKeys", "GET", "/v1/ssh_keys", 200, true),
+		op("GetSshKey", "GET", "/v1/ssh_keys/{id}", 200, true),
+		op("DeleteSshKey", "DELETE", "/v1/ssh_keys/{id}", 204, false),
+	}
 	railway := []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"}
 	fly := []string{"CreateApp", "ListApps", "GetApp", "DeleteApp", "CreateMachine", "ListMachines", "GetMachine", "DeleteMachine"}
 	gcs := []string{"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list",
@@ -1321,7 +1335,7 @@ func Bundle() *model.Bundle {
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
 			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", mk(digitalocean)),
-			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", mk(hetzner)),
+			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", hetzner),
 			svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", mk(railway)),
 			svc("fly.machines", "fly", model.ProtoRESTJSON1, "", "", "", mk(fly)),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),

@@ -151,15 +151,10 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"digitalocean.v2", http.MethodDelete, "/v2/domains/ex.test", "", "DeleteDomain"},
 		{"digitalocean.v2", http.MethodGet, "/v2/unknown", "", "Unknown"},
 
-		{"hetzner.v1", http.MethodPost, "/v1/servers", "", "CreateServer"},
-		{"hetzner.v1", http.MethodGet, "/v1/servers", "", "ListServers"},
-		{"hetzner.v1", http.MethodGet, "/v1/servers/1", "", "GetServer"},
-		{"hetzner.v1", http.MethodDelete, "/v1/servers/1", "", "DeleteServer"},
-		{"hetzner.v1", http.MethodPost, "/v1/ssh_keys", "", "CreateSSHKey"},
-		{"hetzner.v1", http.MethodGet, "/v1/ssh_keys", "", "ListSSHKeys"},
-		{"hetzner.v1", http.MethodGet, "/v1/ssh_keys/1", "", "GetSSHKey"},
-		{"hetzner.v1", http.MethodDelete, "/v1/ssh_keys/1", "", "DeleteSSHKey"},
-		{"hetzner.v1", http.MethodGet, "/v1/unknown", "", "Unknown"},
+		// Hetzner's rows are gone with its route table, for the same reason
+		// Hostinger's are: it is served from a bundle, so httpuri.Match routes
+		// it from the generated model and test/behavior/hetzner covers the
+		// URIs end to end.
 	} {
 		request := httptest.NewRequest(test.method, test.path, nil)
 		if test.target != "" {
@@ -359,27 +354,26 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		t.Fatalf("do fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 
+	// Hetzner keeps only its fault envelope. The response encoder branch went
+	// with the route table: the bundle answers the document's own members, so
+	// the generic encoder serializes them and there is nothing left to wrap.
 	hz := &model.Service{ID: "hetzner.v1"}
-	w = httptest.NewRecorder()
-	if err := codec.Encode(hz, &model.Operation{Name: "ListServers"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"name": "web"}}, "_wrap": "servers"}}); err != nil {
-		t.Fatal(err)
-	}
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"servers"`) || !strings.Contains(w.Body.String(), `"total_entries":1`) || strings.Contains(w.Body.String(), `"_list"`) {
-		t.Fatalf("hz list encode %d %s", w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	if err := codec.Encode(hz, &model.Operation{Name: "GetSSHKey"}, w, &spi.Response{Output: map[string]any{"_wrap": "ssh_key", "ssh_key": map[string]any{"name": "laptop"}}}); err != nil {
-		t.Fatal(err)
-	}
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"ssh_key"`) {
-		t.Fatalf("hz encode %d %s", w.Code, w.Body.String())
-	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(hz, &model.Operation{Name: "GetServer"}, w, &spi.Fault{Code: "not_found", Message: "Server not found", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"not_found"`) || !strings.Contains(w.Body.String(), `"error"`) {
 		t.Fatalf("hz fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+	// A status that forbids a body gets none, whatever the operation
+	// projected. An engine-served DeleteSshKey answers 204 with an empty
+	// output map, and without this the map reaches net/http as `{}`.
+	w = httptest.NewRecorder()
+	if err := codec.Encode(hz, &model.Operation{Name: "DeleteSshKey", HTTP: model.HTTPBinding{Code: 204}}, w, &spi.Response{Output: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 204 || w.Body.Len() != 0 {
+		t.Fatalf("hz 204 %d %q", w.Code, w.Body.String())
 	}
 
 	rw := &model.Service{ID: "railway.graphql"}

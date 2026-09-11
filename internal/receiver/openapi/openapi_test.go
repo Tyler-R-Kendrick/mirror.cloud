@@ -296,3 +296,52 @@ func sortedByName(ops []model.Operation) bool {
 	}
 	return true
 }
+
+// TestIngestCarriesTheServerBasePathIntoEveryURI states the half of an address
+// OpenAPI keeps outside the path items. Hetzner declares its server as
+// `https://api.hetzner.cloud/v1` and writes its paths as `/servers`; a client
+// calls `/v1/servers`. Dropping the base produced a model that was well-formed
+// and unroutable, with no symptom but a service that answered nothing.
+func TestIngestCarriesTheServerBasePathIntoEveryURI(t *testing.T) {
+	const based = `{
+	  "openapi": "3.1.0",
+	  "info": {"title": "Based API"},
+	  "servers": [{"url": "https://api.example.invalid/v1/"}],
+	  "paths": {
+	    "/servers": {"get": {"operationId": "list_servers", "responses": {"200": {}}}}
+	  }
+	}`
+	svcs, err := openapi.Receiver{}.Ingest(context.Background(),
+		model.SourceRef{Path: "example/v1.json"}, []byte(based))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := svcs[0].Operations[0].HTTP.URI; got != "/v1/servers" {
+		t.Errorf("URI = %q, want /v1/servers; the server URL's path is part of "+
+			"every address a client uses", got)
+	}
+}
+
+// TestIngestDropsATemplatedServerBasePath keeps the fix from inventing an
+// address. A server URL with a variable in it cannot be resolved from the
+// document alone, and substituting anything would bind every operation to a
+// path no client calls -- worse than leaving the paths as the document wrote
+// them, which is what every document got before base paths existed.
+func TestIngestDropsATemplatedServerBasePath(t *testing.T) {
+	const templated = `{
+	  "openapi": "3.1.0",
+	  "info": {"title": "Templated API"},
+	  "servers": [{"url": "https://api.example.invalid/{version}"}],
+	  "paths": {
+	    "/servers": {"get": {"operationId": "list_servers", "responses": {"200": {}}}}
+	  }
+	}`
+	svcs, err := openapi.Receiver{}.Ingest(context.Background(),
+		model.SourceRef{Path: "example/v1.json"}, []byte(templated))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := svcs[0].Operations[0].HTTP.URI; got != "/servers" {
+		t.Errorf("URI = %q, want /servers", got)
+	}
+}

@@ -1,0 +1,502 @@
+{
+  "schema": "trace/1",
+  "service": "hetzner.v1",
+  "source": "pack:internal/services/hetzner/v1@63ebff9f",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Hetzner Cloud API; a probe run replaces cells with observed evidence and cites the cassette.\n\nThe four SSH-key operations carry recorded_as: the pack spelled them CreateSSHKey, the document spells them create_ssh_key, and the receiver exports that as CreateSshKey.\n\nServer and SSH-key ids are referenced rather than written literally, because the service issues them: each side is asked about the identifier it drew itself. What the two cannot agree on is that id's value. It is an integer, and the unifier substitutes token-shaped strings only, so every body carrying one excuses that member by name.\n\nWhat is still gated, in every body that is not a list: the name the caller gave round-trips, the status the service invents is `running`, the public key round-trips -- and, across the whole run, the nine faults and their precedence: a duplicate name is a conflict, a missing required member is invalid_input, a deleted id is not_found, and a name freed by a delete can be taken again.",
+  "steps": [
+    {
+      "operation": "ListServers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [],
+        "_wrap": "servers"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the bundle answers the document's own members, `servers` or `ssh_keys` plus `meta`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    },
+    {
+      "operation": "CreateServer",
+      "input": {
+        "image": "ubuntu-24.04",
+        "name": "web-1",
+        "server_type": "cx22"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "server",
+        "server": {
+          "id": 526682617,
+          "image": "ubuntu-24.04",
+          "name": "web-1",
+          "server_type": "cx22",
+          "status": "running"
+        }
+      },
+      "superseded_members": {
+        "_wrap": "the pack's private hint to its branch of the REST/JSON codec, not a member of the response; the branch went with the pack",
+        "server.id": "both sides draw an integer id from the same deterministic Rand in different orders, and the unifier substitutes token-shaped strings only",
+        "server.server_type": "the document declares this an object and the pack stored the caller's bare string, which no hcloud client can read",
+        "server.image": "the document declares this an object and the pack stored the caller's bare string, which no hcloud client can read",
+        "server.created": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "server.locked": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "server.rescue_enabled": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "action": "the document marks `action` required on a create and hcloud clients wait on it; the pack answered the server alone"
+      }
+    },
+    {
+      "operation": "CreateServer",
+      "input": {
+        "image": "ubuntu-24.04",
+        "name": "web-1",
+        "server_type": "cx22"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "uniqueness_error",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateServer",
+      "input": {
+        "image": "ubuntu-24.04",
+        "server_type": "cx22"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "invalid_input",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListServers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "id": 526682617,
+            "image": "ubuntu-24.04",
+            "name": "web-1",
+            "server_type": "cx22",
+            "status": "running"
+          }
+        ],
+        "_wrap": "servers"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the bundle answers the document's own members, `servers` or `ssh_keys` plus `meta`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    },
+    {
+      "operation": "GetServer",
+      "input": {
+        "id": {
+          "$fromStep": 1,
+          "$fromPath": "server.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "server",
+        "server": {
+          "id": 526682617,
+          "image": "ubuntu-24.04",
+          "name": "web-1",
+          "server_type": "cx22",
+          "status": "running"
+        }
+      },
+      "superseded_members": {
+        "_wrap": "the pack's private hint to its branch of the REST/JSON codec, not a member of the response; the branch went with the pack",
+        "server.id": "both sides draw an integer id from the same deterministic Rand in different orders, and the unifier substitutes token-shaped strings only",
+        "server.server_type": "the document declares this an object and the pack stored the caller's bare string, which no hcloud client can read",
+        "server.image": "the document declares this an object and the pack stored the caller's bare string, which no hcloud client can read",
+        "server.created": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "server.locked": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "server.rescue_enabled": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape"
+      }
+    },
+    {
+      "operation": "GetServer",
+      "input": {
+        "id": "999999999"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteServer",
+      "input": {
+        "id": {
+          "$fromStep": 1,
+          "$fromPath": "server.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "superseded_members": {
+        "action": "the document answers a delete with an action; the pack answered 200 with no body at all"
+      }
+    },
+    {
+      "operation": "DeleteServer",
+      "input": {
+        "id": {
+          "$fromStep": 1,
+          "$fromPath": "server.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListServers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [],
+        "_wrap": "servers"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the bundle answers the document's own members, `servers` or `ssh_keys` plus `meta`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    },
+    {
+      "operation": "CreateServer",
+      "input": {
+        "image": "ubuntu-24.04",
+        "name": "web-1",
+        "server_type": "cx22"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "server",
+        "server": {
+          "id": 395791637,
+          "image": "ubuntu-24.04",
+          "name": "web-1",
+          "server_type": "cx22",
+          "status": "running"
+        }
+      },
+      "superseded_members": {
+        "_wrap": "the pack's private hint to its branch of the REST/JSON codec, not a member of the response; the branch went with the pack",
+        "server.id": "both sides draw an integer id from the same deterministic Rand in different orders, and the unifier substitutes token-shaped strings only",
+        "server.server_type": "the document declares this an object and the pack stored the caller's bare string, which no hcloud client can read",
+        "server.image": "the document declares this an object and the pack stored the caller's bare string, which no hcloud client can read",
+        "server.created": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "server.locked": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "server.rescue_enabled": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "action": "the document marks `action` required on a create and hcloud clients wait on it; the pack answered the server alone"
+      }
+    },
+    {
+      "operation": "ListSshKeys",
+      "recorded_as": "ListSSHKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [],
+        "_wrap": "ssh_keys"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the bundle answers the document's own members, `servers` or `ssh_keys` plus `meta`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    },
+    {
+      "operation": "CreateSshKey",
+      "recorded_as": "CreateSSHKey",
+      "input": {
+        "name": "deploy",
+        "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "ssh_key",
+        "ssh_key": {
+          "fingerprint": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example",
+          "id": 119826463,
+          "name": "deploy",
+          "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example"
+        }
+      },
+      "superseded_members": {
+        "_wrap": "the pack's private hint to its branch of the REST/JSON codec, not a member of the response; the branch went with the pack",
+        "ssh_key.id": "both sides draw an integer id from the same deterministic Rand in different orders, and the unifier substitutes token-shaped strings only",
+        "ssh_key.created": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "ssh_key.fingerprint": "the pack put the entire public key in the fingerprint member; see the quirk on CreateSshKey"
+      }
+    },
+    {
+      "operation": "CreateSshKey",
+      "recorded_as": "CreateSSHKey",
+      "input": {
+        "name": "deploy-again",
+        "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "uniqueness_error",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateSshKey",
+      "recorded_as": "CreateSSHKey",
+      "input": {
+        "name": "nokey"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "invalid_input",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateSshKey",
+      "recorded_as": "CreateSSHKey",
+      "input": {
+        "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "invalid_input",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListSshKeys",
+      "recorded_as": "ListSSHKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "fingerprint": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example",
+            "id": 119826463,
+            "name": "deploy",
+            "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example"
+          }
+        ],
+        "_wrap": "ssh_keys"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the bundle answers the document's own members, `servers` or `ssh_keys` plus `meta`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    },
+    {
+      "operation": "GetSshKey",
+      "recorded_as": "GetSSHKey",
+      "input": {
+        "id": {
+          "$fromStep": 12,
+          "$fromPath": "ssh_key.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "ssh_key",
+        "ssh_key": {
+          "fingerprint": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example",
+          "id": 119826463,
+          "name": "deploy",
+          "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample mirror@example"
+        }
+      },
+      "superseded_members": {
+        "_wrap": "the pack's private hint to its branch of the REST/JSON codec, not a member of the response; the branch went with the pack",
+        "ssh_key.id": "both sides draw an integer id from the same deterministic Rand in different orders, and the unifier substitutes token-shaped strings only",
+        "ssh_key.created": "declared by the document and not stored by the pack; `declared` outranks the pack's `authored` shape",
+        "ssh_key.fingerprint": "the pack put the entire public key in the fingerprint member; see the quirk on CreateSshKey"
+      }
+    },
+    {
+      "operation": "GetSshKey",
+      "recorded_as": "GetSSHKey",
+      "input": {
+        "id": "999999999"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteSshKey",
+      "recorded_as": "DeleteSSHKey",
+      "input": {
+        "id": {
+          "$fromStep": 12,
+          "$fromPath": "ssh_key.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteSshKey",
+      "recorded_as": "DeleteSSHKey",
+      "input": {
+        "id": {
+          "$fromStep": 12,
+          "$fromPath": "ssh_key.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListSshKeys",
+      "recorded_as": "ListSSHKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [],
+        "_wrap": "ssh_keys"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the bundle answers the document's own members, `servers` or `ssh_keys` plus `meta`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    }
+  ]
+}

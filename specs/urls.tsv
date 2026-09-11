@@ -11,4 +11,5 @@
 #
 # format: <service-id>	<path under specs/>	<url>
 gcp.storage	gcp/storage.json	https://storage.googleapis.com/$discovery/rest?version=v1
+hetzner.v1	hetzner/v1.json	https://docs.hetzner.cloud/cloud.spec.json
 hostinger.api	hostinger/api.json	https://raw.githubusercontent.com/hostinger/api/main/openapi.json

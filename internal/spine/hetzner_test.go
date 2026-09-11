@@ -12,7 +12,10 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hetzner/v1"
+	// Links the bundle's registration in. Without it the registry has no pack
+	// for hetzner.v1 and the edge answers from the mock tier -- which looks
+	// like a working service returning synthesized data, not like a failure.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestBootedServerHetznerAPI(t *testing.T) {
@@ -50,7 +53,8 @@ func TestBootedServerHetznerAPI(t *testing.T) {
 	env := map[string]any{}
 	_ = json.Unmarshal(raw, &env)
 	srv, _ := env["server"].(map[string]any)
-	if code != 200 || srv["name"] != "web" {
+	// 201, which is what the document declares; the pack answered 200.
+	if code != 201 || srv["name"] != "web" {
 		t.Fatalf("create server %d %s", code, raw)
 	}
 	id := strconv.Itoa(int(srv["id"].(float64)))
@@ -66,7 +70,7 @@ func TestBootedServerHetznerAPI(t *testing.T) {
 	code, raw, _ = do(http.MethodPost, "/v1/ssh_keys", `{"name":"laptop","public_key":"ssh-ed25519 AAAA"}`)
 	_ = json.Unmarshal(raw, &env)
 	key, _ := env["ssh_key"].(map[string]any)
-	if code != 200 || key["name"] != "laptop" {
+	if code != 201 || key["name"] != "laptop" {
 		t.Fatalf("create ssh %d %s", code, raw)
 	}
 	kid := strconv.Itoa(int(key["id"].(float64)))
@@ -75,9 +79,10 @@ func TestBootedServerHetznerAPI(t *testing.T) {
 	if code != 200 || env["ssh_key"].(map[string]any)["name"] != "laptop" {
 		t.Fatalf("get ssh %d %s", code, raw)
 	}
-	code, _, _ = do(http.MethodDelete, "/v1/ssh_keys/"+kid, "")
-	if code != 200 {
-		t.Fatalf("delete ssh %d", code)
+	// 204 with no content, where the pack answered 200 with no body.
+	code, raw, _ = do(http.MethodDelete, "/v1/ssh_keys/"+kid, "")
+	if code != 204 || len(raw) != 0 {
+		t.Fatalf("delete ssh %d %q", code, raw)
 	}
 	code, raw, h := do(http.MethodDelete, "/v1/servers/missing", "")
 	miss := map[string]any{}

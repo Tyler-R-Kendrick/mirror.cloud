@@ -39,7 +39,6 @@ import (
 	doapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
 	flyapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/fly/machines"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
-	hzapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hetzner/v1"
 	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -7927,7 +7926,13 @@ func TestDigitalOceanConcurrentDropletCreateGet(t *testing.T) {
 }
 
 func TestHetznerConcurrentDuplicateServers(t *testing.T) {
-	p := hzapi.New(spitest.Deps(t))
+	// The pack these exercised is gone; the property is not. Exactly one
+	// concurrent create may win the name, and the engine has to hold that the
+	// same way the hand-written mutex did.
+	p, err := bundled.New("hetzner.v1", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7936,7 +7941,8 @@ func TestHetznerConcurrentDuplicateServers(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateServer", Input: map[string]any{"name": "race"}})
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateServer",
+				Input: map[string]any{"name": "race", "server_type": "cx22", "image": "ubuntu-24.04"}})
 			errCh <- err
 		}()
 	}
@@ -7959,7 +7965,10 @@ func TestHetznerConcurrentDuplicateServers(t *testing.T) {
 }
 
 func TestHetznerConcurrentSSHKeyCreateGet(t *testing.T) {
-	p := hzapi.New(spitest.Deps(t))
+	p, err := bundled.New("hetzner.v1", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	var wg sync.WaitGroup
@@ -7968,7 +7977,7 @@ func TestHetznerConcurrentSSHKeyCreateGet(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSSHKey", Input: map[string]any{"name": "k", "public_key": "ssh-ed25519 " + strconv.Itoa(n)}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSshKey", Input: map[string]any{"name": "k", "public_key": "ssh-ed25519 " + strconv.Itoa(n)}}); err != nil {
 				errCh <- err
 			}
 		}(i)
@@ -7978,9 +7987,17 @@ func TestHetznerConcurrentSSHKeyCreateGet(t *testing.T) {
 	for err := range errCh {
 		t.Fatal(err)
 	}
-	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSSHKeys", Input: map[string]any{}})
-	if err != nil || got.Output["_list"] == nil {
-		t.Fatalf("list after concurrent create %#v %v", got, err)
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSshKeys", Input: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sixteen keys under one name: uniqueness is on the fingerprint alone,
+	// which is what the pack enforced. The document says the name must be
+	// unique too; the bundle records that as a quirk rather than quietly
+	// tightening it here.
+	keys, _ := got.Output["ssh_keys"].([]any)
+	if len(keys) != 16 {
+		t.Fatalf("ssh keys after 16 concurrent creates = %d, want 16", len(keys))
 	}
 }
 

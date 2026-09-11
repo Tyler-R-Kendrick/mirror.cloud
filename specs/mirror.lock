@@ -13,6 +13,10 @@
     "hostinger.api": {
       "source": "https://raw.githubusercontent.com/hostinger/api/main/openapi.json",
       "ref": "2026-09-11T00:55:54Z"
+    },
+    "hetzner.v1": {
+      "source": "https://docs.hetzner.cloud/cloud.spec.json",
+      "ref": "2026-09-11T04:14:12Z"
     }
   },
   "files": [
@@ -1207,6 +1211,14 @@
       "path": "gcp/storage.json",
       "sha256": "ff15c6b8561f3b7b650d0e47f2532dcb55893f8d2c7fbdcad27698aaeaadb246",
       "ingested": "2026-08-28T18:51:00Z"
+    },
+    {
+      "serviceId": "hetzner.v1",
+      "source": "https://docs.hetzner.cloud/cloud.spec.json",
+      "ref": "2026-09-11T04:14:12Z",
+      "path": "hetzner/v1.json",
+      "sha256": "7467483b455386dcff8db84b87bad3b7353ffabf08a82c020d7e053028670421",
+      "ingested": "2026-09-11T04:14:14Z"
     },
     {
       "serviceId": "hostinger.api",

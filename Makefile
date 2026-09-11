@@ -34,11 +34,9 @@ test-snapshot:
 	$(GO) test ./internal/services/aws/states -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/vercel/api -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/cloudflare/api -run 'Characterization$$' -count=1
-	$(GO) test ./internal/services/hostinger/api -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/gcp/gcs -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/azure/blobs -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/digitalocean/v2 -run 'Characterization$$' -count=1
-	$(GO) test ./internal/services/hetzner/v1 -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/railway/graphql -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/fly/machines -run 'Characterization$$' -count=1
 
@@ -49,7 +47,7 @@ test-bdd:
 	$(GO) test ./test/behavior/... ./test/terraform -count=1
 
 test-fuzz-seeds:
-	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/sqs ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/services/vercel/api ./internal/services/cloudflare/api ./internal/services/hostinger/api ./internal/services/azure/blobs ./internal/services/digitalocean/v2 ./internal/services/hetzner/v1 ./internal/services/railway/graphql ./internal/services/fly/machines ./internal/proto/aws/restjson ./internal/proto/aws/restxml -count=1
+	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/sqs ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/services/vercel/api ./internal/services/cloudflare/api ./internal/services/azure/blobs ./internal/services/digitalocean/v2 ./internal/services/railway/graphql ./internal/services/fly/machines ./internal/proto/aws/restjson ./internal/proto/aws/restxml -count=1
 
 test-fuzz:
 	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzDeframeAWSChunked$$' -fuzztime=10000x -parallel=4
@@ -177,14 +175,10 @@ test-fuzz:
 	$(GO) test ./internal/services/vercel/api -run '^$$' -fuzz '^FuzzKvCommand$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzCloudflareRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/cloudflare/api -run '^$$' -fuzz '^FuzzKVValue$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzHostingerRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/hostinger/api -run '^$$' -fuzz '^FuzzDNSRecords$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restxml -run '^$$' -fuzz '^FuzzAzureRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/azure/blobs -run '^$$' -fuzz '^FuzzBlobBytes$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzDigitalOceanRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/digitalocean/v2 -run '^$$' -fuzz '^FuzzCreateBody$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzHetznerRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/hetzner/v1 -run '^$$' -fuzz '^FuzzCreateBody$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzRailwayRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/railway/graphql -run '^$$' -fuzz '^FuzzCreateBody$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzFlyRoute$$' -fuzztime=10000x -parallel=4

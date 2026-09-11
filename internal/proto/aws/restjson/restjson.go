@@ -42,9 +42,6 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "digitalocean.v2" {
 		return digitaloceanOp(svc, r), nil
 	}
-	if svc.ID == "hetzner.v1" {
-		return hetznerOp(svc, r), nil
-	}
 	if svc.ID == "railway.graphql" {
 		return railwayOp(svc, r), nil
 	}
@@ -435,48 +432,6 @@ func railwayRoute(r *http.Request) string {
 	}
 }
 
-func hetznerOp(svc *model.Service, r *http.Request) *model.Operation {
-	name := hetznerRoute(r)
-	if op := svc.OperationByName(name); op != nil {
-		return op
-	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
-}
-
-func hetznerRoute(r *http.Request) string {
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	m := r.Method
-	if len(parts) >= 2 && parts[0] == "v1" && parts[1] == "servers" {
-		if len(parts) == 2 && m == http.MethodPost {
-			return "CreateServer"
-		}
-		if len(parts) == 2 && m == http.MethodGet {
-			return "ListServers"
-		}
-		if len(parts) >= 3 && m == http.MethodGet {
-			return "GetServer"
-		}
-		if len(parts) >= 3 && m == http.MethodDelete {
-			return "DeleteServer"
-		}
-	}
-	if len(parts) >= 2 && parts[0] == "v1" && parts[1] == "ssh_keys" {
-		if len(parts) == 2 && m == http.MethodPost {
-			return "CreateSSHKey"
-		}
-		if len(parts) == 2 && m == http.MethodGet {
-			return "ListSSHKeys"
-		}
-		if len(parts) >= 3 && m == http.MethodGet {
-			return "GetSSHKey"
-		}
-		if len(parts) >= 3 && m == http.MethodDelete {
-			return "DeleteSSHKey"
-		}
-	}
-	return "Unknown"
-}
-
 func digitaloceanOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := digitaloceanRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -670,14 +625,21 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if svc.ID == "digitalocean.v2" {
 		return encodeDigitalOcean(w, status, resp)
 	}
-	if svc.ID == "hetzner.v1" {
-		return encodeHetzner(w, status, resp)
-	}
 	if svc.ID == "railway.graphql" {
 		return encodeRailway(w, status, resp)
 	}
 	if svc.ID == "fly.machines" {
 		return encodeFly(w, status, resp)
+	}
+	// A status that forbids a body gets none. An engine-served operation
+	// always projects an output map -- empty when its response shape declares
+	// no members -- so without this a 204 reaches net/http with `{}` behind
+	// it, which the server drops while logging that the response code does not
+	// allow a body. DeleteSshKey is the first such operation; the rule is the
+	// protocol's, not Hetzner's, so it lives here rather than in a branch.
+	if status == http.StatusNoContent || status == http.StatusNotModified || status < 200 {
+		w.WriteHeader(status)
+		return nil
 	}
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -778,33 +740,6 @@ func encodeFly(w http.ResponseWriter, status int, resp *spi.Response) error {
 	if wrap != "" {
 		if rec, ok := resp.Output[wrap]; ok {
 			return json.NewEncoder(w).Encode(rec)
-		}
-	}
-	return json.NewEncoder(w).Encode(resp.Output)
-}
-
-func encodeHetzner(w http.ResponseWriter, status int, resp *spi.Response) error {
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-	}
-	w.WriteHeader(status)
-	if resp.Output == nil {
-		return nil
-	}
-	wrap, _ := resp.Output["_wrap"].(string)
-	if lst, ok := resp.Output["_list"]; ok {
-		items, _ := lst.([]any)
-		if items == nil {
-			items = []any{}
-		}
-		if wrap == "" {
-			wrap = "servers"
-		}
-		return json.NewEncoder(w).Encode(map[string]any{wrap: items, "meta": map[string]any{"pagination": map[string]any{"total_entries": len(items)}}})
-	}
-	if wrap != "" {
-		if rec, ok := resp.Output[wrap]; ok {
-			return json.NewEncoder(w).Encode(map[string]any{wrap: rec})
 		}
 	}
 	return json.NewEncoder(w).Encode(resp.Output)

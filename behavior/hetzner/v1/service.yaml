@@ -1,0 +1,282 @@
+schema: bir/1
+service: hetzner.v1
+
+# Extracted from internal/services/hetzner/v1 (194 lines of Go). Every cell is
+# `authored` -- transcribed from that pack, not established against the real
+# Hetzner Cloud API -- except where the generated model contradicts the pack,
+# which is noted per operation and in `quirks` below.
+provenance: authored
+
+# The pack answered its own 400 with `invalid_input` for a missing name. The
+# model declares which members are required and the engine checks them before
+# any rule here runs, so the name of that failure has to be stated once rather
+# than repeated as a rule per operation -- and it has to be Hetzner's name for
+# it, not the ValidationException default.
+missing_input_error: InvalidInput
+
+resources:
+  server:
+    collection: hzsrv
+    id:
+      generate: { kind: int }
+      input_members: [id]
+    record:
+      # The document declares the id an integer and the pack drew one too. The
+      # store key is text, because every key is; the record carries the number
+      # the wire needs.
+      id: "int(id)"
+      name: "string(input.name)"
+      status: "'running'"
+      created: "string(now)"
+      # The request names a server type and an image by name; the response
+      # declares both as objects, and every hcloud client reads
+      # `server_type.name`. The pack stored the caller's bare strings under
+      # those names, which is a shape no client can read. Only the name is
+      # filled: cores, memory, prices, an image's OS flavour are facts about
+      # Hetzner's catalogue this emulator has no evidence for, and inventing
+      # them would read as recorded behaviour rather than as the guess it is.
+      server_type: "{'name': string(input.server_type)}"
+      image: "{'name': string(input.image)}"
+      labels: "('labels' in input && input.labels != null) ? input.labels : {}"
+      locked: "false"
+      rescue_enabled: "false"
+
+  # Server names are unique per project, and the pack enforced that with a
+  # second collection keyed by name. It stays a resource rather than becoming
+  # a member of the server record because uniqueness is a lookup by the name,
+  # and a record keyed by id cannot answer one.
+  server_name:
+    collection: hzsname
+    id:
+      # Total: the expression is evaluated wherever the resource is addressed
+      # from the request, and a request that carries no name must yield an
+      # empty key rather than an evaluation error.
+      derive: "('name' in input && input.name != null) ? string(input.name) : ''"
+
+  ssh_key:
+    collection: hzkey
+    id:
+      generate: { kind: int }
+      input_members: [id]
+    record:
+      id: "int(id)"
+      name: "string(input.name)"
+      # See the quirk: a digest of the armored key text, not the fingerprint
+      # ssh-keygen prints.
+      fingerprint: "md5hex(string(input.public_key))"
+      public_key: "string(input.public_key)"
+      created: "string(now)"
+      labels: "('labels' in input && input.labels != null) ? input.labels : {}"
+
+  ssh_fingerprint:
+    collection: hzfp
+    id:
+      derive: "('public_key' in input && input.public_key != null) ? md5hex(string(input.public_key)) : ''"
+
+errors:
+  InvalidInput:
+    code: invalid_input
+    http: 400
+    fault: client
+  UniquenessError:
+    code: uniqueness_error
+    http: 409
+    fault: client
+  NotFound:
+    code: not_found
+    http: 404
+    fault: client
+
+operations:
+  CreateServer:
+    reads:
+      taken: { resource: server_name }
+    require:
+      # `cond` is a precondition: the error fires when it does NOT hold.
+      - { cond: "!taken_found", error: UniquenessError, message: "server name already used" }
+    effects:
+      # Drawn first so the writes below decide what `rec` and `id` are left
+      # bound to. A generate effect binds under `fx` and touches neither.
+      - generate: { bind: action, kind: int }
+      # The name index is written before the server, and the order matters:
+      # every write effect rebinds `rec` and `id`, and the output projects the
+      # server from `rec`. Reversing these two answers with the index row.
+      - put:
+          resource: server_name
+          record:
+            name: id
+      - create: { resource: server }
+    output:
+      server: rec
+      # The pack answered `{server}` alone. The document declares all four
+      # members required, and hcloud-go and the Terraform provider both wait
+      # on the action before treating the server as usable -- an absent action
+      # is a client that hangs, so this one is answered already finished.
+      action: >
+        {
+          'id': int(fx.action),
+          'command': 'create_server',
+          'status': 'success',
+          'progress': 100,
+          'started': string(now),
+          'finished': string(now),
+          'resources': [{'id': rec.id, 'type': 'server'}],
+          'error': null
+        }
+      next_actions: "[]"
+      # Null rather than a drawn password: hcloud answers null whenever the
+      # request named SSH keys, and a password this emulator invented would be
+      # a credential that looks real and authenticates nothing.
+      root_password: "null"
+
+  ListServers:
+    list: { resource: server, member: servers }
+    output:
+      # The pack answered `meta.pagination.total_entries` and nothing else; the
+      # document declares all six members of the pagination object required,
+      # and a client that reads `last_page` to decide whether to fetch another
+      # page gets null from an absent one. The listing is unpaginated -- see
+      # the quirk -- so every entry is on page one.
+      meta: >
+        {
+          'pagination': {
+            'page': 1,
+            'per_page': 25,
+            'previous_page': null,
+            'next_page': null,
+            'last_page': 1,
+            'total_entries': size(items)
+          }
+        }
+
+  GetServer:
+    reads:
+      srv: { resource: server }
+    require:
+      - { cond: srv_found, error: NotFound, message: "Server not found" }
+    output:
+      server: srv
+
+  DeleteServer:
+    reads:
+      srv: { resource: server }
+    require:
+      - { cond: srv_found, error: NotFound, message: "Server not found" }
+    effects:
+      - generate: { bind: action, kind: int }
+      - delete: { resource: server }
+      # Keyed off the stored record, not the request: a delete addresses the
+      # server by id and never carries its name.
+      - delete: { resource: server_name, key: "string(srv.name)" }
+    output:
+      action: >
+        {
+          'id': int(fx.action),
+          'command': 'delete_server',
+          'status': 'success',
+          'progress': 100,
+          'started': string(now),
+          'finished': string(now),
+          'resources': [{'id': srv.id, 'type': 'server'}],
+          'error': null
+        }
+
+  CreateSshKey:
+    reads:
+      taken: { resource: ssh_fingerprint }
+    require:
+      - { cond: "!taken_found", error: UniquenessError, message: "SSH key fingerprint already used" }
+    effects:
+      - put:
+          resource: ssh_fingerprint
+          record:
+            fingerprint: id
+      - create: { resource: ssh_key }
+    output:
+      ssh_key: rec
+
+  ListSshKeys:
+    list: { resource: ssh_key, member: ssh_keys }
+    output:
+      meta: >
+        {
+          'pagination': {
+            'page': 1,
+            'per_page': 25,
+            'previous_page': null,
+            'next_page': null,
+            'last_page': 1,
+            'total_entries': size(items)
+          }
+        }
+
+  GetSshKey:
+    reads:
+      sshkey: { resource: ssh_key }
+    require:
+      - { cond: sshkey_found, error: NotFound, message: "SSH key not found" }
+    output:
+      ssh_key: sshkey
+
+  DeleteSshKey:
+    reads:
+      sshkey: { resource: ssh_key }
+    require:
+      - { cond: sshkey_found, error: NotFound, message: "SSH key not found" }
+    effects:
+      - delete: { resource: ssh_key }
+      - delete: { resource: ssh_fingerprint, key: "string(sshkey.fingerprint)" }
+    # No output: the document answers 204 with no content, where the pack
+    # answered 200 with no body. The status is the model's now.
+
+quirks:
+  - operation: CreateServer
+    note: >
+      Three differences from the pack, all of them the model winning over it.
+      The document requires server_type and image as well as name, where the
+      pack required only name and stored empty strings for the other two; a
+      request that omits either now fails the engine's model check with
+      invalid_input/400 rather than creating a server with no type. The
+      success status is 201, not the pack's 200. And the response carries
+      action, next_actions and root_password beside the server, all four of
+      which the document marks required.
+
+      The action is synthesized, not recorded: it is answered already
+      successful because the emulator creates the server synchronously, so
+      there is no interval in which a client polling the action would see it
+      running. A real create returns an action in progress. A client that
+      tests for that interval will not find it here.
+  - operation: CreateSshKey
+    note: >
+      The pack put the entire public key in the `fingerprint` member, which
+      the document describes as the MD5 fingerprint of the key. This answers a
+      digest instead -- md5hex of the armored key text -- so the member holds
+      a digest rather than the key. It is still not what ssh-keygen prints:
+      that is an MD5 of the base64-decoded key blob, grouped into colon-
+      separated pairs, and neither the decode nor the grouping is expressible
+      in the expression language. So the value has the wrong algorithm and the
+      wrong shape, and is recorded here rather than left to be discovered.
+
+      Uniqueness is enforced on the digest, which is one-to-one with the
+      public key the pack keyed on, so two keys collide exactly when the pack
+      said they did.
+  - operation: CreateSshKey
+    note: >
+      Nothing enforces that an SSH key's name is unique, though the document
+      says it must be unique per project: the pack indexed keys by public key
+      only, and this indexes them by the digest of one. Sixteen keys may share
+      a name here and the real API would refuse the second.
+  - operation: ListServers
+    note: >
+      The listing is unpaginated: page, per_page and last_page describe a
+      single page holding every record, whatever `page` and `per_page` the
+      request asked for. The pack ignored them too. A client that pages
+      through a large project sees the whole set on its first request and an
+      empty one on its second, which is not what Hetzner does.
+  - operation: ListSshKeys
+    note: Unpaginated, exactly as ListServers is.
+  - operation: DeleteSshKey
+    note: >
+      204 with no content, where the pack answered 200 with no body. Both are
+      bodyless, so nothing an SDK parses changes; a client that switches on
+      the status code sees a different number.

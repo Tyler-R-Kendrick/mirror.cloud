@@ -233,6 +233,70 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 404 || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("Content-Type") != "" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("head missing %d %#v %s", code, h, raw)
 	}
+	code, raw, _ = do(http.MethodPut, "/ctr/p", "", map[string]string{"x-ms-blob-type": "PageBlob", "x-ms-blob-content-length": "1024"})
+	if code != 201 {
+		t.Fatalf("create page blob %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodHead, "/ctr/p", "", nil)
+	if code != 200 || h.Get("x-ms-blob-type") != "PageBlob" || h.Get("Content-Length") != "1024" || h.Get("x-ms-blob-sequence-number") != "0" {
+		t.Fatalf("page head %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/p?comp=page", strings.Repeat("a", 512), map[string]string{"x-ms-page-write": "update", "x-ms-range": "bytes=0-511"})
+	if code != 201 {
+		t.Fatalf("put page %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/p?comp=page", strings.Repeat("b", 512), map[string]string{"x-ms-page-write": "update", "x-ms-range": "bytes=512-1023"})
+	if code != 201 {
+		t.Fatalf("put page 2 %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/p?comp=pagelist", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<Start>0</Start><End>1023</End>") {
+		t.Fatalf("page ranges %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/p?comp=pagelist", "", map[string]string{"x-ms-range": "bytes=0-511"})
+	if code != 200 || !strings.Contains(string(raw), "<Start>0</Start><End>511</End>") || strings.Contains(string(raw), "1023") {
+		t.Fatalf("clipped page ranges %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/p", "", nil)
+	if code != 200 || len(raw) != 1024 || string(raw[:512]) != strings.Repeat("a", 512) || string(raw[512:]) != strings.Repeat("b", 512) {
+		t.Fatalf("page download %d %d", code, len(raw))
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/p?comp=page", "", map[string]string{"x-ms-page-write": "clear", "x-ms-range": "bytes=0-511"})
+	if code != 201 {
+		t.Fatalf("clear pages %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/p?comp=pagelist", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<Start>512</Start><End>1023</End>") {
+		t.Fatalf("ranges after clear %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/p?comp=properties", "", map[string]string{"x-ms-blob-content-length": "512"})
+	if code != 200 {
+		t.Fatalf("resize %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodHead, "/ctr/p", "", nil)
+	if code != 200 || h.Get("Content-Length") != "512" {
+		t.Fatalf("head after resize %d %#v", code, h)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/p?comp=properties", "", map[string]string{"x-ms-sequence-number-action": "increment"})
+	if code != 200 {
+		t.Fatalf("sequence increment %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodHead, "/ctr/p", "", nil)
+	if code != 200 || h.Get("x-ms-blob-sequence-number") != "1" {
+		t.Fatalf("head after increment %d %#v", code, h)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/p?comp=page", strings.Repeat("a", 512), map[string]string{"x-ms-page-write": "update", "x-ms-range": "bytes=1536-2047"})
+	if code != 416 || h.Get("x-ms-error-code") != "RequestedRangeNotSatisfiable" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("put page beyond size %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/o?comp=page", strings.Repeat("a", 512), map[string]string{"x-ms-page-write": "update", "x-ms-range": "bytes=0-511"})
+	if code != 409 || h.Get("x-ms-error-code") != "InvalidBlobType" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("put page on block blob %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/p", "", map[string]string{"x-ms-blob-type": "PageBlob", "x-ms-blob-content-length": "512"})
+	if code != 409 || h.Get("x-ms-error-code") != "BlobAlreadyExists" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("recreate page blob %d %#v %s", code, h, raw)
+	}
 }
 
 func TestBootedServerAzureQueue(t *testing.T) {

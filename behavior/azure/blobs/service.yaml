@@ -82,6 +82,22 @@ errors:
     code: LeaseIdMismatchWithLeaseOperation
     http: 409
     fault: client
+  BlobAlreadyExists:
+    code: BlobAlreadyExists
+    http: 409
+    fault: client
+  InvalidBlobType:
+    code: InvalidBlobType
+    http: 409
+    fault: client
+  InvalidHeaderValue:
+    code: InvalidHeaderValue
+    http: 400
+    fault: client
+  RequestedRangeNotSatisfiable:
+    code: RequestedRangeNotSatisfiable
+    http: 416
+    fault: client
 
 operations:
   CreateContainer:
@@ -171,7 +187,8 @@ operations:
       content_disposition: "('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''"
       content_md5: "('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''"
       blob_type: "('blob_type' in rec && rec.blob_type != null && string(rec.blob_type) != '') ? string(rec.blob_type) : 'BlockBlob'"
-      content_length: "string(size(string(rec.value)))"
+      content_length: "string(blen(string(rec.value)))"
+      sequence_number: "('sequence_number' in rec && rec.sequence_number != null) ? string(rec.sequence_number) : ''"
 
   SetBlobMetadata:
     reads:
@@ -222,6 +239,134 @@ operations:
       content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
       content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
       content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
+
+  CreatePageBlob:
+    reads:
+      ctr: { resource: container }
+      existing: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "'content_length' in input && input.content_length != null", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.content_length) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+    effects:
+      - put:
+          resource: blob
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "zeros(int(input.content_length))"
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+            content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+            cache_control: ''
+            content_encoding: ''
+            content_language: ''
+            content_disposition: ''
+            content_md5: ''
+            blob_type: "'PageBlob'"
+            sequence_number: "('sequence_number' in input && input.sequence_number != null) ? string(int(input.sequence_number)) : '0'"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  PutPage:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'page_write' in input && string(input.page_write) == 'update'", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "'range_start' in input", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_start) % 512 == 0 && (int(input.range_end) + 1) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_end) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+      - { cond: "blen(('body' in input && input.body != null) ? string(input.body) : '') == int(input.range_end) - int(input.range_start) + 1", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            value: "substr(string(rec.value), 0, int(input.range_start)) + (('body' in input && input.body != null) ? string(input.body) : '') + substr(string(rec.value), int(input.range_end) + 1, blen(string(rec.value)))"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  ClearPages:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'range_start' in input", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_start) % 512 == 0 && (int(input.range_end) + 1) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_end) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            value: "substr(string(rec.value), 0, int(input.range_start)) + zeros(int(input.range_end) - int(input.range_start) + 1) + substr(string(rec.value), int(input.range_end) + 1, blen(string(rec.value)))"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  GetPageRanges:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "!('range_start' in input) || int(input.range_start) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+    let:
+      npages: "blen(string(rec.value)) / 512"
+      starts: "series(npages).filter(i, substr(string(rec.value), i * 512, i * 512 + 512) != zeros(512) && (i == 0 || substr(string(rec.value), (i - 1) * 512, i * 512) == zeros(512)))"
+      ends: "series(npages).filter(i, substr(string(rec.value), i * 512, i * 512 + 512) != zeros(512) && (i + 1 == npages || substr(string(rec.value), (i + 1) * 512, (i + 2) * 512) == zeros(512)))"
+      all: "series(size(starts)).map(j, {'start': starts[j] * 512, 'end': ends[j] * 512 + 511})"
+    output:
+      ranges: "('range_start' in input) ? all.filter(r, r.end >= int(input.range_start) && r.start <= int(input.range_end)).map(r, {'start': r.start > int(input.range_start) ? r.start : int(input.range_start), 'end': r.end < int(input.range_end) ? r.end : int(input.range_end)}) : all"
+
+  ResizePageBlob:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'content_length' in input && input.content_length != null", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.content_length) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            value: "int(input.content_length) > blen(string(rec.value)) ? string(rec.value) + zeros(int(input.content_length) - blen(string(rec.value))) : substr(string(rec.value), 0, int(input.content_length))"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  SetBlobSequenceNumber:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'sequence_number_action' in input && ['update', 'max', 'increment'].exists(a, a == string(input.sequence_number_action))", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "string(input.sequence_number_action) == 'increment' || 'sequence_number' in input", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+    let:
+      cur: "('sequence_number' in rec && rec.sequence_number != null) ? int(rec.sequence_number) : 0"
+      next: "string(input.sequence_number_action) == 'increment' ? cur + 1 : (string(input.sequence_number_action) == 'max' ? (cur > int(input.sequence_number) ? cur : int(input.sequence_number)) : int(input.sequence_number))"
+    effects:
+      - patch:
+          resource: blob
+          record:
+            sequence_number: "string(next)"
+    output:
+      sequence_number: "string(next)"
 
   ListBlobs:
     reads:

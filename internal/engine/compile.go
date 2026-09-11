@@ -303,6 +303,33 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.String(strings.Join(parts, fmt.Sprint(sep.Value())))
 			}))),
 
+		// zeros materializes n NUL bytes, bounded like series for the same
+		// reason: an unbounded repeat lets one request allocate without limit.
+		cel.Function("zeros", cel.Overload("zeros_1", []*cel.Type{num}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				n := asInt(v)
+				if n > zerosMax {
+					return types.NewErr(
+						"engine: zeros(%d) exceeds the %d the engine will build in one call", n, zerosMax)
+				}
+				return types.String(strings.Repeat("\x00", int(max(n, 0))))
+			}))),
+
+		// substr slices bytes, not code points: page arithmetic is defined on
+		// byte offsets and a body that is not UTF-8 must not shift them.
+		cel.Function("substr", cel.Overload("substr_3", []*cel.Type{str, num, num}, str,
+			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+				s := fmt.Sprint(args[0].Value())
+				start := max(int64(0), min(asInt(args[1]), int64(len(s))))
+				end := max(start, min(asInt(args[2]), int64(len(s))))
+				return types.String(s[start:end])
+			}))),
+
+		cel.Function("blen", cel.Overload("blen_1", []*cel.Type{str}, num,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				return types.Int(len(fmt.Sprint(v.Value())))
+			}))),
+
 		// queueFromArn is lastSegment with the ARN separator, named for the
 		// thing bundles actually write.
 		cel.Function("queueFromArn", cel.Overload("queueFromArn_1", []*cel.Type{str}, str,
@@ -348,6 +375,11 @@ func runtimeFuncs() []cel.EnvOption {
 // launch -- EC2's own RunInstances rejects counts far below it -- and finite,
 // which is the property that matters: the count comes from the request.
 const seriesMax = 1024
+
+// zerosMax bounds one zeros() call. A page blob create asks for its full
+// size up front; the bound is far above what the pinned Azurite tests stage
+// and far below the 8 TiB the real service allows.
+const zerosMax = 1 << 24
 
 func blank(v ref.Val) bool {
 	if v == nil || v == types.NullValue {

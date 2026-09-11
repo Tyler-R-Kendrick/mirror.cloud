@@ -115,6 +115,16 @@ func celFuncs() []cel.EnvOption {
 		// join concatenates a list of values with a separator. PutBlockList
 		// folds staged blocks in request order; CEL has no list join.
 		binaryDyn("join", dyn, str, str),
+		// zeros answers a string of n NUL bytes. Sparse fixed-size blobs (an
+		// Azure page blob is born as N zero bytes) need to materialize the
+		// zero fill somewhere, and CEL cannot repeat a character.
+		unaryDyn("zeros", num, str),
+		// substr is byte-based slicing, s[start:end] clamped to the string.
+		// CEL's own string functions count code points, which makes offset
+		// arithmetic wrong the moment a body is not UTF-8.
+		ternaryDyn("substr", str, num, num, str),
+		// blen is the byte length of a string, for the same reason.
+		unaryDyn("blen", str, num),
 		unaryDyn("queueFromArn", str, str),
 		binaryDyn("filterAttrs", dyn, dyn, dyn),
 

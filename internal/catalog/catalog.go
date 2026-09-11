@@ -307,6 +307,12 @@ func Bundle() *model.Bundle {
 		op("SetBlobMetadata", "PUT", "/{container}/{blob}?comp=metadata", 200, false),
 		op("GetBlobMetadata", "GET", "/{container}/{blob}?comp=metadata", 200, true),
 		op("SetBlobProperties", "PUT", "/{container}/{blob}?comp=properties", 200, false),
+		op("CreatePageBlob", "PUT", "/{container}/{blob}", 201, false),
+		op("PutPage", "PUT", "/{container}/{blob}?comp=page", 201, false),
+		op("ClearPages", "PUT", "/{container}/{blob}?comp=page", 201, false),
+		op("GetPageRanges", "GET", "/{container}/{blob}?comp=pagelist", 200, true),
+		op("ResizePageBlob", "PUT", "/{container}/{blob}?comp=properties", 200, false),
+		op("SetBlobSequenceNumber", "PUT", "/{container}/{blob}?comp=properties", 200, false),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
@@ -335,6 +341,12 @@ func Bundle() *model.Bundle {
 	azureSvc.OperationByName("SetBlobMetadata").Output = "Blob"
 	azureSvc.OperationByName("GetBlobMetadata").Output = "Blob"
 	azureSvc.OperationByName("SetBlobProperties").Output = "Blob"
+	azureSvc.OperationByName("CreatePageBlob").Output = "Blob"
+	azureSvc.OperationByName("PutPage").Output = "Blob"
+	azureSvc.OperationByName("ClearPages").Output = "Blob"
+	azureSvc.OperationByName("ResizePageBlob").Output = "Blob"
+	azureSvc.OperationByName("SetBlobSequenceNumber").Output = "Blob"
+	azureSvc.OperationByName("GetPageRanges").Output = "PageRangeList"
 	azureSvc.Shapes = map[string]model.Shape{
 		"String": {ID: "String", Kind: model.KindString},
 		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
@@ -361,6 +373,7 @@ func Bundle() *model.Bundle {
 			"content_language":    {Shape: "String"},
 			"content_disposition": {Shape: "String"},
 			"content_md5":         {Shape: "String"},
+			"sequence_number":     {Shape: "String"},
 			"blob_type":           {Shape: "String"},
 			"content_length":      {Shape: "String"},
 		}},
@@ -371,6 +384,14 @@ func Bundle() *model.Bundle {
 			"value": {Shape: "String"},
 		}},
 		"BlockList": {ID: "BlockList", Kind: model.KindList, Member: "Block"},
+		"PageRange": {ID: "PageRange", Kind: model.KindStructure, Members: map[string]model.Member{
+			"start": {Shape: "String"},
+			"end":   {Shape: "String"},
+		}},
+		"PageRanges": {ID: "PageRanges", Kind: model.KindList, Member: "PageRange"},
+		"PageRangeList": {ID: "PageRangeList", Kind: model.KindStructure, Members: map[string]model.Member{
+			"ranges": {Shape: "PageRanges"},
+		}},
 		"Account": {ID: "Account", Kind: model.KindStructure, Members: map[string]model.Member{
 			"properties":   {Shape: "String"},
 			"geo_status":   {Shape: "String"},

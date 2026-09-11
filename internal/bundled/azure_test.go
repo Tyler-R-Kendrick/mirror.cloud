@@ -278,6 +278,93 @@ func TestAzureBlobMetadataPropertiesHead(t *testing.T) {
 	}
 }
 
+func TestAzurePageBlob(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	fault := func(op string, in map[string]any, status int, code string) {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		f, ok := err.(*spi.Fault)
+		if !ok || f.HTTPStatus != status || f.Code != code {
+			t.Fatalf("%s: got %#v, want %d %s", op, err, status, code)
+		}
+	}
+	pageIn := func(start, end int64, body string) map[string]any {
+		return map[string]any{"container": "ctr", "blob": "p", "page_write": "update",
+			"range_start": start, "range_end": end, "body": body}
+	}
+
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	inv("CreatePageBlob", map[string]any{"container": "ctr", "blob": "p", "content_length": "1024"})
+	props := inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "p"})
+	if props.Output["blob_type"] != "PageBlob" || props.Output["content_length"] != "1024" || props.Output["sequence_number"] != "0" {
+		t.Fatalf("page properties %#v", props.Output)
+	}
+	dl := inv("GetBlob", map[string]any{"container": "ctr", "blob": "p"})
+	if raw := fmt.Sprint(dl.Output["_raw"]); len(raw) != 1024 || strings.Count(raw, "\x00") != 1024 {
+		t.Fatalf("fresh page blob download %d bytes", len(raw))
+	}
+
+	inv("PutPage", pageIn(0, 511, strings.Repeat("a", 512)))
+	inv("PutPage", pageIn(512, 1023, strings.Repeat("b", 512)))
+	ranges := inv("GetPageRanges", map[string]any{"container": "ctr", "blob": "p"})
+	got, _ := ranges.Output["ranges"].([]any)
+	if len(got) != 1 || fmt.Sprint(got[0].(map[string]any)["start"]) != "0" || fmt.Sprint(got[0].(map[string]any)["end"]) != "1023" {
+		t.Fatalf("merged ranges %#v", ranges.Output)
+	}
+	clipped := inv("GetPageRanges", map[string]any{"container": "ctr", "blob": "p", "range_start": int64(0), "range_end": int64(511)})
+	got, _ = clipped.Output["ranges"].([]any)
+	if len(got) != 1 || fmt.Sprint(got[0].(map[string]any)["end"]) != "511" {
+		t.Fatalf("clipped ranges %#v", clipped.Output)
+	}
+
+	inv("ClearPages", map[string]any{"container": "ctr", "blob": "p", "range_start": int64(0), "range_end": int64(511)})
+	dl = inv("GetBlob", map[string]any{"container": "ctr", "blob": "p"})
+	raw := fmt.Sprint(dl.Output["_raw"])
+	if len(raw) != 1024 || raw[:512] != strings.Repeat("\x00", 512) || raw[512:] != strings.Repeat("b", 512) {
+		t.Fatalf("after clear %q", raw[:32])
+	}
+
+	inv("ResizePageBlob", map[string]any{"container": "ctr", "blob": "p", "content_length": "512"})
+	props = inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "p"})
+	if props.Output["content_length"] != "512" {
+		t.Fatalf("shrunk %#v", props.Output)
+	}
+	inv("ResizePageBlob", map[string]any{"container": "ctr", "blob": "p", "content_length": "1536"})
+	props = inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "p"})
+	if props.Output["content_length"] != "1536" {
+		t.Fatalf("grown %#v", props.Output)
+	}
+
+	if out := inv("SetBlobSequenceNumber", map[string]any{"container": "ctr", "blob": "p", "sequence_number_action": "increment"}); out.Output["sequence_number"] != "1" {
+		t.Fatalf("increment %#v", out.Output)
+	}
+	if out := inv("SetBlobSequenceNumber", map[string]any{"container": "ctr", "blob": "p", "sequence_number_action": "update", "sequence_number": "10"}); out.Output["sequence_number"] != "10" {
+		t.Fatalf("update %#v", out.Output)
+	}
+	if out := inv("SetBlobSequenceNumber", map[string]any{"container": "ctr", "blob": "p", "sequence_number_action": "max", "sequence_number": "5"}); out.Output["sequence_number"] != "10" {
+		t.Fatalf("max %#v", out.Output)
+	}
+
+	fault("CreatePageBlob", map[string]any{"container": "ctr", "blob": "p", "content_length": "512"}, 409, "BlobAlreadyExists")
+	fault("CreatePageBlob", map[string]any{"container": "ctr", "blob": "bad", "content_length": "100"}, 400, "InvalidHeaderValue")
+	fault("PutPage", map[string]any{"container": "ctr", "blob": "missing", "page_write": "update", "range_start": int64(0), "range_end": int64(511), "body": strings.Repeat("a", 512)}, 404, "BlobNotFound")
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "x"})
+	fault("PutPage", map[string]any{"container": "ctr", "blob": "o", "page_write": "update", "range_start": int64(0), "range_end": int64(511), "body": strings.Repeat("a", 512)}, 409, "InvalidBlobType")
+	fault("PutPage", map[string]any{"container": "ctr", "blob": "p", "page_write": "update", "range_start": int64(1), "range_end": int64(512), "body": strings.Repeat("a", 512)}, 400, "InvalidHeaderValue")
+	fault("PutPage", map[string]any{"container": "ctr", "blob": "p", "page_write": "update", "range_start": int64(1536), "range_end": int64(2047), "body": strings.Repeat("a", 512)}, 416, "RequestedRangeNotSatisfiable")
+	fault("GetPageRanges", map[string]any{"container": "ctr", "blob": "o"}, 409, "InvalidBlobType")
+}
+
 func TestAzurePutBlockListFoldsInRequestOrder(t *testing.T) {
 	p := azurePack(t)
 	ctx := context.Background()

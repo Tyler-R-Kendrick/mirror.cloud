@@ -869,6 +869,35 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 			t.Errorf("azure lease %s: %#v %v, want %s", action, op, err, want)
 		}
 	}
+	for name, test := range map[string]struct {
+		path, header, value, want string
+	}{
+		"create page blob": {"/c/o", "x-ms-blob-type", "PageBlob", "CreatePageBlob"},
+		"put page":         {"/c/o?comp=page", "x-ms-page-write", "update", "PutPage"},
+		"clear pages":      {"/c/o?comp=page", "x-ms-page-write", "clear", "ClearPages"},
+		"resize":           {"/c/o?comp=properties", "x-ms-blob-content-length", "512", "ResizePageBlob"},
+		"sequence number":  {"/c/o?comp=properties", "x-ms-sequence-number-action", "increment", "SetBlobSequenceNumber"},
+	} {
+		req := httptest.NewRequest(http.MethodPut, test.path, nil)
+		req.Header.Set(test.header, test.value)
+		op, err := codec.Route(az, req)
+		if err != nil || op.Name != test.want {
+			t.Errorf("azure %s: %#v %v, want %s", name, op, err, test.want)
+		}
+	}
+	if op, err := codec.Route(az, httptest.NewRequest(http.MethodGet, "/c/o?comp=pagelist", nil)); err != nil || op.Name != "GetPageRanges" {
+		t.Errorf("azure page ranges: %#v %v", op, err)
+	}
+	if op, err := codec.Route(az, httptest.NewRequest(http.MethodPut, "/c/o?comp=pagelist", nil)); err != nil || op.Name != "UnsupportedQuery" {
+		t.Errorf("azure page ranges put: %#v %v", op, err)
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(az, &model.Operation{Name: "GetPageRanges"}, w, &spi.Response{Output: map[string]any{"ranges": []any{map[string]any{"start": 0, "end": 511}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "<PageRange><Start>0</Start><End>511</End></PageRange>") {
+		t.Fatalf("azure page ranges encode %d %s", w.Code, w.Body.String())
+	}
 	w = httptest.NewRecorder()
 	if err := codec.Encode(az, &model.Operation{Name: "ListContainers"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"name": "c"}}, "_kind": "containers"}}); err != nil {
 		t.Fatal(err)

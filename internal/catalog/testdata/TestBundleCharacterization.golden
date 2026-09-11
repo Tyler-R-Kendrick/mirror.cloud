@@ -829,7 +829,13 @@
       "GetBlobProperties",
       "SetBlobMetadata",
       "GetBlobMetadata",
-      "SetBlobProperties"
+      "SetBlobProperties",
+      "CreatePageBlob",
+      "PutPage",
+      "ClearPages",
+      "GetPageRanges",
+      "ResizePageBlob",
+      "SetBlobSequenceNumber"
     ]
   },
   {

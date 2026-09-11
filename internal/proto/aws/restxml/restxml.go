@@ -452,10 +452,32 @@ func azureRoute(r *http.Request) string {
 			}
 			return "GetBlobMetadata"
 		case "properties":
+			if r.Header.Get("x-ms-blob-content-length") != "" {
+				return "ResizePageBlob"
+			}
+			if r.Header.Get("x-ms-sequence-number-action") != "" || r.Header.Get("x-ms-blob-sequence-number") != "" {
+				return "SetBlobSequenceNumber"
+			}
 			return "SetBlobProperties"
+		case "page":
+			if m != http.MethodPut {
+				return "UnsupportedQuery"
+			}
+			if r.Header.Get("x-ms-page-write") == "clear" {
+				return "ClearPages"
+			}
+			return "PutPage"
+		case "pagelist":
+			if m != http.MethodGet {
+				return "UnsupportedQuery"
+			}
+			return "GetPageRanges"
 		case "":
 			switch m {
 			case http.MethodPut:
+				if strings.EqualFold(r.Header.Get("x-ms-blob-type"), "PageBlob") {
+					return "CreatePageBlob"
+				}
 				return "PutBlob"
 			case http.MethodHead:
 				return "GetBlobProperties"
@@ -523,6 +545,21 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 			in["content_language"] = vs[0]
 		case "x-ms-blob-content-disposition":
 			in["content_disposition"] = vs[0]
+		case "x-ms-blob-content-length":
+			in["content_length"] = vs[0]
+		case "x-ms-blob-sequence-number":
+			in["sequence_number"] = vs[0]
+		case "x-ms-sequence-number-action":
+			in["sequence_number_action"] = vs[0]
+		}
+	}
+	if s, ok := in["range"].(string); ok {
+		// "bytes=start-end" (a bare "-end" suffix range is left unparsed and
+		// the operation's own requires decide what that means).
+		var start, end int64
+		if n, _ := fmt.Sscanf(s, "bytes=%d-%d", &start, &end); n == 2 {
+			in["range_start"] = start
+			in["range_end"] = end
 		}
 	}
 	if len(meta) > 0 {
@@ -651,7 +688,7 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		}
 		decodeAzureHeaders(in, r)
 		req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
-		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList" || op.Name == "AppendBlock" || op.Name == "SetContainerAcl" || op.Name == "SetServiceProperties") && r.Body != nil {
+		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList" || op.Name == "AppendBlock" || op.Name == "SetContainerAcl" || op.Name == "SetServiceProperties" || op.Name == "PutPage") && r.Body != nil {
 			body, _ := io.ReadAll(r.Body)
 			in["body"] = string(body)
 			if op.Name == "PutBlockList" {
@@ -2230,6 +2267,22 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 		w.WriteHeader(status)
 		return nil
 	}
+	if resp != nil && resp.Output != nil && op == "GetPageRanges" {
+		b := &strings.Builder{}
+		b.WriteString(`<?xml version="1.0" encoding="utf-8"?><PageList>`)
+		if ranges, ok := resp.Output["ranges"].([]any); ok {
+			for _, r := range ranges {
+				if m, ok := r.(map[string]any); ok {
+					fmt.Fprintf(b, "<PageRange><Start>%v</Start><End>%v</End></PageRange>", m["start"], m["end"])
+				}
+			}
+		}
+		b.WriteString(`</PageList>`)
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
 	if resp != nil && resp.Output != nil && op == "GetContainerAcl" {
 		body := strAny(resp.Output["acl"])
 		if body == "" {
@@ -2353,6 +2406,9 @@ func writeAzureBlobHeaders(w http.ResponseWriter, resp *spi.Response) {
 	}
 	if s := strAny(out["blob_type"]); s != "" {
 		w.Header().Set("x-ms-blob-type", s)
+	}
+	if s := strAny(out["sequence_number"]); s != "" {
+		w.Header().Set("x-ms-blob-sequence-number", s)
 	}
 	if s := strAny(out["content_length"]); s != "" {
 		w.Header().Set("Content-Length", s)

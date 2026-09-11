@@ -95,11 +95,11 @@ Authority: official DigitalOcean API v2 (`api.digitalocean.com` `/v2/droplets` a
 |---|---|
 | `POST /v2/droplets` (`CreateDroplet`) | Booted create returns `{droplet}`; atomic empty name 422; BDD create |
 | `GET /v2/droplets` (`ListDroplets`) | Booted list wraps `{droplets, meta.total}`; characterization `list`; BDD lists after create |
-| `GET /v2/droplets/{id}` (`GetDroplet`) | Booted get-after-set; missing droplet HTTP 404 `{id:"not_found"}` without `x-amzn-errortype` |
+| `GET /v2/droplets/{id}` (`GetDroplet`) | Booted GET on `api.digitalocean.com` returns `{droplet}` with the same id as create; missing droplet HTTP 404 `{id:"not_found"}` without `x-amzn-errortype` |
 | `DELETE /v2/droplets/{id}` (`DeleteDroplet`) | Booted delete is HTTP 204 empty body; characterization `delete`; `TestDeleteMissingDropletAndDomain` and booted DELETE of missing id are HTTP 404 `{id:"not_found"}` with no `x-amzn-errortype`; mutant `digitalocean-delete-missing-droplet-as-success` |
 | `POST /v2/domains` (`CreateDomain`) | Atomic empty 422 and duplicate 409; BDD create; chaos `TestDigitalOceanConcurrentDuplicateDomains`; mutants `digitalocean-accept-empty-domain` and `digitalocean-accept-duplicate-domain` |
 | `GET /v2/domains` (`ListDomains`) | Characterization `domains`; BDD lists after create |
-| `GET /v2/domains/{name}` (`GetDomain`) | Booted POST then GET returns the stored domain; missing domain 404; mutant `digitalocean-get-missing-domain-as-empty` |
+| `GET /v2/domains/{name}` (`GetDomain`) | Booted POST then GET returns the stored domain; missing domain HTTP 404 `{id:"not_found"}` without `x-amzn-errortype`; mutant `digitalocean-get-missing-domain-as-empty` |
 | `DELETE /v2/domains/{name}` (`DeleteDomain`) | Atomic 204; characterization `del_domain`; booted and BDD DELETE of missing name are HTTP 404 `{id:"not_found"}`; characterization `del_miss_n`; mutant `digitalocean-delete-missing-domain-as-success` |
 | DigitalOcean faults vs AWS faults | restJson1 `Encode` wraps singular/plural keys plus `meta.total`; `EncodeFault` uses `{id,message}` and omits `x-amzn-errortype`; mutant `digitalocean-encode-aws-fault` |
 

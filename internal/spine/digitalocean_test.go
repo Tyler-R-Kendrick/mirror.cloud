@@ -60,7 +60,8 @@ func TestBootedServerDigitalOceanAPI(t *testing.T) {
 	}
 	code, raw, _ = do(http.MethodGet, "/v2/droplets/"+id, "")
 	_ = json.Unmarshal(raw, &env)
-	if code != 200 || env["droplet"] == nil {
+	gotDrop, _ := env["droplet"].(map[string]any)
+	if code != 200 || strconv.Itoa(int(gotDrop["id"].(float64))) != id {
 		t.Fatalf("get droplet %d %s", code, raw)
 	}
 	code, raw, _ = do(http.MethodPost, "/v2/domains", `{"name":"boot.test"}`)

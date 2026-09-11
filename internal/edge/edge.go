@@ -451,29 +451,43 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			}
 		}
 	}
-	if flyRequest(r) {
-		return s.bundle.ServiceByID("fly.machines")
-	}
-	if railwayRequest(r) {
-		return s.bundle.ServiceByID("railway.graphql")
-	}
-	if hetznerRequest(r) {
-		return s.bundle.ServiceByID("hetzner.v1")
-	}
-	if digitaloceanRequest(r) {
-		return s.bundle.ServiceByID("digitalocean.v2")
-	}
-	if azureRequest(r) {
-		return s.bundle.ServiceByID("azure.blobs")
-	}
-	if cloudflareRequest(r) {
-		return s.bundle.ServiceByID("cloudflare.kv")
-	}
-	if hostingerRequest(r) {
-		return s.bundle.ServiceByID("hostinger.dns")
-	}
-	if vercelRequest(r) {
-		return s.bundle.ServiceByID("vercel.api")
+	// The provider guesses below claim a path rather than an endpoint, and a
+	// path is not theirs to claim when the request has already said which AWS
+	// service it is for. `flyRequest` is true of any path containing
+	// `/v1/apps`, which is also AWS Pinpoint's GetApps, so a signed Pinpoint
+	// request was answered by Fly. This is the third time a new provider has
+	// taken an AWS service this way -- Vercel took ECR and IoT Wireless by
+	// name, Fly took Pinpoint by path -- so the guard is on the class rather
+	// than on the instance.
+	//
+	// An SDK says which service it means in ways a provider client never does:
+	// a SigV4 credential scope, an X-Amz-Target, an AWS endpoint host. Where
+	// one of those is present and the model can place it, the model wins.
+	if !awsAddressed(r) || s.resolveByModel(r) == nil {
+		if flyRequest(r) {
+			return s.bundle.ServiceByID("fly.machines")
+		}
+		if railwayRequest(r) {
+			return s.bundle.ServiceByID("railway.graphql")
+		}
+		if hetznerRequest(r) {
+			return s.bundle.ServiceByID("hetzner.v1")
+		}
+		if digitaloceanRequest(r) {
+			return s.bundle.ServiceByID("digitalocean.v2")
+		}
+		if azureRequest(r) {
+			return s.bundle.ServiceByID("azure.blobs")
+		}
+		if cloudflareRequest(r) {
+			return s.bundle.ServiceByID("cloudflare.kv")
+		}
+		if hostingerRequest(r) {
+			return s.bundle.ServiceByID("hostinger.dns")
+		}
+		if vercelRequest(r) {
+			return s.bundle.ServiceByID("vercel.api")
+		}
 	}
 	if svc := s.resolveByModel(r); svc != nil {
 		return svc
@@ -508,6 +522,23 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
+}
+
+// awsAddressed reports whether the request names an AWS service the way an AWS
+// client does. A provider client sends none of these: Fly, Vercel and the rest
+// authenticate with a bearer token and address a bare host.
+func awsAddressed(r *http.Request) bool {
+	if r.Header.Get("X-Amz-Target") != "" {
+		return true
+	}
+	if credentialScopeService(r.Header.Get("Authorization")) != "" {
+		return true
+	}
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	return strings.HasSuffix(host, ".amazonaws.com") || strings.HasSuffix(host, ".api.aws")
 }
 
 func flyRequest(r *http.Request) bool {

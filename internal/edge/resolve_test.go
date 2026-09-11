@@ -423,16 +423,22 @@ func TestCredentialScopeService(t *testing.T) {
 	}
 }
 
-// TestHostLabel takes the service prefix of an endpoint host, and nothing from
-// a host that has no service in it. Dotted AWS prefixes stay intact so
-// `api.ecr` is not the same label as Vercel's `api`.
+// TestHostLabel takes the leading label of an endpoint host, and nothing from a
+// host that has no service in it. A dotted prefix like `api.ecr` is not its job:
+// serviceByHostPrefix matches those against the whole prefix the model records,
+// which is what TestADottedEndpointPrefixIsNotItsLeadingLabel covers.
 func TestHostLabel(t *testing.T) {
 	for _, tc := range []struct{ host, want string }{
 		{"guardduty.us-east-1.amazonaws.com", "guardduty"},
 		{"GuardDuty.us-east-1.amazonaws.com:443", "guardduty"},
-		{"api.ecr.us-east-1.amazonaws.com", "api.ecr"},
-		{"api.iotwireless.us-east-1.amazonaws.com", "api.iotwireless"},
-		{"data.iot.us-east-1.amazonaws.com", "data.iot"},
+		// The FIPS marker is stripped, so a FIPS client reaches the service it
+		// asked for rather than whatever the demux falls back to.
+		{"guardduty-fips.us-east-1.amazonaws.com", "guardduty"},
+		// A dotted prefix reads as its leading label here and is resolved by
+		// serviceByHostPrefix instead; the three in the bundle are pinned at
+		// the level that matters by TestADottedEndpointPrefixIsNotItsLeadingLabel.
+		{"api.ecr.us-east-1.amazonaws.com", "api"},
+		{"data.iot.us-east-1.amazonaws.com", "data"},
 		{"s3.amazonaws.com", "s3"},
 		{"localhost:4566", "localhost"},
 		{"127.0.0.1:4566", "127"},
@@ -440,6 +446,42 @@ func TestHostLabel(t *testing.T) {
 	} {
 		if got := hostLabel(tc.host); got != tc.want {
 			t.Errorf("hostLabel(%q) = %q, want %q", tc.host, got, tc.want)
+		}
+	}
+}
+
+// TestEveryEndpointVariantReachesItsService covers the endpoint forms a client
+// is configured into rather than the plain one every test had been using.
+//
+// A FIPS endpoint suffixes the service label -- `dynamodb-fips.<region>` -- and
+// nothing matched that, so every one of them fell past the model to the
+// path-style S3 default at the bottom of the demux. A client asking DynamoDB a
+// question got S3's answer, and got it silently, because a wrong service still
+// replies. The dualstack form inserts labels after the service instead, which a
+// whole-prefix match already reads past.
+func TestEveryEndpointVariantReachesItsService(t *testing.T) {
+	bundle := catalog.Bundle()
+	server := &Server{bundle: bundle}
+	for host, want := range map[string]string{
+		"guardduty.us-east-1.amazonaws.com":                 "aws.guardduty",
+		"guardduty-fips.us-east-1.amazonaws.com":            "aws.guardduty",
+		"dynamodb-fips.us-east-1.amazonaws.com":             "aws.dynamodb",
+		"kms-fips.us-east-1.amazonaws.com":                  "aws.kms",
+		"api.ecr.us-east-1.amazonaws.com":                   "aws.api.ecr",
+		"api.ecr-fips.us-east-1.amazonaws.com":              "aws.api.ecr",
+		"api.ecr.dualstack.us-east-1.amazonaws.com":         "aws.api.ecr",
+		"api.iotwireless.dualstack.us-east-1.amazonaws.com": "aws.iotwireless",
+		"dynamodb.us-east-1.api.aws":                        "aws.dynamodb",
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		r.Host = host
+		got := server.demux(r)
+		if got == nil {
+			t.Errorf("%s resolved to nothing, want %s", host, want)
+			continue
+		}
+		if got.ID != want {
+			t.Errorf("%s resolved to %s, want %s", host, got.ID, want)
 		}
 	}
 }
@@ -550,5 +592,45 @@ func TestTheLongestEndpointPrefixWins(t *testing.T) {
 		if id != want {
 			t.Errorf("%s resolved to %q, want %q", host, id, want)
 		}
+	}
+}
+
+// TestAProviderPathGuessDoesNotTakeAnAddressedAWSService pins the class of bug
+// that has now broken three AWS services.
+//
+// Each provider is matched by a substring guess over the path, and a path is
+// shared: `flyRequest` is true of anything containing `/v1/apps`, which is also
+// AWS Pinpoint's GetApps. Those guesses run before the model, so Pinpoint was
+// answered by Fly -- and nothing in Pinpoint's own tests could see it, because
+// the collision arrived with a different service.
+//
+// A request that names its service the way an SDK does is answered from the
+// model. A provider client sends none of that, so its own routing is untouched,
+// which the second half of this test holds.
+func TestAProviderPathGuessDoesNotTakeAnAddressedAWSService(t *testing.T) {
+	bundle := catalog.Bundle()
+	server := &Server{bundle: bundle}
+
+	signed := httptest.NewRequest(http.MethodGet, "/v1/apps", nil)
+	signed.Host = "pinpoint.us-east-1.amazonaws.com"
+	signed.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=t/20200101/us-east-1/"+
+		"mobiletargeting/aws4_request, SignedHeaders=host, Signature=0")
+	if got := server.demux(signed); got == nil || got.ID != "aws.pinpoint" {
+		name := "nothing"
+		if got != nil {
+			name = got.ID
+		}
+		t.Errorf("a signed Pinpoint GetApps resolved to %s", name)
+	}
+
+	// The same path with no AWS addressing is still Fly's.
+	bare := httptest.NewRequest(http.MethodGet, "/v1/apps", nil)
+	bare.Host = "127.0.0.1:4566"
+	if got := server.demux(bare); got == nil || got.ID != "fly.machines" {
+		name := "nothing"
+		if got != nil {
+			name = got.ID
+		}
+		t.Errorf("an unaddressed /v1/apps resolved to %s, want fly.machines", name)
 	}
 }

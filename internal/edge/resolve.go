@@ -48,10 +48,7 @@ func (s *Server) resolveByModel(r *http.Request) *model.Service {
 // prefix that is itself dotted. The longest such prefix wins, so a service
 // reached at `api.ecr` is not shadowed by one reached at `api`.
 func (s *Server) serviceByHostPrefix(host string) *model.Service {
-	host = strings.ToLower(host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
+	host = endpointHost(host)
 	if host == "" {
 		return nil
 	}
@@ -88,27 +85,40 @@ var clientSpellings = map[string]string{
 	"directoryservice": "aws.ds",
 }
 
-// hostLabel is the service prefix of an endpoint host: the `guardduty` of
-// `guardduty.us-east-1.amazonaws.com`, and the `api.ecr` of
-// `api.ecr.us-east-1.amazonaws.com`. A first-label-only cut would map ECR and
-// IoT Wireless to `api`, which is `vercel.api`'s short name. A bare host with
-// no dots -- `localhost`, an IP -- has no service in it, and returning it
-// costs nothing because it will not match any endpoint prefix.
-func hostLabel(host string) string {
+// endpointHost strips the port and the endpoint variant a client may have been
+// configured to use, leaving the host the model's endpoint prefixes describe.
+//
+// AWS marks a FIPS endpoint by suffixing the service label: DynamoDB's is
+// `dynamodb-fips.<region>.amazonaws.com` and ECR's is
+// `api.ecr-fips.<region>...`. Nothing matched those, so every FIPS endpoint fell
+// past the model to the path-style S3 default at the bottom of the demux, and a
+// client asking DynamoDB a question got S3's answer -- silently, because a wrong
+// service still replies.
+//
+// The dualstack form needs nothing: it inserts labels after the service rather
+// than changing it, and a prefix match already reads only the leading ones.
+func endpointHost(host string) string {
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
 	}
 	host = strings.ToLower(host)
-	if strings.HasSuffix(host, ".amazonaws.com") {
-		rest := strings.TrimSuffix(host, ".amazonaws.com")
-		parts := strings.Split(rest, ".")
-		// ponytail: hyphenated trailing label = region (us-east-1); dualstack/fips extra labels need a real region table.
-		if n := len(parts); n >= 2 && strings.Contains(parts[n-1], "-") {
-			parts = parts[:n-1]
-		}
-		return strings.Join(parts, ".")
+	// The marker counts only where a label ends with it, so a service whose own
+	// name contains the letters is left alone.
+	return strings.ReplaceAll(host, "-fips.", ".")
+}
+
+// hostLabel is the leading label of an endpoint host: the `guardduty` of
+// `guardduty.us-east-1.amazonaws.com`. A dotted prefix like `api.ecr` is not
+// this function's job -- serviceByHostPrefix matches those against the whole
+// prefix the model records, which also carries the dualstack form that a
+// region-stripping heuristic here could not. A bare host with no dots --
+// `localhost`, an IP -- has no service in it, and returning it costs nothing
+// because it will not match any endpoint prefix.
+func hostLabel(host string) string {
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
 	}
-	label, _, _ := strings.Cut(host, ".")
+	label, _, _ := strings.Cut(endpointHost(host), ".")
 	return label
 }
 

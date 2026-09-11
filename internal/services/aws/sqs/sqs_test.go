@@ -3501,9 +3501,31 @@ func TestMessageMoveTaskDestinationDeletionCharacterization(t *testing.T) {
 		t.Fatalf("task did not fail after destination deletion: %#v", result)
 	}
 	left, _, _ := p.col(&spi.Request{Identity: id}, "msgs:move-delete-dlq").List(ctx, "", "", 0)
+	// The split between moved and left is a race, not behavior. The task is
+	// started with MaxNumberOfMessagesPerSecond: 1 on the real clock and the
+	// destination is deleted immediately after, so whether the loop lands one
+	// message before the delete depends on how the two goroutines are
+	// scheduled. This golden used to record moved: 0 / messagesLeft: 3, which
+	// held only while the delete won; under load it does not, and CI saw
+	// moved: 1 / messagesLeft: 2.
+	//
+	// What the operation actually promises is that a destination vanishing
+	// mid-task fails the task and loses nothing, so that is what is asserted --
+	// and it is the stronger claim: `moved: 0` would still have passed if the
+	// emulator had dropped a message on the floor.
+	// `moved` is already the bool from the moveOne probe above.
+	movedCount := 0
+	switch v := result["ApproximateNumberOfMessagesMoved"].(type) {
+	case int:
+		movedCount = v
+	case int64:
+		movedCount = int(v)
+	case float64:
+		movedCount = int(v)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"taskHandlePresent": str(started.Output["TaskHandle"]) != "", "status": result["Status"],
-		"moved": result["ApproximateNumberOfMessagesMoved"], "failureReason": result["FailureReason"], "messagesLeft": len(left),
+		"failureReason": result["FailureReason"], "noMessageLost": movedCount+len(left) == 3,
 	})
 }
 

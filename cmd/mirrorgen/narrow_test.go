@@ -176,3 +176,44 @@ func TestLoadSetReadsASelector(t *testing.T) {
 		t.Fatal("a malformed selector loaded as though there were none")
 	}
 }
+
+// TestCatalogModeIgnoresAPathSelector pins the reason applySet takes a flag.
+//
+// A `paths=` selector is a statement about the vendor's document. The
+// bootstrap catalog is a hand-written stand-in whose bindings are
+// approximations -- most of its operations sit at POST / because nothing there
+// ever needed a URI -- so a selector written against the vendor's paths
+// matches none of them. Since narrow treats a selector that matches nothing as
+// fatal, and rightly so, applying one to the catalog does not narrow the
+// catalog: it takes `mirrorgen --catalog` down for that service and every
+// service after it.
+//
+// The stand-in here is deliberately a service whose operation URI is "/", the
+// catalog's own shape, against a selector that is perfectly good for the real
+// document. Out of catalog mode the same call must still fail, because a
+// selector that matches nothing in the vendor's document is a real defect and
+// this must not become a licence to ignore selectors generally.
+func TestCatalogModeIgnoresAPathSelector(t *testing.T) {
+	stub := model.Service{
+		ID:         "vendor.api",
+		Operations: []model.Operation{{Name: "KvGet", HTTP: model.HTTPBinding{Method: "POST", URI: "/"}, Input: "In", Output: "Out"}},
+		Shapes: map[string]model.Shape{
+			"In":  {ID: "In", Kind: model.KindStructure},
+			"Out": {ID: "Out", Kind: model.KindStructure},
+		},
+	}
+	want := []setEntry{{ID: "vendor.api", Tier: model.TierMock, Paths: []string{"/v4/kv/"}}}
+
+	got, err := applySet([]model.Service{stub}, want, true)
+	if err != nil {
+		t.Fatalf("catalog mode: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Operations) != 1 {
+		t.Fatalf("catalog mode: got %d service(s) with %d operation(s), want the stand-in untouched",
+			len(got), len(got[0].Operations))
+	}
+
+	if _, err := applySet([]model.Service{stub}, want, false); err == nil {
+		t.Error("spec mode: a selector that matches no operation must still be fatal")
+	}
+}

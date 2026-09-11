@@ -210,6 +210,39 @@ func TestAzureContainerMetadataAclLease(t *testing.T) {
 	}
 }
 
+func TestAzureServicePropertiesStatsAccountInfo(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetServiceProperties", Input: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Output["properties"] != "" && got.Output["properties"] != nil {
+		t.Fatalf("default properties %#v", got.Output)
+	}
+	body := "<StorageServiceProperties><Cors /></StorageServiceProperties>"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetServiceProperties", Input: map[string]any{"body": body}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetServiceProperties", Input: map[string]any{}})
+	if err != nil || fmt.Sprint(got.Output["properties"]) != body {
+		t.Fatalf("roundtrip %#v %v", got, err)
+	}
+	acct, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetAccountInfo", Input: map[string]any{}})
+	if err != nil || acct.Output["account_kind"] != "StorageV2" || acct.Output["sku_name"] != "Standard_RAGRS" || acct.Output["hns"] != "false" {
+		t.Fatalf("account %#v %v", acct, err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetServiceStats", Input: map[string]any{}})
+	if f, ok := err.(*spi.Fault); !ok || f.Code != "InvalidQueryParameterValue" || f.HTTPStatus != 400 {
+		t.Fatalf("stats primary %#v", err)
+	}
+	st, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetServiceStats", Input: map[string]any{"secondary": true}})
+	if err != nil || st.Output["geo_status"] != "live" {
+		t.Fatalf("stats secondary %#v %v", st, err)
+	}
+}
+
 func TestAzurePutBlockListFoldsInRequestOrder(t *testing.T) {
 	p := azurePack(t)
 	ctx := context.Background()

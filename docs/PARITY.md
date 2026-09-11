@@ -125,13 +125,13 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Queue swagger `x-ms-paths` keys | 11 |
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
-| Blob keys fully routed | 11 / 59 |
+| Blob keys fully routed | 16 / 59 |
 | Queue keys fully routed | 4 / 11 |
 | Table method+paths routed | 6 / 12 |
-| Blob keys accounted (routed + unclaim) | 22 / 59 |
+| Blob keys accounted (routed + unclaim) | 27 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
-| Azurite test functions traced | 48 / 806 (6%) |
+| Azurite test functions traced | 73 / 806 (9%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -202,11 +202,11 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 
 | Path key | Status | Mirror |
 |---|---|---|
-| `/?restype=service&comp=properties` | missing | Get/Set Service Properties |
-| `/?restype=service&comp=stats` | missing | Get Stats |
+| `/?restype=service&comp=properties` | routed | `GetServiceProperties` / `SetServiceProperties`; default XML then stored body |
+| `/?restype=service&comp=stats` | routed | `GetServiceStats`; primary 400 `InvalidQueryParameterValue`; `{account}-secondary` returns `<Status>live</Status>` |
 | `/?comp=list` | routed | `ListContainers` |
 | `/?restype=service&comp=userdelegationkey` | unclaim | not in Azurite REST matrix; oauth tests parse-only |
-| `/?restype=account&comp=properties` | missing | Get Account Information |
+| `/?restype=account&comp=properties` | routed | `GetAccountInfo` headers `StorageV2` / `Standard_RAGRS` / HNS false |
 | `/?comp=batch` | missing | SubmitBatch |
 | `/?comp=blobs` | missing | FilterBlobs (tags) |
 | `/{containerName}?restype=container` | routed | `CreateContainer` / `GetContainer` / `DeleteContainer` (HEAD rides GET) |
@@ -222,7 +222,7 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}?comp=lease&restype=container&change` | routed | `ChangeContainerLease` |
 | `/{containerName}?restype=container&comp=list&flat` | partial | `ListBlobs` — no delimiter/hierarchy |
 | `/{containerName}?restype=container&comp=list&hierarchy` | missing | List Blobs hierarchy |
-| `/{containerName}?restype=account&comp=properties` | missing | Container Get Account Information |
+| `/{containerName}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
 | `/{containerName}/{blob}` | partial | `GetBlob` / `DeleteBlob`; HEAD Get Properties not routed |
 | `/{containerName}/{blob}?PageBlob` | missing | PageBlob_Create (`x-ms-blob-type`) |
 | `/{containerName}/{blob}?AppendBlob` | missing | AppendBlob_Create (`x-ms-blob-type`) |
@@ -244,7 +244,7 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}/{blob}?comp=copy&sync` | missing | Copy Blob From URL (same account) |
 | `/{containerName}/{blob}?comp=copy&copyid` | missing | Abort Copy Blob |
 | `/{containerName}/{blob}?comp=tier` | unclaim | not in Azurite REST matrix |
-| `/{containerName}/{blob}?restype=account&comp=properties` | missing | Blob Get Account Information |
+| `/{containerName}/{blob}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
 | `/{containerName}/{blob}?comp=block` | routed | `PutBlock` |
 | `/{containerName}/{blob}?comp=block&fromURL` | missing | Put Block From URL (same instance) |
 | `/{containerName}/{blob}?comp=blocklist` | routed | `PutBlockList` folds staged blocks in request order (`TestAzurePutBlockListFoldsInRequestOrder`, booted XML commit); missing id is 400 `InvalidBlockList`; `GetBlockList` lists staged ids |
@@ -353,6 +353,31 @@ Direct `it()` names from `blob/apis/container.test.ts` (48). Rows marked later-s
 | `blob/apis/container.test.ts::Delete a container with block blob, then create container/blob with same name, and delete container should success.` | DeleteContainer then recreate; PutBlock/PutBlockList fold | Mapped and green |
 | `blob/apis/container.test.ts::listBlobsFlat with startFrom should begin at that blob name` | Later slice | Not mapped this slice |
 | `blob/apis/container.test.ts::listBlobsByHierarchy with startFrom should begin at that blob name` | Later slice | Not mapped this slice |
+| `blob/apis/service.test.ts::getUserDelegationKey with Key credential should fail` | User-delegation key unclaimed; parse-only later | Unclaim (key 4) |
+| `blob/apis/service.test.ts::getUserDelegationKey with SAS token credential should fail` | Same | Unclaim (key 4) |
+| `blob/apis/service.test.ts::GetServiceProperties` | Booted GET default `StorageServiceProperties` | Mapped and green |
+| `blob/apis/service.test.ts::Set CORS with empty AllowedHeaders, ExposedHeaders` | PUT stores body, GET echoes; CORS XML not interpreted | Stored XML mapped; CORS eval later |
+| `blob/apis/service.test.ts::SetServiceProperties` | Booted PUT 202 then GET contains stored CORS origin | Mapped and green |
+| `blob/apis/service.test.ts::List containers in sorted order` | ListContainers exists; sort/prefix unclaimed | Partial |
+| `blob/apis/service.test.ts::List containers with marker` | Later | Partial |
+| `blob/apis/service.test.ts::List containers with marker and max result length less than result size` | Later | Partial |
+| `blob/apis/service.test.ts::ListContainers with default parameters` | Booted list `EnumerationResults` | Partial; etag/lastModified later |
+| `blob/apis/service.test.ts::ListContainers with all parameters configured` | Metadata on list later | Partial |
+| `blob/apis/service.test.ts::ListContainers without include metadata should not return container metadata.` | Later | Partial |
+| `blob/apis/service.test.ts::get Account info` | Booted `x-ms-account-kind=StorageV2` `Standard_RAGRS` HNS false | Mapped and green |
+| `blob/apis/service.test.ts::Get Account/Service Properties with URI has suffix '/' after account name` | Path trim already treats trailing slash as service root | Mapped and green |
+| `blob/apis/service.test.ts::Get Blob service stats negative` | Primary host GET stats is 400 `InvalidQueryParameterValue` | Mapped and green |
+| `blob/apis/service.test.ts::Find blob by tags should work` | Tags later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with more than limited conditions on service` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with conditions number equal to limitation on service` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with invalid key chars on service` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with valid special key chars on service` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with long key` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with invalid value chars on service` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with valid special value chars on service` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with long value` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::filter blob by tags with continuationToken on service` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::Get Blob service stats` | `{account}-secondary.blob.core.windows.net` GET stats returns live | Mapped and green |
 
 ### Shipped YAML evidence (not the inventory)
 

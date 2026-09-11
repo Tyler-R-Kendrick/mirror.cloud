@@ -42,6 +42,13 @@ resources:
       id: id
       value: "('body' in input && input.body != null) ? string(input.body) : ''"
 
+  account:
+    collection: azacct
+    id:
+      derive: "'default'"
+    record:
+      properties: "('body' in input && input.body != null) ? string(input.body) : ''"
+
 errors:
   InvalidResourceName:
     code: InvalidResourceName
@@ -305,6 +312,30 @@ operations:
     output:
       lease_status: "'unlocked'"
       lease_state: "'broken'"
+
+  GetServiceProperties:
+    reads:
+      rec: { resource: account }
+    output:
+      properties: "rec_found && rec.properties != null && string(rec.properties) != '' ? string(rec.properties) : ''"
+
+  SetServiceProperties:
+    effects:
+      - put: { resource: account }
+    output:
+      properties: "('body' in input && input.body != null) ? string(input.body) : ''"
+
+  GetServiceStats:
+    require:
+      - { cond: "'secondary' in input && input.secondary == true", error: InvalidQueryParameterValue, message: "The value for one of the query parameters specified in the request URI is invalid." }
+    output:
+      geo_status: "'live'"
+
+  GetAccountInfo:
+    output:
+      account_kind: "'StorageV2'"
+      sku_name: "'Standard_RAGRS'"
+      hns: "'false'"
 
   ChangeContainerLease:
     reads:

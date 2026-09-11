@@ -824,6 +824,12 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	for _, test := range []struct{ method, path, want string }{
 		{http.MethodPut, "/c?restype=container", "CreateContainer"},
 		{http.MethodGet, "/?comp=list", "ListContainers"},
+		{http.MethodGet, "/?restype=service&comp=properties", "GetServiceProperties"},
+		{http.MethodPut, "/?restype=service&comp=properties", "SetServiceProperties"},
+		{http.MethodGet, "/?restype=service&comp=stats", "GetServiceStats"},
+		{http.MethodGet, "/?restype=account&comp=properties", "GetAccountInfo"},
+		{http.MethodGet, "/c?restype=account&comp=properties", "GetAccountInfo"},
+		{http.MethodGet, "/c/o?restype=account&comp=properties", "GetAccountInfo"},
 		{http.MethodGet, "/c?restype=container", "GetContainer"},
 		{http.MethodDelete, "/c?restype=container", "DeleteContainer"},
 		{http.MethodPut, "/c/o", "PutBlob"},

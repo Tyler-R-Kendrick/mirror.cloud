@@ -368,7 +368,22 @@ func azureRoute(r *http.Request) string {
 	}
 	m := r.Method
 	comp := q.Get("comp")
-	if q.Get("restype") == "container" && blob == "" {
+	restype := q.Get("restype")
+	if restype == "account" && comp == "properties" {
+		return "GetAccountInfo"
+	}
+	if restype == "service" {
+		switch comp {
+		case "properties":
+			if m == http.MethodPut {
+				return "SetServiceProperties"
+			}
+			return "GetServiceProperties"
+		case "stats":
+			return "GetServiceStats"
+		}
+	}
+	if restype == "container" && blob == "" {
 		switch comp {
 		case "list":
 			return "ListBlobs"
@@ -610,9 +625,12 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		if bid := r.URL.Query().Get("blockid"); bid != "" {
 			in["blockid"] = bid
 		}
+		if strings.Contains(strings.ToLower(r.Host), "-secondary") {
+			in["secondary"] = true
+		}
 		decodeAzureHeaders(in, r)
 		req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
-		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList" || op.Name == "AppendBlock" || op.Name == "SetContainerAcl") && r.Body != nil {
+		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList" || op.Name == "AppendBlock" || op.Name == "SetContainerAcl" || op.Name == "SetServiceProperties") && r.Body != nil {
 			body, _ := io.ReadAll(r.Body)
 			in["body"] = string(body)
 			if op.Name == "PutBlockList" {
@@ -2142,6 +2160,8 @@ func writeLifecycle(v any, b *strings.Builder) {
 	}
 }
 
+const defaultAzureServiceProperties = `<?xml version="1.0" encoding="utf-8"?><StorageServiceProperties><Logging><Version>1.0</Version><Delete>false</Delete><Read>false</Read><Write>false</Write><RetentionPolicy><Enabled>false</Enabled></RetentionPolicy></Logging><HourMetrics><Version>1.0</Version><Enabled>false</Enabled><RetentionPolicy><Enabled>false</Enabled></RetentionPolicy></HourMetrics><MinuteMetrics><Version>1.0</Version><Enabled>false</Enabled><RetentionPolicy><Enabled>false</Enabled></RetentionPolicy></MinuteMetrics><Cors /><DefaultServiceVersion>2026-06-06</DefaultServiceVersion><DeleteRetentionPolicy><Enabled>false</Enabled></DeleteRetentionPolicy></StorageServiceProperties>`
+
 func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op string) error {
 	for k, vs := range resp.Headers {
 		for _, v := range vs {
@@ -2154,6 +2174,35 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 		_, err := io.Copy(w, resp.Stream)
 		_ = resp.Stream.Close()
 		return err
+	}
+	if resp != nil && resp.Output != nil && op == "GetServiceProperties" {
+		body := strAny(resp.Output["properties"])
+		if body == "" {
+			body = defaultAzureServiceProperties
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, body)
+		return err
+	}
+	if resp != nil && resp.Output != nil && op == "GetServiceStats" {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?><StorageServiceStats><GeoReplication><Status>live</Status></GeoReplication></StorageServiceStats>`)
+		return err
+	}
+	if resp != nil && resp.Output != nil && op == "GetAccountInfo" {
+		if k := strAny(resp.Output["account_kind"]); k != "" {
+			w.Header().Set("x-ms-account-kind", k)
+		}
+		if s := strAny(resp.Output["sku_name"]); s != "" {
+			w.Header().Set("x-ms-sku-name", s)
+		}
+		if h := strAny(resp.Output["hns"]); h != "" {
+			w.Header().Set("x-ms-is-hns-enabled", h)
+		}
+		w.WriteHeader(status)
+		return nil
 	}
 	if resp != nil && resp.Output != nil && op == "GetContainerAcl" {
 		body := strAny(resp.Output["acl"])

@@ -20,6 +20,9 @@ func FuzzAzureRoute(f *testing.F) {
 	f.Add("PUT", "/c?restype=container&comp=metadata")
 	f.Add("GET", "/c?restype=container&comp=acl")
 	f.Add("PUT", "/c?restype=container&comp=lease")
+	f.Add("GET", "/?restype=service&comp=properties")
+	f.Add("PUT", "/?restype=service&comp=properties")
+	f.Add("GET", "/?restype=account&comp=properties")
 	f.Fuzz(func(t *testing.T, method, path string) {
 		if method == "" {
 			method = http.MethodGet

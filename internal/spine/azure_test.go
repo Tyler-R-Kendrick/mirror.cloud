@@ -166,6 +166,49 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 404 || !strings.Contains(string(raw), "ContainerNotFound") || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("missing metadata %d %#v %s", code, h, raw)
 	}
+	code, raw, h = do(http.MethodGet, "/?restype=service&comp=properties", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "StorageServiceProperties") {
+		t.Fatalf("get service props %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/?restype=service&comp=properties", "<StorageServiceProperties><Cors><CorsRule><AllowedOrigins>example.com</AllowedOrigins><AllowedMethods>GET</AllowedMethods><MaxAgeInSeconds>1</MaxAgeInSeconds><ExposedHeaders></ExposedHeaders><AllowedHeaders></AllowedHeaders></CorsRule></Cors></StorageServiceProperties>", nil)
+	if code != 202 {
+		t.Fatalf("set service props %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/?restype=service&comp=properties", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "example.com") {
+		t.Fatalf("get service props after set %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/?restype=account&comp=properties", "", nil)
+	if code != 200 || h.Get("x-ms-account-kind") != "StorageV2" || h.Get("x-ms-sku-name") != "Standard_RAGRS" || h.Get("x-ms-is-hns-enabled") != "false" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("account info %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr?restype=account&comp=properties", "", nil)
+	if code != 200 || h.Get("x-ms-account-kind") != "StorageV2" {
+		t.Fatalf("container account info %d %#v", code, h)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/o?restype=account&comp=properties", "", nil)
+	if code != 200 || h.Get("x-ms-account-kind") != "StorageV2" {
+		t.Fatalf("blob account info %d %#v", code, h)
+	}
+	code, raw, h = do(http.MethodGet, "/?restype=service&comp=stats", "", nil)
+	if code != 400 || h.Get("x-ms-error-code") != "InvalidQueryParameterValue" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("stats primary %d %#v %s", code, h, raw)
+	}
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/?restype=service&comp=stats", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "acct-secondary.blob.core.windows.net"
+	req.Header.Set("Authorization", "Bearer test")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(string(b), "<Status>live</Status>") || res.Header.Get("x-amzn-errortype") != "" {
+		t.Fatalf("stats secondary %d %#v %s", res.StatusCode, res.Header, b)
+	}
 }
 
 func TestBootedServerAzureQueue(t *testing.T) {

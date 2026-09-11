@@ -299,6 +299,10 @@ func Bundle() *model.Bundle {
 		op("RenewContainerLease", "PUT", "/{container}?comp=lease&restype=container&renew", 200, false),
 		op("BreakContainerLease", "PUT", "/{container}?comp=lease&restype=container&break", 202, false),
 		op("ChangeContainerLease", "PUT", "/{container}?comp=lease&restype=container&change", 200, false),
+		op("GetServiceProperties", "GET", "/?restype=service&comp=properties", 200, true),
+		op("SetServiceProperties", "PUT", "/?restype=service&comp=properties", 202, false),
+		op("GetServiceStats", "GET", "/?restype=service&comp=stats", 200, true),
+		op("GetAccountInfo", "GET", "/?restype=account&comp=properties", 200, true),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
@@ -319,6 +323,10 @@ func Bundle() *model.Bundle {
 	azureSvc.OperationByName("RenewContainerLease").Output = "Container"
 	azureSvc.OperationByName("BreakContainerLease").Output = "Container"
 	azureSvc.OperationByName("ChangeContainerLease").Output = "Container"
+	azureSvc.OperationByName("GetServiceProperties").Output = "Account"
+	azureSvc.OperationByName("SetServiceProperties").Output = "Account"
+	azureSvc.OperationByName("GetServiceStats").Output = "Account"
+	azureSvc.OperationByName("GetAccountInfo").Output = "Account"
 	azureSvc.Shapes = map[string]model.Shape{
 		"String": {ID: "String", Kind: model.KindString},
 		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
@@ -346,6 +354,13 @@ func Bundle() *model.Bundle {
 			"value": {Shape: "String"},
 		}},
 		"BlockList": {ID: "BlockList", Kind: model.KindList, Member: "Block"},
+		"Account": {ID: "Account", Kind: model.KindStructure, Members: map[string]model.Member{
+			"properties":   {Shape: "String"},
+			"geo_status":   {Shape: "String"},
+			"account_kind": {Shape: "String"},
+			"sku_name":     {Shape: "String"},
+			"hns":          {Shape: "String"},
+		}},
 	}
 	queueOps := []model.Operation{
 		op("CreateQueue", "PUT", "/{queue}", 201, false),

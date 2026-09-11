@@ -284,6 +284,27 @@ func filterSet(svcs []model.Service, want []setEntry) []model.Service {
 	if len(missing) > 0 {
 		fmt.Fprintf(os.Stderr, "mirrorgen: not in ingested set (need specs-sync): %s\n", strings.Join(missing, ", "))
 	}
+	// The converse, which used to pass in silence: a document under specs/
+	// that no line of specs/mirror.set asks for. It is ingested, counted in
+	// "ingested N service(s)", and then dropped -- so the run says 153 and
+	// writes 152, exit 0, with nothing naming the one that vanished.
+	//
+	// That is how a spec is added and the model never appears. It is the same
+	// shape as the embed pattern that listed two providers by name: a file
+	// sitting in the tree that the pipeline ignores, where the only symptom is
+	// a later "no model for <service>" that reads like a missing document
+	// rather than a missing declaration.
+	var undeclared []string
+	for _, s := range svcs {
+		if !keep[s.ID] {
+			undeclared = append(undeclared, s.ID)
+		}
+	}
+	if len(undeclared) > 0 {
+		sort.Strings(undeclared)
+		fmt.Fprintf(os.Stderr, "mirrorgen: ingested but not declared in specs/mirror.set, "+
+			"so no model is written: %s\n", strings.Join(undeclared, ", "))
+	}
 	return out
 }
 

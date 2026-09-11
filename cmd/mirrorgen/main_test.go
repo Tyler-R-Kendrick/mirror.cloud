@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,5 +174,53 @@ func TestDiffFilteringAndEmission(t *testing.T) {
 	}
 	if len(sha256Hex([]byte("value"))) != 64 {
 		t.Fatal("SHA-256 length")
+	}
+}
+
+// TestFilterSetNamesWhatItDropped covers the half of the reconciliation that
+// used to pass in silence.
+//
+// `specs/mirror.set` decides which ingested documents become models, and a
+// document nobody declared is dropped. The run then reports "ingested 153" and
+// "wrote 152", exits 0, and names neither the service nor the reason -- so a
+// spec added without its set entry produces no model and no message, and the
+// only symptom is a later "no model for <service>" that reads like a missing
+// document rather than a missing declaration.
+//
+// The converse -- declared with no document -- was always reported. This
+// pins both directions.
+func TestFilterSetNamesWhatItDropped(t *testing.T) {
+	svcs := []model.Service{{ID: "aws.declared"}, {ID: "vendor.undeclared"}}
+	want := []setEntry{{ID: "aws.declared"}, {ID: "aws.nodocument"}}
+
+	stderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	kept := filterSet(svcs, want)
+	os.Stderr = stderr
+	w.Close()
+	var buf strings.Builder
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	said := buf.String()
+
+	if len(kept) != 1 || kept[0].ID != "aws.declared" {
+		t.Fatalf("kept %v, want only aws.declared", kept)
+	}
+	if !strings.Contains(said, "vendor.undeclared") {
+		t.Errorf("a document nobody declared was dropped without being named: %q", said)
+	}
+	if !strings.Contains(said, "aws.nodocument") {
+		t.Errorf("a declared service with no document was not reported: %q", said)
+	}
+	// The two are different failures and must not read as one: the first needs
+	// a line in specs/mirror.set, the second needs `make specs-sync`.
+	if strings.Contains(said, "vendor.undeclared, aws.nodocument") ||
+		strings.Contains(said, "aws.nodocument, vendor.undeclared") {
+		t.Errorf("the two directions were reported as one list: %q", said)
 	}
 }

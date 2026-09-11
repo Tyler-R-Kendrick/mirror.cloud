@@ -446,11 +446,20 @@ func azureRoute(r *http.Request) string {
 				return "GetBlockList"
 			}
 			return "PutBlockList"
+		case "metadata":
+			if m == http.MethodPut {
+				return "SetBlobMetadata"
+			}
+			return "GetBlobMetadata"
+		case "properties":
+			return "SetBlobProperties"
 		case "":
 			switch m {
 			case http.MethodPut:
 				return "PutBlob"
-			case http.MethodGet, http.MethodHead:
+			case http.MethodHead:
+				return "GetBlobProperties"
+			case http.MethodGet:
 				return "GetBlob"
 			case http.MethodDelete:
 				return "DeleteBlob"
@@ -502,6 +511,18 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 			in["if_modified_since"] = vs[0]
 		case "content-type":
 			in["content_type"] = vs[0]
+		case "x-ms-blob-cache-control":
+			in["cache_control"] = vs[0]
+		case "x-ms-blob-content-type":
+			in["content_type"] = vs[0]
+		case "x-ms-blob-content-md5":
+			in["content_md5"] = vs[0]
+		case "x-ms-blob-content-encoding":
+			in["content_encoding"] = vs[0]
+		case "x-ms-blob-content-language":
+			in["content_language"] = vs[0]
+		case "x-ms-blob-content-disposition":
+			in["content_disposition"] = vs[0]
 		}
 	}
 	if len(meta) > 0 {
@@ -2204,6 +2225,11 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 		w.WriteHeader(status)
 		return nil
 	}
+	if resp != nil && resp.Output != nil && (op == "GetBlobProperties" || op == "GetBlobMetadata" || op == "SetBlobMetadata" || op == "SetBlobProperties") {
+		writeAzureBlobHeaders(w, resp)
+		w.WriteHeader(status)
+		return nil
+	}
 	if resp != nil && resp.Output != nil && op == "GetContainerAcl" {
 		body := strAny(resp.Output["acl"])
 		if body == "" {
@@ -2294,6 +2320,45 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 	return nil
 }
 
+func writeAzureBlobHeaders(w http.ResponseWriter, resp *spi.Response) {
+	if resp == nil || resp.Output == nil {
+		return
+	}
+	out := resp.Output
+	if meta, ok := out["metadata"].(map[string]any); ok {
+		for k, v := range meta {
+			if k == "" || v == nil {
+				continue
+			}
+			w.Header().Set("x-ms-meta-"+k, fmt.Sprint(v))
+		}
+	}
+	if s := strAny(out["content_type"]); s != "" {
+		w.Header().Set("Content-Type", s)
+	}
+	if s := strAny(out["cache_control"]); s != "" {
+		w.Header().Set("Cache-Control", s)
+	}
+	if s := strAny(out["content_encoding"]); s != "" {
+		w.Header().Set("Content-Encoding", s)
+	}
+	if s := strAny(out["content_language"]); s != "" {
+		w.Header().Set("Content-Language", s)
+	}
+	if s := strAny(out["content_disposition"]); s != "" {
+		w.Header().Set("Content-Disposition", s)
+	}
+	if s := strAny(out["content_md5"]); s != "" {
+		w.Header().Set("Content-MD5", s)
+	}
+	if s := strAny(out["blob_type"]); s != "" {
+		w.Header().Set("x-ms-blob-type", s)
+	}
+	if s := strAny(out["content_length"]); s != "" {
+		w.Header().Set("Content-Length", s)
+	}
+}
+
 func writeAzureContainerHeaders(w http.ResponseWriter, resp *spi.Response) {
 	if resp == nil || resp.Output == nil {
 		return
@@ -2344,8 +2409,12 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		status = 501
 	}
 	if svc.ID == "azure.blobs" || svc.ID == "azure.queue" {
-		w.Header().Set("Content-Type", "application/xml")
 		w.Header().Set("x-ms-error-code", f.Code)
+		if op != nil && op.Name == "GetBlobProperties" {
+			w.WriteHeader(status)
+			return nil
+		}
+		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(status)
 		_, err := io.WriteString(w, `<Error><Code>`+xmlEscape(f.Code)+`</Code><Message>`+xmlEscape(f.Message)+`</Message></Error>`)
 		return err

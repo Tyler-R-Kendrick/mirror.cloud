@@ -834,6 +834,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		{http.MethodDelete, "/c?restype=container", "DeleteContainer"},
 		{http.MethodPut, "/c/o", "PutBlob"},
 		{http.MethodGet, "/c/o", "GetBlob"},
+		{http.MethodHead, "/c/o", "GetBlobProperties"},
+		{http.MethodPut, "/c/o?comp=metadata", "SetBlobMetadata"},
+		{http.MethodGet, "/c/o?comp=metadata", "GetBlobMetadata"},
+		{http.MethodPut, "/c/o?comp=properties", "SetBlobProperties"},
 		{http.MethodGet, "/c?restype=container&comp=list", "ListBlobs"},
 		{http.MethodDelete, "/c/o", "DeleteBlob"},
 		{http.MethodPut, "/c/o?comp=block", "PutBlock"},
@@ -843,7 +847,6 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		{http.MethodGet, "/c?restype=container&comp=metadata", "GetContainerMetadata"},
 		{http.MethodPut, "/c?restype=container&comp=acl", "SetContainerAcl"},
 		{http.MethodGet, "/c?restype=container&comp=acl", "GetContainerAcl"},
-		{http.MethodPut, "/c/o?comp=metadata", "UnsupportedQuery"},
 		{http.MethodPut, "/c?restype=container&comp=lease", "UnsupportedQuery"},
 		{http.MethodGet, "/unknown", "Unknown"},
 	} {

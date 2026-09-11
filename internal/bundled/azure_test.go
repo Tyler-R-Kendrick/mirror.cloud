@@ -243,6 +243,41 @@ func TestAzureServicePropertiesStatsAccountInfo(t *testing.T) {
 	}
 }
 
+func TestAzureBlobMetadataPropertiesHead(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "hello"})
+	inv("SetBlobMetadata", map[string]any{"container": "ctr", "blob": "o", "metadata": map[string]any{"a": "b"}})
+	md := inv("GetBlobMetadata", map[string]any{"container": "ctr", "blob": "o"})
+	got, _ := md.Output["metadata"].(map[string]any)
+	if fmt.Sprint(got["a"]) != "b" {
+		t.Fatalf("metadata %#v", md.Output)
+	}
+	inv("SetBlobProperties", map[string]any{"container": "ctr", "blob": "o", "content_type": "text/plain", "cache_control": "no-cache"})
+	props := inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "o"})
+	if props.Output["content_type"] != "text/plain" || props.Output["cache_control"] != "no-cache" || props.Output["blob_type"] != "BlockBlob" || props.Output["content_length"] != "5" {
+		t.Fatalf("properties %#v", props.Output)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBlobProperties", Input: map[string]any{"container": "ctr", "blob": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "BlobNotFound" {
+		t.Fatalf("missing properties %#v", err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBlobMetadata", Input: map[string]any{"container": "ctr", "blob": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "BlobNotFound" {
+		t.Fatalf("missing metadata %#v", err)
+	}
+}
+
 func TestAzurePutBlockListFoldsInRequestOrder(t *testing.T) {
 	p := azurePack(t)
 	ctx := context.Background()

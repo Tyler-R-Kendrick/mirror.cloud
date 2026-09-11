@@ -810,7 +810,26 @@
       "DeleteBlob",
       "PutBlock",
       "PutBlockList",
-      "GetBlockList"
+      "GetBlockList",
+      "AppendBlock",
+      "UnsupportedQuery",
+      "SetContainerMetadata",
+      "GetContainerMetadata",
+      "SetContainerAcl",
+      "GetContainerAcl",
+      "AcquireContainerLease",
+      "ReleaseContainerLease",
+      "RenewContainerLease",
+      "BreakContainerLease",
+      "ChangeContainerLease",
+      "GetServiceProperties",
+      "SetServiceProperties",
+      "GetServiceStats",
+      "GetAccountInfo",
+      "GetBlobProperties",
+      "SetBlobMetadata",
+      "GetBlobMetadata",
+      "SetBlobProperties"
     ]
   },
   {

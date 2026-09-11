@@ -303,6 +303,10 @@ func Bundle() *model.Bundle {
 		op("SetServiceProperties", "PUT", "/?restype=service&comp=properties", 202, false),
 		op("GetServiceStats", "GET", "/?restype=service&comp=stats", 200, true),
 		op("GetAccountInfo", "GET", "/?restype=account&comp=properties", 200, true),
+		op("GetBlobProperties", "HEAD", "/{container}/{blob}", 200, true),
+		op("SetBlobMetadata", "PUT", "/{container}/{blob}?comp=metadata", 200, false),
+		op("GetBlobMetadata", "GET", "/{container}/{blob}?comp=metadata", 200, true),
+		op("SetBlobProperties", "PUT", "/{container}/{blob}?comp=properties", 200, false),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
@@ -327,6 +331,10 @@ func Bundle() *model.Bundle {
 	azureSvc.OperationByName("SetServiceProperties").Output = "Account"
 	azureSvc.OperationByName("GetServiceStats").Output = "Account"
 	azureSvc.OperationByName("GetAccountInfo").Output = "Account"
+	azureSvc.OperationByName("GetBlobProperties").Output = "Blob"
+	azureSvc.OperationByName("SetBlobMetadata").Output = "Blob"
+	azureSvc.OperationByName("GetBlobMetadata").Output = "Blob"
+	azureSvc.OperationByName("SetBlobProperties").Output = "Blob"
 	azureSvc.Shapes = map[string]model.Shape{
 		"String": {ID: "String", Kind: model.KindString},
 		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
@@ -343,9 +351,18 @@ func Bundle() *model.Bundle {
 
 		"ContainerList": {ID: "ContainerList", Kind: model.KindList, Member: "Container"},
 		"Blob": {ID: "Blob", Kind: model.KindStructure, Members: map[string]model.Member{
-			"name":      {Shape: "String"},
-			"container": {Shape: "String"},
-			"value":     {Shape: "String"},
+			"name":                {Shape: "String"},
+			"container":           {Shape: "String"},
+			"value":               {Shape: "String"},
+			"metadata":            {Shape: "Map"},
+			"content_type":        {Shape: "String"},
+			"cache_control":       {Shape: "String"},
+			"content_encoding":    {Shape: "String"},
+			"content_language":    {Shape: "String"},
+			"content_disposition": {Shape: "String"},
+			"content_md5":         {Shape: "String"},
+			"blob_type":           {Shape: "String"},
+			"content_length":      {Shape: "String"},
 		}},
 		"BlobList": {ID: "BlobList", Kind: model.KindList, Member: "Blob"},
 		"BlobBody": {ID: "BlobBody", Kind: model.KindString},

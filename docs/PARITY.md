@@ -125,13 +125,13 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Queue swagger `x-ms-paths` keys | 11 |
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
-| Blob keys fully routed | 16 / 59 |
+| Blob keys fully routed | 20 / 59 |
 | Queue keys fully routed | 4 / 11 |
 | Table method+paths routed | 6 / 12 |
-| Blob keys accounted (routed + unclaim) | 27 / 59 |
+| Blob keys accounted (routed + unclaim) | 31 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
-| Azurite test functions traced | 73 / 806 (9%) |
+| Azurite test functions traced | 171 / 806 (21%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -223,17 +223,17 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}?restype=container&comp=list&flat` | partial | `ListBlobs` — no delimiter/hierarchy |
 | `/{containerName}?restype=container&comp=list&hierarchy` | missing | List Blobs hierarchy |
 | `/{containerName}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
-| `/{containerName}/{blob}` | partial | `GetBlob` / `DeleteBlob`; HEAD Get Properties not routed |
+| `/{containerName}/{blob}` | routed | `PutBlob` / `GetBlob` / `DeleteBlob`; HEAD is `GetBlobProperties` (stored metadata + `x-ms-blob-*` headers, no body; missing is 404 `BlobNotFound` with no XML body) |
 | `/{containerName}/{blob}?PageBlob` | missing | PageBlob_Create (`x-ms-blob-type`) |
 | `/{containerName}/{blob}?AppendBlob` | missing | AppendBlob_Create (`x-ms-blob-type`) |
-| `/{containerName}/{blob}?BlockBlob` | partial | `PutBlob` — `x-ms-blob-type` not read |
+| `/{containerName}/{blob}?BlockBlob` | routed | `PutBlob` reads `x-ms-blob-type` and stores it; `GetBlobProperties` returns it |
 | `/{containerName}/{blob}?BlockBlob&fromUrl` | unclaim | Azurite: Put Blob From URL unsupported |
 | `/{containerName}/{blob}?comp=undelete` | unclaim | Azurite: soft delete unsupported |
 | `/{containerName}/{blob}?comp=expiry` | unclaim | Azurite: blob expiry unsupported |
-| `/{containerName}/{blob}?comp=properties&SetHTTPHeaders` | missing | Set Blob Properties |
+| `/{containerName}/{blob}?comp=properties&SetHTTPHeaders` | routed | `SetBlobProperties` stores `x-ms-blob-content-type/cache-control/content-md5/content-encoding/content-language/content-disposition`; missing blob 404 |
 | `/{containerName}/{blob}?comp=immutabilityPolicies` | unclaim | Azurite: immutability unsupported |
 | `/{containerName}/{blob}?comp=legalhold` | unclaim | Azurite: legal hold unsupported |
-| `/{containerName}/{blob}?comp=metadata` | missing | Set Blob Metadata |
+| `/{containerName}/{blob}?comp=metadata` | routed | `SetBlobMetadata` / `GetBlobMetadata` round-trip `x-ms-meta-*`; missing blob 404 `BlobNotFound`; C# identifier validation unclaimed |
 | `/{containerName}/{blob}?comp=lease&acquire` | missing | Lease Blob acquire |
 | `/{containerName}/{blob}?comp=lease&release` | missing | Lease Blob release |
 | `/{containerName}/{blob}?comp=lease&renew` | missing | Lease Blob renew |
@@ -301,7 +301,7 @@ Host `{account}.table.core.windows.net`. Table `x-ms-paths` service properties/s
 
 ### Traced tests
 
-Direct `it()` names from `blob/apis/container.test.ts` (48). Rows marked later-slice still count, as S3 skipped rows do.
+Direct `it()` names from `blob/apis/container.test.ts` (48), `blob/apis/service.test.ts` (25), and `blob/apis/blob.test.ts` (98). Rows marked later-slice still count, as S3 skipped rows do.
 
 | Azurite test | Mirror evidence | Result |
 |---|---|---|
@@ -378,6 +378,109 @@ Direct `it()` names from `blob/apis/container.test.ts` (48). Rows marked later-s
 | `blob/apis/service.test.ts::filter blob by tags with long value` | Later | Not mapped this slice |
 | `blob/apis/service.test.ts::filter blob by tags with continuationToken on service` | Later | Not mapped this slice |
 | `blob/apis/service.test.ts::Get Blob service stats` | `{account}-secondary.blob.core.windows.net` GET stats returns live | Mapped and green |
+
+Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/conditions/tags/snapshot/copy functions whose swagger keys are still `missing` in the path table; they are named here so the slice that routes them owns the row.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/blob.test.ts::download with default parameters` | Booted GET `/ctr/o` returns stored bytes | Mapped and green |
+| `blob/apis/blob.test.ts::download should work with conditional headers` | GET exists; If-* not applied until conditions slice | Download mapped; condition unclaimed |
+| `blob/apis/blob.test.ts::download with ifTags condition` | Tags not routed until tags slice | Later |
+| `blob/apis/blob.test.ts::getProperties with ifTags condition` | Same | Later |
+| `blob/apis/blob.test.ts::setProperties with ifTags condition` | Same | Later |
+| `blob/apis/blob.test.ts::setMetadata with ifTags condition` | Same | Later |
+| `blob/apis/blob.test.ts::download should work with ifMatch value *` | Conditions slice | Later |
+| `blob/apis/blob.test.ts::download should not work with invalid conditional header ifMatch` | Same | Later |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch` | Same | Later |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch *` | Same | Later |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifModifiedSince` | Same | Later |
+| `blob/apis/blob.test.ts::download should not work when blob in Archive tier` | Tier is `unclaim` in the path table | Unclaim |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifUnmodifiedSince` | Conditions slice | Later |
+| `blob/apis/blob.test.ts::download all parameters set` | `Range` header not honored; full body always returned | Partial; range GET unclaimed |
+| `blob/apis/blob.test.ts::download entire with range` | Same | Range unclaimed |
+| `blob/apis/blob.test.ts::download out of range` | Same | Range unclaimed |
+| `blob/apis/blob.test.ts::download invalid range` | Same | Range unclaimed |
+| `blob/apis/blob.test.ts::download partial range (via custom policy)` | Same | Range unclaimed |
+| `blob/apis/blob.test.ts::get properties response should not set content-type` | HEAD writes `Content-Type` only when one was stored | Mapped and green |
+| `blob/apis/blob.test.ts::delete` | Booted DELETE 202 then GET 404 | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for valid ifMatch` | Conditions slice | Later |
+| `blob/apis/blob.test.ts::delete should work for * ifMatch` | Same | Later |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifMatch` | Same | Later |
+| `blob/apis/blob.test.ts::delete should work for valid ifNoneMatch` | Same | Later |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifNoneMatch` | Same | Later |
+| `blob/apis/blob.test.ts::delete should work for ifNoneMatch *` | Same | Later |
+| `blob/apis/blob.test.ts::delete should work for valid ifModifiedSince *` | Same | Later |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifModifiedSince` | Same | Later |
+| `blob/apis/blob.test.ts::delete should work for valid ifUnmodifiedSince *` | Same | Later |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifUnmodifiedSince` | Same | Later |
+| `blob/apis/blob.test.ts::Delete with ifTags should work` | Tags slice | Later |
+| `blob/apis/blob.test.ts::should create a snapshot from a blob` | Snapshot key `missing` until snapshot/copy slice | Later |
+| `blob/apis/blob.test.ts::Create a snapshot from a blob with ifTags` | Same | Later |
+| `blob/apis/blob.test.ts::should create a snapshot with metadata from a blob` | Same | Later |
+| `blob/apis/blob.test.ts::should not delete base blob without include snapshot header` | 409 `SnapshotsPresent` needs snapshots first | Later |
+| `blob/apis/blob.test.ts::should delete snapshot` | Snapshot slice | Later |
+| `blob/apis/blob.test.ts::should also list snapshots` | Same | Later |
+| `blob/apis/blob.test.ts::should setMetadata with new metadata set` | Booted PUT/GET `comp=metadata` round-trips `x-ms-meta-a`; atomic `TestAzureBlobMetadataPropertiesHead` | Mapped and green |
+| `blob/apis/blob.test.ts::should fail when setMetadata with invalid metadata name with hyphen` | Metadata keys stored verbatim; C# identifier rule unclaimed (same ceiling as container metadata) | Partial |
+| `blob/apis/blob.test.ts::should fail when upload has metadata names that are invalid C# identifiers` | Same | Partial |
+| `blob/apis/blob.test.ts::acquireLease_available_proposedLeaseId_fixed` | Blob `comp=lease` keys still `missing` | Later |
+| `blob/apis/blob.test.ts::acquireLease_available_NoproposedLeaseId_infinite` | Same | Later |
+| `blob/apis/blob.test.ts::lease blob with ifTags` | Same | Later |
+| `blob/apis/blob.test.ts::releaseLease` | Same | Later |
+| `blob/apis/blob.test.ts::renewLease` | Same | Later |
+| `blob/apis/blob.test.ts::changeLease` | Same | Later |
+| `blob/apis/blob.test.ts::breakLease` | Same | Later |
+| `blob/apis/blob.test.ts::should get the correct headers back when setting metadata` | GET `comp=metadata` returns `x-ms-meta-*` headers | Mapped and green |
+| `blob/apis/blob.test.ts::should get the correct properties set based on set HTTP headers` | Booted PUT `comp=properties` then HEAD returns `Content-Type` / `Cache-Control` | Mapped and green |
+| `blob/apis/blob.test.ts::Settier with ifTags should work` | Tier is `unclaim` in the path table | Unclaim |
+| `blob/apis/blob.test.ts::setTier set default to cool` | Same | Unclaim |
+| `blob/apis/blob.test.ts::setTier set default to cold` | Same | Unclaim |
+| `blob/apis/blob.test.ts::setTier set archive to hot` | Same | Unclaim |
+| `blob/apis/blob.test.ts::setTier on leased blob` | Same | Unclaim |
+| `blob/apis/blob.test.ts::Upload blob with accesstier should get accessTierInferred as false` | Same | Unclaim |
+| `blob/apis/blob.test.ts::setHTTPHeaders with default parameters` | Booted `SetBlobProperties`; atomic `TestAzureBlobMetadataPropertiesHead` | Mapped and green |
+| `blob/apis/blob.test.ts::setHTTPHeaders with all parameters set` | All six `x-ms-blob-*` headers decoded, stored, and re-emitted on HEAD | Mapped and green |
+| `blob/apis/blob.test.ts::Copy blob should work` | Copy key `missing` until snapshot/copy slice | Later |
+| `blob/apis/blob.test.ts::Copy blob with ifTags should work` | Same | Later |
+| `blob/apis/blob.test.ts::Copy blob should work to override metadata` | Same | Later |
+| `blob/apis/blob.test.ts::Copy blob should work with source archive blob and accesstier header` | Copy later; tier unclaim | Later |
+| `blob/apis/blob.test.ts::Copy blob should not override destination Lease status` | Copy slice | Later |
+| `blob/apis/blob.test.ts::Copy blob should work for page blob` | Page slice then copy slice | Later |
+| `blob/apis/blob.test.ts::Copy blob should not work for page blob and set tier` | Same | Later |
+| `blob/apis/blob.test.ts::Copy blob should fail with 400 when copy source is invalid` | Copy slice | Later |
+| `blob/apis/blob.test.ts::Copy blob should not work with  ifNoneMatch * when dest exist` | Copy then conditions | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work` | `comp=copy&sync` key `missing` | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob echoes source Content-MD5 in response when supplied` | Same | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob omits Content-MD5 in response when not supplied` | Same | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work to override metadata` | Same | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob should not override destination Lease status` | Same | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work to override tag` | Same | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work for page blob` | Same | Later |
+| `blob/apis/blob.test.ts::set/get blob tag should work, with base blob or snapshot` | Tags slice | Later |
+| `blob/apis/blob.test.ts::set blob tag should work in put block blob, pubBlockList, and startCopyFromURL on block blob, and getBlobProperties, Download Blob, list blob can get blob tags.` | Same | Later |
+| `blob/apis/blob.test.ts::set blob tag should work in create page/append blob, copyFromURL.` | Same | Later |
+| `blob/apis/blob.test.ts::set blob tag fail with invalid tag.` | Same | Later |
+| `blob/apis/blob.test.ts::Set and get blob tags should work with lease condition` | Same | Later |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition` | Same | Later |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition - special char comparing` | Same | Later |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition - key with special chars` | Same | Later |
+| `blob/apis/blob.test.ts::get blob tag with long ifTags condition` | Same | Later |
+| `blob/apis/blob.test.ts::get blob tag with invalid ifTags condition string` | Same | Later |
+| `blob/apis/blob.test.ts::upload invalid x-ms-blob-content-md5` | Content-MD5 stored verbatim; base64/format validation unclaimed | Partial |
+| `blob/apis/blob.test.ts::Acquire Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Blob lease keys still `missing` | Later |
+| `blob/apis/blob.test.ts::Renew Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Change Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Renew: Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Acquire Lease on Broken Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Break Lease on Infinite Lease, if give valid breakPeriod, should be broken after breakperiod` | Same; break-period clock unclaimed even for container lease | Later |
+| `blob/apis/blob.test.ts::Break Lease on Infinite Lease, if not give breakPeriod, should be broken immediately` | Blob lease keys still `missing` | Later |
+| `blob/apis/blob.test.ts::Renew: Lease on Leased status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Change Lease on Leased status, if input LeaseId not match anyone of leaseID or proposedLeaseId, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Change Lease on Leased status, if input LeaseId matches proposedLeaseId, will change success` | Same | Later |
+| `blob/apis/blob.test.ts::UploadPage on a Leased page blob, if input LeaseId matches, will success` | Page slice then blob lease | Later |
+| `blob/apis/blob.test.ts::ClearPage on a Leased page blob, if input LeaseId matches, will success` | Same | Later |
+| `blob/apis/blob.test.ts::Resize a Leased page blob, if input LeaseId matches, will success` | Same | Later |
+| `blob/apis/blob.test.ts::UpdateSequenceNumber a Leased page blob, if input LeaseId matches, will success` | Same | Later |
 
 ### Shipped YAML evidence (not the inventory)
 

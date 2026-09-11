@@ -209,6 +209,30 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if res.StatusCode != 200 || !strings.Contains(string(b), "<Status>live</Status>") || res.Header.Get("x-amzn-errortype") != "" {
 		t.Fatalf("stats secondary %d %#v %s", res.StatusCode, res.Header, b)
 	}
+	code, raw, _ = do(http.MethodPut, "/ctr/o", "hello-azure", map[string]string{"x-ms-blob-type": "BlockBlob"})
+	if code != 201 {
+		t.Fatalf("re-put blob %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/o?comp=metadata", "", map[string]string{"x-ms-meta-a": "b"})
+	if code >= 300 {
+		t.Fatalf("set blob metadata %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/o?comp=metadata", "", nil)
+	if code != 200 || h.Get("x-ms-meta-a") != "b" {
+		t.Fatalf("get blob metadata %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/o?comp=properties", "", map[string]string{"x-ms-blob-content-type": "text/plain", "x-ms-blob-cache-control": "no-cache"})
+	if code >= 300 {
+		t.Fatalf("set blob properties %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodHead, "/ctr/o", "", nil)
+	if code != 200 || h.Get("x-ms-meta-a") != "b" || h.Get("Content-Type") != "text/plain" || h.Get("Cache-Control") != "no-cache" || h.Get("x-ms-blob-type") != "BlockBlob" || len(raw) != 0 {
+		t.Fatalf("head properties %d %#v %q", code, h, raw)
+	}
+	code, raw, h = do(http.MethodHead, "/ctr/missing", "", nil)
+	if code != 404 || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("Content-Type") != "" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("head missing %d %#v %s", code, h, raw)
+	}
 }
 
 func TestBootedServerAzureQueue(t *testing.T) {

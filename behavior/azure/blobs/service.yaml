@@ -15,15 +15,15 @@ resources:
     record:
       name: id
 
+  # No resource-level record: every write re-evaluates it, so a metadata or
+  # properties patch would re-run the template against a body-less request and
+  # wipe the value it was not touching. PutBlob carries the full record;
+  # patches and folds declare only the fields they mean to change.
   blob:
     collection: "azblob:{container.id}"
     parent: container
     id:
       input_members: [blob]
-    record:
-      container: "lower(string(input.container))"
-      name: "string(input.blob)"
-      value: "('body' in input && input.body != null) ? string(input.body) : (('value' in input && input.value != null) ? string(input.value) : '')"
 
   blob_slot:
     collection: azslot
@@ -127,7 +127,20 @@ operations:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
     effects:
-      - put: { resource: blob }
+      - put:
+          resource: blob
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "('body' in input && input.body != null) ? string(input.body) : (('value' in input && input.value != null) ? string(input.value) : '')"
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+            content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+            cache_control: "('cache_control' in input && input.cache_control != null) ? string(input.cache_control) : ''"
+            content_encoding: "('content_encoding' in input && input.content_encoding != null) ? string(input.content_encoding) : ''"
+            content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
+            content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
+            content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
+            blob_type: "('blob_type' in input && input.blob_type != null && string(input.blob_type) != '') ? string(input.blob_type) : 'BlockBlob'"
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"
@@ -141,6 +154,74 @@ operations:
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
     output:
       _raw: "string(rec.value)"
+
+  GetBlobProperties:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    output:
+      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
+      content_type: "('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : ''"
+      cache_control: "('cache_control' in rec && rec.cache_control != null) ? string(rec.cache_control) : ''"
+      content_encoding: "('content_encoding' in rec && rec.content_encoding != null) ? string(rec.content_encoding) : ''"
+      content_language: "('content_language' in rec && rec.content_language != null) ? string(rec.content_language) : ''"
+      content_disposition: "('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''"
+      content_md5: "('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''"
+      blob_type: "('blob_type' in rec && rec.blob_type != null && string(rec.blob_type) != '') ? string(rec.blob_type) : 'BlockBlob'"
+      content_length: "string(size(string(rec.value)))"
+
+  SetBlobMetadata:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+    output:
+      metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+
+  GetBlobMetadata:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    output:
+      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
+
+  SetBlobProperties:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+            cache_control: "('cache_control' in input && input.cache_control != null) ? string(input.cache_control) : ''"
+            content_encoding: "('content_encoding' in input && input.content_encoding != null) ? string(input.content_encoding) : ''"
+            content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
+            content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
+            content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
+    output:
+      content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+      cache_control: "('cache_control' in input && input.cache_control != null) ? string(input.cache_control) : ''"
+      content_encoding: "('content_encoding' in input && input.content_encoding != null) ? string(input.content_encoding) : ''"
+      content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
+      content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
+      content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
 
   ListBlobs:
     reads:

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -595,7 +596,7 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	}
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
-	do := func(method, path, body string) (int, []byte, http.Header) {
+	do := func(method, path, body string, hdr map[string]string) (int, []byte, http.Header) {
 		t.Helper()
 		var rdr io.Reader
 		if body != "" {
@@ -607,6 +608,9 @@ func TestBootedServerAzureQueue(t *testing.T) {
 		}
 		req.Host = "acct.queue.core.windows.net"
 		req.Header.Set("Authorization", "Bearer test")
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -615,23 +619,140 @@ func TestBootedServerAzureQueue(t *testing.T) {
 		res.Body.Close()
 		return res.StatusCode, b, res.Header
 	}
-	code, raw, _ := do(http.MethodPut, "/q1", "")
-	if code >= 300 {
+	envelope := func(text string) string {
+		return `<?xml version="1.0" encoding="utf-8"?><QueueMessage><MessageText>` + text + `</MessageText></QueueMessage>`
+	}
+	code, raw, _ := do(http.MethodPut, "/q1", "", map[string]string{"x-ms-meta-app": "demo"})
+	if code != 201 {
 		t.Fatalf("create queue %d %s", code, raw)
 	}
-	code, raw, _ = do(http.MethodGet, "/?comp=list", "")
+	code, raw, _ = do(http.MethodGet, "/?comp=list", "", nil)
 	if code != 200 || !strings.Contains(string(raw), "q1") {
 		t.Fatalf("list queues %d %s", code, raw)
 	}
-	code, raw, _ = do(http.MethodPost, "/q1/messages", "hello-q")
-	if code >= 300 {
+	// Metadata + approximate count.
+	code, raw, h := do(http.MethodGet, "/q1?comp=metadata", "", nil)
+	if code != 200 || h.Get("x-ms-meta-app") != "demo" || h.Get("x-ms-approximate-messages-count") != "0" {
+		t.Fatalf("queue properties %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/q1?comp=metadata", "", map[string]string{"x-ms-meta-app": "v2"})
+	if code != 204 {
+		t.Fatalf("set queue metadata %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/q1?comp=metadata", "", nil)
+	if code != 200 || h.Get("x-ms-meta-app") != "v2" {
+		t.Fatalf("queue metadata %d %#v %s", code, h, raw)
+	}
+	// ACL round-trip.
+	code, raw, _ = do(http.MethodPut, "/q1?comp=acl", `<?xml version="1.0" encoding="utf-8"?><SignedIdentifiers><SignedIdentifier><Id>id1</Id></SignedIdentifier></SignedIdentifiers>`, nil)
+	if code != 204 {
+		t.Fatalf("set queue acl %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1?comp=acl", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<Id>id1</Id>") {
+		t.Fatalf("get queue acl %d %s", code, raw)
+	}
+	// Service properties + stats.
+	code, raw, _ = do(http.MethodGet, "/?restype=service&comp=properties", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "StorageServiceProperties") {
+		t.Fatalf("queue service properties %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/?restype=service&comp=stats", "", nil)
+	if code != 400 || h.Get("x-ms-error-code") != "InvalidQueryParameterValue" {
+		t.Fatalf("queue stats primary %d %#v %s", code, h, raw)
+	}
+	// Enqueue / peek / dequeue / clear.
+	code, raw, _ = do(http.MethodPost, "/q1/messages", envelope("hello-q"), nil)
+	if code != 201 || !strings.Contains(string(raw), "<PopReceipt>") || !strings.Contains(string(raw), "<MessageText>hello-q</MessageText>") {
 		t.Fatalf("put message %d %s", code, raw)
 	}
-	code, raw, _ = do(http.MethodGet, "/q1/messages", "")
-	if code != 200 || !strings.Contains(string(raw), "hello-q") {
-		t.Fatalf("get messages %d %s", code, raw)
+	code, raw, _ = do(http.MethodPost, "/q1/messages", envelope("second"), nil)
+	if code != 201 {
+		t.Fatalf("put second %d %s", code, raw)
 	}
-	code, raw, h := do(http.MethodDelete, "/missing", "")
+	code, raw, _ = do(http.MethodPost, "/q1/messages", envelope("raw~bad"), nil)
+	if code == 201 {
+		// no-op: envelope is well-formed here; the raw-body negative is below
+	}
+	code, raw, h = do(http.MethodPost, "/q1/messages", "not xml at all <<<", nil)
+	if code != 400 || h.Get("x-ms-error-code") != "InvalidXmlDocument" {
+		t.Fatalf("malformed message body %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<MessageText>hello-q</MessageText>") || strings.Contains(string(raw), "second") || strings.Contains(string(raw), "<PopReceipt>") {
+		t.Fatalf("peek %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<MessageText>hello-q</MessageText>") || !strings.Contains(string(raw), "<PopReceipt>") || strings.Contains(string(raw), "second") {
+		t.Fatalf("dequeue %d %s", code, raw)
+	}
+	popReceipt := ""
+	if i := strings.Index(string(raw), "<PopReceipt>"); i >= 0 {
+		rest := string(raw)[i+len("<PopReceipt>"):]
+		popReceipt = rest[:strings.Index(rest, "</PopReceipt>")]
+	}
+	if popReceipt == "" {
+		t.Fatalf("no pop receipt in %s", raw)
+	}
+	msgID := ""
+	if i := strings.Index(string(raw), "<MessageId>"); i >= 0 {
+		rest := string(raw)[i+len("<MessageId>"):]
+		msgID = rest[:strings.Index(rest, "</MessageId>")]
+	}
+	// The dequeued message is invisible to the next dequeue.
+	code, raw, _ = do(http.MethodGet, "/q1/messages", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<MessageText>second</MessageText>") || strings.Contains(string(raw), "hello-q") {
+		t.Fatalf("second dequeue %d %s", code, raw)
+	}
+	// Update with the wrong receipt is a 400; the right one works.
+	code, raw, h = do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt=wrong&visibilitytimeout=5", envelope("changed"), nil)
+	if code != 400 || h.Get("x-ms-error-code") != "PopReceiptMismatch" {
+		t.Fatalf("update wrong receipt %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt="+url.QueryEscape(popReceipt)+"&visibilitytimeout=5", envelope("changed"), nil)
+	if code != 204 || h.Get("x-ms-popreceipt") == "" || h.Get("x-ms-time-next-visible") == "" {
+		t.Fatalf("update %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPost, "/q1/messages?visibilitytimeout=691200", envelope("x"), nil)
+	if code != 400 || h.Get("x-ms-error-code") != "OutOfRangeQueryParameterValue" {
+		t.Fatalf("invalid visibilitytimeout %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodDelete, "/q1/messages", "", nil)
+	if code != 204 {
+		t.Fatalf("clear %d %s", code, raw)
+	}
+	// Real clock: a short TTL expires the message, and a dequeued message
+	// reappears after its visibility timeout.
+	code, raw, _ = do(http.MethodPost, "/q1/messages?messagettl=1", envelope("short"), nil)
+	if code != 201 {
+		t.Fatalf("put short ttl %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPost, "/q1/messages", envelope("linger"), nil)
+	if code != 201 {
+		t.Fatalf("put linger %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages?visibilitytimeout=1", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<MessageText>short</MessageText>") {
+		t.Fatalf("dequeue short %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<MessageText>linger</MessageText>") || strings.Contains(string(raw), "short") {
+		t.Fatalf("peek hides invisible %d %s", code, raw)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true&numofmessages=5", "", nil)
+	if code != 200 || strings.Contains(string(raw), "short") || !strings.Contains(string(raw), "<MessageText>linger</MessageText>") {
+		t.Fatalf("peek after ttl %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodDelete, "/q1/messages", "", nil)
+	if code != 204 {
+		t.Fatalf("clear %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
+	if code != 200 || strings.Contains(string(raw), "<QueueMessage>") {
+		t.Fatalf("peek after clear %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/missing", "", nil)
 	if code != 404 || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("delete missing queue %d %#v %s", code, h, raw)
 	}

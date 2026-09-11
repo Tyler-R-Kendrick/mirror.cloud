@@ -443,19 +443,56 @@ func Bundle() *model.Bundle {
 		op("DeleteQueue", "DELETE", "/{queue}", 204, false),
 		op("PutMessage", "POST", "/{queue}/messages", 201, false),
 		op("GetMessages", "GET", "/{queue}/messages", 200, true),
+		op("PeekMessages", "GET", "/{queue}/messages?peekonly=true", 200, true),
+		op("ClearMessages", "DELETE", "/{queue}/messages", 204, false),
+		op("UpdateMessage", "PUT", "/{queue}/messages/{messageid}", 204, false),
 		op("DeleteMessage", "DELETE", "/{queue}/messages/{messageid}", 204, false),
+		op("SetQueueMetadata", "PUT", "/{queue}?comp=metadata", 204, false),
+		op("GetQueueProperties", "GET", "/{queue}?comp=metadata", 200, true),
+		op("SetQueueAcl", "PUT", "/{queue}?comp=acl", 204, false),
+		op("GetQueueAcl", "GET", "/{queue}?comp=acl", 200, true),
+		op("GetServiceProperties", "GET", "/?restype=service&comp=properties", 200, true),
+		op("SetServiceProperties", "PUT", "/?restype=service&comp=properties", 202, false),
+		op("GetServiceStats", "GET", "/?restype=service&comp=stats", 200, true),
 	}
 	queueSvc := svc("azure.queue", "queue", model.ProtoRESTXML, "", "", "", queueOps)
 	queueSvc.OperationByName("CreateQueue").Output = "Queue"
 	queueSvc.OperationByName("ListQueues").Output = "QueueList"
 	queueSvc.OperationByName("PutMessage").Output = "Message"
 	queueSvc.OperationByName("GetMessages").Output = "MessageList"
+	queueSvc.OperationByName("PeekMessages").Output = "MessageList"
+	queueSvc.OperationByName("SetQueueMetadata").Output = "Queue"
+	queueSvc.OperationByName("GetQueueProperties").Output = "Queue"
+	queueSvc.OperationByName("SetQueueAcl").Output = "Queue"
+	queueSvc.OperationByName("GetQueueAcl").Output = "Queue"
+	queueSvc.OperationByName("UpdateMessage").Output = "Message"
+	queueSvc.OperationByName("GetServiceProperties").Output = "QueueAccount"
+	queueSvc.OperationByName("SetServiceProperties").Output = "QueueAccount"
+	queueSvc.OperationByName("GetServiceStats").Output = "QueueAccount"
 	queueSvc.Shapes = map[string]model.Shape{
 		"String":     {ID: "String", Kind: model.KindString},
-		"Queue":      {ID: "Queue", Kind: model.KindStructure, Members: map[string]model.Member{"name": {Shape: "String"}}},
-		"QueueList":  {ID: "QueueList", Kind: model.KindList, Member: "Queue"},
-		"Message":    {ID: "Message", Kind: model.KindStructure, Members: map[string]model.Member{"id": {Shape: "String"}, "message": {Shape: "String"}}},
+		"Map":        {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
+		"Queue": {ID: "Queue", Kind: model.KindStructure, Members: map[string]model.Member{
+			"name":         {Shape: "String"},
+			"metadata":     {Shape: "Map"},
+			"acl":          {Shape: "String"},
+			"approx_count": {Shape: "String"},
+		}},
+		"QueueList": {ID: "QueueList", Kind: model.KindList, Member: "Queue"},
+		"Message": {ID: "Message", Kind: model.KindStructure, Members: map[string]model.Member{
+			"id":            {Shape: "String"},
+			"message":       {Shape: "String"},
+			"pop_receipt":   {Shape: "String"},
+			"dequeue_count": {Shape: "String"},
+			"inserted_at":   {Shape: "String"},
+			"expires_at":    {Shape: "String"},
+			"visible_at":    {Shape: "String"},
+		}},
 		"MessageList": {ID: "MessageList", Kind: model.KindList, Member: "Message"},
+		"QueueAccount": {ID: "QueueAccount", Kind: model.KindStructure, Members: map[string]model.Member{
+			"properties": {Shape: "String"},
+			"geo_status": {Shape: "String"},
+		}},
 	}
 	tableOps := []model.Operation{
 		op("CreateTable", "POST", "/Tables", 201, false),

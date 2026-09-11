@@ -936,6 +936,34 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	}
 }
 
+func TestAzureQueueRoutes(t *testing.T) {
+	codec := Codec{}
+	qs := &model.Service{ID: "azure.queue"}
+	for _, test := range []struct{ method, path, want string }{
+		{http.MethodPut, "/q", "CreateQueue"},
+		{http.MethodDelete, "/q", "DeleteQueue"},
+		{http.MethodGet, "/?comp=list", "ListQueues"},
+		{http.MethodPut, "/q?comp=metadata", "SetQueueMetadata"},
+		{http.MethodGet, "/q?comp=metadata", "GetQueueProperties"},
+		{http.MethodPut, "/q?comp=acl", "SetQueueAcl"},
+		{http.MethodGet, "/q?comp=acl", "GetQueueAcl"},
+		{http.MethodGet, "/?restype=service&comp=properties", "GetServiceProperties"},
+		{http.MethodPut, "/?restype=service&comp=properties", "SetServiceProperties"},
+		{http.MethodGet, "/?restype=service&comp=stats", "GetServiceStats"},
+		{http.MethodPost, "/q/messages", "PutMessage"},
+		{http.MethodGet, "/q/messages", "GetMessages"},
+		{http.MethodGet, "/q/messages?peekonly=true", "PeekMessages"},
+		{http.MethodDelete, "/q/messages", "ClearMessages"},
+		{http.MethodPut, "/q/messages/abc?popreceipt=x&visibilitytimeout=5", "UpdateMessage"},
+		{http.MethodDelete, "/q/messages/abc?popreceipt=x", "DeleteMessage"},
+	} {
+		op, err := codec.Route(qs, httptest.NewRequest(test.method, test.path, nil))
+		if err != nil || op.Name != test.want {
+			t.Errorf("azure queue %s %s: %#v %v, want %s", test.method, test.path, op, err, test.want)
+		}
+	}
+}
+
 func TestAzureConditionalHeadersDecode(t *testing.T) {
 	codec := Codec{}
 	az := &model.Service{ID: "azure.blobs"}

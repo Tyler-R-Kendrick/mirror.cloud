@@ -15,9 +15,53 @@ resources:
     parent: queue
     id:
       generate: { kind: hex, bytes: 8 }
+      input_members: [messageid]
+    # Keyed by the stable message id (pop receipts rotate per dequeue; the id
+    # never changes), so event writes land back under the same key.
+    key: id
     record:
       id: id
-      message: "('body' in input && input.body != null) ? string(input.body) : string(input.message)"
+      message: "('message' in input && input.message != null) ? string(input.message) : (('body' in input && input.body != null) ? string(input.body) : '')"
+      seq: { counter: "seq:{queue.id}" }
+      pop_receipt: { generate: { kind: hex, bytes: 16 } }
+      dequeue_count: "0"
+      inserted_at: "int(now)"
+      # messagettl -1 means never expire; default is seven days.
+      expires_at: "('messagettl' in input && int(input.messagettl) == -1) ? 253402300799 : (int(now) + (('messagettl' in input && int(input.messagettl) > 0) ? int(input.messagettl) : 604800))"
+      visible_at: "int(now) + (('visibilitytimeout' in input && int(input.visibilitytimeout) > 0) ? int(input.visibilitytimeout) : 0)"
+    statechart:
+      initial: visible
+      states:
+        visible:
+          on:
+            # The drawn receipt is suffixed with seq so every message dequeued
+            # in one batch still gets a distinct receipt.
+            DEQUEUE:
+              - target: invisible
+                actions:
+                  - set: { dequeue_count: "int(rec.dequeue_count) + 1", pop_receipt: "event.popReceipt + '-' + string(rec.seq)", visible_at: "int(event.nextVisible)" }
+                  - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
+            DELETE: [{ target: deleted }]
+            CLEAR: [{ target: deleted }]
+        invisible:
+          timers:
+            - { deadline: reappear, target: visible }
+          on:
+            UPDATE:
+              - target: invisible
+                actions:
+                  - set: { pop_receipt: "event.popReceipt", message: "event.text", visible_at: "int(event.nextVisible)" }
+                  - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
+            DELETE: [{ target: deleted }]
+            CLEAR: [{ target: deleted }]
+        deleted: { final: true }
+
+  account:
+    collection: azqacct
+    id:
+      derive: "'default'"
+    record:
+      properties: "('body' in input && input.body != null) ? string(input.body) : ''"
 
 errors:
   QueueAlreadyExists:
@@ -36,6 +80,26 @@ errors:
     code: MessageNotFound
     http: 404
     fault: client
+  PopReceiptMismatch:
+    code: PopReceiptMismatch
+    http: 400
+    fault: client
+  OutOfRangeQueryParameterValue:
+    code: OutOfRangeQueryParameterValue
+    http: 400
+    fault: client
+  RequestBodyTooLarge:
+    code: RequestBodyTooLarge
+    http: 400
+    fault: client
+  InvalidQueryParameterValue:
+    code: InvalidQueryParameterValue
+    http: 400
+    fault: client
+  InvalidXmlDocument:
+    code: InvalidXmlDocument
+    http: 400
+    fault: client
 
 operations:
   CreateQueue:
@@ -45,7 +109,11 @@ operations:
       - { cond: "'queue' in input && string(input.queue) != ''", error: InvalidResourceName, message: "The specified resource name contains invalid characters." }
       - { cond: "!existing_found", error: QueueAlreadyExists, message: "The specified queue already exists." }
     effects:
-      - create: { resource: queue }
+      - create:
+          resource: queue
+          record:
+            name: id
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
     output:
       name: id
 
@@ -60,23 +128,171 @@ operations:
     effects:
       - delete: { resource: queue }
 
+  SetQueueMetadata:
+    reads:
+      rec: { resource: queue }
+    require:
+      - { cond: rec_found, error: QueueNotFound, message: "The specified queue does not exist." }
+    effects:
+      - patch:
+          resource: queue
+          record:
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+    output:
+      name: rec.name
+      metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+
+  GetQueueProperties:
+    reads:
+      rec: { resource: queue }
+    require:
+      - { cond: rec_found, error: QueueNotFound, message: "The specified queue does not exist." }
+    select: { binding: msgs, resource: message }
+    output:
+      name: rec.name
+      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
+      approx_count: "string(size(msgs.filter(m, int(m.expires_at) > int(now))))"
+
+  SetQueueAcl:
+    reads:
+      rec: { resource: queue }
+    require:
+      - { cond: rec_found, error: QueueNotFound, message: "The specified queue does not exist." }
+    effects:
+      - patch:
+          resource: queue
+          record:
+            acl: "('acl' in input && input.acl != null) ? string(input.acl) : (('body' in input && input.body != null) ? string(input.body) : '')"
+    output:
+      name: rec.name
+
+  GetQueueAcl:
+    reads:
+      rec: { resource: queue }
+    require:
+      - { cond: rec_found, error: QueueNotFound, message: "The specified queue does not exist." }
+    output:
+      acl: "('acl' in rec && rec.acl != null && string(rec.acl) != '') ? string(rec.acl) : '<?xml version=\"1.0\" encoding=\"utf-8\"?><SignedIdentifiers></SignedIdentifiers>'"
+
+  GetServiceProperties:
+    reads:
+      rec: { resource: account }
+    output:
+      properties: "rec_found && rec.properties != null && string(rec.properties) != '' ? string(rec.properties) : ''"
+
+  SetServiceProperties:
+    effects:
+      - put: { resource: account }
+    output:
+      properties: "('body' in input && input.body != null) ? string(input.body) : ''"
+
+  GetServiceStats:
+    require:
+      - { cond: "'secondary' in input && input.secondary == true", error: InvalidQueryParameterValue, message: "The value for one of the query parameters specified in the request URI is invalid." }
+    output:
+      geo_status: "'live'"
+
   PutMessage:
     reads:
       q: { resource: queue }
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+      - { cond: "!('body_invalid' in input && input.body_invalid == true)", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
+      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      - { cond: "!('messagettl' in input && input.messagettl != null) || int(input.messagettl) == -1 || (int(input.messagettl) > 0 && int(input.messagettl) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      # The 64KB limit is computed after content encoding; the encoded form
+      # is what lands here.
+      - { cond: "blen(('message' in input && input.message != null) ? string(input.message) : (('body' in input && input.body != null) ? string(input.body) : '')) <= 65536", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
     effects:
       - create: { resource: message }
     output:
-      id: id
-      message: "('body' in input && input.body != null) ? string(input.body) : string(input.message)"
+      id: rec.id
+      message: rec.message
+      pop_receipt: rec.pop_receipt
+      dequeue_count: rec.dequeue_count
+      inserted_at: rec.inserted_at
+      expires_at: rec.expires_at
+      visible_at: rec.visible_at
 
+  # Dequeue: the first visible, unexpired messages (default 1), each flipped
+  # invisible with a fresh pop receipt.
   GetMessages:
     reads:
       q: { resource: queue }
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
-    list: { resource: message, member: _list }
+      - { cond: "!('numofmessages' in input && input.numofmessages != null) || (int(input.numofmessages) >= 1 && int(input.numofmessages) <= 32)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+    select:
+      binding: msgs
+      resource: message
+      state: visible
+      filter: "int(item.visible_at) <= int(now) && int(item.expires_at) > int(now)"
+      order_by: item.seq
+      limit: "('numofmessages' in input && input.numofmessages != null) ? int(input.numofmessages) : 1"
+    effects:
+      - generate: { bind: pr, kind: hex, bytes: 16 }
+      - send_event:
+          foreach: msgs
+          event: DEQUEUE
+          context:
+            popReceipt: fx.pr
+            visibilityTimeout: "('visibilitytimeout' in input && input.visibilitytimeout != null) ? int(input.visibilitytimeout) : 30"
+            nextVisible: "string(int(now) + (('visibilitytimeout' in input && input.visibilitytimeout != null) ? int(input.visibilitytimeout) : 30))"
+    output:
+      _list: "msgs.map(m, {'id': m.id, 'message': m.message, 'pop_receipt': m.pop_receipt, 'dequeue_count': m.dequeue_count, 'inserted_at': m.inserted_at, 'expires_at': m.expires_at, 'visible_at': m.visible_at})"
+
+  PeekMessages:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+      - { cond: "!('numofmessages' in input && input.numofmessages != null) || (int(input.numofmessages) >= 1 && int(input.numofmessages) <= 32)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+    select:
+      binding: msgs
+      resource: message
+      state: visible
+      filter: "int(item.visible_at) <= int(now) && int(item.expires_at) > int(now)"
+      order_by: item.seq
+      limit: "('numofmessages' in input && input.numofmessages != null) ? int(input.numofmessages) : 1"
+    output:
+      _list: "msgs.map(m, {'id': m.id, 'message': m.message, 'dequeue_count': m.dequeue_count, 'inserted_at': m.inserted_at, 'expires_at': m.expires_at})"
+
+  ClearMessages:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+    select: { binding: msgs, resource: message }
+    effects:
+      - send_event: { foreach: msgs, event: CLEAR }
+
+  UpdateMessage:
+    reads:
+      q: { resource: queue }
+      rec: { resource: message }
+    require:
+      - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+      - { cond: "!('body_invalid' in input && input.body_invalid == true)", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
+      - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
+      - { cond: "int(rec.expires_at) > int(now)", error: MessageNotFound, message: "The specified message does not exist." }
+      - { cond: "'popreceipt' in input && input.popreceipt != null && string(rec.pop_receipt) == string(input.popreceipt)", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
+      - { cond: "('visibilitytimeout' in input && input.visibilitytimeout != null) && int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      - { cond: "blen(('message' in input && input.message != null) ? string(input.message) : '') <= 65536", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
+    effects:
+      - generate: { bind: pr, kind: hex, bytes: 16 }
+      - send_event:
+          resource: message
+          event: UPDATE
+          context:
+            popReceipt: fx.pr
+            text: "('message' in input && input.message != null) ? string(input.message) : ''"
+            visibilityTimeout: "int(input.visibilitytimeout)"
+            nextVisible: "string(int(now) + int(input.visibilitytimeout))"
+    output:
+      id: "string(input.messageid)"
+      pop_receipt: fx.pr
+      visible_at: "string(int(now) + int(input.visibilitytimeout))"
 
   DeleteMessage:
     reads:
@@ -85,5 +301,7 @@ operations:
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
       - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
+      - { cond: "int(rec.expires_at) > int(now)", error: MessageNotFound, message: "The specified message does not exist." }
+      - { cond: "string(rec.pop_receipt) == (('popreceipt' in input && input.popreceipt != null) ? string(input.popreceipt) : '')", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
     effects:
-      - delete: { resource: message }
+      - send_event: { resource: message, event: DELETE }

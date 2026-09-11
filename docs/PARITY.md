@@ -126,12 +126,12 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
 | Blob keys fully routed | 40 / 59 |
-| Queue keys fully routed | 4 / 11 |
+| Queue keys fully routed | 11 / 11 |
 | Table method+paths routed | 6 / 12 |
 | Blob keys accounted (routed + unclaim) | 49 / 59 |
-| Queue keys accounted | 4 / 11 |
+| Queue keys accounted | 11 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
-| Azurite test functions traced | 317 / 806 (39%) |
+| Azurite test functions traced | 347 / 806 (43%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -268,17 +268,17 @@ All eleven are must-route (Azurite Queue README). Host `{account}.queue.core.win
 
 | Path key | Status | Mirror |
 |---|---|---|
-| `/?restype=service&comp=properties` | missing | Get/Set Service Properties |
-| `/?restype=service&comp=stats` | missing | Get Stats |
+| `/?restype=service&comp=properties` | routed | `GetServiceProperties` / `SetServiceProperties`; default XML then stored body (same shape as blob service) |
+| `/?restype=service&comp=stats` | routed | `GetServiceStats`; primary 400 `InvalidQueryParameterValue`, `{account}-secondary.queue.core.windows.net` live |
 | `/?comp=list` | routed | `ListQueues` |
 | `/{queueName}` | routed | `CreateQueue` / `DeleteQueue` |
-| `/{queueName}?comp=metadata` | missing | Get/Set Queue Metadata |
-| `/{queueName}?comp=acl` | missing | Get/Set Queue ACL |
-| `/{queueName}/messages` | partial | `GetMessages` dequeue; DELETE clear not routed |
+| `/{queueName}?comp=metadata` | routed | `GetQueueProperties` (`x-ms-meta-*` + `x-ms-approximate-messages-count` of unexpired) / `SetQueueMetadata` |
+| `/{queueName}?comp=acl` | routed | `SetQueueAcl` / `GetQueueAcl`; signed-identifier XML stored verbatim |
+| `/{queueName}/messages` | routed | `GetMessages` dequeue (visibility statechart, rotated pop receipts, dequeue count, numofmessages) + `ClearMessages` |
 | `/{queueName}/messages?visibilitytimeout={visibilityTimeout}&messagettl={messageTimeToLive}` | routed | `PutMessage` |
-| `/{queueName}/messages?peekonly=true` | missing | Peek Messages |
-| `/{queueName}/messages/{messageid}?popreceipt={popReceipt}&visibilitytimeout={visibilityTimeout}` | missing | Update Message |
-| `/{queueName}/messages/{messageid}?popreceipt={popReceipt}` | routed | `DeleteMessage` |
+| `/{queueName}/messages?peekonly=true` | routed | `PeekMessages`; visible unexpired only, no receipt, no visibility change |
+| `/{queueName}/messages/{messageid}?popreceipt={popReceipt}&visibilitytimeout={visibilityTimeout}` | routed | `UpdateMessage`; wrong receipt 400 `PopReceiptMismatch`, expired 404, new receipt + `x-ms-time-next-visible` |
+| `/{queueName}/messages/{messageid}?popreceipt={popReceipt}` | routed | `DeleteMessage`; wrong/missing receipt 400 `PopReceiptMismatch`, expired 404 |
 
 #### Table `paths` method+path (12)
 
@@ -649,6 +649,41 @@ Direct `it()` names from `blob/apis/blobbatch.test.ts` (13). Batch is fanned out
 | `blob/apis/blobbatch.test.ts::SubmitBatch batch with SAS token set tier` | SAS slice + tier unclaim | Later |
 | `blob/apis/blobbatch.test.ts::SubmitBatch within containerScope - with SAS token - batch deleting` | SAS slice | Later |
 | `blob/apis/blobbatch.test.ts::SubmitBatch batch with different operations` | Mixed parts dispatch independently (delete covered; tier partial) | Mapped and green |
+
+Direct `it()` names from `queue/apis/queue.test.ts` (9), `queue/apis/queueService.test.ts` (7), `queue/apis/messages.test.ts` (9), and `queue/apis/messageid.test.ts` (5). Queue runs the same visibility machinery as SQS (statechart settle): dequeue rotates the pop receipt and hides the message for the visibility timeout, TTL hides and lazily drops expired messages.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/apis/queue.test.ts::setMetadata` | Booted PUT then GET `comp=metadata` round-trips `x-ms-meta-*`; atomic `TestAzureQueueMessages` | Mapped and green |
+| `queue/apis/queue.test.ts::getProperties with default/all parameters` | Booted GET `comp=metadata`: metadata + `x-ms-approximate-messages-count` of unexpired messages | Mapped and green |
+| `queue/apis/queue.test.ts::getProperties negative` | Missing queue is 404 `QueueNotFound`; atomic | Mapped and green |
+| `queue/apis/queue.test.ts::create with default parameters` | Booted PUT 201; duplicate 409 `QueueAlreadyExists` | Mapped and green |
+| `queue/apis/queue.test.ts::create with all parameters` | `x-ms-meta-*` stored at create | Mapped and green |
+| `queue/apis/queue.test.ts::create negative` | Only the empty name is rejected (400); case/length rules unclaimed | Partial |
+| `queue/apis/queue.test.ts::delete` | Booted DELETE 204; missing is 404 with no `x-amzn-errortype` | Mapped and green |
+| `queue/apis/queue.test.ts::SetAccessPolicy should work` | SignedIdentifiers XML round-trips; booted + atomic | Mapped and green |
+| `queue/apis/queue.test.ts::setAccessPolicy negative` | ACL XML stored verbatim; malformed-ACL 400 unclaimed | Partial |
+| `queue/apis/queueService.test.ts::Get Queue service properties` | Default `StorageServiceProperties` XML; booted | Mapped and green |
+| `queue/apis/queueService.test.ts::Set CORS with empty AllowedHeaders, ExposedHeaders` | PUT 202 stores the body, GET echoes it; atomic | Mapped and green |
+| `queue/apis/queueService.test.ts::Set Queue service properties` | Same | Mapped and green |
+| `queue/apis/queueService.test.ts::listQueuesSegment with default parameters` | Booted `?comp=list` EnumerationResults | Mapped and green |
+| `queue/apis/queueService.test.ts::listQueuesSegment with all parameters` | prefix/marker/maxresults unclaimed (same ceiling as every list) | Partial |
+| `queue/apis/queueService.test.ts::Get Queue service stats negative` | Primary stats is 400 `InvalidQueryParameterValue`; booted | Mapped and green |
+| `queue/apis/queueService.test.ts::Get Queue service stats` | Secondary host returns live geo-replication; atomic | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue and clear message with default parameters` | Full lifecycle booted: 201 with receipt, peek first-only without receipt, dequeue with receipt, clear 204, empty peek | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue and clear message with all parameters` | visibilitytimeout/messagettl stored; times in the dequeue XML | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue empty message, and peek, dequeue with numberOfMessages > count(messages)` | Empty MessageText enqueues; oversized numofmessages returns what exists | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue special characters` | MessageText stored verbatim (whatever the client encoded) | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue with 64KB characters size which is computed after encoding` | 64KB limit on the encoded form; atomic | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek and dequeue negative` | Missing queue is 404 `QueueNotFound` | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue negative with 65537B(64KB+1B) characters size which is computed after encoding` | 400 `RequestBodyTooLarge`; atomic | Mapped and green |
+| `queue/apis/messages.test.ts::peek,dequeue,update,delete expired message` | Booted real-clock: TTL expires the message from peek/dequeue and single-message ops 404 | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue,dequeue,update message with invalid visibilityTimeout` | vt outside 0..604800 is 400 `OutOfRangeQueryParameterValue`; booted + atomic | Mapped and green |
+| `queue/apis/messageid.test.ts::update and delete empty message with default parameters` | Update sets text + new receipt + next-visible; delete with the fresh receipt | Mapped and green |
+| `queue/apis/messageid.test.ts::update and delete message with all parameters` | Same, with visibilitytimeout honored | Mapped and green |
+| `queue/apis/messageid.test.ts::update message with 64KB characters size which is computed after encoding` | 64KB limit on update; atomic | Mapped and green |
+| `queue/apis/messageid.test.ts::update message negative with 65537B (64KB+1B) characters size which is computed after encoding` | 400 `RequestBodyTooLarge`; atomic | Mapped and green |
+| `queue/apis/messageid.test.ts::delete message negative` | Wrong receipt is 400 `PopReceiptMismatch`; booted + atomic | Mapped and green |
 
 ### Shipped YAML evidence (not the inventory)
 

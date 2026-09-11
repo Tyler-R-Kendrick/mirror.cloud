@@ -857,7 +857,17 @@
       "DeleteQueue",
       "PutMessage",
       "GetMessages",
-      "DeleteMessage"
+      "PeekMessages",
+      "ClearMessages",
+      "UpdateMessage",
+      "DeleteMessage",
+      "SetQueueMetadata",
+      "GetQueueProperties",
+      "SetQueueAcl",
+      "GetQueueAcl",
+      "GetServiceProperties",
+      "SetServiceProperties",
+      "GetServiceStats"
     ]
   },
   {

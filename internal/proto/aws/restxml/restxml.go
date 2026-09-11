@@ -833,10 +833,36 @@ func azureQueueRoute(r *http.Request) string {
 	}
 	q := r.URL.Query()
 	m := r.Method
-	if path == "" && q.Get("comp") == "list" {
-		return "ListQueues"
+	if path == "" {
+		if q.Get("restype") == "service" {
+			switch q.Get("comp") {
+			case "properties":
+				if m == http.MethodPut {
+					return "SetServiceProperties"
+				}
+				return "GetServiceProperties"
+			case "stats":
+				return "GetServiceStats"
+			}
+		}
+		if q.Get("comp") == "list" {
+			return "ListQueues"
+		}
+		return "Unknown"
 	}
 	if len(parts) == 1 {
+		switch q.Get("comp") {
+		case "metadata":
+			if m == http.MethodPut {
+				return "SetQueueMetadata"
+			}
+			return "GetQueueProperties"
+		case "acl":
+			if m == http.MethodPut {
+				return "SetQueueAcl"
+			}
+			return "GetQueueAcl"
+		}
 		switch m {
 		case http.MethodPut:
 			return "CreateQueue"
@@ -845,13 +871,24 @@ func azureQueueRoute(r *http.Request) string {
 		}
 	}
 	if len(parts) >= 2 && parts[1] == "messages" {
-		if len(parts) >= 3 && m == http.MethodDelete {
-			return "DeleteMessage"
+		if len(parts) >= 3 {
+			if m == http.MethodPut {
+				return "UpdateMessage"
+			}
+			if m == http.MethodDelete {
+				return "DeleteMessage"
+			}
+			return "Unknown"
 		}
-		if m == http.MethodPost {
+		switch m {
+		case http.MethodPost:
 			return "PutMessage"
-		}
-		if m == http.MethodGet {
+		case http.MethodDelete:
+			return "ClearMessages"
+		case http.MethodGet:
+			if q.Get("peekonly") == "true" {
+				return "PeekMessages"
+			}
 			return "GetMessages"
 		}
 	}
@@ -869,14 +906,50 @@ func decodeAzureQueue(svc *model.Service, op *model.Operation, r *http.Request) 
 			in["id"] = parts[2]
 		}
 	}
+	q := r.URL.Query()
+	for _, k := range []string{"numofmessages", "visibilitytimeout", "messagettl", "popreceipt"} {
+		if s := q.Get(k); s != "" {
+			in[k] = s
+		}
+	}
+	if strings.Contains(strings.ToLower(r.Host), "-secondary") {
+		in["secondary"] = true
+	}
+	decodeAzureHeaders(in, r)
 	req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
-	if r.Body != nil && (op.Name == "PutMessage") {
+	if r.Body != nil && (op.Name == "PutMessage" || op.Name == "UpdateMessage" || op.Name == "SetQueueAcl" || op.Name == "SetServiceProperties") {
 		body, _ := io.ReadAll(r.Body)
 		in["body"] = string(body)
-		in["message"] = string(body)
 		req.Body = io.NopCloser(bytes.NewReader(body))
+		if op.Name == "PutMessage" || op.Name == "UpdateMessage" {
+			text, ok := azureMessageText(body)
+			if !ok {
+				in["body_invalid"] = true
+			} else {
+				in["message"] = text
+			}
+		}
+		if op.Name == "SetQueueAcl" {
+			in["acl"] = string(body)
+		}
 	}
 	return req, nil
+}
+
+// azureMessageText pulls the MessageText element out of a QueueMessage
+// envelope; the stored text is whatever the client encoded (Azurite keeps it
+// verbatim, base64 or not).
+func azureMessageText(body []byte) (string, bool) {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "", true
+	}
+	var doc struct {
+		Text string `xml:"MessageText"`
+	}
+	if err := xml.Unmarshal(body, &doc); err != nil {
+		return "", false
+	}
+	return doc.Text, true
 }
 
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
@@ -2583,7 +2656,32 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
-	if resp != nil && resp.Output != nil && op == "GetContainerAcl" {
+	if resp != nil && resp.Output != nil && op == "PutMessage" {
+		var b strings.Builder
+		b.WriteString(`<?xml version="1.0" encoding="utf-8"?><QueueMessagesList>`)
+		writeAzureQueueMessage(&b, resp.Output, true)
+		b.WriteString("</QueueMessagesList>")
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if resp != nil && resp.Output != nil && op == "UpdateMessage" {
+		w.Header().Set("x-ms-popreceipt", strAny(resp.Output["pop_receipt"]))
+		if s := azureUnix(resp.Output["visible_at"]); s != "" {
+			w.Header().Set("x-ms-time-next-visible", s)
+		}
+		w.WriteHeader(status)
+		return nil
+	}
+	if resp != nil && resp.Output != nil && op == "GetQueueProperties" {
+		if s := strAny(resp.Output["approx_count"]); s != "" {
+			w.Header().Set("x-ms-approximate-messages-count", s)
+		}
+		w.WriteHeader(status)
+		return nil
+	}
+	if resp != nil && resp.Output != nil && (op == "GetContainerAcl" || op == "GetQueueAcl") {
 		body := strAny(resp.Output["acl"])
 		if body == "" {
 			body = `<?xml version="1.0" encoding="utf-8"?><SignedIdentifiers></SignedIdentifiers>`
@@ -2611,16 +2709,12 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 		if lst, ok := resp.Output["_list"]; ok {
 			w.Header().Set("Content-Type", "application/xml")
 			w.WriteHeader(status)
-			if op == "GetMessages" {
+			if op == "GetMessages" || op == "PeekMessages" {
 				var b strings.Builder
 				b.WriteString(`<?xml version="1.0" encoding="utf-8"?><QueueMessagesList>`)
 				for _, item := range asAny(lst) {
 					m, _ := item.(map[string]any)
-					b.WriteString("<QueueMessage><MessageId>")
-					b.WriteString(xmlEscape(strAny(m["id"])))
-					b.WriteString("</MessageId><MessageText>")
-					b.WriteString(xmlEscape(strAny(m["message"])))
-					b.WriteString("</MessageText></QueueMessage>")
+					writeAzureQueueMessage(&b, m, op == "GetMessages")
 				}
 				b.WriteString("</QueueMessagesList>")
 				_, err := io.WriteString(w, b.String())
@@ -2721,6 +2815,60 @@ func writeAzureTagSet(b *strings.Builder, v any) {
 		b.WriteString(xmlEscape(fmt.Sprint(tags[k])))
 		b.WriteString("</Value></Tag>")
 	}
+}
+
+// azureUnix renders a unix-seconds member as an RFC1123 GMT string.
+func azureUnix(v any) string {
+	var n int64
+	switch t := v.(type) {
+	case int64:
+		n = t
+	case int:
+		n = int64(t)
+	case float64:
+		n = int64(t)
+	case string:
+		n, _ = strconv.ParseInt(t, 10, 64)
+	}
+	if n <= 0 {
+		return ""
+	}
+	return time.Unix(n, 0).UTC().Format(http.TimeFormat)
+}
+
+// writeAzureQueueMessage writes one <QueueMessage>; dequeue responses carry
+// PopReceipt and TimeNextVisible, peek responses do not.
+func writeAzureQueueMessage(b *strings.Builder, m map[string]any, withReceipt bool) {
+	b.WriteString("<QueueMessage><MessageId>")
+	b.WriteString(xmlEscape(strAny(m["id"])))
+	b.WriteString("</MessageId>")
+	if s := azureUnix(m["inserted_at"]); s != "" {
+		b.WriteString("<InsertionTime>")
+		b.WriteString(s)
+		b.WriteString("</InsertionTime>")
+	}
+	if s := azureUnix(m["expires_at"]); s != "" {
+		b.WriteString("<ExpirationTime>")
+		b.WriteString(s)
+		b.WriteString("</ExpirationTime>")
+	}
+	if withReceipt {
+		if s := strAny(m["pop_receipt"]); s != "" {
+			b.WriteString("<PopReceipt>")
+			b.WriteString(xmlEscape(s))
+			b.WriteString("</PopReceipt>")
+		}
+		if s := azureUnix(m["visible_at"]); s != "" {
+			b.WriteString("<TimeNextVisible>")
+			b.WriteString(s)
+			b.WriteString("</TimeNextVisible>")
+		}
+	}
+	b.WriteString("<DequeueCount>")
+	b.WriteString(strAny(m["dequeue_count"]))
+	b.WriteString("</DequeueCount><MessageText>")
+	b.WriteString(xmlEscape(strAny(m["message"])))
+	b.WriteString("</MessageText></QueueMessage>")
 }
 
 func writeAzureBlobHeaders(w http.ResponseWriter, resp *spi.Response) {

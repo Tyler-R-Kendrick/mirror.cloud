@@ -118,11 +118,11 @@ Authority: official Azure Blob REST (`{account}.blob.core.windows.net`, `restype
 | `PUT /{container}?restype=container` (`CreateContainer`) | Booted create is HTTP 201; atomic empty 400 `InvalidResourceName` and duplicate 409 `ContainerAlreadyExists`; BDD create; chaos `TestAzureConcurrentDuplicateContainers`; mutants `azure-accept-empty-container` and `azure-accept-duplicate-container` |
 | `GET /{container}?restype=container` (`GetContainer`) | Booted get after create; characterization `get`; missing container HTTP 404 `ContainerNotFound` with `x-ms-error-code` and no `x-amzn-errortype` |
 | `GET /?comp=list` (`ListContainers`) | Booted list XML `EnumerationResults`/`<Name>ctr</Name>`; characterization `list`; BDD lists after create |
-| `DELETE /{container}?restype=container` (`DeleteContainer`) | Atomic delete then missing get is 404; `TestDeleteMissingContainerAndBlob` and booted DELETE of missing container are HTTP 404 `ContainerNotFound` with no `x-amzn-errortype`; characterization `del_miss_c`; mutant `azure-delete-missing-container-as-success` |
+| `DELETE /{container}?restype=container` (`DeleteContainer`) | Atomic delete then missing get is 404; `TestDeleteMissingContainerAndBlob` and booted DELETE of missing container are HTTP 404 `<Code>ContainerNotFound</Code>` with `x-ms-error-code` and no `x-amzn-errortype`; characterization `del_miss_c`; mutant `azure-delete-missing-container-as-success` |
 | `PUT /{container}/{blob}` (`PutBlob`) | Booted Put Blob then Get Blob round-trips bytes; characterization `put`; fuzz `FuzzBlobBytes`; chaos concurrent put/get |
-| `GET /{container}/{blob}` (`GetBlob`) | Booted GET returns stored bytes; missing blob HTTP 404 `BlobNotFound`; mutant `azure-get-missing-blob-as-empty` |
+| `GET /{container}/{blob}` (`GetBlob`) | Booted GET returns stored bytes; missing blob HTTP 404 `<Code>BlobNotFound</Code>` with `x-ms-error-code` and no `x-amzn-errortype`; mutant `azure-get-missing-blob-as-empty` |
 | `GET /{container}?restype=container&comp=list` (`ListBlobs`) | Characterization `blobs`; atomic list after put |
-| `DELETE /{container}/{blob}` (`DeleteBlob`) | Booted delete then GET is 404; characterization `delete`; BDD delete; `TestDeleteMissingContainerAndBlob` and booted DELETE of missing blob are HTTP 404 `BlobNotFound` with no `x-amzn-errortype`; characterization `del_miss_b`; mutant `azure-delete-missing-blob-as-success` |
+| `DELETE /{container}/{blob}` (`DeleteBlob`) | Booted delete then GET is 404; characterization `delete`; BDD delete; `TestDeleteMissingContainerAndBlob` and booted DELETE of missing blob are HTTP 404 `<Code>BlobNotFound</Code>` with `x-ms-error-code` and no `x-amzn-errortype`; characterization `del_miss_b`; mutant `azure-delete-missing-blob-as-success` |
 | Azure faults vs AWS faults | restXml `EncodeFault` uses `<Error><Code/><Message/>` plus `x-ms-error-code` and omits `x-amzn-errortype`; mutant `azure-encode-aws-fault` |
 
 ## GCS baseline

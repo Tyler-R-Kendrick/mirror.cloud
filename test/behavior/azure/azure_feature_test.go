@@ -54,7 +54,7 @@ func TestAzureBlobBehavior(t *testing.T) {
 			t.Fatalf("create %d %s", code, raw)
 		}
 		code, raw, _ = call(http.MethodGet, "/?comp=list", "", nil)
-		if code != 200 || !strings.Contains(string(raw), "<Name>bdd</Name>") {
+		if code != 200 || !strings.Contains(string(raw), "EnumerationResults") || !strings.Contains(string(raw), "<Name>bdd</Name>") {
 			t.Fatalf("list %d %s", code, raw)
 		}
 		code, _, _ = call(http.MethodGet, "/bdd?restype=container", "", nil)

@@ -841,7 +841,10 @@
       "StartCopyFromURL",
       "CopyBlobFromURL",
       "AbortCopy",
-      "StageBlockFromURL"
+      "StageBlockFromURL",
+      "SetTags",
+      "GetTags",
+      "FilterBlobs"
     ]
   },
   {

@@ -13,6 +13,8 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 )
 
 // compileAll turns the bundle's expression sources into runnable programs.
@@ -301,6 +303,42 @@ func runtimeFuncs() []cel.EnvOption {
 					parts = append(parts, fmt.Sprint(p))
 				}
 				return types.String(strings.Join(parts, fmt.Sprint(sep.Value())))
+			}))),
+
+		cel.Function("tagmatch", cel.Overload("tagmatch_3", []*cel.Type{str, dyn, str}, cel.BoolType,
+			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+				expr := fmt.Sprint(args[0].Value())
+				tags, _ := fromCEL(args[1]).(map[string]any)
+				container := fmt.Sprint(args[2].Value())
+				ev, err := bir.ParseTagExpr(expr)
+				if err != nil {
+					return types.NewErr("engine: invalid tag condition %q: %v", expr, err)
+				}
+				return types.Bool(ev(tags, container))
+			}))),
+
+		cel.Function("tagkeys", cel.Overload("tagkeys_1", []*cel.Type{str}, dyn,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				out := make([]any, 0)
+				for _, k := range bir.TagExprKeys(fmt.Sprint(v.Value())) {
+					out = append(out, k)
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
+		cel.Function("hier", cel.Overload("hier_3", []*cel.Type{dyn, str, str}, dyn,
+			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+				raw, _ := fromCEL(args[0]).([]any)
+				names := make([]string, 0, len(raw))
+				for _, n := range raw {
+					names = append(names, fmt.Sprint(n))
+				}
+				entries := hierList(names, fmt.Sprint(args[1].Value()), fmt.Sprint(args[2].Value()))
+				out := make([]any, 0, len(entries))
+				for _, e := range entries {
+					out = append(out, e)
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
 		// zeros materializes n NUL bytes, bounded like series for the same

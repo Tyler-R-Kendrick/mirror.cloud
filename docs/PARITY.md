@@ -125,10 +125,10 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Queue swagger `x-ms-paths` keys | 11 |
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
-| Blob keys fully routed | 33 / 59 |
+| Blob keys fully routed | 38 / 59 |
 | Queue keys fully routed | 4 / 11 |
 | Table method+paths routed | 6 / 12 |
-| Blob keys accounted (routed + unclaim) | 42 / 59 |
+| Blob keys accounted (routed + unclaim) | 47 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
 | Azurite test functions traced | 304 / 806 (38%) |
@@ -208,20 +208,20 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/?restype=service&comp=userdelegationkey` | unclaim | not in Azurite REST matrix; oauth tests parse-only |
 | `/?restype=account&comp=properties` | routed | `GetAccountInfo` headers `StorageV2` / `Standard_RAGRS` / HNS false |
 | `/?comp=batch` | missing | SubmitBatch |
-| `/?comp=blobs` | missing | FilterBlobs (tags) |
+| `/?comp=blobs` | routed | `FilterBlobs`; `where` tag expressions (incl. `@container`), where-less is empty; items carry only expression-referenced tags; pagination unclaimed |
 | `/{containerName}?restype=container` | routed | `CreateContainer` / `GetContainer` / `DeleteContainer` (HEAD rides GET) |
 | `/{containerName}?restype=container&comp=metadata` | routed | `SetContainerMetadata` / `GetContainerMetadata`; missing container 404 |
 | `/{containerName}?restype=container&comp=acl` | routed | `SetContainerAcl` / `GetContainerAcl`; stores signed-identifier XML and `x-ms-blob-public-access` |
 | `/{containerName}?restype=container&comp=undelete` | unclaim | Azurite: soft delete unsupported |
 | `/{containerName}?restype=container&comp=batch` | missing | Container SubmitBatch |
-| `/{containerName}?restype=container&comp=blobs` | missing | Container FilterBlobs |
+| `/{containerName}?restype=container&comp=blobs` | routed | `FilterBlobs` scoped by path container; missing container 404 |
 | `/{containerName}?comp=lease&restype=container&acquire` | routed | `AcquireContainerLease` via `x-ms-lease-action=acquire`; 201 + `x-ms-lease-id` |
 | `/{containerName}?comp=lease&restype=container&release` | routed | `ReleaseContainerLease`; mismatch is 409 `LeaseIdMismatchWithLeaseOperation` |
 | `/{containerName}?comp=lease&restype=container&renew` | routed | `RenewContainerLease`; duration expiry unclaimed |
 | `/{containerName}?comp=lease&restype=container&break` | routed | `BreakContainerLease` immediate broken; remaining-time unclaimed |
 | `/{containerName}?comp=lease&restype=container&change` | routed | `ChangeContainerLease` |
-| `/{containerName}?restype=container&comp=list&flat` | partial | `ListBlobs` — no delimiter/hierarchy |
-| `/{containerName}?restype=container&comp=list&hierarchy` | missing | List Blobs hierarchy |
+| `/{containerName}?restype=container&comp=list&flat` | routed | `ListBlobs` flat with `prefix`, sorted; `include=tags,snapshots` projections; marker/maxresults unclaimed (same ceiling as ListContainers) |
+| `/{containerName}?restype=container&comp=list&hierarchy` | routed | `ListBlobs` with `delimiter` folds leading segments into `BlobPrefix` entries, sorted; marker/maxresults unclaimed |
 | `/{containerName}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
 | `/{containerName}/{blob}` | routed | `PutBlob` / `GetBlob` / `DeleteBlob`; HEAD is `GetBlobProperties` (stored metadata + `x-ms-blob-*` headers, no body; missing is 404 `BlobNotFound` with no XML body). If-Match/If-None-Match/If-Modified-Since/If-Unmodified-Since honored in Azurite validator order (read conditions before the 404); HEAD emits `ETag`/`Last-Modified`; download response omits them (BlobBody shape ceiling) |
 | `/{containerName}/{blob}?PageBlob` | routed | `CreatePageBlob` — born as `zeros(N)`, N must be 512-aligned; stores `x-ms-blob-sequence-number`; duplicate is 409 `BlobAlreadyExists`; size above the engine `zerosMax` (16 MiB) is a known ceiling |
@@ -260,7 +260,7 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}/{blob}?comp=appendblock&fromUrl` | missing | Append Block From URL (same instance) |
 | `/{containerName}/{blob}?comp=seal` | unclaim | Azurite: concurrent append / seal not in REST matrix |
 | `/{containerName}/{blob}?comp=query` | unclaim | Azurite: blob query unsupported |
-| `/{containerName}/{blob}?comp=tags` | missing | Get/Set Blob Tags |
+| `/{containerName}/{blob}?comp=tags` | routed | `GetTags` / `SetTags` (TagSet XML, replace semantics); `x-ms-tags` on PutBlob/PutBlockList/creates/copies; validation 400s `TagsTooLarge`/`EmptyTagName`/`DuplicateTagNames`; `x-ms-if-tags` conditions on read/write/delete/copy |
 
 #### Queue `x-ms-paths` (11)
 
@@ -367,16 +367,16 @@ Direct `it()` names from `blob/apis/container.test.ts` (48), `blob/apis/service.
 | `blob/apis/service.test.ts::get Account info` | Booted `x-ms-account-kind=StorageV2` `Standard_RAGRS` HNS false | Mapped and green |
 | `blob/apis/service.test.ts::Get Account/Service Properties with URI has suffix '/' after account name` | Path trim already treats trailing slash as service root | Mapped and green |
 | `blob/apis/service.test.ts::Get Blob service stats negative` | Primary host GET stats is 400 `InvalidQueryParameterValue` | Mapped and green |
-| `blob/apis/service.test.ts::Find blob by tags should work` | Tags later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with more than limited conditions on service` | Later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with conditions number equal to limitation on service` | Later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with invalid key chars on service` | Later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with valid special key chars on service` | Later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with long key` | Later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with invalid value chars on service` | Later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with valid special value chars on service` | Later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with long value` | Later | Not mapped this slice |
-| `blob/apis/service.test.ts::filter blob by tags with continuationToken on service` | Later | Not mapped this slice |
+| `blob/apis/service.test.ts::Find blob by tags should work` | Booted `?comp=blobs&where=` filters across containers, `@container` scoping, where-less empty; matched items carry only expression-referenced tags; atomic `TestAzureTags` | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with more than limited conditions on service` | Long `and` chains evaluate (no term cap in the Go parser) | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with conditions number equal to limitation on service` | Same | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with invalid key chars on service` | Unknown `@parameter` is a parse error -> 400 `InvalidQueryParameterValue`; parser unit + atomic | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with valid special key chars on service` | Double-quoted keys with space/`+-.:=_/` | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with long key` | Key length is not capped in expressions (set-time 128 limit is separate) | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with invalid value chars on service` | Expression literal charset is not validated beyond quoting (Azurite rejects some control chars) | Partial |
+| `blob/apis/service.test.ts::filter blob by tags with valid special value chars on service` | Values with space/`+`/`.` compare lexicographically | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with long value` | Literal length is not capped | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with continuationToken on service` | marker/maxresults pagination unclaimed (same ceiling as every list key) | Partial |
 | `blob/apis/service.test.ts::Get Blob service stats` | `{account}-secondary.blob.core.windows.net` GET stats returns live | Mapped and green |
 
 Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/conditions/tags/snapshot/copy functions whose swagger keys are still `missing` in the path table; they are named here so the slice that routes them owns the row.
@@ -385,10 +385,10 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 |---|---|---|
 | `blob/apis/blob.test.ts::download with default parameters` | Booted GET `/ctr/o` returns stored bytes | Mapped and green |
 | `blob/apis/blob.test.ts::download should work with conditional headers` | Booted GET passes with matching ifMatch, non-matching ifNoneMatch, past ifModifiedSince, future ifUnmodifiedSince; atomic `TestAzureConditions` | Mapped and green |
-| `blob/apis/blob.test.ts::download with ifTags condition` | Tags not routed until tags slice | Later |
-| `blob/apis/blob.test.ts::getProperties with ifTags condition` | Same | Later |
-| `blob/apis/blob.test.ts::setProperties with ifTags condition` | Same | Later |
-| `blob/apis/blob.test.ts::setMetadata with ifTags condition` | Same | Later |
+| `blob/apis/blob.test.ts::download with ifTags condition` | GET with failing `x-ms-if-tags` is 412 `ConditionNotMet`; atomic `TestAzureTags` + booted | Mapped and green |
+| `blob/apis/blob.test.ts::getProperties with ifTags condition` | HEAD honors `x-ms-if-tags`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::setProperties with ifTags condition` | SetBlobProperties honors `x-ms-if-tags`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::setMetadata with ifTags condition` | SetBlobMetadata honors `x-ms-if-tags` incl. `and`/`not`; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::download should work with ifMatch value *` | GET If-Match `*` (and `*,abc` list) is 200; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::download should not work with invalid conditional header ifMatch` | Booted HEAD/GET with bogus If-Match is 412 `ConditionNotMet`; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch` | If-None-Match with the stored ETag is 304 header-only; atomic | Mapped and green |
@@ -413,13 +413,13 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 | `blob/apis/blob.test.ts::delete should not work for invalid ifModifiedSince` | DELETE with future If-Modified-Since is 412; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::delete should work for valid ifUnmodifiedSince *` | DELETE with future If-Unmodified-Since succeeds; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::delete should not work for invalid ifUnmodifiedSince` | DELETE with past If-Unmodified-Since is 412; atomic | Mapped and green |
-| `blob/apis/blob.test.ts::Delete with ifTags should work` | Tags slice | Later |
+| `blob/apis/blob.test.ts::Delete with ifTags should work` | DeleteBlob honors `x-ms-if-tags`; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::should create a snapshot from a blob` | Booted PUT `comp=snapshot` 201 with `x-ms-snapshot`; snapshot survives base overwrite; atomic `TestAzureSnapshotCopy` | Mapped and green |
-| `blob/apis/blob.test.ts::Create a snapshot from a blob with ifTags` | Same | Later |
+| `blob/apis/blob.test.ts::Create a snapshot from a blob with ifTags` | CreateSnapshot honors `x-ms-if-tags`; snapshot records carry copied tags | Mapped and green |
 | `blob/apis/blob.test.ts::should create a snapshot with metadata from a blob` | Snapshot metadata overrides base metadata; inherited otherwise | Mapped and green |
 | `blob/apis/blob.test.ts::should not delete base blob without include snapshot header` | Booted DELETE of snapshotted base is 409 `SnapshotsPresent`; `x-ms-delete-snapshots: only/include` both routed | Mapped and green |
 | `blob/apis/blob.test.ts::should delete snapshot` | Booted DELETE `?snapshot=` 202; snapshot GET then 404s | Mapped and green |
-| `blob/apis/blob.test.ts::should also list snapshots` | Snapshots stored on the base record; List Blobs `include=snapshots` projection is the tags/hierarchy list slice | Partial |
+| `blob/apis/blob.test.ts::should also list snapshots` | ListBlobs `include=snapshots` emits `<Snapshot>` entries; booted + atomic | Mapped and green |
 | `blob/apis/blob.test.ts::should setMetadata with new metadata set` | Booted PUT/GET `comp=metadata` round-trips `x-ms-meta-a`; atomic `TestAzureBlobMetadataPropertiesHead` | Mapped and green |
 | `blob/apis/blob.test.ts::should fail when setMetadata with invalid metadata name with hyphen` | Metadata keys stored verbatim; C# identifier rule unclaimed (same ceiling as container metadata) | Partial |
 | `blob/apis/blob.test.ts::should fail when upload has metadata names that are invalid C# identifiers` | Same | Partial |
@@ -441,7 +441,7 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 | `blob/apis/blob.test.ts::setHTTPHeaders with default parameters` | Booted `SetBlobProperties`; atomic `TestAzureBlobMetadataPropertiesHead` | Mapped and green |
 | `blob/apis/blob.test.ts::setHTTPHeaders with all parameters set` | All six `x-ms-blob-*` headers decoded, stored, and re-emitted on HEAD | Mapped and green |
 | `blob/apis/blob.test.ts::Copy blob should work` | Booted PUT `x-ms-copy-source` 202 `x-ms-copy-status: success`, content round-trips | Mapped and green |
-| `blob/apis/blob.test.ts::Copy blob with ifTags should work` | Same | Later |
+| `blob/apis/blob.test.ts::Copy blob with ifTags should work` | Copy ops honor `x-ms-source-if-tags` against the source record; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::Copy blob should work to override metadata` | Copy inherits source metadata; request `x-ms-meta-*` overrides | Mapped and green |
 | `blob/apis/blob.test.ts::Copy blob should work with source archive blob and accesstier header` | Copy later; tier unclaim | Later |
 | `blob/apis/blob.test.ts::Copy blob should not override destination Lease status` | Copy slice | Later |
@@ -456,16 +456,16 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 | `blob/apis/blob.test.ts::Synchronized copy blob should not override destination Lease status` | Same | Later |
 | `blob/apis/blob.test.ts::Synchronized copy blob should work to override tag` | Same | Later |
 | `blob/apis/blob.test.ts::Synchronized copy blob should work for page blob` | Page copy preserves type and sequence number | Mapped and green |
-| `blob/apis/blob.test.ts::set/get blob tag should work, with base blob or snapshot` | Tags slice | Later |
-| `blob/apis/blob.test.ts::set blob tag should work in put block blob, pubBlockList, and startCopyFromURL on block blob, and getBlobProperties, Download Blob, list blob can get blob tags.` | Same | Later |
-| `blob/apis/blob.test.ts::set blob tag should work in create page/append blob, copyFromURL.` | Same | Later |
-| `blob/apis/blob.test.ts::set blob tag fail with invalid tag.` | Same | Later |
+| `blob/apis/blob.test.ts::set/get blob tag should work, with base blob or snapshot` | SetTags/GetTags round-trip TagSet XML; snapshot GET returns the snapshot's copied tags; atomic + booted | Mapped and green |
+| `blob/apis/blob.test.ts::set blob tag should work in put block blob, pubBlockList, and startCopyFromURL on block blob, and getBlobProperties, Download Blob, list blob can get blob tags.` | `x-ms-tags` stored by PutBlob/PutBlockList/StartCopyFromURL; HEAD emits `x-ms-tag-count`; `include=tags` on List Blobs; download omits tag headers (BlobBody ceiling) | Partial |
+| `blob/apis/blob.test.ts::set blob tag should work in create page/append blob, copyFromURL.` | `x-ms-tags` stored by CreatePageBlob/CreateAppendBlob/CopyBlobFromURL; copy defaults to source tags, request tags override; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::set blob tag fail with invalid tag.` | >10 tags or long key/value is 400 `TagsTooLarge`, empty key is 400 `EmptyTagName`, bad chars are 400 `DuplicateTagNames` (Azurite's real codes); atomic + booted | Mapped and green |
 | `blob/apis/blob.test.ts::Set and get blob tags should work with lease condition` | Same | Later |
-| `blob/apis/blob.test.ts::get blob tag with ifTags condition` | Same | Later |
-| `blob/apis/blob.test.ts::get blob tag with ifTags condition - special char comparing` | Same | Later |
-| `blob/apis/blob.test.ts::get blob tag with ifTags condition - key with special chars` | Same | Later |
-| `blob/apis/blob.test.ts::get blob tag with long ifTags condition` | Same | Later |
-| `blob/apis/blob.test.ts::get blob tag with invalid ifTags condition string` | Same | Later |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition` | GetTags honors `x-ms-if-tags` equality; 412 on miss; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition - special char comparing` | Lexicographic `>` comparisons over values with spaces/`+`/`.`; parser unit `TestTagExpr` | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition - key with special chars` | Double-quoted keys in expressions; parser unit + atomic | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with long ifTags condition` | 700-term `and` chain parses and evaluates; parser is linear Go | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with invalid ifTags condition string` | `==` operator or unquoted special-char key is 400 `InvalidHeaderValue`; booted + atomic | Mapped and green |
 | `blob/apis/blob.test.ts::upload invalid x-ms-blob-content-md5` | Content-MD5 stored verbatim; base64/format validation unclaimed | Partial |
 | `blob/apis/blob.test.ts::Acquire Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Blob lease keys still `missing` | Later |
 | `blob/apis/blob.test.ts::Renew Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
@@ -550,7 +550,7 @@ Direct `it()` names from `blob/apis/appendblob.test.ts` (38). Append blobs are b
 | Azurite test | Mirror evidence | Result |
 |---|---|---|
 | `blob/apis/appendblob.test.ts::Create append blob should work` | Booted PUT `x-ms-blob-type: AppendBlob` → 201, HEAD `AppendBlob`/`0`; atomic `TestAzureAppendBlob` | Mapped and green |
-| `blob/apis/appendblob.test.ts::Create append blob with ifTags should work` | Tags slice | Later |
+| `blob/apis/appendblob.test.ts::Create append blob with ifTags should work` | CreateAppendBlob evaluates `x-ms-if-tags` against the blob it overwrites; 412 on miss; atomic | Mapped and green |
 | `blob/apis/appendblob.test.ts::Create append blob override existing pageblob` | Create-append overwrites any existing blob; atomic override assertion | Mapped and green |
 | `blob/apis/appendblob.test.ts::Create append blob should fail when metadata names are invalid C# identifiers` | Metadata keys stored verbatim; C# identifier rule unclaimed | Partial |
 | `blob/apis/appendblob.test.ts::Delete append blob should work` | DeleteBlob is type-agnostic | Mapped and green |
@@ -567,7 +567,7 @@ Direct `it()` names from `blob/apis/appendblob.test.ts` (38). Append blobs are b
 | `blob/apis/appendblob.test.ts::AppendBlock with wrong md5 should throw mismatch` | Same | Checksum unclaimed |
 | `blob/apis/appendblob.test.ts::AppendBlock without any checksum header should still echo computed crc64` | Same | Checksum unclaimed |
 | `blob/apis/appendblob.test.ts::AppendBlock with both md5 and crc64 supplied should be rejected` | Same | Checksum unclaimed |
-| `blob/apis/appendblob.test.ts::AppendBlock with ifTags should work` | Tags slice | Later |
+| `blob/apis/appendblob.test.ts::AppendBlock with ifTags should work` | AppendBlock honors `x-ms-if-tags`; atomic | Mapped and green |
 | `blob/apis/appendblob.test.ts::Download append blob should work` | Booted GET `onetwo` | Mapped and green |
 | `blob/apis/appendblob.test.ts::Download append blob should work for snapshot` | GetBlob `?snapshot=` returns the snapshot bytes | Mapped and green |
 | `blob/apis/appendblob.test.ts::Download append blob should work for copied blob` | Copy destination downloads the source bytes | Mapped and green |

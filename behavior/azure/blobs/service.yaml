@@ -148,6 +148,23 @@ errors:
     code: MaxBlobSizeConditionNotMet
     http: 412
     fault: client
+  TagsTooLarge:
+    code: TagsTooLarge
+    http: 400
+    fault: client
+  EmptyTagName:
+    code: EmptyTagName
+    http: 400
+    fault: client
+  # Azurite's getInvalidTag really returns this code for bad characters.
+  DuplicateTagNames:
+    code: DuplicateTagNames
+    http: 400
+    fault: client
+  InvalidXmlDocument:
+    code: InvalidXmlDocument
+    http: 400
+    fault: client
 
 operations:
   CreateContainer:
@@ -190,12 +207,18 @@ operations:
     reads:
       ctr: { resource: container }
       existing: { resource: blob }
+      acct: { resource: account }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
       # Azurite createBlob special case: If-None-Match * on an existing blob
       # is a 409, not the write validator's 412.
       - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     effects:
       - put:
           resource: blob
@@ -211,6 +234,13 @@ operations:
             content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
             content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
             blob_type: "('blob_type' in input && input.blob_type != null && string(input.blob_type) != '') ? string(input.blob_type) : 'BlockBlob'"
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      # The FilterBlobs index mirrors this blob's tags at account level; an
+      # overwrite replaces the entry wholesale, tags or no tags.
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"
@@ -234,6 +264,8 @@ operations:
       - { cond: "!('if_unmodified_since_unix' in input) || last_mod <= int(input.if_unmodified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
       - { cond: "!('if_none_match_list' in input && input.if_none_match_list.exists(m, string(m) == etag)) || (('if_modified_since_unix' in input) && int(input.if_modified_since_unix) < last_mod)", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
       - { cond: "!('if_modified_since_unix' in input) || int(input.if_modified_since_unix) < last_mod || (('if_none_match_list' in input && size(input.if_none_match_list) > 0) && !input.if_none_match_list.exists(m, string(m) == etag))", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in src && src.tags != null) ? src.tags : {}, ('container' in src && src.container != null) ? string(src.container) : lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     let:
       # Guard the snapshot index: an unknown snapshot id must 404 via the
       # require above, not fault the let before requires run.
@@ -250,9 +282,11 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     let:
       snap_id: "rec_found ? string(now) + '-' + string((('snapshots' in rec && rec.snapshots != null) ? size(rec.snapshots) : 0)) : ''"
-      snap: "rec_found ? {'id': snap_id, 'value': string(rec.value), 'metadata': (('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in rec && rec.metadata != null) ? rec.metadata : {})), 'content_type': (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : ''), 'cache_control': (('cache_control' in rec && rec.cache_control != null) ? string(rec.cache_control) : ''), 'content_encoding': (('content_encoding' in rec && rec.content_encoding != null) ? string(rec.content_encoding) : ''), 'content_language': (('content_language' in rec && rec.content_language != null) ? string(rec.content_language) : ''), 'content_disposition': (('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''), 'content_md5': (('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''), 'blob_type': (('blob_type' in rec && rec.blob_type != null) ? string(rec.blob_type) : 'BlockBlob'), 'last_modified': int(now)} : {}"
+      snap: "rec_found ? {'id': snap_id, 'value': string(rec.value), 'metadata': (('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in rec && rec.metadata != null) ? rec.metadata : {})), 'content_type': (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : ''), 'cache_control': (('cache_control' in rec && rec.cache_control != null) ? string(rec.cache_control) : ''), 'content_encoding': (('content_encoding' in rec && rec.content_encoding != null) ? string(rec.content_encoding) : ''), 'content_language': (('content_language' in rec && rec.content_language != null) ? string(rec.content_language) : ''), 'content_disposition': (('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''), 'content_md5': (('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''), 'blob_type': (('blob_type' in rec && rec.blob_type != null) ? string(rec.blob_type) : 'BlockBlob'), 'tags': (('tags' in rec && rec.tags != null) ? rec.tags : {}), 'last_modified': int(now)} : {}"
     effects:
       - patch:
           resource: blob
@@ -266,15 +300,22 @@ operations:
       ctr: { resource: container }
       src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
       dst: { resource: blob }
+      acct: { resource: account }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('source_snapshot' in input && input.source_snapshot != null) || ('snapshots' in src && src.snapshots != null && size(src.snapshots.filter(s, s.id == string(input.source_snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !dst_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('source_if_tags_invalid' in input && input.source_if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('source_if_tags' in input && input.source_if_tags != null && string(input.source_if_tags) != '') || tagmatch(string(input.source_if_tags), ('tags' in srcrec && srcrec.tags != null) ? srcrec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     let:
       srcrec: "src_found ? (('source_snapshot' in input && input.source_snapshot != null) ? src.snapshots.filter(s, s.id == string(input.source_snapshot))[0] : src) : {}"
       smeta: "('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in srcrec && srcrec.metadata != null) ? srcrec.metadata : {})"
+      stags: "('tags' in input && input.tags != null) ? input.tags : (('tags' in srcrec && srcrec.tags != null) ? srcrec.tags : {})"
     effects:
       # The src read resolved this resource's id to the source blob; without
       # an explicit key the put would carry that key and overwrite the source.
@@ -295,6 +336,11 @@ operations:
             blob_type: "('blob_type' in srcrec && srcrec.blob_type != null) ? string(srcrec.blob_type) : 'BlockBlob'"
             sequence_number: "('sequence_number' in srcrec && srcrec.sequence_number != null) ? string(srcrec.sequence_number) : '0'"
             append_count: "'0'"
+            tags: stags
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': stags}})"
     output:
       copy_id: "md5hex(string(input.copy_source) + '|' + string(input.blob))"
       copy_status: "'success'"
@@ -305,15 +351,22 @@ operations:
       ctr: { resource: container }
       src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
       dst: { resource: blob }
+      acct: { resource: account }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('source_snapshot' in input && input.source_snapshot != null) || ('snapshots' in src && src.snapshots != null && size(src.snapshots.filter(s, s.id == string(input.source_snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !dst_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('source_if_tags_invalid' in input && input.source_if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('source_if_tags' in input && input.source_if_tags != null && string(input.source_if_tags) != '') || tagmatch(string(input.source_if_tags), ('tags' in srcrec && srcrec.tags != null) ? srcrec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     let:
       srcrec: "src_found ? (('source_snapshot' in input && input.source_snapshot != null) ? src.snapshots.filter(s, s.id == string(input.source_snapshot))[0] : src) : {}"
       smeta: "('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in srcrec && srcrec.metadata != null) ? srcrec.metadata : {})"
+      stags: "('tags' in input && input.tags != null) ? input.tags : (('tags' in srcrec && srcrec.tags != null) ? srcrec.tags : {})"
     effects:
       # The src read resolved this resource's id to the source blob; without
       # an explicit key the put would carry that key and overwrite the source.
@@ -334,6 +387,11 @@ operations:
             blob_type: "('blob_type' in srcrec && srcrec.blob_type != null) ? string(srcrec.blob_type) : 'BlockBlob'"
             sequence_number: "('sequence_number' in srcrec && srcrec.sequence_number != null) ? string(srcrec.sequence_number) : '0'"
             append_count: "'0'"
+            tags: stags
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': stags}})"
     output:
       copy_id: "md5hex(string(input.copy_source) + '|' + string(input.blob))"
       copy_status: "'success'"
@@ -384,6 +442,8 @@ operations:
       - { cond: "!('if_unmodified_since_unix' in input) || last_mod <= int(input.if_unmodified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
       - { cond: "!('if_none_match_list' in input && input.if_none_match_list.exists(m, string(m) == etag)) || (('if_modified_since_unix' in input) && int(input.if_modified_since_unix) < last_mod)", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
       - { cond: "!('if_modified_since_unix' in input) || int(input.if_modified_since_unix) < last_mod || (('if_none_match_list' in input && size(input.if_none_match_list) > 0) && !input.if_none_match_list.exists(m, string(m) == etag))", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in src && src.tags != null) ? src.tags : {}, ('container' in src && src.container != null) ? string(src.container) : lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     let:
       src: "rec_found ? (('snapshot' in input && input.snapshot != null && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
       etag: "rec_found ? md5hex(string(src.value) + '|' + toJSON(('metadata' in src && src.metadata != null) ? src.metadata : {}) + '|' + (('content_type' in src && src.content_type != null) ? string(src.content_type) : '')) : ''"
@@ -399,6 +459,7 @@ operations:
       blob_type: "('blob_type' in src && src.blob_type != null && string(src.blob_type) != '') ? string(src.blob_type) : 'BlockBlob'"
       content_length: "string(blen(string(src.value)))"
       sequence_number: "('sequence_number' in src && src.sequence_number != null) ? string(src.sequence_number) : ''"
+      tag_count: "string(size(('tags' in src && src.tags != null) ? src.tags : {}))"
       etag: "rec_found ? '\"' + etag + '\"' : ''"
       last_modified: "string(last_mod)"
 
@@ -409,6 +470,8 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     effects:
       - patch:
           resource: blob
@@ -427,6 +490,69 @@ operations:
     output:
       metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
 
+  SetTags:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'InvalidXmlDocument')", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  GetTags:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in src && src.tags != null) ? src.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      src: "rec_found ? (('snapshot' in input && input.snapshot != null && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
+    output:
+      tags: "('tags' in src && src.tags != null) ? src.tags : {}"
+
+  # FilterBlobs answers both /?comp=blobs (service) and
+  # /{container}?restype=container&comp=blobs (container-scoped); a missing
+  # where is an empty result, and matched items carry only the tags the
+  # expression references, like Azurite. The account-level tags_index is
+  # maintained by every tag-changing op.
+  FilterBlobs:
+    reads:
+      acct: { resource: account }
+      ctr: { resource: container }
+    require:
+      - { cond: "!has_ctr || ctr_found", error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('where_invalid' in input && input.where_invalid == true)", error: InvalidQueryParameterValue, message: "The value for one of the query parameters specified in the request URI is invalid." }
+    let:
+      has_ctr: "('container' in input && input.container != null && string(input.container) != '')"
+      wq: "('where' in input && input.where != null) ? string(input.where) : ''"
+      idx: "(acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}"
+      wkeys: "wq != '' ? tagkeys(wq) : []"
+    output:
+      where: wq
+      blobs: "wq == '' ? [] : idx.map(k, idx[k]).filter(b, (!has_ctr || string(b.container) == lower(string(input.container))) && tagmatch(wq, ('tags' in b && b.tags != null) ? b.tags : {}, string(b.container))).map(b, {'name': b.name, 'container': string(b.container), 'tags': without(('tags' in b && b.tags != null) ? b.tags : {}, (('tags' in b && b.tags != null) ? b.tags : {}).map(tk, tk).filter(tk, !wkeys.exists(w, w == tk)))})"
+
   SetBlobProperties:
     reads:
       ctr: { resource: container }
@@ -434,6 +560,8 @@ operations:
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     effects:
       - patch:
           resource: blob
@@ -456,11 +584,17 @@ operations:
     reads:
       ctr: { resource: container }
       existing: { resource: blob }
+      acct: { resource: account }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "!existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
       - { cond: "'content_length' in input && input.content_length != null", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: "int(input.content_length) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     effects:
       - put:
           resource: blob
@@ -477,6 +611,11 @@ operations:
             content_md5: ''
             blob_type: "'PageBlob'"
             sequence_number: "('sequence_number' in input && input.sequence_number != null) ? string(int(input.sequence_number)) : '0'"
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"
@@ -595,12 +734,22 @@ operations:
       ctr: { resource: container }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
-    list: { resource: blob, member: _list }
+    select: { binding: all, resource: blob }
+    let:
+      pfx: "('prefix' in input && input.prefix != null) ? string(input.prefix) : ''"
+      dlm: "('delimiter' in input && input.delimiter != null) ? string(input.delimiter) : ''"
+      inc: "('include' in input && input.include != null) ? string(input.include) : ''"
+    output:
+      # hier folds names containing the delimiter into one BlobPrefix entry
+      # per leading segment, sorted; flat otherwise. It must compute here, not
+      # in a let: select bindings only exist after the select runs.
+      _list: "hier(all.map(b, string(b.name)), pfx, dlm).map(e, all.exists(b, string(b.name) == e) ? {'name': e, 'tags': (inc.contains('tags') && 'tags' in all.filter(b, string(b.name) == e)[0] && all.filter(b, string(b.name) == e)[0].tags != null) ? all.filter(b, string(b.name) == e)[0].tags : {}, 'snapshots': (inc.contains('snapshots') && 'snapshots' in all.filter(b, string(b.name) == e)[0] && all.filter(b, string(b.name) == e)[0].snapshots != null) ? all.filter(b, string(b.name) == e)[0].snapshots : []} : {'prefix': e})"
 
   DeleteBlob:
     reads:
       ctr: { resource: container }
       rec: { resource: blob }
+      acct: { resource: account }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
@@ -616,6 +765,8 @@ operations:
       - { cond: "inm || !im || string(input.if_match_list[0]) == '*' || string(input.if_match_list[0]) == etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
       - { cond: "inm || im || !ims || last_mod > int(input.if_modified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
       - { cond: "inm || im || ims || !('if_unmodified_since_unix' in input) || int(input.if_unmodified_since_unix) >= last_mod", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     let:
       inm: "('if_none_match_list' in input && size(input.if_none_match_list) > 0)"
       im: "('if_match_list' in input && size(input.if_match_list) > 0)"
@@ -640,6 +791,11 @@ operations:
       - delete:
           when: "!('snapshot' in input && input.snapshot != null) && !('delete_snapshots' in input && string(input.delete_snapshots) == 'only')"
           resource: blob
+      - patch:
+          when: "!('snapshot' in input && input.snapshot != null) && !('delete_snapshots' in input && string(input.delete_snapshots) == 'only')"
+          resource: account
+          record:
+            tags_index: "without((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, [lower(string(input.container)) + '/' + string(input.blob)])"
 
   PutBlock:
     reads:
@@ -656,6 +812,7 @@ operations:
       ctr: { resource: container }
       slot: { resource: blob_slot }
       existing: { resource: blob }
+      acct: { resource: account }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
@@ -663,6 +820,9 @@ operations:
       # Same createBlob special case as PutBlob: If-None-Match * on an
       # existing blob is a 409.
       - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
     select: { binding: staged, resource: block }
     effects:
       - put:
@@ -672,6 +832,11 @@ operations:
             name: "string(input.blob)"
             value: "join(input.blockids.map(id, string(staged.filter(b, string(b.id) == string(id))[0].value)), '')"
             blob_type: "'BlockBlob'"
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"
@@ -874,6 +1039,8 @@ operations:
       - { cond: "inm || im || ims || !('if_unmodified_since_unix' in input) || int(input.if_unmodified_since_unix) >= last_mod", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
       - { cond: "!('max_size' in input) || blen(string(rec.value)) + blen(string(input.body)) <= int(input.max_size)", error: MaxBlobSizeConditionNotMet, message: "The max blob size condition specified was not met." }
       - { cond: "!('append_pos' in input) || blen(string(rec.value)) == int(input.append_pos)", error: AppendPositionConditionNotMet, message: "The append position condition specified was not met." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     let:
       offset: "rec_found ? blen(string(rec.value)) : 0"
       count: "rec_found ? ((('append_count' in rec && rec.append_count != null) ? int(rec.append_count) : 0) + 1) : 0"
@@ -896,8 +1063,15 @@ operations:
   CreateAppendBlob:
     reads:
       ctr: { resource: container }
+      existing: { resource: blob }
+      acct: { resource: account }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
     effects:
       - put:
           resource: blob
@@ -914,6 +1088,11 @@ operations:
             content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
             blob_type: "'AppendBlob'"
             append_count: "'0'"
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"

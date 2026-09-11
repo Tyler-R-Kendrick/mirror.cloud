@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -389,6 +390,8 @@ func azureRoute(r *http.Request) string {
 		switch comp {
 		case "list":
 			return "ListBlobs"
+		case "blobs":
+			return "FilterBlobs"
 		case "metadata":
 			if m == http.MethodPut {
 				return "SetContainerMetadata"
@@ -431,6 +434,8 @@ func azureRoute(r *http.Request) string {
 		switch comp {
 		case "list":
 			return "ListContainers"
+		case "blobs":
+			return "FilterBlobs"
 		case "":
 			return "Unknown"
 		default:
@@ -456,6 +461,11 @@ func azureRoute(r *http.Request) string {
 			return "UnsupportedQuery"
 		case "appendblock":
 			return "AppendBlock"
+		case "tags":
+			if m == http.MethodPut {
+				return "SetTags"
+			}
+			return "GetTags"
 		case "blocklist":
 			if m == http.MethodGet || m == http.MethodHead {
 				return "GetBlockList"
@@ -533,6 +543,64 @@ func azureETagList(v string) []any {
 	return out
 }
 
+// azureParseTagsHeader parses the x-ms-tags header (URL query format
+// k1=v1&k2=v2) into a tag map, or returns the Azurite validation error code.
+func azureParseTagsHeader(v string) (map[string]any, string) {
+	vals, err := url.ParseQuery(v)
+	if err != nil {
+		return nil, "DuplicateTagNames"
+	}
+	tags := map[string]any{}
+	for k, vs := range vals {
+		if len(vs) > 0 {
+			tags[k] = vs[0]
+		}
+	}
+	if code := azureValidateTags(tags); code != "" {
+		return nil, code
+	}
+	return tags, ""
+}
+
+// azureValidateTags applies Azurite's Set Blob Tags limits in its order:
+// count, then per-tag empty key, key length, value length, character set.
+// The returned string is the Azurite error code (DuplicateTagNames is what
+// Azurite's getInvalidTag really returns).
+func azureValidateTags(tags map[string]any) string {
+	if len(tags) > 10 {
+		return "TagsTooLarge"
+	}
+	for k, v := range tags {
+		if k == "" {
+			return "EmptyTagName"
+		}
+		if len(k) > 128 || len(fmt.Sprint(v)) > 256 {
+			return "TagsTooLarge"
+		}
+		if !azureValidTagChars(k) || !azureValidTagChars(fmt.Sprint(v)) {
+			return "DuplicateTagNames"
+		}
+	}
+	return ""
+}
+
+func azureValidTagChars(s string) bool {
+	for _, c := range s {
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == ' ' || c == '+' || c == '-' || c == '.' || c == '/' || c == ':' || c == '=' || c == '_'
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// azureValidTagExpr reports whether a tag-condition expression parses.
+func azureValidTagExpr(s string) bool {
+	_, err := bir.ParseTagExpr(s)
+	return err == nil
+}
+
 func decodeAzureHeaders(in map[string]any, r *http.Request) {
 	meta := map[string]any{}
 	for k, vs := range r.Header {
@@ -587,6 +655,23 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 			in["append_pos"] = vs[0]
 		case "x-ms-blob-condition-maxsize":
 			in["max_size"] = vs[0]
+		case "x-ms-tags":
+			tags, code := azureParseTagsHeader(vs[0])
+			if code != "" {
+				in["tags_invalid"] = code
+			} else {
+				in["tags"] = tags
+			}
+		case "x-ms-if-tags":
+			in["if_tags"] = vs[0]
+			if !azureValidTagExpr(vs[0]) {
+				in["if_tags_invalid"] = true
+			}
+		case "x-ms-source-if-tags":
+			in["source_if_tags"] = vs[0]
+			if !azureValidTagExpr(vs[0]) {
+				in["source_if_tags_invalid"] = true
+			}
 		case "content-type":
 			in["content_type"] = vs[0]
 		case "x-ms-blob-cache-control":
@@ -658,6 +743,34 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 	if snap := r.URL.Query().Get("snapshot"); snap != "" {
 		in["snapshot"] = snap
 	}
+}
+
+// azureTagsXML is the Set/Get Blob Tags body shape.
+type azureTagsXML struct {
+	Tags []struct {
+		Key   string `xml:"Key"`
+		Value string `xml:"Value"`
+	} `xml:"TagSet>Tag"`
+}
+
+// azureParseTagsXML parses a Set Blob Tags body, or returns the Azurite
+// validation error code (malformed XML is InvalidXmlDocument).
+func azureParseTagsXML(body []byte) (map[string]any, string) {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return map[string]any{}, ""
+	}
+	var doc azureTagsXML
+	if err := xml.Unmarshal(body, &doc); err != nil {
+		return nil, "InvalidXmlDocument"
+	}
+	tags := map[string]any{}
+	for _, t := range doc.Tags {
+		tags[t.Key] = t.Value
+	}
+	if code := azureValidateTags(tags); code != "" {
+		return nil, code
+	}
+	return tags, ""
 }
 
 func parseAzureBlockIDs(body []byte) []any {
@@ -779,6 +892,21 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		if s := r.URL.Query().Get("copyid"); s != "" {
 			in["copy_id"] = s
 		}
+		if s := r.URL.Query().Get("where"); s != "" {
+			in["where"] = s
+			if !azureValidTagExpr(s) {
+				in["where_invalid"] = true
+			}
+		}
+		if s := r.URL.Query().Get("prefix"); s != "" {
+			in["prefix"] = s
+		}
+		if s := r.URL.Query().Get("delimiter"); s != "" {
+			in["delimiter"] = s
+		}
+		if s := r.URL.Query().Get("include"); s != "" {
+			in["include"] = s
+		}
 		if strings.Contains(strings.ToLower(r.Host), "-secondary") {
 			in["secondary"] = true
 		}
@@ -792,6 +920,16 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 			}
 			if op.Name == "SetContainerAcl" {
 				in["acl"] = string(body)
+			}
+			req.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		if op.Name == "SetTags" && r.Body != nil {
+			body, _ := io.ReadAll(r.Body)
+			tags, code := azureParseTagsXML(body)
+			if code != "" {
+				in["tags_invalid"] = code
+			} else {
+				in["tags"] = tags
 			}
 			req.Body = io.NopCloser(bytes.NewReader(body))
 		}
@@ -2401,6 +2539,40 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
+	if resp != nil && resp.Output != nil && op == "GetTags" {
+		var b strings.Builder
+		b.WriteString(`<?xml version="1.0" encoding="utf-8"?><Tags><TagSet>`)
+		writeAzureTagSet(&b, resp.Output["tags"])
+		b.WriteString(`</TagSet></Tags>`)
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if resp != nil && resp.Output != nil && op == "FilterBlobs" {
+		var b strings.Builder
+		b.WriteString(`<?xml version="1.0" encoding="utf-8"?><EnumerationResults ServiceEndpoint="">`)
+		b.WriteString("<Where>")
+		b.WriteString(xmlEscape(strAny(resp.Output["where"])))
+		b.WriteString("</Where><Blobs>")
+		if lst, ok := resp.Output["blobs"].([]any); ok {
+			for _, item := range lst {
+				m, _ := item.(map[string]any)
+				b.WriteString("<Blob><Name>")
+				b.WriteString(xmlEscape(strAny(m["name"])))
+				b.WriteString("</Name><ContainerName>")
+				b.WriteString(xmlEscape(strAny(m["container"])))
+				b.WriteString("</ContainerName><Tags><TagSet>")
+				writeAzureTagSet(&b, m["tags"])
+				b.WriteString("</TagSet></Tags></Blob>")
+			}
+		}
+		b.WriteString(`</Blobs><NextMarker></NextMarker></EnumerationResults>`)
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
 	if resp != nil && resp.Output != nil && op == "GetContainerAcl" {
 		body := strAny(resp.Output["acl"])
 		if body == "" {
@@ -2467,9 +2639,19 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 				b.WriteString("<Blobs>")
 				for _, item := range asAny(lst) {
 					m, _ := item.(map[string]any)
-					b.WriteString("<Blob><Name>")
-					b.WriteString(xmlEscape(strAny(m["name"])))
-					b.WriteString("</Name></Blob>")
+					if p := strAny(m["prefix"]); p != "" {
+						b.WriteString("<BlobPrefix><Name>")
+						b.WriteString(xmlEscape(p))
+						b.WriteString("</Name></BlobPrefix>")
+						continue
+					}
+					writeAzureBlobListItem(&b, m, "")
+					if snaps, ok := m["snapshots"].([]any); ok {
+						for _, s := range snaps {
+							sm, _ := s.(map[string]any)
+							writeAzureBlobListItem(&b, m, strAny(sm["id"]))
+						}
+					}
 				}
 				b.WriteString("</Blobs>")
 			} else {
@@ -2489,6 +2671,46 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 	}
 	w.WriteHeader(status)
 	return nil
+}
+
+// writeAzureBlobListItem writes one <Blob> entry; snapshot carries the
+// snapshot id when the entry is a snapshot projection.
+func writeAzureBlobListItem(b *strings.Builder, m map[string]any, snapshot string) {
+	b.WriteString("<Blob><Name>")
+	b.WriteString(xmlEscape(strAny(m["name"])))
+	b.WriteString("</Name>")
+	if snapshot != "" {
+		b.WriteString("<Snapshot>")
+		b.WriteString(xmlEscape(snapshot))
+		b.WriteString("</Snapshot>")
+	}
+	if tags, ok := m["tags"].(map[string]any); ok && len(tags) > 0 {
+		b.WriteString("<Tags><TagSet>")
+		writeAzureTagSet(b, tags)
+		b.WriteString("</TagSet></Tags>")
+	}
+	b.WriteString("</Blob>")
+}
+
+// writeAzureTagSet writes <Tag><Key/><Value/></Tag> entries, key-sorted for
+// deterministic output.
+func writeAzureTagSet(b *strings.Builder, v any) {
+	tags, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b.WriteString("<Tag><Key>")
+		b.WriteString(xmlEscape(k))
+		b.WriteString("</Key><Value>")
+		b.WriteString(xmlEscape(fmt.Sprint(tags[k])))
+		b.WriteString("</Value></Tag>")
+	}
 }
 
 func writeAzureBlobHeaders(w http.ResponseWriter, resp *spi.Response) {
@@ -2530,6 +2752,9 @@ func writeAzureBlobHeaders(w http.ResponseWriter, resp *spi.Response) {
 	}
 	if s := strAny(out["content_length"]); s != "" {
 		w.Header().Set("Content-Length", s)
+	}
+	if s := strAny(out["tag_count"]); s != "" {
+		w.Header().Set("x-ms-tag-count", s)
 	}
 	writeAzureEntityHeaders(w, out)
 }

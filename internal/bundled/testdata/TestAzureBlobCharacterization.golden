@@ -3,18 +3,9 @@
     "output": {
       "_list": [
         {
-          "blob_type": "BlockBlob",
-          "cache_control": "",
-          "container": "snap",
-          "content_disposition": "",
-          "content_encoding": "",
-          "content_language": "",
-          "content_md5": "",
-          "content_type": "",
-          "last_modified": 0,
-          "metadata": {},
           "name": "o",
-          "value": "hello"
+          "snapshots": [],
+          "tags": {}
         }
       ]
     },

@@ -844,6 +844,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		{http.MethodPut, "/c/o?comp=block", "PutBlock"},
 		{http.MethodPut, "/c/o?comp=blocklist", "PutBlockList"},
 		{http.MethodGet, "/c/o?comp=blocklist", "GetBlockList"},
+		{http.MethodPut, "/c/o?comp=tags", "SetTags"},
+		{http.MethodGet, "/c/o?comp=tags", "GetTags"},
+		{http.MethodGet, "/?comp=blobs", "FilterBlobs"},
+		{http.MethodGet, "/c?restype=container&comp=blobs", "FilterBlobs"},
 		{http.MethodPut, "/c?restype=container&comp=metadata", "SetContainerMetadata"},
 		{http.MethodGet, "/c?restype=container&comp=metadata", "GetContainerMetadata"},
 		{http.MethodPut, "/c?restype=container&comp=acl", "SetContainerAcl"},
@@ -941,6 +945,8 @@ func TestAzureConditionalHeadersDecode(t *testing.T) {
 	req.Header.Set("x-ms-if-sequence-number-eq", "5")
 	req.Header.Set("x-ms-blob-condition-appendpos", "3")
 	req.Header.Set("x-ms-blob-condition-maxsize", "100")
+	req.Header.Set("x-ms-tags", "k1=v1&k2=v%202")
+	req.Header.Set("x-ms-if-tags", "k1='v1'")
 	op, err := codec.Route(az, req)
 	if err != nil {
 		t.Fatal(err)
@@ -961,6 +967,22 @@ func TestAzureConditionalHeadersDecode(t *testing.T) {
 	}
 	if in["seq_eq"] != "5" || in["append_pos"] != "3" || in["max_size"] != "100" {
 		t.Fatalf("condition headers %#v", in)
+	}
+	tags, _ := in["tags"].(map[string]any)
+	if tags["k1"] != "v1" || tags["k2"] != "v 2" || in["if_tags"] != "k1='v1'" {
+		t.Fatalf("tag headers %#v", in)
+	}
+	bad := httptest.NewRequest(http.MethodGet, "/c/o", nil)
+	bad.Header.Set("x-ms-if-tags", "k1=='v1'")
+	dec, _ = codec.Decode(az, op, bad)
+	if dec.Input["if_tags_invalid"] != true {
+		t.Fatalf("invalid if-tags %#v", dec.Input)
+	}
+	bad = httptest.NewRequest(http.MethodGet, "/c/o", nil)
+	bad.Header.Set("x-ms-tags", "bad~key=v")
+	dec, _ = codec.Decode(az, op, bad)
+	if dec.Input["tags_invalid"] != "DuplicateTagNames" {
+		t.Fatalf("invalid tags %#v", dec.Input)
 	}
 
 	w := httptest.NewRecorder()

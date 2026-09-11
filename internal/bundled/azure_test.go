@@ -684,6 +684,175 @@ func TestAzureConditions(t *testing.T) {
 	fault("CopyBlobFromURL", map[string]any{"container": "ctr", "blob": "o2", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src", "if_none_match_list": []any{"*"}}, 409, "BlobAlreadyExists")
 }
 
+func TestAzureTags(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	fault := func(op string, in map[string]any, status int, code string) {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		f, ok := err.(*spi.Fault)
+		if !ok || f.HTTPStatus != status || f.Code != code {
+			t.Fatalf("%s: got %#v, want %d %s", op, err, status, code)
+		}
+	}
+	names := func(res *spi.Response) []string {
+		t.Helper()
+		var out []string
+		for _, item := range res.Output["_list"].([]any) {
+			m := item.(map[string]any)
+			if pfx, ok := m["prefix"].(string); ok && pfx != "" {
+				out = append(out, "P:"+pfx)
+			} else {
+				out = append(out, fmt.Sprint(m["name"]))
+			}
+		}
+		return out
+	}
+
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	inv("CreateContainer", map[string]any{"container": "ctr2"})
+
+	// Tags round-trip through put, HEAD count, set/get.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "x", "tags": map[string]any{"a": "1", "b": "2"}})
+	props := inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "o"})
+	if props.Output["tag_count"] != "2" {
+		t.Fatalf("tag count %#v", props.Output)
+	}
+	inv("SetTags", map[string]any{"container": "ctr", "blob": "o", "tags": map[string]any{"c": "3"}})
+	got := inv("GetTags", map[string]any{"container": "ctr", "blob": "o"})
+	tags, _ := got.Output["tags"].(map[string]any)
+	if len(tags) != 1 || tags["c"] != "3" {
+		t.Fatalf("tags after set %#v", got.Output)
+	}
+
+	// Tag conditions on read, write, and delete.
+	inv("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_tags": "c='3'"})
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_tags": "c='no'"}, 412, "ConditionNotMet")
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_tags": "c=='3'", "if_tags_invalid": true}, 400, "InvalidHeaderValue")
+	inv("SetBlobMetadata", map[string]any{"container": "ctr", "blob": "o", "metadata": map[string]any{"m": "n"}, "if_tags": "c='3' and not c='no'"})
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_tags": "c='no'"}, 412, "ConditionNotMet")
+	fault("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "y", "if_tags": "c='no'"}, 412, "ConditionNotMet")
+
+	// Tag validation surfaces Azurite's three 400 codes.
+	fault("SetTags", map[string]any{"container": "ctr", "blob": "o", "tags_invalid": "TagsTooLarge"}, 400, "TagsTooLarge")
+	fault("SetTags", map[string]any{"container": "ctr", "blob": "o", "tags_invalid": "EmptyTagName"}, 400, "EmptyTagName")
+	fault("PutBlob", map[string]any{"container": "ctr", "blob": "o2", "body": "x", "tags_invalid": "DuplicateTagNames"}, 400, "DuplicateTagNames")
+
+	// FilterBlobs across containers, @container, where-less, and scoping.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "t1", "body": "x", "tags": map[string]any{"k": "v1"}})
+	inv("PutBlob", map[string]any{"container": "ctr2", "blob": "t2", "body": "x", "tags": map[string]any{"k": "v2"}})
+	inv("PutBlob", map[string]any{"container": "ctr2", "blob": "t3", "body": "x", "tags": map[string]any{"k": "v1"}})
+	fb := inv("FilterBlobs", map[string]any{"where": "k='v1'"})
+	fitems, _ := fb.Output["blobs"].([]any)
+	if len(fitems) != 2 {
+		t.Fatalf("filter blobs %#v", fb.Output)
+	}
+	for _, it := range fitems {
+		m := it.(map[string]any)
+		tt, _ := m["tags"].(map[string]any)
+		if len(tt) != 1 || tt["k"] != "v1" {
+			t.Fatalf("filter item tags %#v", m)
+		}
+	}
+	fb = inv("FilterBlobs", map[string]any{"where": "@container='ctr2' and k='v1'"})
+	fitems, _ = fb.Output["blobs"].([]any)
+	if len(fitems) != 1 || fitems[0].(map[string]any)["name"] != "t3" {
+		t.Fatalf("@container filter %#v", fb.Output)
+	}
+	fb = inv("FilterBlobs", map[string]any{})
+	if n := len(fb.Output["blobs"].([]any)); n != 0 || fb.Output["where"] != "" {
+		t.Fatalf("where-less filter %#v", fb.Output)
+	}
+	fb = inv("FilterBlobs", map[string]any{"container": "ctr2", "where": "k='v1'"})
+	if n := len(fb.Output["blobs"].([]any)); n != 1 {
+		t.Fatalf("container filter %#v", fb.Output)
+	}
+	fault("FilterBlobs", map[string]any{"container": "nope", "where": "k='v1'"}, 404, "ContainerNotFound")
+	fault("FilterBlobs", map[string]any{"where": "k==1", "where_invalid": true}, 400, "InvalidQueryParameterValue")
+
+	// Overwrite clears tags; delete drops the index entry.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "t1", "body": "z"})
+	fb = inv("FilterBlobs", map[string]any{"where": "k='v1'"})
+	if n := len(fb.Output["blobs"].([]any)); n != 1 {
+		t.Fatalf("after overwrite %#v", fb.Output)
+	}
+	inv("DeleteBlob", map[string]any{"container": "ctr2", "blob": "t3"})
+	fb = inv("FilterBlobs", map[string]any{"where": "k='v1'"})
+	if n := len(fb.Output["blobs"].([]any)); n != 0 {
+		t.Fatalf("after delete %#v", fb.Output)
+	}
+
+	// Hierarchy, prefix, include=tags and include=snapshots on List Blobs.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "dir/a", "body": "x"})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "dir/b", "body": "x"})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "top", "body": "x", "tags": map[string]any{"tt": "1"}})
+	lst := inv("ListBlobs", map[string]any{"container": "ctr", "delimiter": "/"})
+	gotNames := names(lst)
+	if fmt.Sprint(gotNames) != "[P:dir/ dir/a dir/b o o2 t1 top]" && !contains(gotNames, "P:dir/") {
+		t.Fatalf("hierarchy %#v", gotNames)
+	}
+	if gotNames[len(gotNames)-1] != "top" || gotNames[0] != "P:dir/" {
+		t.Fatalf("hierarchy order %#v", gotNames)
+	}
+	lst = inv("ListBlobs", map[string]any{"container": "ctr", "prefix": "dir/", "delimiter": "/"})
+	if fmt.Sprint(names(lst)) != "[dir/a dir/b]" {
+		t.Fatalf("prefix hierarchy %#v", names(lst))
+	}
+	snap := inv("CreateSnapshot", map[string]any{"container": "ctr", "blob": "top"})
+	sid := fmt.Sprint(snap.Output["snapshot"])
+	lst = inv("ListBlobs", map[string]any{"container": "ctr", "prefix": "top", "include": "snapshots,tags"})
+	items, _ := lst.Output["_list"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("include list %#v", lst.Output)
+	}
+	m := items[0].(map[string]any)
+	snaps, _ := m["snapshots"].([]any)
+	itags, _ := m["tags"].(map[string]any)
+	if len(snaps) != 1 || fmt.Sprint(snaps[0].(map[string]any)["id"]) != sid || itags["tt"] != "1" {
+		t.Fatalf("include item %#v", m)
+	}
+	lst = inv("ListBlobs", map[string]any{"container": "ctr", "prefix": "top"})
+	m = lst.Output["_list"].([]any)[0].(map[string]any)
+	if len(m["snapshots"].([]any)) != 0 || len(m["tags"].(map[string]any)) != 0 {
+		t.Fatalf("no-include item %#v", m)
+	}
+
+	// Snapshot tags follow the snapshot; copies carry or override tags.
+	gt := inv("GetTags", map[string]any{"container": "ctr", "blob": "top", "snapshot": sid})
+	if gt.Output["tags"].(map[string]any)["tt"] != "1" {
+		t.Fatalf("snapshot tags %#v", gt.Output)
+	}
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "src", "body": "s", "tags": map[string]any{"s": "1"}})
+	inv("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "cp", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src"})
+	if got := inv("GetTags", map[string]any{"container": "ctr", "blob": "cp"}); got.Output["tags"].(map[string]any)["s"] != "1" {
+		t.Fatalf("copy tags %#v", got.Output)
+	}
+	inv("CopyBlobFromURL", map[string]any{"container": "ctr", "blob": "cp2", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src", "tags": map[string]any{"s": "2"}})
+	if got := inv("GetTags", map[string]any{"container": "ctr", "blob": "cp2"}); got.Output["tags"].(map[string]any)["s"] != "2" {
+		t.Fatalf("copy override tags %#v", got.Output)
+	}
+	fault("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "cp3", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src", "source_if_tags": "s='no'"}, 412, "ConditionNotMet")
+	inv("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "cp3", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src", "source_if_tags": "s='1'"})
+}
+
+func contains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
 func FuzzBlobBytes(f *testing.F) {
 	f.Add("o", "hello")
 	f.Add("", "v")

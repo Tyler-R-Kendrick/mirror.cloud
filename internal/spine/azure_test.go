@@ -303,6 +303,77 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 201 {
 		t.Fatalf("append position ok %d %s", code, raw)
 	}
+
+	// Tags: x-ms-tags header on put, tag count on HEAD, set/get XML, filter.
+	code, raw, _ = do(http.MethodPut, "/ctr/tg", "tagged", map[string]string{"x-ms-tags": "k1=v1&k2=v2"})
+	if code != 201 {
+		t.Fatalf("put tagged %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodHead, "/ctr/tg", "", nil)
+	if code != 200 || h.Get("x-ms-tag-count") != "2" {
+		t.Fatalf("tag count %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/tg?comp=tags", `<?xml version="1.0" encoding="utf-8"?><Tags><TagSet><Tag><Key>c</Key><Value>3</Value></Tag></TagSet></Tags>`, nil)
+	if code != 204 {
+		t.Fatalf("set tags %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/tg?comp=tags", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<Key>c</Key>") || !strings.Contains(string(raw), "<Value>3</Value>") {
+		t.Fatalf("get tags %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/tg?comp=tags", `<Tags><TagSet><Tag><Key>bad~key</Key><Value>v</Value></Tag></TagSet></Tags>`, nil)
+	if code != 400 || h.Get("x-ms-error-code") != "DuplicateTagNames" {
+		t.Fatalf("bad tag chars %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/tg2", "x", map[string]string{"x-ms-tags": "a=1&b=2&c=3&d=4&e=5&f=6&g=7&h=8&i=9&j=10&k=11"})
+	if code != 400 || h.Get("x-ms-error-code") != "TagsTooLarge" {
+		t.Fatalf("too many tags %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/tg", "", map[string]string{"x-ms-if-tags": "c='3'"})
+	if code != 200 {
+		t.Fatalf("if-tags pass %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/tg", "", map[string]string{"x-ms-if-tags": "c='no'"})
+	if code != 412 || h.Get("x-ms-error-code") != "ConditionNotMet" {
+		t.Fatalf("if-tags fail %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/tg", "", map[string]string{"x-ms-if-tags": "c=='3'"})
+	if code != 400 || h.Get("x-ms-error-code") != "InvalidHeaderValue" {
+		t.Fatalf("if-tags invalid %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/?comp=blobs&where=c%3D%273%27", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<Name>tg</Name>") || !strings.Contains(string(raw), "<ContainerName>ctr</ContainerName>") || !strings.Contains(string(raw), "<Where>c='3'</Where>") {
+		t.Fatalf("filter blobs %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/?comp=blobs", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<Blobs></Blobs>") {
+		t.Fatalf("filter blobs where-less %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr?restype=container&comp=blobs&where=c%3D%273%27", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<Name>tg</Name>") {
+		t.Fatalf("container filter blobs %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/?comp=blobs&where=c%3D%3D%273%27", "", nil)
+	if code != 400 || h.Get("x-ms-error-code") != "InvalidQueryParameterValue" {
+		t.Fatalf("filter invalid where %d %#v %s", code, h, raw)
+	}
+	// Hierarchy and include projections on List Blobs.
+	code, raw, _ = do(http.MethodPut, "/ctr/dir/a", "x", nil)
+	if code != 201 {
+		t.Fatalf("put dir blob %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr?restype=container&comp=list&delimiter=/", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<BlobPrefix><Name>dir/</Name></BlobPrefix>") {
+		t.Fatalf("hierarchy list %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/tg?comp=snapshot", "", nil)
+	if code != 201 {
+		t.Fatalf("snapshot tagged %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr?restype=container&comp=list&prefix=tg&include=snapshots,tags", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<Snapshot>") || !strings.Contains(string(raw), "<Tag><Key>c</Key><Value>3</Value></Tag>") {
+		t.Fatalf("include list %d %s", code, raw)
+	}
 	code, raw, h = do(http.MethodHead, "/ctr/missing", "", nil)
 	if code != 404 || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("Content-Type") != "" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("head missing %d %#v %s", code, h, raw)

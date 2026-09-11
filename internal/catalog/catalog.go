@@ -319,6 +319,9 @@ func Bundle() *model.Bundle {
 		op("CopyBlobFromURL", "PUT", "/{container}/{blob}", 202, false),
 		op("AbortCopy", "PUT", "/{container}/{blob}?comp=copy", 204, false),
 		op("StageBlockFromURL", "PUT", "/{container}/{blob}?comp=block", 201, false),
+		op("SetTags", "PUT", "/{container}/{blob}?comp=tags", 204, false),
+		op("GetTags", "GET", "/{container}/{blob}?comp=tags", 200, true),
+		op("FilterBlobs", "GET", "/?comp=blobs", 200, true),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
@@ -358,6 +361,9 @@ func Bundle() *model.Bundle {
 	azureSvc.OperationByName("CopyBlobFromURL").Output = "Blob"
 	azureSvc.OperationByName("StageBlockFromURL").Output = "Blob"
 	azureSvc.OperationByName("GetPageRanges").Output = "PageRangeList"
+	azureSvc.OperationByName("SetTags").Output = "Blob"
+	azureSvc.OperationByName("GetTags").Output = "Blob"
+	azureSvc.OperationByName("FilterBlobs").Output = "FilterBlobResult"
 	azureSvc.Shapes = map[string]model.Shape{
 		"String": {ID: "String", Kind: model.KindString},
 		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
@@ -394,6 +400,18 @@ func Bundle() *model.Bundle {
 			"content_length":      {Shape: "String"},
 			"etag":                {Shape: "String"},
 			"last_modified":       {Shape: "String"},
+			"tags":                {Shape: "Map"},
+			"tag_count":           {Shape: "String"},
+		}},
+		"FilterBlob": {ID: "FilterBlob", Kind: model.KindStructure, Members: map[string]model.Member{
+			"name":      {Shape: "String"},
+			"container": {Shape: "String"},
+			"tags":      {Shape: "Map"},
+		}},
+		"FilterBlobList": {ID: "FilterBlobList", Kind: model.KindList, Member: "FilterBlob"},
+		"FilterBlobResult": {ID: "FilterBlobResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"where": {Shape: "String"},
+			"blobs": {Shape: "FilterBlobList"},
 		}},
 		"BlobList": {ID: "BlobList", Kind: model.KindList, Member: "Blob"},
 		"BlobBody": {ID: "BlobBody", Kind: model.KindString},

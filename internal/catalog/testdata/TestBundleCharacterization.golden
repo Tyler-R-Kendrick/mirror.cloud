@@ -852,14 +852,14 @@
     "ID": "fly.machines",
     "Protocol": "restJson1",
     "Ops": [
-      "CreateApp",
-      "ListApps",
-      "GetApp",
-      "DeleteApp",
-      "CreateMachine",
-      "ListMachines",
-      "GetMachine",
-      "DeleteMachine"
+      "AppsCreate",
+      "AppsList",
+      "AppsShow",
+      "AppsDelete",
+      "MachinesCreate",
+      "MachinesList",
+      "MachinesShow",
+      "MachinesDelete"
     ]
   },
   {

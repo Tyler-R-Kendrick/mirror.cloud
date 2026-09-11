@@ -9,8 +9,8 @@ The test suite keeps each failure mode independently runnable:
 | Snapshot / characterization | `make test-snapshot` | Catalog, support matrix, mock determinism, and spec diffs via `internal/golden` |
 | Chaos | `make test-chaos` | Concurrent writes and transaction tokens, account isolation, injected blob failure, clock jumps, and subscriber panics |
 | BDD / functional | `make test-bdd` | Booted HTTP S3/STS/Vercel/Cloudflare/Hostinger/GCS/Azure Blob/DigitalOcean/Hetzner/Railway/Fly Machines behavior and Terraform read paths |
-| Fuzz | `make test-fuzz` | AWS chunk framing, SigV4 identity, REST URI routing, every DynamoDB lifecycle/data/PartiQL/stream/transaction fuzzer, S3 state and checksums, Step Functions JSONPath, GCS paths and object bytes, Vercel routes/KV, Cloudflare routes/KV, Azure Blob routes/bytes, DigitalOcean routes/create, Railway GraphQL routes/create, and Fly Machines routes/create |
-| Mutation | `make test-mutation` | selected routing, auth, protocol, state, queue, stream, event, compute, scheduler, pipes, lifecycle, storage, Vercel, Cloudflare, GCS, Azure Blob, DigitalOcean, Railway, and Fly Machines mutants, plus the Hostinger and Hetzner fault envelopes; all must be killed |
+| Fuzz | `make test-fuzz` | AWS chunk framing, SigV4 identity, REST URI routing, every DynamoDB lifecycle/data/PartiQL/stream/transaction fuzzer, S3 state and checksums, Step Functions JSONPath, GCS paths and object bytes, Vercel routes/KV, Cloudflare routes/KV, Azure Blob routes/bytes, DigitalOcean routes/create, and Railway GraphQL routes/create |
+| Mutation | `make test-mutation` | selected routing, auth, protocol, state, queue, stream, event, compute, scheduler, pipes, lifecycle, storage, Vercel, Cloudflare, GCS, Azure Blob, DigitalOcean, and Railway mutants, plus the Hostinger, Hetzner and Fly Machines fault envelopes; all must be killed |
 
 `internal/golden` is the stdlib-only Verify equivalent. Set `UPDATE_GOLDEN=1` only when intentionally accepting a reviewed snapshot.
 

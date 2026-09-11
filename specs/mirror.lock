@@ -17,6 +17,10 @@
     "hetzner.v1": {
       "source": "https://docs.hetzner.cloud/cloud.spec.json",
       "ref": "2026-09-11T04:14:12Z"
+    },
+    "fly.machines": {
+      "source": "https://docs.machines.dev/spec/openapi3.json",
+      "ref": "2026-09-11T06:04:02Z"
     }
   },
   "files": [
@@ -1203,6 +1207,14 @@
       "path": "aws/xray/service/2016-04-12/xray-2016-04-12.json",
       "sha256": "ab1a0cfc7a244eb934542d67949631b6b353d1165e263e8cd2dcaff84c9f554c",
       "ingested": "2026-08-28T18:51:00Z"
+    },
+    {
+      "serviceId": "fly.machines",
+      "source": "https://docs.machines.dev/spec/openapi3.json",
+      "ref": "2026-09-11T06:04:02Z",
+      "path": "fly/machines.json",
+      "sha256": "2df85095182c40aaa1f1ca8e797b73af6236165ed1168360b5c3916bc1c23dff",
+      "ingested": "2026-09-11T06:04:02Z"
     },
     {
       "serviceId": "gcp.storage",

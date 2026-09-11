@@ -1,0 +1,467 @@
+{
+  "schema": "trace/1",
+  "service": "fly.machines",
+  "source": "pack:internal/services/fly/machines@655a4cd8",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Fly Machines API; a probe run replaces cells with observed evidence and cites the cassette.\n\nEvery step carries recorded_as: the pack named all eight operations itself and the document names them apps_list, machines_create and so on, which the receiver exports as AppsList and MachinesCreate.\n\nThe machine steps carry the id twice, as `id` and as `machine_id`. The pack read `id`; the document declares the path label `machine_id`. Neither side minds the other's spelling -- an input member no shape declares is ignored -- and writing both keeps the recording replayable against either without rewriting what the pack was asked.\n\nMachine and app ids are referenced rather than written literally, because the service issues them. The reference names `id`, not the `machine.id` the pack answered: a reference is resolved against the answer being replayed, and the document's Machine has no `machine` member to nest under. Both are hex, so unlike Hetzner's integers they unify: the comparison substitutes token-shaped strings, and every generated id here is one.\n\nWhat is still gated: the eight faults and their precedence -- a duplicate name is taken/422, a missing required member is invalid/400, an unknown app or machine is not_found/404, and a create under a missing app fails before it checks the image -- both bodyless deletes, and the whole machine list including each record's members. What is not is the four operations whose envelope the document removes.",
+  "steps": [
+    {
+      "operation": "AppsList",
+      "recorded_as": "ListApps",
+      "input": {
+        "org_slug": "personal"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [],
+        "_wrap": "apps"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the document declares `apps` and `total_apps`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    },
+    {
+      "operation": "AppsCreate",
+      "recorded_as": "CreateApp",
+      "input": {
+        "name": "app-one",
+        "org_slug": "personal"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "app",
+        "app": {
+          "created_at": 1,
+          "id": "7c589129"
+        }
+      },
+      "superseded": "The pack answered `{app: ...}` / `{machine: ...}`; the document declares the body to BE the App or the Machine, so the envelope is gone and no member sits where the recording put it. `_wrap` was the pack's private hint to its branch of the REST/JSON codec, and that branch went with the pack."
+    },
+    {
+      "operation": "AppsCreate",
+      "recorded_as": "CreateApp",
+      "input": {
+        "name": "app-one",
+        "org_slug": "personal"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "taken",
+        "http_status": 422,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AppsCreate",
+      "recorded_as": "CreateApp",
+      "input": {
+        "org_slug": "personal"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "invalid",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AppsShow",
+      "recorded_as": "GetApp",
+      "input": {
+        "app_name": "app-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "app",
+        "app": {
+          "created_at": 1,
+          "id": "7c589129",
+          "name": "app-one",
+          "network": "default",
+          "organization": {
+            "name": "personal",
+            "slug": "personal"
+          },
+          "status": "pending"
+        }
+      },
+      "superseded": "The pack answered `{app: ...}` / `{machine: ...}`; the document declares the body to BE the App or the Machine, so the envelope is gone and no member sits where the recording put it. `_wrap` was the pack's private hint to its branch of the REST/JSON codec, and that branch went with the pack."
+    },
+    {
+      "operation": "AppsShow",
+      "recorded_as": "GetApp",
+      "input": {
+        "app_name": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AppsList",
+      "recorded_as": "ListApps",
+      "input": {
+        "org_slug": "personal"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "id": "7c589129",
+            "machine_count": 0,
+            "name": "app-one",
+            "network": "default",
+            "volume_count": 0
+          }
+        ],
+        "_wrap": "apps"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the document declares `apps` and `total_apps`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    },
+    {
+      "operation": "MachinesCreate",
+      "recorded_as": "CreateMachine",
+      "input": {
+        "app_name": "app-one",
+        "config": {
+          "image": "flyio/hello:1"
+        },
+        "region": "iad"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "machine",
+        "machine": {
+          "app_name": "app-one",
+          "config": {
+            "image": "flyio/hello:1"
+          },
+          "id": "5f59f223",
+          "name": "5f59f223",
+          "region": "iad",
+          "state": "created"
+        }
+      },
+      "superseded": "The pack answered `{app: ...}` / `{machine: ...}`; the document declares the body to BE the App or the Machine, so the envelope is gone and no member sits where the recording put it. `_wrap` was the pack's private hint to its branch of the REST/JSON codec, and that branch went with the pack."
+    },
+    {
+      "operation": "MachinesCreate",
+      "recorded_as": "CreateMachine",
+      "input": {
+        "app_name": "nope",
+        "config": {
+          "image": "flyio/hello:1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "MachinesCreate",
+      "recorded_as": "CreateMachine",
+      "input": {
+        "app_name": "app-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "invalid",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "MachinesShow",
+      "recorded_as": "GetMachine",
+      "input": {
+        "app_name": "app-one",
+        "id": {
+          "$fromStep": 7,
+          "$fromPath": "id"
+        },
+        "machine_id": {
+          "$fromStep": 7,
+          "$fromPath": "id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "machine",
+        "machine": {
+          "app_name": "app-one",
+          "config": {
+            "image": "flyio/hello:1"
+          },
+          "id": "5f59f223",
+          "name": "5f59f223",
+          "region": "iad",
+          "state": "created"
+        }
+      },
+      "superseded": "The pack answered `{app: ...}` / `{machine: ...}`; the document declares the body to BE the App or the Machine, so the envelope is gone and no member sits where the recording put it. `_wrap` was the pack's private hint to its branch of the REST/JSON codec, and that branch went with the pack."
+    },
+    {
+      "operation": "MachinesShow",
+      "recorded_as": "GetMachine",
+      "input": {
+        "app_name": "app-one",
+        "id": "deadbeefdeadbeef",
+        "machine_id": "deadbeefdeadbeef"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "MachinesList",
+      "recorded_as": "ListMachines",
+      "input": {
+        "app_name": "app-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "app_name": "app-one",
+            "config": {
+              "image": "flyio/hello:1"
+            },
+            "id": "5f59f223",
+            "name": "5f59f223",
+            "region": "iad",
+            "state": "created"
+          }
+        ],
+        "_wrap": "machines"
+      },
+      "superseded_members": {
+        "_wrap": "`_wrap` is the pack's hint to its codec branch, not a member of the response; the branch went with the pack. The list itself is compared: the document answers a bare array, which the bundle projects under the same `_list` the pack used."
+      }
+    },
+    {
+      "operation": "MachinesList",
+      "recorded_as": "ListMachines",
+      "input": {
+        "app_name": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "MachinesDelete",
+      "recorded_as": "DeleteMachine",
+      "input": {
+        "app_name": "app-one",
+        "id": {
+          "$fromStep": 7,
+          "$fromPath": "id"
+        },
+        "machine_id": {
+          "$fromStep": 7,
+          "$fromPath": "id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "MachinesDelete",
+      "recorded_as": "DeleteMachine",
+      "input": {
+        "app_name": "app-one",
+        "id": {
+          "$fromStep": 7,
+          "$fromPath": "id"
+        },
+        "machine_id": {
+          "$fromStep": 7,
+          "$fromPath": "id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "MachinesList",
+      "recorded_as": "ListMachines",
+      "input": {
+        "app_name": "app-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [],
+        "_wrap": "machines"
+      },
+      "superseded_members": {
+        "_wrap": "`_wrap` is the pack's hint to its codec branch, not a member of the response; the branch went with the pack. The list itself is compared: the document answers a bare array, which the bundle projects under the same `_list` the pack used."
+      }
+    },
+    {
+      "operation": "AppsDelete",
+      "recorded_as": "DeleteApp",
+      "input": {
+        "app_name": "app-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AppsDelete",
+      "recorded_as": "DeleteApp",
+      "input": {
+        "app_name": "app-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AppsList",
+      "recorded_as": "ListApps",
+      "input": {
+        "org_slug": "personal"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [],
+        "_wrap": "apps"
+      },
+      "superseded": "The pack answered its codec's private envelope -- `_list` plus `_wrap` -- where the document declares `apps` and `total_apps`. The two share no member name, so no part of the body survives the rename to be compared. The step still runs, so every later step is still gated on the state it leaves behind."
+    }
+  ]
+}

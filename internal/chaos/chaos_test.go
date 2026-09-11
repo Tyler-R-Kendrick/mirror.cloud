@@ -37,7 +37,6 @@ import (
 	azblobs "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
 	cfapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
 	doapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
-	flyapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/fly/machines"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
@@ -8002,7 +8001,13 @@ func TestHetznerConcurrentSSHKeyCreateGet(t *testing.T) {
 }
 
 func TestFlyConcurrentDuplicateApps(t *testing.T) {
-	p := flyapi.New(spitest.Deps(t))
+	// The pack this exercised is gone; the property is not. Exactly one
+	// concurrent create may win the name, which the engine holds with the same
+	// lock the hand-written mutex was.
+	p, err := bundled.New("fly.machines", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	var wg sync.WaitGroup
@@ -8011,7 +8016,8 @@ func TestFlyConcurrentDuplicateApps(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateApp", Input: map[string]any{"app_name": "race"}})
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "AppsCreate",
+				Input: map[string]any{"name": "race", "org_slug": "personal"}})
 			errCh <- err
 		}()
 	}

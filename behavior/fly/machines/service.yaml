@@ -1,0 +1,240 @@
+schema: bir/1
+service: fly.machines
+
+# Extracted from internal/services/fly/machines (251 lines of Go). Every cell is
+# `authored` -- transcribed from that pack, not established against the real Fly
+# Machines API -- except where the generated model contradicts the pack, which
+# is noted per operation and in `quirks` below.
+provenance: authored
+
+# The pack answered its own 400 with `invalid` for a missing name or image. The
+# model decides which members are required and the engine checks them before any
+# rule here runs, so the name of that failure is stated once, in Fly's spelling.
+missing_input_error: Invalid
+
+resources:
+  app:
+    collection: flyapp
+    id:
+      # The app is keyed by its name. The document names it `app_name` on every
+      # operation that addresses one and `name` on the create, and the pack
+      # accepted either everywhere; this keeps that.
+      #
+      # Total, because the expression is evaluated wherever the resource is
+      # addressed and a request carrying neither must yield an empty key rather
+      # than an evaluation error.
+      derive: >
+        ('app_name' in input && input.app_name != null) ? string(input.app_name)
+          : (('name' in input && input.name != null) ? string(input.name) : '')
+
+  # Machines are flat, keyed by their own id, with the app they belong to stored
+  # on the record and filtered for on a list. The document nests them under an
+  # app -- /v1/apps/{app_name}/machines/{machine_id} -- and scoping the
+  # collection would be closer to Fly, but it would also change what a lookup by
+  # id answers, which the pack decided and the recording asserts. See the quirk.
+  machine:
+    collection: flymach
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [machine_id]
+
+errors:
+  Invalid:
+    code: invalid
+    http: 400
+    fault: client
+  NameTaken:
+    code: taken
+    http: 422
+    fault: client
+  NotFound:
+    code: not_found
+    http: 404
+    fault: client
+
+operations:
+  AppsCreate:
+    reads:
+      taken: { resource: app }
+    require:
+      # `cond` is a precondition: the error fires when it does NOT hold.
+      #
+      # The document does not mark `name` required, so the engine's model check
+      # lets a nameless create through -- and without this rule the engine
+      # cheerfully stored an app under the empty key, which is the phantom
+      # record this project keeps finding in the packs. The pack rejected it,
+      # and rejected it before it looked for a duplicate, which is why this
+      # rule is first.
+      - cond: >
+          ('name' in input && input.name != null && string(input.name) != '')
+            || ('app_name' in input && input.app_name != null && string(input.app_name) != '')
+        error: Invalid
+        message: "app name is required"
+      - { cond: "!taken_found", error: NameTaken, message: "app name already taken" }
+    effects:
+      # Drawn before the write, so the record can name it. An app's id is not
+      # its store key -- the name is -- so it cannot come from the resource's
+      # own generator.
+      - generate: { bind: appid, kind: hex, bytes: 8 }
+      - create:
+          resource: app
+          record:
+            id: fx.appid
+            name: id
+            status: "'pending'"
+            organization: >
+              {
+                'name': ('org_slug' in input && input.org_slug != null) ? string(input.org_slug) : 'personal',
+                'slug': ('org_slug' in input && input.org_slug != null) ? string(input.org_slug) : 'personal'
+              }
+            network: "('network' in input && input.network != null && string(input.network) != '') ? string(input.network) : 'default'"
+            # Not a member of App, only of the create's response. The pack
+            # stored a literal 1 and echoed it; see the quirk.
+            created_at: "1"
+    output:
+      id: rec.id
+      created_at: rec.created_at
+
+  AppsShow:
+    reads:
+      app: { resource: app }
+    require:
+      - { cond: app_found, error: NotFound, message: "app not found" }
+    output:
+      id: app.id
+      name: app.name
+      status: app.status
+      organization: app.organization
+      network: app.network
+
+  AppsDelete:
+    reads:
+      app: { resource: app }
+    require:
+      - { cond: app_found, error: NotFound, message: "app not found" }
+    effects:
+      # The app's machines are left behind, which is what the pack did. See the
+      # quirk: a delete that does not cascade leaves machines addressable by id
+      # under an app that no longer exists.
+      - delete: { resource: app }
+
+  AppsList:
+    list: { resource: app, member: apps }
+    output:
+      # The pack answered id, name, network and two zeroes. Only the members it
+      # actually knew are filled: machine_count is a count it never maintained
+      # and volume_count a resource it does not model, and both are answered as
+      # the zero the pack answered.
+      apps: >
+        items.map(a, {
+          'id': a.id,
+          'name': a.name,
+          'network': a.network,
+          'machine_count': 0,
+          'volume_count': 0
+        })
+      total_apps: size(items)
+
+  MachinesCreate:
+    reads:
+      app: { resource: app }
+    require:
+      - { cond: app_found, error: NotFound, message: "app not found" }
+      - cond: "'config' in input && input.config != null && 'image' in input.config && string(input.config.image) != ''"
+        error: Invalid
+        message: "image is required"
+    effects:
+      - create:
+          resource: machine
+          record:
+            id: id
+            name: "('name' in input && input.name != null && string(input.name) != '') ? string(input.name) : id"
+            state: "'created'"
+            region: "('region' in input && input.region != null) ? string(input.region) : ''"
+            # The app this machine belongs to, which is what a list filters on.
+            app_name: "string(input.app_name)"
+            config: "{'image': string(input.config.image)}"
+    output:
+      id: rec.id
+      name: rec.name
+      state: rec.state
+      region: rec.region
+      config: rec.config
+
+  MachinesShow:
+    reads:
+      machine: { resource: machine }
+    require:
+      - { cond: machine_found, error: NotFound, message: "machine not found" }
+    output:
+      id: machine.id
+      name: machine.name
+      state: machine.state
+      region: machine.region
+      config: machine.config
+
+  MachinesDelete:
+    reads:
+      machine: { resource: machine }
+    require:
+      - { cond: machine_found, error: NotFound, message: "machine not found" }
+    effects:
+      - delete: { resource: machine }
+
+  MachinesList:
+    reads:
+      app: { resource: app }
+    require:
+      - { cond: app_found, error: NotFound, message: "app not found" }
+    list:
+      resource: machine
+      # The document answers a bare JSON array of machines, not an object with
+      # a member holding one.
+      member: _list
+      filter: "item.app_name == string(input.app_name)"
+
+quirks:
+  - operation: AppsShow
+    note: >
+      The pack answered `{app: <the whole record>}`. The document declares the
+      body to be the App object itself, and App has no `created_at`, so two
+      things change: the envelope is gone and the stored created_at is no
+      longer answered. Both are the model winning over the pack -- a client
+      reading `app.name` was reading a member the real API does not nest, and
+      `created_at` belongs to the create's response, where it still is.
+  - operation: AppsList
+    note: >
+      `org_slug` is required by the document and was required by nothing in the
+      pack, so a list without it now fails the engine's model check with
+      invalid/400. It is still ignored: every app in the account is listed
+      whatever org is named, because the pack stored an organization on each
+      app and never filtered on it. A caller scoping a list to one org gets
+      more than it asked for, which is why this is recorded rather than left to
+      be discovered.
+
+      machine_count and volume_count are answered as zero, as the pack
+      answered them. The first is a count this emulator could compute and does
+      not; the second is a resource it does not model at all.
+  - operation: MachinesCreate
+    note: >
+      The pack accepted the image at the top level as well as inside `config`,
+      and preferred the top-level one. The document declares it only at
+      `config.image`, so a request sending `image` beside `config` now fails
+      the model check rather than being honoured.
+
+      Only `config.image` is stored. A real machine's config carries guest
+      sizing, mounts, services, environment and a dozen more members, and every
+      one of them is a fact about a machine this emulator does not run.
+  - operation: MachinesShow
+    note: >
+      A machine is looked up by its id alone, so a machine created under one
+      app is answered when asked for under another, and an app deleted with
+      machines still in it leaves those machines addressable. That is the
+      pack's behavior -- its collection was flat and its lookup unscoped -- and
+      the document's nesting says nothing about which lookups are scoped, only
+      about the shape of the address. Scoping the collection is the repair; it
+      changes what a lookup answers, so it is a decision, not a transcription.
+  - operation: AppsDelete
+    note: >
+      Deleting an app does not delete its machines. Fly refuses to delete an
+      app that still has machines; this deletes the app and leaves them.

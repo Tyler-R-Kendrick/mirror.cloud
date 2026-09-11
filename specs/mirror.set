@@ -157,3 +157,4 @@ aws.managedblockchain emulate
 aws.kinesisanalyticsv2 emulate
 hostinger.api emulate
 hetzner.v1 emulate
+fly.machines emulate

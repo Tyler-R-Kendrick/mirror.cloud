@@ -21879,54 +21879,19 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
-	{
-		name: "fly-accept-empty-image",
-		file: filepath.Join("internal", "services", "fly", "machines", "api.go"),
-		old:  "if img == \"\" {\n\t\treturn nil, flyFault(\"invalid\", \"image is required\", 400)",
-		new:  "if false {\n\t\treturn nil, flyFault(\"invalid\", \"image is required\", 400)",
-		pkg:  "./internal/services/fly/machines",
-		run:  "TestCreateMachineRejectsEmptyImage",
-	},
-	{
-		name: "fly-accept-empty-app-name",
-		file: filepath.Join("internal", "services", "fly", "machines", "api.go"),
-		old:  "if name == \"\" {\n\t\treturn nil, flyFault(\"invalid\", \"app name is required\", 400)",
-		new:  "if false {\n\t\treturn nil, flyFault(\"invalid\", \"app name is required\", 400)",
-		pkg:  "./internal/services/fly/machines",
-		run:  "TestCreateAppRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "fly-accept-duplicate-app",
-		file: filepath.Join("internal", "services", "fly", "machines", "api.go"),
-		old:  `if _, exists, _ := p.col(req, "flyapp").Get(ctx, name); exists {`,
-		new:  `if _, exists, _ := p.col(req, "flyapp").Get(ctx, name); false {`,
-		pkg:  "./internal/services/fly/machines",
-		run:  "TestCreateAppRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "fly-get-missing-app-as-empty",
-		file: filepath.Join("internal", "services", "fly", "machines", "api.go"),
-		old:  "b, ok, _ := p.col(req, \"flyapp\").Get(ctx, name)\n\tif !ok {\n\t\treturn nil, flyFault(\"not_found\", \"app not found\", 404)",
-		new:  "b, ok, _ := p.col(req, \"flyapp\").Get(ctx, name)\n\tif false {\n\t\treturn nil, flyFault(\"not_found\", \"app not found\", 404)",
-		pkg:  "./internal/services/fly/machines",
-		run:  "TestAppAndMachineLifecycle",
-	},
-	{
-		name: "fly-delete-missing-app-as-success",
-		file: filepath.Join("internal", "services", "fly", "machines", "api.go"),
-		old:  "func (p *Pack) deleteApp(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif _, err := p.getApp(ctx, req); err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "func (p *Pack) deleteApp(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif _, err := p.getApp(ctx, req); false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/fly/machines",
-		run:  "TestDeleteMissingAppAndMachine",
-	},
-	{
-		name: "fly-delete-missing-machine-as-success",
-		file: filepath.Join("internal", "services", "fly", "machines", "api.go"),
-		old:  "if _, err := p.getMachine(ctx, req); err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "if _, err := p.getMachine(ctx, req); false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/fly/machines",
-		run:  "TestDeleteMissingAppAndMachine",
-	},
+	// The six mutants that rewrote the Fly pack's empty-image, empty-name,
+	// duplicate-app, missing-app and missing-machine branches are gone with
+	// the Go they rewrote, as Hostinger's and Hetzner's were. The behaviour is
+	// `require` rules in behavior/fly/machines/service.yaml, and the
+	// equivalence recording replays every one of them as its own step;
+	// internal/bundled/fly_test.go asserts the same by invocation.
+	//
+	// One of those rules exists because the recording caught its absence. The
+	// document does not mark an app's name required, so the engine's model
+	// check let a nameless create through and the bundle stored an app under
+	// the empty key -- the phantom record this project keeps finding -- until
+	// the replay reported a fault the pack raised and the bundle did not.
+	// That is the recording doing what a mutant would have.
 	{
 		name: "fly-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),

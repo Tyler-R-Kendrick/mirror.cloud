@@ -958,15 +958,19 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 			}
 			return &spi.Response{Output: map[string]any{"Messages": out}}, nil
 		}
-		d := deadline.Sub(now)
-		if d < 0 {
-			d = 0
-		}
-		if next, ok := p.nextVisible(ctx, req, name, now); ok && next < d {
-			d = next
+		// The wait is a deadline, so it is registered as one. Computing a
+		// delay from `now` and passing it to After leaves a window in which
+		// the clock can move, and under a controllable clock -- which is what
+		// every test and every deterministic run uses -- nothing moves it a
+		// second time, so the wakeup is lost outright and the poll parks
+		// forever. spi.Clock says exactly this, and every other pack that
+		// waits on a deadline already uses AfterTime.
+		wakeAt := deadline
+		if next, ok := p.nextVisible(ctx, req, name, now); ok && now.Add(next).Before(wakeAt) {
+			wakeAt = now.Add(next)
 		}
 		select {
-		case <-p.deps.Clock.After(d):
+		case <-p.deps.Clock.AfterTime(wakeAt):
 		case <-wake:
 			continue
 		case <-ctx.Done():

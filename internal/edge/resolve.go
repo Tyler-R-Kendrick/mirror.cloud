@@ -26,10 +26,50 @@ import (
 // transcribed, so a service added to a specification is addressable without
 // anyone writing a branch for it.
 func (s *Server) resolveByModel(r *http.Request) *model.Service {
+	// A dotted endpoint prefix is tried first, because the leading label of
+	// such a host is not a service name at all. ECR is reached at
+	// `api.ecr.<region>.amazonaws.com` and IoT Wireless at
+	// `api.iotwireless.<region>...`, so the leading label of both is `api` --
+	// and any service whose short name happens to be `api` then answers for
+	// them. One did: naming a service `vercel.api` made its short name the
+	// generic word, and both AWS services became unreachable at their own
+	// endpoints. Matching the whole prefix the model records is what tells
+	// `api.ecr` apart from `api`.
+	if svc := s.serviceByHostPrefix(r.Host); svc != nil {
+		return svc
+	}
 	if svc := s.serviceByLabel(r, hostLabel(r.Host)); svc != nil {
 		return svc
 	}
 	return s.serviceByLabel(r, credentialScopeService(r.Header.Get("Authorization")))
+}
+
+// serviceByHostPrefix matches the leading labels of a host against an endpoint
+// prefix that is itself dotted. The longest such prefix wins, so a service
+// reached at `api.ecr` is not shadowed by one reached at `api`.
+func (s *Server) serviceByHostPrefix(host string) *model.Service {
+	host = strings.ToLower(host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if host == "" {
+		return nil
+	}
+	var best *model.Service
+	for i := range s.bundle.Services {
+		svc := &s.bundle.Services[i]
+		prefix := strings.ToLower(svc.EndpointPrefix)
+		if prefix == "" || !strings.Contains(prefix, ".") {
+			continue
+		}
+		if host != prefix && !strings.HasPrefix(host, prefix+".") {
+			continue
+		}
+		if best == nil || len(prefix) > len(best.EndpointPrefix) {
+			best = svc
+		}
+	}
+	return best
 }
 
 // clientSpellings are labels a client may use that no specification records.

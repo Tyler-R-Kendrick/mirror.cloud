@@ -19,35 +19,57 @@ jobs:
         with:
           go-version: "1.24"
           cache-dependency-path: test/sdk/go/go.sum
+      # Every check below runs whatever the ones before it did, and the job
+      # still fails if any of them fail.
+      #
+      # Without this a step failure skips the rest, and one had been doing that
+      # for six merges: the ratchet sits third and the nine checks after it --
+      # the equivalence gate, the unit suite, the protocol contracts, the SDK
+      # round-trips, snapshots, chaos, BDD, fuzzing and the race detector --
+      # never ran at all. A red gate that hides nine other gates reports less
+      # than no gate, because the silence reads as coverage.
       - name: vet
+        if: ${{ !cancelled() }}
         run: go vet ./...
       - name: gofmt
+        if: ${{ !cancelled() }}
         run: test -z "$(gofmt -l . | grep -v node_modules || true)"
       - name: anti-drift ratchet
+        if: ${{ !cancelled() }}
         run: make ratchet
       - name: extraction equivalence
+        if: ${{ !cancelled() }}
         # Named separately so it can be a required check: no pack may be
         # deleted without its recording replaying green against the bundle
         # that replaced it.
         run: make equivalence
       - name: unit and coverage floor
+        if: ${{ !cancelled() }}
         run: make test-coverage
       - name: protocol contracts
+        if: ${{ !cancelled() }}
         run: go test ./internal/conformance ./internal/proto/... -count=1
       - name: aws sdk round-trip
+        if: ${{ !cancelled() }}
         working-directory: test/sdk/go
         run: go test ./... -count=1
       - name: snapshots
+        if: ${{ !cancelled() }}
         run: make test-snapshot
       - name: chaos
+        if: ${{ !cancelled() }}
         run: make test-chaos
       - name: bdd and functional
+        if: ${{ !cancelled() }}
         run: make test-bdd
       - name: fuzz seeds
+        if: ${{ !cancelled() }}
         run: make test-fuzz-seeds
       - name: bounded native fuzzing
+        if: ${{ !cancelled() }}
         run: make test-fuzz
       - name: race detector
+        if: ${{ !cancelled() }}
         run: make test-race
 
   # Separate matrix job: the mutation suite had grown to fifty-eight minutes

@@ -12098,12 +12098,38 @@ var mutants = []mutant{
 		run:  "TestTheHostWinsOverTheCredentialScope",
 	},
 	{
+		// Without the whole-prefix match, a host leading with a generic label
+		// resolves by that label -- and any service whose short name is that
+		// word answers for it. That is how api.ecr and api.iotwireless became
+		// unreachable the moment a service called `*.api` existed.
+		name: "demux-resolve-a-dotted-prefix-by-its-leading-label",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "\tif svc := s.serviceByHostPrefix(r.Host); svc != nil {",
+		new:  "\tif svc := s.serviceByHostPrefix(\"\"); svc != nil {",
+		pkg:  "./internal/edge",
+		run:  "TestADottedEndpointPrefixIsNotItsLeadingLabel",
+	},
+	{
+		// The longest prefix has to win, or a service reached at `api` shadows
+		// one reached at `api.ecr` again by another route.
+		name: "demux-take-the-shortest-matching-prefix",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "\t\tif best == nil || len(prefix) > len(best.EndpointPrefix) {",
+		new:  "\t\tif best == nil {",
+		pkg:  "./internal/edge",
+		run:  "TestTheLongestEndpointPrefixWins",
+	},
+	{
 		name: "demux-ignore-the-credential-scope",
 		file: filepath.Join("internal", "edge", "resolve.go"),
 		old:  "\treturn s.serviceByLabel(r, credentialScopeService(r.Header.Get(\"Authorization\")))",
 		new:  "\treturn nil",
 		pkg:  "./internal/edge",
-		run:  "TestEveryServiceIsReachableTheWayAnSDKAddressesIt",
+		// Retargeted: the reachability test sends an endpoint host as well, and
+		// the host resolves first, so this line was never what it exercised.
+		// It read as covered only because that test was red for an unrelated
+		// reason and the mutant died on the failure.
+		run: "TestAServiceIsReachableByItsCredentialScopeAlone",
 	},
 	{
 		name: "demux-forget-a-service-can-be-named-by-its-own-id",

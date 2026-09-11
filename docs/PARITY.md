@@ -105,20 +105,34 @@ Authority: official DigitalOcean API v2 (`api.digitalocean.com` `/v2/droplets` a
 
 ## Azure Storage baseline
 
-Authority: Azurite commit `b1f480ed345d032eced096d475f40c76466fd954` (`https://github.com/Azure/Azurite`, audited 2026-09-11), API version 2026-06-06. This is the LocalStack analogue for Azure Storage: Blob + Queue + Table. The vendor swagger Azurite generates from is pinned under `specs/azure/` (`blob-storage.json`, `queue-storage.json`, `table/table.json`). Census: `specs/azure/azurite-inventory.json`, reproduced by `python3 scripts/count-azurite-tests.py --azurite <clone> --check`.
+Authority: Azurite commit `b1f480ed345d032eced096d475f40c76466fd954` (`https://github.com/Azure/Azurite`, audited 2026-09-11), API version 2026-06-06. This is the LocalStack analogue for Azure Storage: Blob + Queue + Table. The vendor swagger Azurite generates from is pinned under `specs/azure/` (`blob-storage.json`, `queue-storage.json`, `table/table.json`). Census: `specs/azure/azurite-inventory.json`, reproduced by `python3 scripts/count-azurite-tests.py --azurite <clone> --check`. Denominators are guarded by `TestAzureCensusDenominators`.
 
-This is a source-level inventory map, not a live `*.core.windows.net` differential. Completeness is row count against the pinned Azurite tests, the same way S3 is 463/463 LocalStack functions — not “the eight Blob CRUD ops we already had are well tested.”
+This is a source-level inventory map, not a live `*.core.windows.net` differential. Completeness is swagger-path accounting plus row count against the pinned Azurite tests, the same way S3 is 115/115 routed ops and 463/463 LocalStack functions — not “the YAML names we already had are well tested.”
 
-**Not in this denominator** (unclaimed, like LocalStack-skipped S3 rows): Azure Files (`file.core.windows.net`), Data Lake Gen2 (`dfs.core.windows.net`), ARM `management.azure.com`, and REST APIs Azurite itself marks unsupported at this pin (soft delete/undelete, blob versions, query blob, encryption scope, object replication, Put Blob From URL, static website, incremental copy, SharedKey Lite). Each such API gets an explicit unclaimed row when traced; they do not shrink the census.
+Three numerators, never collapsed:
+
+- **Routed** — a Blob/Queue `x-ms-paths` key (or Table `paths` method+path) whose every non-HEAD method is answered Azurite-shaped on the official host (`x-ms-error-code`, no `x-amzn-errortype`). Partial keys do not count.
+- **Accounted** — routed, or an explicit unclaim row naming the Azurite-unsupported reason. Target 59/59, 11/11, 12/12.
+- **Traced** — one row per inventory `it()`/`test()`. Target 806/806, including n/a and unclaimed (S3 skipped rows still counted).
+
+YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and are not extra keys.
+
+**Not in this denominator** (unclaimed, like LocalStack-skipped S3 rows): Azure Files (`file.core.windows.net`), Data Lake Gen2 (`dfs.core.windows.net`), ARM `management.azure.com`. Azurite-unsupported REST APIs stay in the 59/11/12 tables as `unclaim` rows; they do not shrink the census. SharedKey is parsed, never HMAC-verified.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the **currently implemented** 8 Blob CRUD ops | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 12 / 59 |
-| Queue REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 6 / 11 |
-| Table REST ops in pinned swagger (`paths`) routed to emulation | 6 / 12 |
-| Azurite test functions explicitly traced | 0 / 806 (0%) |
-| Azurite test functions not yet traced | 806 / 806 (100%) |
+| Blob swagger `x-ms-paths` keys | 59 |
+| Queue swagger `x-ms-paths` keys | 11 |
+| Table swagger `paths` method+path | 12 |
+| Azurite test functions | 806 |
+| Blob keys fully routed | 3 / 59 |
+| Queue keys fully routed | 4 / 11 |
+| Table method+paths routed | 6 / 12 |
+| Blob keys accounted (routed + unclaim) | 14 / 59 |
+| Queue keys accounted | 4 / 11 |
+| Table method+paths accounted (routed + unclaim) | 8 / 12 |
+| Azurite test functions traced | 0 / 806 (0%) |
+| Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
 ### Pinned inventory
@@ -182,43 +196,112 @@ Direct `it()`/`test()` calls, params unexpanded. Harness-only files (Azurite uni
 
 ### Pinned swagger vs Mirror
 
-Declared surface is `x-ms-paths` (Blob 59, Queue 11) and Table `paths` (12), counted from the vendored documents. Azurite implements a subset (its README support matrix); unimplemented-by-Azurite APIs stay unclaimed rows, they do not shrink these denominators. Implemented today: Create/Get/List/Delete Container, Put/Get/List/Delete Blob (8).
+Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `paths` method+path (12), counted from the vendored documents. Status is per key, not per YAML name: `routed` = every non-HEAD method Azurite-shaped; `partial` = some method answered but not the key; `missing` = must-route, not yet answered; `unclaim` = Azurite unsupported at this pin (still in the denominator).
 
-| Azurite Blob REST | Mirror |
-|---|---|
-| List Containers | implemented (8-op slice) |
-| Create Container | implemented |
-| Get Container Properties | implemented as GetContainer |
-| Delete Container | implemented |
-| List Blobs | implemented |
-| Put Blob | implemented (block blob bytes only; `x-ms-blob-type` not read) |
-| Get Blob | implemented |
-| Delete Blob | implemented |
-| Put Block / Put Block List / Get Block List | implemented (authored; PutBlockList commits the request body as the blob) |
-| Create Append Blob / Append Block | AppendBlock implemented (concatenates onto the blob; missing blob is created) |
-| Set/Get Service Properties | not implemented |
-| Get Stats | not implemented |
-| Get Account Information | not implemented |
-| Get/Set Container Metadata | not implemented |
-| Get/Set Container ACL | not implemented |
-| Lease Container | not implemented |
-| Put Block / Put Block From URL / Put Block List / Get Block List | not implemented |
-| Get/Set Blob Properties | not implemented |
-| Get/Set Blob Metadata | not implemented |
-| Create Append Blob / Append Block | not implemented |
-| Put Page / Get Page Ranges | not implemented |
-| Lease Blob | not implemented |
-| Snapshot Blob | not implemented |
-| Copy Blob / Abort Copy Blob / Copy Blob From URL | not implemented |
-| CORS / Preflight | not implemented |
+#### Blob `x-ms-paths` (59)
 
-Queue: Create/List/Delete Queue, Put/Get/Delete Message implemented on `{account}.queue.core.windows.net`. Get/Set Service Properties, ACL, metadata, peek/update/clear not yet.
+| Path key | Status | Mirror |
+|---|---|---|
+| `/?restype=service&comp=properties` | missing | Get/Set Service Properties |
+| `/?restype=service&comp=stats` | missing | Get Stats |
+| `/?comp=list` | routed | `ListContainers` |
+| `/?restype=service&comp=userdelegationkey` | unclaim | not in Azurite REST matrix; oauth tests parse-only |
+| `/?restype=account&comp=properties` | missing | Get Account Information |
+| `/?comp=batch` | missing | SubmitBatch |
+| `/?comp=blobs` | missing | FilterBlobs (tags) |
+| `/{containerName}?restype=container` | routed | `CreateContainer` / `GetContainer` / `DeleteContainer` (HEAD rides GET) |
+| `/{containerName}?restype=container&comp=metadata` | missing | Set Container Metadata |
+| `/{containerName}?restype=container&comp=acl` | missing | Get/Set Container ACL |
+| `/{containerName}?restype=container&comp=undelete` | unclaim | Azurite: soft delete unsupported |
+| `/{containerName}?restype=container&comp=batch` | missing | Container SubmitBatch |
+| `/{containerName}?restype=container&comp=blobs` | missing | Container FilterBlobs |
+| `/{containerName}?comp=lease&restype=container&acquire` | missing | Lease Container acquire |
+| `/{containerName}?comp=lease&restype=container&release` | missing | Lease Container release |
+| `/{containerName}?comp=lease&restype=container&renew` | missing | Lease Container renew |
+| `/{containerName}?comp=lease&restype=container&break` | missing | Lease Container break |
+| `/{containerName}?comp=lease&restype=container&change` | missing | Lease Container change |
+| `/{containerName}?restype=container&comp=list&flat` | partial | `ListBlobs` — no delimiter/hierarchy |
+| `/{containerName}?restype=container&comp=list&hierarchy` | missing | List Blobs hierarchy |
+| `/{containerName}?restype=account&comp=properties` | missing | Container Get Account Information |
+| `/{containerName}/{blob}` | partial | `GetBlob` / `DeleteBlob`; HEAD Get Properties not routed |
+| `/{containerName}/{blob}?PageBlob` | missing | PageBlob_Create (`x-ms-blob-type`) |
+| `/{containerName}/{blob}?AppendBlob` | missing | AppendBlob_Create (`x-ms-blob-type`) |
+| `/{containerName}/{blob}?BlockBlob` | partial | `PutBlob` — `x-ms-blob-type` not read |
+| `/{containerName}/{blob}?BlockBlob&fromUrl` | unclaim | Azurite: Put Blob From URL unsupported |
+| `/{containerName}/{blob}?comp=undelete` | unclaim | Azurite: soft delete unsupported |
+| `/{containerName}/{blob}?comp=expiry` | unclaim | Azurite: blob expiry unsupported |
+| `/{containerName}/{blob}?comp=properties&SetHTTPHeaders` | missing | Set Blob Properties |
+| `/{containerName}/{blob}?comp=immutabilityPolicies` | unclaim | Azurite: immutability unsupported |
+| `/{containerName}/{blob}?comp=legalhold` | unclaim | Azurite: legal hold unsupported |
+| `/{containerName}/{blob}?comp=metadata` | missing | Set Blob Metadata |
+| `/{containerName}/{blob}?comp=lease&acquire` | missing | Lease Blob acquire |
+| `/{containerName}/{blob}?comp=lease&release` | missing | Lease Blob release |
+| `/{containerName}/{blob}?comp=lease&renew` | missing | Lease Blob renew |
+| `/{containerName}/{blob}?comp=lease&change` | missing | Lease Blob change |
+| `/{containerName}/{blob}?comp=lease&break` | missing | Lease Blob break |
+| `/{containerName}/{blob}?comp=snapshot` | missing | Snapshot Blob |
+| `/{containerName}/{blob}?comp=copy` | missing | Copy Blob (same account) |
+| `/{containerName}/{blob}?comp=copy&sync` | missing | Copy Blob From URL (same account) |
+| `/{containerName}/{blob}?comp=copy&copyid` | missing | Abort Copy Blob |
+| `/{containerName}/{blob}?comp=tier` | unclaim | not in Azurite REST matrix |
+| `/{containerName}/{blob}?restype=account&comp=properties` | missing | Blob Get Account Information |
+| `/{containerName}/{blob}?comp=block` | routed | `PutBlock` |
+| `/{containerName}/{blob}?comp=block&fromURL` | missing | Put Block From URL (same instance) |
+| `/{containerName}/{blob}?comp=blocklist` | partial | `GetBlockList` ok; `PutBlockList` stores the request body, does not fold staged blocks |
+| `/{containerName}/{blob}?comp=page&update` | missing | Put Page |
+| `/{containerName}/{blob}?comp=page&clear` | missing | Clear Pages |
+| `/{containerName}/{blob}?comp=page&update&fromUrl` | missing | Put Page From URL (same instance) |
+| `/{containerName}/{blob}?comp=pagelist` | missing | Get Page Ranges (no continuation token) |
+| `/{containerName}/{blob}?comp=pagelist&diff` | missing | Get Page Ranges Diff |
+| `/{containerName}/{blob}?comp=properties&Resize` | missing | PageBlob resize |
+| `/{containerName}/{blob}?comp=properties&UpdateSequenceNumber` | missing | PageBlob sequence number |
+| `/{containerName}/{blob}?comp=incrementalcopy` | unclaim | Azurite: incremental copy unsupported |
+| `/{containerName}/{blob}?comp=appendblock` | partial | `AppendBlock` concatenates; missing blob is created (Azurite create-append is `?AppendBlob`) |
+| `/{containerName}/{blob}?comp=appendblock&fromUrl` | missing | Append Block From URL (same instance) |
+| `/{containerName}/{blob}?comp=seal` | unclaim | Azurite: concurrent append / seal not in REST matrix |
+| `/{containerName}/{blob}?comp=query` | unclaim | Azurite: blob query unsupported |
+| `/{containerName}/{blob}?comp=tags` | missing | Get/Set Blob Tags |
 
-Table: Create/List/Delete Table, Insert/Query/Delete Entity implemented on `{account}.table.core.windows.net`. Merge/Update/Batch not yet.
+#### Queue `x-ms-paths` (11)
 
-### Currently implemented 8-op slice (not the inventory)
+All eleven are must-route (Azurite Queue README). Host `{account}.queue.core.windows.net`.
 
-The seven-form evidence below covers only the eight ops now in `behavior/azure/blobs/service.yaml`. It is not Azurite-inventory completeness.
+| Path key | Status | Mirror |
+|---|---|---|
+| `/?restype=service&comp=properties` | missing | Get/Set Service Properties |
+| `/?restype=service&comp=stats` | missing | Get Stats |
+| `/?comp=list` | routed | `ListQueues` |
+| `/{queueName}` | routed | `CreateQueue` / `DeleteQueue` |
+| `/{queueName}?comp=metadata` | missing | Get/Set Queue Metadata |
+| `/{queueName}?comp=acl` | missing | Get/Set Queue ACL |
+| `/{queueName}/messages` | partial | `GetMessages` dequeue; DELETE clear not routed |
+| `/{queueName}/messages?visibilitytimeout={visibilityTimeout}&messagettl={messageTimeToLive}` | routed | `PutMessage` |
+| `/{queueName}/messages?peekonly=true` | missing | Peek Messages |
+| `/{queueName}/messages/{messageid}?popreceipt={popReceipt}&visibilitytimeout={visibilityTimeout}` | missing | Update Message |
+| `/{queueName}/messages/{messageid}?popreceipt={popReceipt}` | routed | `DeleteMessage` |
+
+#### Table `paths` method+path (12)
+
+Host `{account}.table.core.windows.net`. Table `x-ms-paths` service properties/stats are outside this 12 and stay unclaimed (Azurite Table README: not supported).
+
+| Method+path | Status | Mirror |
+|---|---|---|
+| `GET /Tables` | routed | `ListTables` |
+| `POST /Tables` | routed | `CreateTable` |
+| `POST /$batch` | missing | Batch (changeset; isolation unclaimed) |
+| `DELETE /Tables('{table}')` | routed | `DeleteTable` |
+| `GET /{table}()` | routed | `QueryEntities` |
+| `GET /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | missing | Get entity |
+| `PUT /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | missing | Update entity |
+| `PATCH /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | missing | Merge entity |
+| `DELETE /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `DeleteEntity` |
+| `POST /{table}` | routed | `InsertEntity` |
+| `GET /{table}` | unclaim | Azurite: Get Table ACL unsupported |
+| `PUT /{table}` | unclaim | Azurite: Set Table ACL unsupported |
+
+### Shipped YAML evidence (not the inventory)
+
+The seven-form evidence below covers the original eight Blob CRUD YAML ops. It is not swagger-path completeness and not Azurite-inventory completeness. Extra YAML (`PutBlock`, `PutBlockList`, `GetBlockList`, `AppendBlock`, Queue/Table CRUD) is scored in the path-key tables above, including the PutBlockList fold deviation.
 
 | Azure Blob operation | Mirror evidence |
 |---|---|

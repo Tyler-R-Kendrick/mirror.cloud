@@ -83,25 +83,33 @@ Four answers changed with the extraction, each recorded as a quirk in the bundle
 
 ## DigitalOcean baseline
 
-Authority: official DigitalOcean API v2 (`api.digitalocean.com` `/v2/droplets` and `/v2/domains`). There is no LocalStack DigitalOcean inventory; rows are operation → Mirror evidence, not a live `api.digitalocean.com` differential. Apps, Kubernetes, Spaces, domain records, and droplet actions are not in this denominator.
+Authority: the official DigitalOcean API v2 document, vendored at `specs/digitalocean/v2.yaml` and pinned in `specs/mirror.lock`. Rows are operation -> Mirror evidence, not a live `api.digitalocean.com` differential. Apps, Kubernetes and Spaces are not in this denominator.
+
+The pack's own characterization golden went with it; the 26-step equivalence recording replaces it and asserts more, because it replays rather than compares one frozen answer.
+
+Served from `behavior/digitalocean/v2/service.yaml` since the hand-written pack was deleted. Three things changed with it. The operation names are the document's -- `DropletsCreate`, `DomainsGet` -- where the pack invented all eight and bound them to these same URIs, so the requests are unchanged and the recording carries both names per step. The success codes are the document's: a droplet create is 202 and a domain create 201, where the pack answered 200 for both. And the `{droplet}` / `{droplets, meta}` envelope is the response shape the document declares rather than something a branch of the REST/JSON codec synthesized from `_wrap` and `_list`.
+
+DigitalOcean publishes YAML and nothing else, and writes 96% of its responses as references to shared response objects; both had to be taught to the pipeline before a model existed to serve from. The document is 3 MB and 659 operations. `specs/mirror.set` narrows it to the droplet and domain path prefixes, so the generated model is forty operations over 507 shapes; the whole document is still vendored and hashed, because the lock's hash is the pin.
+
+Routing is the model's now, which widens the surface rather than narrowing it: the deleted table knew eight URIs and answered 501 for everything else under `/v2/droplets`, where `httpuri.Match` reaches all forty the narrowed model declares. The thirty-two the bundle does not implement answer 501 as unimplemented operations rather than as unknown paths.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the emulated DigitalOcean slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Core DigitalOcean v2 operations routed to emulation | 8 / 8 |
+| Requested test forms wired for the emulated DigitalOcean slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the fault envelope and the generic union-output rule this service is the first to need) |
+| DigitalOcean operations served by the bundle | 8 / 40 (the thirty-two the pack never served answer 501, as they did under it) |
 | Live DigitalOcean probe | none (not required) |
 
 | DigitalOcean operation | Mirror evidence |
 |---|---|
-| `POST /v2/droplets` (`CreateDroplet`) | Booted create returns `{droplet}`; atomic empty name 422; BDD create |
-| `GET /v2/droplets` (`ListDroplets`) | Booted list wraps `{droplets, meta.total}`; characterization `list`; BDD lists after create |
-| `GET /v2/droplets/{id}` (`GetDroplet`) | Booted get-after-set; missing droplet HTTP 404 `{id:"not_found"}` without `x-amzn-errortype` |
-| `DELETE /v2/droplets/{id}` (`DeleteDroplet`) | Booted delete is HTTP 204 empty body; characterization `delete`; `TestDeleteMissingDropletAndDomain` and booted DELETE of missing id are HTTP 404 `{id:"not_found"}` with no `x-amzn-errortype`; mutant `digitalocean-delete-missing-droplet-as-success` |
-| `POST /v2/domains` (`CreateDomain`) | Atomic empty 422 and duplicate 409; BDD create; chaos `TestDigitalOceanConcurrentDuplicateDomains`; mutants `digitalocean-accept-empty-domain` and `digitalocean-accept-duplicate-domain` |
-| `GET /v2/domains` (`ListDomains`) | Characterization `domains`; BDD lists after create |
-| `GET /v2/domains/{name}` (`GetDomain`) | Booted POST then GET returns the stored domain; missing domain 404; mutant `digitalocean-get-missing-domain-as-empty` |
-| `DELETE /v2/domains/{name}` (`DeleteDomain`) | Atomic 204; characterization `del_domain`; booted and BDD DELETE of missing name are HTTP 404 `{id:"not_found"}`; characterization `del_miss_n`; mutant `digitalocean-delete-missing-domain-as-success` |
-| DigitalOcean faults vs AWS faults | restJson1 `Encode` wraps singular/plural keys plus `meta.total`; `EncodeFault` uses `{id,message}` and omits `x-amzn-errortype`; mutant `digitalocean-encode-aws-fault` |
+| `POST /v2/droplets` (`DropletsCreate`) | Recording replays create, an absent name 422/`unprocessable_entity` and an explicitly empty one; booted create is 202 `{droplet, links}`; BDD create; chaos `TestDigitalOceanConcurrentDropletCreateGet` -- sixteen concurrent creates are sixteen droplets, because a droplet name is not a key |
+| `GET /v2/droplets` (`DropletsList`) | Recording replays the empty, one- and two-entry cases and the listing after a delete; booted list carries `droplets` and `meta.total`; BDD lists after create; unpaginated, which is recorded as a quirk |
+| `GET /v2/droplets/{droplet_id}` (`DropletsGet`) | Recording replays get by reference to the created id, an unknown id 404/`not_found` and a read after delete; booted get-after-set; missing droplet 404 `{id:"not_found"}` without `x-amzn-errortype` |
+| `DELETE /v2/droplets/{droplet_id}` (`DropletsDestroy`) | Recording replays delete and delete of an unknown id 404/`not_found`; booted delete is 204 with an empty body |
+| `POST /v2/domains` (`DomainsCreate`) | Recording replays create, an absent name and an empty one 422/`unprocessable_entity`, a duplicate 409/`conflict`, a duplicate written in a different case 409/`conflict`, and re-creating a name a delete freed; booted create is 201 `{domain}`; chaos `TestDigitalOceanConcurrentDuplicateDomains` -- sixteen concurrent creates, one winner |
+| `GET /v2/domains` (`DomainsList`) | Recording replays the two-entry case and the listing after a delete; BDD lists after create |
+| `GET /v2/domains/{domain_name}` (`DomainsGet`) | Recording replays get by a name written in a different case than the create, an unknown name 404/`not_found` and a read after delete; the lower-casing is the resource key's, recorded as a quirk |
+| `DELETE /v2/domains/{domain_name}` (`DomainsDelete`) | Recording replays delete by a differently-cased name, a double delete 404/`not_found`, and the re-create that follows; booted and BDD DELETE of a missing name are 404 `{id:"not_found"}` |
+| DigitalOcean faults vs AWS faults | The success envelope is the document's response shape and is projected by the bundle; `EncodeFault` still answers `{id, message}` and omits `x-amzn-errortype`, mutant `digitalocean-encode-aws-fault`. A create's response is the only union-shaped output in the tree, and the rule that reads its arms is covered by `model-union-output-hides-its-arms` and `model-union-walk-is-unbounded` |
 
 ## Azure Blob baseline
 

@@ -9,22 +9,34 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
+	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
+	// Links the bundle's registration in. Without it the registry has no pack
+	// for digitalocean.v2 and the edge answers from the mock tier -- which
+	// looks like a working service returning synthesized data, not like a
+	// failure.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
+// TestDigitalOceanV2Behavior drives the served service over its real HTTP
+// surface. It boots the runtime rather than constructing an edge directly,
+// because a bundle is served from the generated model and `edge.New` falls
+// back to the hand-authored catalog when none is supplied.
+//
+// The URIs are unchanged from the pack this replaced. What changed is the
+// names of all eight operations -- the document spells them DropletsCreate and
+// DomainsGet, not CreateDroplet and GetDomain -- and the success codes: a
+// droplet create is accepted, a domain create is created. Both are recorded as
+// quirks in the bundle.
 func TestDigitalOceanV2Behavior(t *testing.T) {
-	deps := spitest.Deps(t)
 	cfg := config.Default()
 	cfg.Services = []string{"digitalocean.v2"}
-	reg, err := registry.New(deps, cfg.Services, nil)
+	cfg.Seed = "do-bdd"
+	rt, err := rtpkg.Boot(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	call := func(method, path, body string) (int, []byte, http.Header) {
 		t.Helper()
@@ -51,7 +63,7 @@ func TestDigitalOceanV2Behavior(t *testing.T) {
 		code, raw, _ := call(http.MethodPost, "/v2/droplets", `{"name":"bdd","region":"nyc3"}`)
 		env := map[string]any{}
 		_ = json.Unmarshal(raw, &env)
-		if code != 200 || env["droplet"] == nil {
+		if code != 202 || env["droplet"] == nil {
 			t.Fatalf("create %d %s", code, raw)
 		}
 		code, raw, _ = call(http.MethodGet, "/v2/droplets", "")
@@ -63,7 +75,7 @@ func TestDigitalOceanV2Behavior(t *testing.T) {
 		code, raw, _ := call(http.MethodPost, "/v2/domains", `{"name":"bdd.test"}`)
 		env := map[string]any{}
 		_ = json.Unmarshal(raw, &env)
-		if code != 200 || env["domain"] == nil {
+		if code != 201 || env["domain"] == nil {
 			t.Fatalf("create %d %s", code, raw)
 		}
 		code, raw, _ = call(http.MethodGet, "/v2/domains/bdd.test", "")

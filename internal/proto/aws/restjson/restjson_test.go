@@ -11,6 +11,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	generatedpp "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/aws/pinpoint"
 	generatedcf "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/cloudflare/api"
+	generateddo "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/digitalocean/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -141,15 +142,9 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		// here would have to assert against a hand-written table that no
 		// longer exists.
 
-		{"digitalocean.v2", http.MethodPost, "/v2/droplets", "", "CreateDroplet"},
-		{"digitalocean.v2", http.MethodGet, "/v2/droplets", "", "ListDroplets"},
-		{"digitalocean.v2", http.MethodGet, "/v2/droplets/1", "", "GetDroplet"},
-		{"digitalocean.v2", http.MethodDelete, "/v2/droplets/1", "", "DeleteDroplet"},
-		{"digitalocean.v2", http.MethodPost, "/v2/domains", "", "CreateDomain"},
-		{"digitalocean.v2", http.MethodGet, "/v2/domains", "", "ListDomains"},
-		{"digitalocean.v2", http.MethodGet, "/v2/domains/ex.test", "", "GetDomain"},
-		{"digitalocean.v2", http.MethodDelete, "/v2/domains/ex.test", "", "DeleteDomain"},
-		{"digitalocean.v2", http.MethodGet, "/v2/unknown", "", "Unknown"},
+		// DigitalOcean's rows are gone with its route table, exactly as
+		// Cloudflare's were. TestDigitalOceanRoutesFromItsGeneratedModel below
+		// routes the same URIs against the model instead.
 
 		// Hetzner's rows are gone with its route table, for the same reason
 		// Hostinger's are: it is served from a bundle, so httpuri.Match routes
@@ -339,30 +334,30 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		t.Fatalf("hs fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 
+	// DigitalOcean keeps only its fault envelope, for the reason Hetzner does
+	// below: the `_wrap`/`_list` encoder was synthesizing an envelope the
+	// document declares as each operation's own response shape, so the bundle
+	// projects `droplets` and `meta` by name and the generic encoder
+	// serializes them. A 204 needs no branch either -- the rule that a status
+	// forbidding a body gets none is the protocol's, not the provider's.
 	do := &model.Service{ID: "digitalocean.v2"}
 	w = httptest.NewRecorder()
-	if err := codec.Encode(do, &model.Operation{Name: "ListDroplets"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"name": "web"}}, "_wrap": "droplets"}}); err != nil {
+	if err := codec.Encode(do, &model.Operation{Name: "DomainsList"}, w,
+		&spi.Response{Output: map[string]any{"domains": []any{map[string]any{"name": "ex.test"}}, "meta": map[string]any{"total": 1}}}); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"droplets"`) || !strings.Contains(w.Body.String(), `"total":1`) || strings.Contains(w.Body.String(), `"_list"`) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"domains"`) || !strings.Contains(w.Body.String(), `"total":1`) {
 		t.Fatalf("do list encode %d %s", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()
-	if err := codec.Encode(do, &model.Operation{Name: "GetDomain"}, w, &spi.Response{Output: map[string]any{"_wrap": "domain", "domain": map[string]any{"name": "ex.test"}}}); err != nil {
-		t.Fatal(err)
-	}
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"domain"`) || !strings.Contains(w.Body.String(), `"ex.test"`) {
-		t.Fatalf("do encode %d %s", w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	if err := codec.Encode(do, &model.Operation{Name: "DeleteDomain"}, w, &spi.Response{Status: 204}); err != nil {
+	if err := codec.Encode(do, &model.Operation{Name: "DomainsDelete", HTTP: model.HTTPBinding{Code: 204}}, w, &spi.Response{}); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 204 || w.Body.Len() != 0 {
 		t.Fatalf("do delete %d %q", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()
-	if err := codec.EncodeFault(do, &model.Operation{Name: "GetDroplet"}, w, &spi.Fault{Code: "not_found", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+	if err := codec.EncodeFault(do, &model.Operation{Name: "DropletsGet"}, w, &spi.Fault{Code: "not_found", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"id":"not_found"`) {
@@ -473,6 +468,45 @@ func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://api.cloudflare.com"+base+"/nid/values/a/b", nil)
 	if op, err := (Codec{}).Route(cf, req); err == nil && op != nil && op.Name == "WorkersKvNamespaceReadKeyValuePair" {
 		t.Fatal("an unencoded slash in a key should not route to the read")
+	}
+}
+
+// TestDigitalOceanRoutesFromItsGeneratedModel replaces the eight route-table
+// rows that went with the pack. The URIs are the same; what answers them is
+// httpuri.Match over the model's own patterns, which is how every modelled
+// service routes.
+//
+// Two things the table could not do are asserted here. Its names were
+// invented -- CreateDroplet for what the document calls DropletsCreate -- and
+// it knew eight operations where the model declares forty, so a request to a
+// droplet's actions or backups fell through to "Unknown" and answered 501.
+// Routing from the model reaches all of them, and the collection-wide
+// DELETE /v2/droplets is a different operation from the one addressing a
+// droplet, which a table keyed on segment count had to special-case.
+func TestDigitalOceanRoutesFromItsGeneratedModel(t *testing.T) {
+	do := generateddo.Model()
+	for _, test := range []struct{ method, path, want string }{
+		{http.MethodPost, "/v2/droplets", "DropletsCreate"},
+		{http.MethodGet, "/v2/droplets", "DropletsList"},
+		{http.MethodGet, "/v2/droplets/1", "DropletsGet"},
+		{http.MethodDelete, "/v2/droplets/1", "DropletsDestroy"},
+		{http.MethodPost, "/v2/domains", "DomainsCreate"},
+		{http.MethodGet, "/v2/domains", "DomainsList"},
+		{http.MethodGet, "/v2/domains/ex.test", "DomainsGet"},
+		{http.MethodDelete, "/v2/domains/ex.test", "DomainsDelete"},
+		// Beyond what the table knew:
+		{http.MethodDelete, "/v2/droplets", "DropletsDestroyByTag"},
+		{http.MethodGet, "/v2/droplets/1/actions", "DropletActionsList"},
+		{http.MethodPost, "/v2/droplets/1/actions", "DropletActionsPost"},
+		{http.MethodGet, "/v2/droplets/1/backups", "DropletsListBackups"},
+		{http.MethodGet, "/v2/domains/ex.test/records", "DomainsListRecords"},
+		{http.MethodPatch, "/v2/domains/ex.test/records/7", "DomainsPatchRecord"},
+	} {
+		req := httptest.NewRequest(test.method, "http://api.digitalocean.com"+test.path, nil)
+		op, err := (Codec{}).Route(do, req)
+		if err != nil || op == nil || op.Name != test.want {
+			t.Fatalf("%s %s: op %v err %v, want %s", test.method, test.path, op, err, test.want)
+		}
 	}
 }
 

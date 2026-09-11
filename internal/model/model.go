@@ -278,3 +278,50 @@ func (s *Service) PayloadMember(op *Operation) (string, bool) {
 	}
 	return best, best != ""
 }
+
+// BodyMembers answers the members a response body of the named shape may
+// carry, which for a structure is simply its own members.
+//
+// A union is the reason this is not that one line. A union output means the
+// body IS one of the options -- OpenAPI writes it `oneOf`, with no
+// discriminator member anywhere on the wire -- so what a reader may find in
+// the body is the union of what every option declares, and asking the union
+// shape itself yields only the synthetic option0/option1 names the receiver
+// gave the arms, which appear in no response.
+//
+// DigitalOcean's droplet create is the one operation in the tree shaped that
+// way: one `name` is answered {droplet, links} and several `names`
+// {droplets, links}, and the document declares both as arms of one response.
+// The other union output, Cloudflare's KV value, is a union of a string and a
+// blob -- an opaque body, which ScalarBody answers and which has no members at
+// all -- so it arrives here as the empty map it should be.
+//
+// The walk is bounded because a document may reference itself in a circle, and
+// a receiver is not obliged to have noticed.
+func (s *Service) BodyMembers(shapeID string) map[string]Member {
+	out := map[string]Member{}
+	if s == nil {
+		return out
+	}
+	s.collectBodyMembers(shapeID, out, 0)
+	return out
+}
+
+func (s *Service) collectBodyMembers(shapeID string, out map[string]Member, depth int) {
+	if depth > 8 {
+		return
+	}
+	shape, ok := s.Shapes[shapeID]
+	if !ok {
+		return
+	}
+	if shape.Kind != KindUnion {
+		for name, m := range shape.Members {
+			out[name] = m
+		}
+		return
+	}
+	for _, arm := range shape.Members {
+		s.collectBodyMembers(arm.Shape, out, depth+1)
+	}
+}

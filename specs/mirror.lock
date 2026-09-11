@@ -25,6 +25,10 @@
     "cloudflare.api": {
       "source": "https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json",
       "ref": "2026-09-11T07:32:38Z"
+    },
+    "digitalocean.v2": {
+      "source": "https://api-engineering.nyc3.cdn.digitaloceanspaces.com/spec-ci/DigitalOcean-public.v2.yaml",
+      "ref": "2026-09-11T10:32:02Z"
     }
   },
   "files": [
@@ -1219,6 +1223,14 @@
       "path": "cloudflare/api.json",
       "sha256": "f92eb6d9c9c26ccdea47a8fc0fbb5c7d7c3bf278f8619e92c4f8006d241f93f4",
       "ingested": "2026-09-11T07:32:38Z"
+    },
+    {
+      "serviceId": "digitalocean.v2",
+      "source": "https://api-engineering.nyc3.cdn.digitaloceanspaces.com/spec-ci/DigitalOcean-public.v2.yaml",
+      "ref": "2026-09-11T10:32:02Z",
+      "path": "digitalocean/v2.yaml",
+      "sha256": "4ea599dfe03f2fb661de8e6f19e14ae5a6771cb6205572d1d262c5f080c4bcd1",
+      "ingested": "2026-09-11T10:32:02Z"
     },
     {
       "serviceId": "fly.machines",

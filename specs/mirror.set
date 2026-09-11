@@ -172,3 +172,4 @@ hostinger.api emulate
 hetzner.v1 emulate
 fly.machines emulate
 cloudflare.api emulate paths=/client/v4/accounts/{account_id}/storage/kv
+digitalocean.v2 emulate paths=/v2/droplets,/v2/domains

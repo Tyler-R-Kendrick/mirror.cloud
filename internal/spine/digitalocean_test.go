@@ -12,7 +12,11 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
+	// Links the bundle's registration in. Without it the registry has no pack
+	// for digitalocean.v2 and the edge answers from the mock tier -- which
+	// looks like a working service returning synthesized data, not like a
+	// failure.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestBootedServerDigitalOceanAPI(t *testing.T) {
@@ -50,7 +54,9 @@ func TestBootedServerDigitalOceanAPI(t *testing.T) {
 	env := map[string]any{}
 	_ = json.Unmarshal(raw, &env)
 	drop, _ := env["droplet"].(map[string]any)
-	if code != 200 || drop["name"] != "web" {
+	// 202, not 200: the document says a droplet create is accepted rather than
+	// completed, and the code is the model's now that the pack's is gone.
+	if code != 202 || drop["name"] != "web" {
 		t.Fatalf("create droplet %d %s", code, raw)
 	}
 	id := strconv.Itoa(int(drop["id"].(float64)))
@@ -66,7 +72,9 @@ func TestBootedServerDigitalOceanAPI(t *testing.T) {
 	code, raw, _ = do(http.MethodPost, "/v2/domains", `{"name":"boot.test"}`)
 	_ = json.Unmarshal(raw, &env)
 	dom, _ := env["domain"].(map[string]any)
-	if code != 200 || dom["name"] != "boot.test" {
+	// 201: a domain create is created, where a droplet create is accepted.
+	// The pack answered 200 for both.
+	if code != 201 || dom["name"] != "boot.test" {
 		t.Fatalf("create domain %d %s", code, raw)
 	}
 	code, raw, _ = do(http.MethodGet, "/v2/domains/boot.test", "")

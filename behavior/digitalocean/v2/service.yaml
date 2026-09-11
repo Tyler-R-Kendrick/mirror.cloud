@@ -1,0 +1,159 @@
+schema: bir/1
+service: digitalocean.v2
+
+# Extracted from internal/services/digitalocean/v2 (191 lines of Go), which
+# served eight operations under names of its own -- CreateDroplet, GetDomain --
+# bound to the URIs DigitalOcean's document gives DropletsCreate and DomainsGet.
+# The recording carries both names, so the rename is visible rather than
+# silently applied.
+#
+# Every cell is `authored`: transcribed from that pack, not established against
+# the real DigitalOcean API. Where the document contradicts the pack the
+# document wins, and each of those is stated per operation and in `quirks`.
+provenance: authored
+
+# The pack answered a missing name with `unprocessable_entity` / 422 before
+# looking at anything else, and the document marks droplet_id and domain_name
+# required. The engine's model check runs before any rule here, so the name of
+# that failure has to be DigitalOcean's rather than the ValidationException
+# default.
+missing_input_error: UnprocessableEntity
+
+resources:
+  droplet:
+    collection: dodrop
+    id:
+      # An integer, which is what the document declares and what the pack drew.
+      # The store key is text because every key is; the record carries the
+      # number the wire needs.
+      generate: { kind: int }
+      input_members: [droplet_id]
+    record:
+      id: "int(id)"
+      name: "string(input.name)"
+      status: "'active'"
+      # The pack stored the caller's bare strings under `region`, `size` and
+      # `image`, and the document declares all three as objects: region is a
+      # region, size a size, image an image. Answering a string where a client
+      # reads `.slug` is a shape no client can parse, so each is answered as
+      # the one object member this emulator has evidence for -- the slug the
+      # caller named. Filling in a region's features or a size's price would
+      # read as recorded behaviour rather than as the invention it would be.
+      #
+      # Each is total: region, size and image are optional in the document, and
+      # an expression that reads an absent member fails the operation where the
+      # pack's type assertion yielded "". A droplet created without an image is
+      # a real request, so it has to answer rather than fault.
+      region: "{'slug': ('region' in input && input.region != null) ? string(input.region) : ''}"
+      size_slug: "('size' in input && input.size != null) ? string(input.size) : ''"
+      image: "{'slug': ('image' in input && input.image != null) ? string(input.image) : ''}"
+
+  # Domain names are the key, and uniqueness is therefore the key's own: a
+  # second create addresses the same row. No index resource is needed, which is
+  # what separates this from Cloudflare's titles and Hetzner's server names.
+  domain:
+    collection: dodom
+    id:
+      # Total, and lower-cased: the expression is evaluated wherever the
+      # resource is addressed, so it has to answer for a create (which names
+      # the domain `name`, in the body) and for a get or a delete (which name
+      # it `domain_name`, in the path) alike, and for a request carrying
+      # neither it must yield an empty key rather than an evaluation error.
+      derive: >
+        ('domain_name' in input && input.domain_name != null)
+          ? lower(string(input.domain_name))
+          : (('name' in input && input.name != null) ? lower(string(input.name)) : '')
+    record:
+      name: id
+      ttl: "1800"
+
+errors:
+  UnprocessableEntity:
+    code: unprocessable_entity
+    http: 422
+    fault: client
+  NotFound:
+    code: not_found
+    http: 404
+    fault: client
+  Conflict:
+    code: conflict
+    http: 409
+    fault: client
+
+operations:
+  DropletsCreate:
+    require:
+      # `cond` is a precondition: the error fires when it does NOT hold. It
+      # tests presence as well as emptiness, because the document does not mark
+      # `name` required -- it sits inside the oneOf the request body is -- so
+      # the engine's model check never looks at it, and a request omitting it
+      # reaches here. Reading `input.name` unguarded would fail evaluation and
+      # answer 500 where the pack answered 422.
+      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: UnprocessableEntity, message: "droplet name is required" }
+    effects:
+      - create: { resource: droplet }
+    output:
+      droplet: rec
+      # The document declares `links` required on both arms of the response.
+      # The pack answered neither, and a client that follows the action link to
+      # wait for the droplet gets nothing to follow -- so it is answered empty
+      # rather than absent, which is the difference between "no actions" and
+      # "this field does not exist".
+      links: "{'actions': []}"
+
+  DropletsList:
+    list: { resource: droplet, member: droplets }
+    output:
+      # The pack answered `meta.total` and the document declares `meta`
+      # required. The listing is unpaginated -- see the quirk -- so page and
+      # per_page in the request are read by nothing.
+      meta: "{'total': size(items)}"
+
+  DropletsGet:
+    reads:
+      drop: { resource: droplet }
+    require:
+      - { cond: drop_found, error: NotFound, message: "The resource you were accessing could not be found." }
+    output:
+      droplet: drop
+
+  DropletsDestroy:
+    reads:
+      drop: { resource: droplet }
+    require:
+      - { cond: drop_found, error: NotFound, message: "The resource you were accessing could not be found." }
+    effects:
+      - delete: { resource: droplet }
+
+  DomainsCreate:
+    reads:
+      taken: { resource: domain }
+    require:
+      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: UnprocessableEntity, message: "domain name is required" }
+      - { cond: "!taken_found", error: Conflict, message: "name already exists" }
+    effects:
+      - create: { resource: domain }
+    output:
+      domain: rec
+
+  DomainsList:
+    list: { resource: domain, member: domains }
+    output:
+      meta: "{'total': size(items)}"
+
+  DomainsGet:
+    reads:
+      dom: { resource: domain }
+    require:
+      - { cond: dom_found, error: NotFound, message: "The resource you were accessing could not be found." }
+    output:
+      domain: dom
+
+  DomainsDelete:
+    reads:
+      dom: { resource: domain }
+    require:
+      - { cond: dom_found, error: NotFound, message: "The resource you were accessing could not be found." }
+    effects:
+      - delete: { resource: domain }

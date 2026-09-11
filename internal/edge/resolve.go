@@ -48,16 +48,28 @@ var clientSpellings = map[string]string{
 	"directoryservice": "aws.ds",
 }
 
-// hostLabel is the leading label of an endpoint host: the `guardduty` of
-// `guardduty.us-east-1.amazonaws.com`. A bare host with no dots -- `localhost`,
-// an IP -- has no service in it, and returning it costs nothing because it
-// will not match any endpoint prefix.
+// hostLabel is the service prefix of an endpoint host: the `guardduty` of
+// `guardduty.us-east-1.amazonaws.com`, and the `api.ecr` of
+// `api.ecr.us-east-1.amazonaws.com`. A first-label-only cut would map ECR and
+// IoT Wireless to `api`, which is `vercel.api`'s short name. A bare host with
+// no dots -- `localhost`, an IP -- has no service in it, and returning it
+// costs nothing because it will not match any endpoint prefix.
 func hostLabel(host string) string {
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
 	}
+	host = strings.ToLower(host)
+	if strings.HasSuffix(host, ".amazonaws.com") {
+		rest := strings.TrimSuffix(host, ".amazonaws.com")
+		parts := strings.Split(rest, ".")
+		// ponytail: hyphenated trailing label = region (us-east-1); dualstack/fips extra labels need a real region table.
+		if n := len(parts); n >= 2 && strings.Contains(parts[n-1], "-") {
+			parts = parts[:n-1]
+		}
+		return strings.Join(parts, ".")
+	}
 	label, _, _ := strings.Cut(host, ".")
-	return strings.ToLower(label)
+	return label
 }
 
 // credentialScopeService reads the service name out of a SigV4 Authorization

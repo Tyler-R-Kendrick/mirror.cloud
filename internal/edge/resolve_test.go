@@ -423,12 +423,16 @@ func TestCredentialScopeService(t *testing.T) {
 	}
 }
 
-// TestHostLabel takes the leading label of an endpoint host, and nothing from
-// a host that has no service in it.
+// TestHostLabel takes the service prefix of an endpoint host, and nothing from
+// a host that has no service in it. Dotted AWS prefixes stay intact so
+// `api.ecr` is not the same label as Vercel's `api`.
 func TestHostLabel(t *testing.T) {
 	for _, tc := range []struct{ host, want string }{
 		{"guardduty.us-east-1.amazonaws.com", "guardduty"},
 		{"GuardDuty.us-east-1.amazonaws.com:443", "guardduty"},
+		{"api.ecr.us-east-1.amazonaws.com", "api.ecr"},
+		{"api.iotwireless.us-east-1.amazonaws.com", "api.iotwireless"},
+		{"s3.amazonaws.com", "s3"},
 		{"localhost:4566", "localhost"},
 		{"127.0.0.1:4566", "127"},
 		{"", ""},

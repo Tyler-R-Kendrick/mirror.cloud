@@ -63,9 +63,25 @@ type document struct {
 	} `json:"servers"`
 	Paths      map[string]json.RawMessage `json:"paths"`
 	Components struct {
-		Schemas    map[string]schema    `json:"schemas"`
-		Parameters map[string]parameter `json:"parameters"`
+		Schemas    map[string]schema         `json:"schemas"`
+		Parameters map[string]parameter      `json:"parameters"`
+		Responses  map[string]responseObject `json:"responses"`
 	} `json:"components"`
+}
+
+// responseObject is one entry of an operation's `responses` map, or one of the
+// shared responses under `components.responses`.
+//
+// It carries `$ref` because OpenAPI lets a response *be* a reference to a
+// shared one, and a document may do that for nearly everything it declares:
+// DigitalOcean writes `$ref: "#/components/responses/all_droplets"` for 3,731
+// of its 3,885 responses. Until this field existed such a response decoded to a
+// value with no content, `jsonSchema` found nothing, and the operation was
+// given an empty output structure -- so every one of its operations projected
+// nothing and no bundle could be written against it.
+type responseObject struct {
+	Ref     string               `json:"$ref"`
+	Content map[string]mediaType `json:"content"`
 }
 
 type operation struct {
@@ -76,9 +92,7 @@ type operation struct {
 		Required bool                 `json:"required"`
 		Content  map[string]mediaType `json:"content"`
 	} `json:"requestBody"`
-	Responses map[string]struct {
-		Content map[string]mediaType `json:"content"`
-	} `json:"responses"`
+	Responses map[string]responseObject `json:"responses"`
 }
 
 type mediaType struct {
@@ -154,7 +168,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 	}
 	id := serviceID(src.Path)
 	base := basePath(doc)
-	sh := &shaper{shapes: map[string]model.Shape{}}
+	sh := &shaper{shapes: map[string]model.Shape{}, responses: doc.Components.Responses}
 	// The named schemas first, so a `$ref` from an operation or from another
 	// schema resolves to a shape that is already there.
 	for _, name := range sortedKeys(doc.Components.Schemas) {

@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/openapi"
@@ -378,5 +379,107 @@ func TestServiceIDIgnoresTheSerialization(t *testing.T) {
 				t.Fatalf("EndpointPrefix = %q, want digitalocean", svcs[0].EndpointPrefix)
 			}
 		})
+	}
+}
+
+// TestSharedResponseIsResolved covers the shape that made DigitalOcean
+// unmodellable: a response that is a `$ref` into components.responses rather
+// than an inline body.
+//
+// It decoded to a value with no content, `jsonSchema` found nothing, and the
+// operation was handed an empty output structure -- so the model looked whole
+// and projected nothing. DigitalOcean writes 3,731 of its 3,885 responses that
+// way, which is every operation it has.
+func TestSharedResponseIsResolved(t *testing.T) {
+	svcs, err := (openapi.Receiver{}).Ingest(context.Background(),
+		model.SourceRef{Path: "demo/api.json"}, []byte(`{
+			"openapi": "3.0.3",
+			"paths": {"/v2/widgets": {"get": {"operationId": "list-widgets", "responses": {
+				"200": {"$ref": "#/components/responses/all_widgets"}}}}},
+			"components": {
+				"responses": {"all_widgets": {"content": {"application/json": {"schema": {
+					"type": "object", "properties": {"widgets": {"type": "array", "items": {"type": "string"}}}}}}}},
+				"schemas": {}
+			}
+		}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := svcs[0].Shapes[svcs[0].Operations[0].Output]
+	if _, ok := out.Members["widgets"]; !ok {
+		t.Fatalf("the shared response did not reach the output shape: %v", memberNames(out))
+	}
+}
+
+// TestSharedResponseChainIsResolved: nothing forbids a shared response from
+// referring to another, so the reference is followed rather than hopped once.
+func TestSharedResponseChainIsResolved(t *testing.T) {
+	svcs, err := (openapi.Receiver{}).Ingest(context.Background(),
+		model.SourceRef{Path: "demo/api.json"}, []byte(`{
+			"openapi": "3.0.3",
+			"paths": {"/a": {"get": {"operationId": "GetA", "responses": {
+				"200": {"$ref": "#/components/responses/outer"}}}}},
+			"components": {
+				"responses": {
+					"outer": {"$ref": "#/components/responses/inner"},
+					"inner": {"content": {"application/json": {"schema": {
+						"type": "object", "properties": {"ok": {"type": "boolean"}}}}}}
+				},
+				"schemas": {}
+			}
+		}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := svcs[0].Shapes[svcs[0].Operations[0].Output]
+	if _, ok := out.Members["ok"]; !ok {
+		t.Fatalf("the chained response did not reach the output shape: %v", memberNames(out))
+	}
+}
+
+// TestIngestRefusesASharedResponseTheDocumentNeverDefines keeps the new
+// reference under the same rule as every other one: unresolved is fatal and
+// named, not a quietly empty shape.
+func TestIngestRefusesASharedResponseTheDocumentNeverDefines(t *testing.T) {
+	_, err := (openapi.Receiver{}).Ingest(context.Background(),
+		model.SourceRef{Path: "demo/api.json"}, []byte(`{
+			"openapi": "3.0.3",
+			"paths": {"/a": {"get": {"operationId": "GetA", "responses": {
+				"200": {"$ref": "#/components/responses/absent_response"}}}}},
+			"components": {"responses": {}, "schemas": {}}
+		}`))
+	if err == nil {
+		t.Fatal("a document naming an undefined response was ingested")
+	}
+	if !strings.Contains(err.Error(), "absent_response") {
+		t.Errorf("the error does not name the missing response: %v", err)
+	}
+}
+
+// TestSharedResponseCycleIsRefusedNotFollowedForever bounds the walk, so a
+// document that references itself in a circle fails the receiver rather than
+// hanging it.
+func TestSharedResponseCycleIsRefusedNotFollowedForever(t *testing.T) {
+	done := make(chan error, 1)
+	go func() {
+		_, err := (openapi.Receiver{}).Ingest(context.Background(),
+			model.SourceRef{Path: "demo/api.json"}, []byte(`{
+				"openapi": "3.0.3",
+				"paths": {"/a": {"get": {"operationId": "GetA", "responses": {
+					"200": {"$ref": "#/components/responses/loop"}}}}},
+				"components": {
+					"responses": {"loop": {"$ref": "#/components/responses/loop"}},
+					"schemas": {}
+				}
+			}`))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a circular response reference was ingested")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ingest did not return: the reference walk is unbounded")
 	}
 }

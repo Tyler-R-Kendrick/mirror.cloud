@@ -53,25 +53,29 @@ Authority: official Railway GraphQL v2 (`backboard.railway.com` `POST /graphql/v
 
 ## Hetzner baseline
 
-Authority: official Hetzner Cloud API v1 (`api.hetzner.cloud` `/v1/servers` and `/v1/ssh_keys`). There is no LocalStack Hetzner inventory; rows are operation → Mirror evidence, not a live `api.hetzner.cloud` differential. Volumes, load balancers, networks, server actions, and DNS are not in this denominator.
+Authority: the official Hetzner Cloud OpenAPI document (`https://docs.hetzner.cloud/cloud.spec.json`), vendored at `specs/hetzner/v1.json` and pinned in `specs/mirror.lock`. The rows below are operation → Mirror evidence, not a live `api.hetzner.cloud` differential; there is no LocalStack Hetzner inventory. Volumes, load balancers, networks, server actions and DNS are not in this denominator -- the document describes 189 operations and the bundle answers eight of them.
+
+Served from `behavior/hetzner/v1/service.yaml` since the hand-written pack was deleted. Evidence that used to name pack tests and overlay mutants now names the equivalence recording, which replays the pack's own answers against the bundle on every run.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the emulated Hetzner slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Requested test forms wired for the emulated Hetzner slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden`; overlay mutation covers the fault envelope only) |
 | Core Hetzner v1 operations routed to emulation | 8 / 8 |
 | Live Hetzner probe | none (not required) |
 
 | Hetzner operation | Mirror evidence |
 |---|---|
-| `POST /v1/servers` (`CreateServer`) | Booted create returns `{server}`; atomic empty 400 `invalid_input` and duplicate 409 `uniqueness_error`; BDD create; chaos `TestHetznerConcurrentDuplicateServers`; mutants `hetzner-accept-empty-server` and `hetzner-accept-duplicate-server` |
-| `GET /v1/servers` (`ListServers`) | Booted list wraps `{servers, meta.pagination.total_entries}`; characterization `list`; BDD lists after create |
-| `GET /v1/servers/{id}` (`GetServer`) | Booted get-after-set; missing server HTTP 404 `{error.code:not_found}` without `x-amzn-errortype`; mutant `hetzner-get-missing-server-as-empty` |
-| `DELETE /v1/servers/{id}` (`DeleteServer`) | Atomic delete then get is 404; `TestDeleteMissingServerAndSSHKey` and booted DELETE of missing id are HTTP 404 `{error.code:not_found}`; characterization `delete`/`del_miss_s`; mutant `hetzner-delete-missing-server-as-success` |
-| `POST /v1/ssh_keys` (`CreateSSHKey`) | Atomic create; duplicate fingerprint 409; BDD create |
-| `GET /v1/ssh_keys` (`ListSSHKeys`) | Characterization `keys` |
-| `GET /v1/ssh_keys/{id}` (`GetSSHKey`) | Booted POST then GET returns the stored key; missing key 404 |
-| `DELETE /v1/ssh_keys/{id}` (`DeleteSSHKey`) | Atomic `DeleteSSHKey` of a created key then GET is 404; booted DELETE of the created key then DELETE of missing `/v1/ssh_keys/{id}` is HTTP 404 `{error.code:not_found}`; characterization `del_ssh`/`del_miss_k`; mutant `hetzner-delete-missing-ssh-key-as-success` |
-| Hetzner faults vs AWS faults | restJson1 `Encode` wraps singular/plural keys plus `meta.pagination.total_entries`; `EncodeFault` uses `{error:{code,message}}` and omits `x-amzn-errortype`; mutant `hetzner-encode-aws-fault` |
+| `POST /v1/servers` (`CreateServer`) | 201 with `{server, action, next_actions, root_password}`; duplicate name 409 `uniqueness_error` and a request missing `server_type` or `image` 400 `invalid_input`, both replayed from the recording and asserted in `TestHetznerBundleBehaves`; BDD create; chaos `TestHetznerConcurrentDuplicateServers` -- sixteen concurrent creates, one winner |
+| `GET /v1/servers` (`ListServers`) | `{servers, meta.pagination}`; BDD asserts one entry and `total_entries` after a create; recording replays the empty, one-entry and post-delete lists |
+| `GET /v1/servers/{id}` (`GetServer`) | Get-after-create returns the stored name and `status: running`; a missing id is HTTP 404 `{error.code: not_found}` without `x-amzn-errortype`; recording steps 5 and 6 |
+| `DELETE /v1/servers/{id}` (`DeleteServer`) | 200 with an action; deleting twice is 404; the name index goes with the record, so the name can be taken again -- recording steps 7 to 10, and the assertion `TestHetznerBundleBehaves` makes explicit |
+| `POST /v1/ssh_keys` (`CreateSshKey`) | 201 with `{ssh_key}`; a duplicate public key is 409 `uniqueness_error`; a missing `name` or `public_key` is 400 `invalid_input` from the model check; chaos `TestHetznerConcurrentSSHKeyCreateGet` |
+| `GET /v1/ssh_keys` (`ListSshKeys`) | `{ssh_keys, meta.pagination}`; recording replays empty, one-entry and post-delete |
+| `GET /v1/ssh_keys/{id}` (`GetSshKey`) | Get-after-create returns the stored name and public key; a missing id is 404 |
+| `DELETE /v1/ssh_keys/{id}` (`DeleteSshKey`) | 204 with no content at all -- asserted at the codec, in `internal/spine` and over HTTP in the BDD suite; the fingerprint index goes with the record, so the same key can be added again |
+| Hetzner faults vs AWS faults | `EncodeFault` answers `{error:{code,message}}` and omits `x-amzn-errortype`; mutant `hetzner-encode-aws-fault`. The response-encoder branch is gone: the bundle answers the document's own members, so the generic restJson1 encoder serializes them |
+
+Four answers changed with the extraction, each recorded as a quirk in the bundle: a create is 201 rather than 200 and carries the action hcloud clients wait on; a key delete is 204 rather than 200; `server_type` and `image` are objects rather than the caller's bare strings; and `fingerprint` is a digest rather than the whole public key. Two known divergences from the real API are recorded rather than fixed: the listings ignore `page` and `per_page`, and SSH-key names are not enforced unique.
 
 ## DigitalOcean baseline
 
@@ -146,23 +150,25 @@ Authority: official GCS JSON API v1 (`storage.googleapis.com` `/storage/v1/...` 
 
 ## Hostinger baseline
 
-Authority: official Hostinger REST (`api.hostinger.com` `/api/dns/v1/...` and `/api/domains/v1/...`). There is no LocalStack Hostinger inventory; rows are operation → Mirror evidence, not a live `api.hostinger.com` differential.
+Authority: the official Hostinger OpenAPI document, vendored at `specs/hostinger/api.json` and pinned in `specs/mirror.lock`. Rows are operation → Mirror evidence, not a live `api.hostinger.com` differential.
+
+Served from `behavior/hostinger/api/service.yaml` since the hand-written pack was deleted. The operation names are the document's; the pack invented six of its own and bound them to these same URIs, so the requests are unchanged and the recording carries both names per step.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the emulated Hostinger slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Requested test forms wired for the emulated Hostinger slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden`; overlay mutation covers the fault envelope only) |
 | Hostinger operations routed to emulation | 6 / 6 |
 | Live Hostinger probe | none (not required) |
 
 | Hostinger operation | Mirror evidence |
 |---|---|
-| `POST /api/domains/v1/portfolio` (`CreateDomain`) | Booted create returns the domain object; atomic empty domain 422 and duplicate 409; BDD create; chaos `TestHostingerConcurrentDuplicateDomains`; mutants `hostinger-accept-empty-domain` and `hostinger-accept-duplicate-domain` |
-| `GET /api/domains/v1/portfolio` (`ListDomains`) | Atomic lists one domain as a top-level JSON array; characterization `list`; BDD lists after create |
-| `GET /api/domains/v1/portfolio/{domain}` (`GetDomain`) | Atomic get by domain; missing domain HTTP 404 `{message, correlation_id}` without `x-amzn-errortype`; characterization `get`/`missing`; mutant `hostinger-get-missing-domain-as-empty` |
-| `PUT /api/dns/v1/zones/{domain}` (`UpdateDNSRecords`) | Booted PUT returns `{message:"Request accepted"}`; atomic update; characterization `update`; fuzz `FuzzDNSRecords`; chaos concurrent put/get |
-| `GET /api/dns/v1/zones/{domain}` (`GetDNSRecords`) | Booted GET returns a top-level JSON array of records; empty zone is `[]`; characterization `records`/`after_del` |
-| `DELETE /api/dns/v1/zones/{domain}` (`DeleteDNSRecords`) | Booted DELETE then GET is `[]`; atomic delete; characterization `delete`; BDD delete |
-| Hostinger faults vs AWS faults | restJson1 `Encode` writes `_list` as a JSON array; `EncodeFault` uses `{message, correlation_id}` and omits `x-amzn-errortype`; mutant `hostinger-encode-aws-fault` |
+| `POST /api/domains/v1/portfolio` (`DomainsPurchaseNewDomainV1`) | Answers an order, which is what the document declares this to be; a duplicate domain is 409 and an empty one 422; BDD purchase; chaos `TestHostingerConcurrentDuplicateDomains` -- sixteen concurrent creates, one winner |
+| `GET /api/domains/v1/portfolio` (`DomainsGetDomainListV1`) | Lists domains as a top-level JSON array; recording replays the empty and one-entry cases; BDD lists after create |
+| `GET /api/domains/v1/portfolio/{domain}` (`DomainsGetDomainDetailsV1`) | Get by domain, case-folded; a missing domain is HTTP 404 `{message, correlation_id}` without `x-amzn-errortype` |
+| `PUT /api/dns/v1/zones/{domain}` (`DNSUpdateDNSRecordsV1`) | `{message: "Request accepted"}`; appends unless `overwrite`; chaos concurrent put/get |
+| `GET /api/dns/v1/zones/{domain}` (`DNSGetDNSRecordsV1`) | A top-level JSON array of records; an absent zone reads as `[]` |
+| `DELETE /api/dns/v1/zones/{domain}` (`DNSDeleteDNSRecordsV1`) | DELETE then GET is `[]`; BDD delete |
+| Hostinger faults vs AWS faults | `EncodeFault` answers `{message, correlation_id}` and omits `x-amzn-errortype`; mutant `hostinger-encode-aws-fault` |
 
 ## Cloudflare baseline
 

@@ -21798,30 +21798,23 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
-	{
-		name: "hetzner-accept-empty-server",
-		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
-		old:  "if name == \"\" {\n\t\treturn nil, hzFault(\"invalid_input\", \"server name is required\", 400)",
-		new:  "if false {\n\t\treturn nil, hzFault(\"invalid_input\", \"server name is required\", 400)",
-		pkg:  "./internal/services/hetzner/v1",
-		run:  "TestCreateServerRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "hetzner-accept-duplicate-server",
-		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
-		old:  `if _, exists, _ := p.col(req, "hzsname").Get(ctx, name); exists {`,
-		new:  `if _, exists, _ := p.col(req, "hzsname").Get(ctx, name); false {`,
-		pkg:  "./internal/services/hetzner/v1",
-		run:  "TestCreateServerRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "hetzner-get-missing-server-as-empty",
-		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
-		old:  "b, ok, _ := p.col(req, \"hzsrv\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, hzFault(\"not_found\", \"Server not found\", 404)",
-		new:  "b, ok, _ := p.col(req, \"hzsrv\").Get(ctx, id)\n\tif false {\n\t\treturn nil, hzFault(\"not_found\", \"Server not found\", 404)",
-		pkg:  "./internal/services/hetzner/v1",
-		run:  "TestServerAndSSHKeyLifecycle",
-	},
+	// The five mutants that rewrote the Hetzner pack's empty-name,
+	// duplicate-name, missing-server and missing-key branches are gone with
+	// the Go they rewrote, and so is the sixth: the response encoder branch
+	// they mutated no longer exists, because the bundle answers the document's
+	// own members and the generic encoder serializes them.
+	//
+	// The behaviour did not go with them. It is `require` rules and a model
+	// check in behavior/hetzner/v1/service.yaml, and the equivalence recording
+	// replays all four as their own steps on every run -- a duplicate name is
+	// uniqueness_error/409, a request missing a required member is
+	// invalid_input/400, and a deleted server or key is not_found/404.
+	// internal/bundled/hetzner_test.go asserts the same by invocation, and was
+	// checked against an inverted precondition before being committed.
+	//
+	// The trade is the one Hostinger recorded: `go test -overlay` substitutes
+	// Go files, so a rule in a YAML bundle is not something this suite can
+	// rewrite. Only the fault envelope is still Go, and it is still mutated.
 	{
 		name: "hetzner-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
@@ -21829,22 +21822,6 @@ var mutants = []mutant{
 		new:  "if false && svc.ID == \"hetzner.v1\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"error\": map[string]any{\"code\": f.Code, \"message\": f.Message}})",
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
-	},
-	{
-		name: "hetzner-delete-missing-server-as-success",
-		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
-		old:  "got, err := p.getServer(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "got, err := p.getServer(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/hetzner/v1",
-		run:  "TestDeleteMissingServerAndSSHKey",
-	},
-	{
-		name: "hetzner-delete-missing-ssh-key-as-success",
-		file: filepath.Join("internal", "services", "hetzner", "v1", "api.go"),
-		old:  "got, err := p.getSSHKey(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "got, err := p.getSSHKey(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/hetzner/v1",
-		run:  "TestDeleteMissingServerAndSSHKey",
 	},
 	{
 		name: "railway-accept-empty-project-name",

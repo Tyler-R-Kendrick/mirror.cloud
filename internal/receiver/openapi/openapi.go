@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -152,6 +153,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		return nil, fmt.Errorf("openapi: %s: no `openapi` version field", src.Path)
 	}
 	id := serviceID(src.Path)
+	base := basePath(doc)
 	sh := &shaper{shapes: map[string]model.Shape{}}
 	// The named schemas first, so a `$ref` from an operation or from another
 	// schema resolves to a shape that is already there.
@@ -186,7 +188,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 				Name: name,
 				HTTP: model.HTTPBinding{
 					Method: strings.ToUpper(method),
-					URI:    templated(uri),
+					URI:    base + templated(uri),
 					Code:   successCode(op),
 				},
 				Input:      sh.request(name, params, op),
@@ -326,6 +328,44 @@ func templated(uri string) string {
 		return "/" + uri
 	}
 	return uri
+}
+
+// basePath is the path component of the document's first server URL, which is
+// part of every address a client uses and is not repeated in the path items.
+//
+// Ignoring it produced a service bound to `/servers` when every hcloud client
+// calls `/v1/servers`: OpenAPI factors the version out of the paths and into
+// the server URL, where Smithy and Discovery both carry it in the operation.
+// The two disagreed silently -- the model is well-formed either way, and the
+// only symptom is a router that answers nothing.
+//
+// A server URL may be templated (`https://{region}.example.com/{version}`).
+// A variable in the path cannot be resolved from the document alone, and
+// guessing one would bind every operation to an address no client uses, so
+// such a base is dropped rather than substituted: the paths stay as written,
+// which is the behavior every document had before this existed.
+func basePath(doc document) string {
+	if len(doc.Servers) == 0 {
+		return ""
+	}
+	raw := doc.Servers[0].URL
+	if strings.ContainsAny(raw, "{}") {
+		return ""
+	}
+	// A server URL may be absolute or relative to where the document is
+	// served; url.Parse answers with the path either way.
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimSuffix(u.Path, "/")
+	if p == "" || p == "/" {
+		return ""
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return p
 }
 
 // serviceID derives `<provider>.<service>` from where the document sits, which

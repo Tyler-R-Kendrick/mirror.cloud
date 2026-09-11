@@ -829,10 +829,10 @@
       "ListServers",
       "GetServer",
       "DeleteServer",
-      "CreateSSHKey",
-      "ListSSHKeys",
-      "GetSSHKey",
-      "DeleteSSHKey"
+      "CreateSshKey",
+      "ListSshKeys",
+      "GetSshKey",
+      "DeleteSshKey"
     ]
   },
   {

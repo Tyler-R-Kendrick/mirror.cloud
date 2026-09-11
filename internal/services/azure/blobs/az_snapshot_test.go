@@ -35,16 +35,18 @@ func TestAzureBlobCharacterization(t *testing.T) {
 		return out
 	}
 	golden.AssertJSON(t, map[string]any{
-		"create":    inv("CreateContainer", map[string]any{"container": "snap"}, nil),
-		"duplicate": inv("CreateContainer", map[string]any{"container": "snap"}, nil),
-		"empty":     inv("CreateContainer", map[string]any{}, nil),
-		"get":       inv("GetContainer", map[string]any{"container": "snap"}, nil),
-		"list":      inv("ListContainers", nil, nil),
-		"put":       inv("PutBlob", map[string]any{"container": "snap", "blob": "o"}, []byte("hello")),
-		"media":     inv("GetBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
-		"blobs":     inv("ListBlobs", map[string]any{"container": "snap"}, nil),
-		"delete":    inv("DeleteBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
-		"missing":   inv("GetBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
-		"nobucket":  inv("GetContainer", map[string]any{"container": "nope"}, nil),
+		"create":     inv("CreateContainer", map[string]any{"container": "snap"}, nil),
+		"duplicate":  inv("CreateContainer", map[string]any{"container": "snap"}, nil),
+		"empty":      inv("CreateContainer", map[string]any{}, nil),
+		"get":        inv("GetContainer", map[string]any{"container": "snap"}, nil),
+		"list":       inv("ListContainers", nil, nil),
+		"put":        inv("PutBlob", map[string]any{"container": "snap", "blob": "o"}, []byte("hello")),
+		"media":      inv("GetBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
+		"blobs":      inv("ListBlobs", map[string]any{"container": "snap"}, nil),
+		"delete":     inv("DeleteBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
+		"missing":    inv("GetBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
+		"nobucket":   inv("GetContainer", map[string]any{"container": "nope"}, nil),
+		"del_miss_b": inv("DeleteBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
+		"del_miss_c": inv("DeleteContainer", map[string]any{"container": "nope"}, nil),
 	})
 }

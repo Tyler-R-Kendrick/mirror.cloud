@@ -27,6 +27,16 @@
     "timeCreated": "1970-01-01T00:00:00Z",
     "updated": "1970-01-01T00:00:00Z"
   },
+  "del_miss_b": {
+    "error": "notFound",
+    "message": "bucket nope not found",
+    "status": 404
+  },
+  "del_miss_o": {
+    "error": "notFound",
+    "message": "object nope not found",
+    "status": 404
+  },
   "delete": null,
   "duplicate": {
     "error": "conflict",

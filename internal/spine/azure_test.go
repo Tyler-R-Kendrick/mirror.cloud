@@ -51,7 +51,7 @@ func TestBootedServerAzureBlob(t *testing.T) {
 		t.Fatalf("create %d %s", code, raw)
 	}
 	code, raw, _ = do(http.MethodGet, "/?comp=list", "", nil)
-	if code != 200 || !strings.Contains(string(raw), "<Name>ctr</Name>") {
+	if code != 200 || !strings.Contains(string(raw), "EnumerationResults") || !strings.Contains(string(raw), "<Name>ctr</Name>") {
 		t.Fatalf("list %d %s", code, raw)
 	}
 	code, raw, _ = do(http.MethodGet, "/ctr?restype=container", "", nil)
@@ -77,5 +77,13 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	code, raw, h = do(http.MethodGet, "/missing?restype=container", "", nil)
 	if code != 404 || !strings.Contains(string(raw), "<Code>ContainerNotFound</Code>") || h.Get("x-ms-error-code") != "ContainerNotFound" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("missing container %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/ctr/nope", "", nil)
+	if code != 404 || !strings.Contains(string(raw), "<Code>BlobNotFound</Code>") || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing blob %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/missing?restype=container", "", nil)
+	if code != 404 || !strings.Contains(string(raw), "<Code>ContainerNotFound</Code>") || h.Get("x-ms-error-code") != "ContainerNotFound" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing container %d %#v %s", code, h, raw)
 	}
 }

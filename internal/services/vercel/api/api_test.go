@@ -131,6 +131,23 @@ func TestDeleteDeploymentMissingIsNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteMissingProjectAndEnv(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteProject", Input: map[string]any{"id": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.Code != "not_found" {
+		t.Fatalf("delete missing project %#v", err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateProject", Input: map[string]any{"name": "app"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteProjectEnv", Input: map[string]any{"id": "app", "envId": "env_missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.Code != "not_found" {
+		t.Fatalf("delete missing env %#v", err)
+	}
+}
+
 func TestEnvDomainAndKVRejectBadInput(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -34,18 +34,20 @@ func TestGCSJSONCharacterization(t *testing.T) {
 		return res.Output
 	}
 	golden.AssertJSON(t, map[string]any{
-		"create":    inv("storage.buckets.insert", map[string]any{"name": "snap"}, nil),
-		"duplicate": inv("storage.buckets.insert", map[string]any{"name": "snap"}, nil),
-		"empty":     inv("storage.buckets.insert", map[string]any{}, nil),
-		"get":       inv("storage.buckets.get", map[string]any{"bucket": "snap"}, nil),
-		"list":      inv("storage.buckets.list", map[string]any{}, nil),
-		"insert":    inv("storage.objects.insert", map[string]any{"bucket": "snap", "name": "o"}, []byte("hello")),
-		"meta":      inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "o"}, nil),
-		"media":     inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "o", "alt": "media"}, nil),
-		"copy":      inv("storage.objects.copy", map[string]any{"bucket": "snap", "object": "o", "destinationBucket": "snap", "destinationObject": "o2"}, nil),
-		"objects":   inv("storage.objects.list", map[string]any{"bucket": "snap"}, nil),
-		"delete":    inv("storage.objects.delete", map[string]any{"bucket": "snap", "object": "o2"}, nil),
-		"missing":   inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "nope"}, nil),
-		"nobucket":  inv("storage.buckets.get", map[string]any{"bucket": "nope"}, nil),
+		"create":     inv("storage.buckets.insert", map[string]any{"name": "snap"}, nil),
+		"duplicate":  inv("storage.buckets.insert", map[string]any{"name": "snap"}, nil),
+		"empty":      inv("storage.buckets.insert", map[string]any{}, nil),
+		"get":        inv("storage.buckets.get", map[string]any{"bucket": "snap"}, nil),
+		"list":       inv("storage.buckets.list", map[string]any{}, nil),
+		"insert":     inv("storage.objects.insert", map[string]any{"bucket": "snap", "name": "o"}, []byte("hello")),
+		"meta":       inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "o"}, nil),
+		"media":      inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "o", "alt": "media"}, nil),
+		"copy":       inv("storage.objects.copy", map[string]any{"bucket": "snap", "object": "o", "destinationBucket": "snap", "destinationObject": "o2"}, nil),
+		"objects":    inv("storage.objects.list", map[string]any{"bucket": "snap"}, nil),
+		"delete":     inv("storage.objects.delete", map[string]any{"bucket": "snap", "object": "o2"}, nil),
+		"missing":    inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "nope"}, nil),
+		"nobucket":   inv("storage.buckets.get", map[string]any{"bucket": "nope"}, nil),
+		"del_miss_o": inv("storage.objects.delete", map[string]any{"bucket": "snap", "object": "nope"}, nil),
+		"del_miss_b": inv("storage.buckets.delete", map[string]any{"bucket": "nope"}, nil),
 	})
 }

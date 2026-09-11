@@ -1,0 +1,321 @@
+{
+  "emulator": "azurite",
+  "source": "https://github.com/Azure/Azurite",
+  "ref": "b1f480ed345d032eced096d475f40c76466fd954",
+  "audited": "2026-09-11",
+  "apiVersion": "2026-06-06",
+  "countRule": "direct it()/test() calls, params unexpanded; exclude Azurite-internal unit/store/https/sql/utils/upgrade/startup/environment/keepAlive harness files named in excludedFiles",
+  "services": {
+    "blob": {
+      "files": [
+        {
+          "file": "blob/apis/appendblob.test.ts",
+          "tests": 38
+        },
+        {
+          "file": "blob/apis/blob.test.ts",
+          "tests": 98
+        },
+        {
+          "file": "blob/apis/blobbatch.test.ts",
+          "tests": 13
+        },
+        {
+          "file": "blob/apis/blockblob.test.ts",
+          "tests": 60
+        },
+        {
+          "file": "blob/apis/container.test.ts",
+          "tests": 48
+        },
+        {
+          "file": "blob/apis/pageblob.test.ts",
+          "tests": 58
+        },
+        {
+          "file": "blob/apis/service.test.ts",
+          "tests": 25
+        },
+        {
+          "file": "blob/authentication.test.ts",
+          "tests": 5
+        },
+        {
+          "file": "blob/blobCorsRequest.test.ts",
+          "tests": 13
+        },
+        {
+          "file": "blob/blockblob.highlevel.test.ts",
+          "tests": 15
+        },
+        {
+          "file": "blob/conditions.test.ts",
+          "tests": 37
+        },
+        {
+          "file": "blob/handlers/AppendBlobHandler.test.ts",
+          "tests": 7
+        },
+        {
+          "file": "blob/handlers/PageBlobRangesManager.test.ts",
+          "tests": 1
+        },
+        {
+          "file": "blob/oauth.test.ts",
+          "tests": 18
+        },
+        {
+          "file": "blob/pagewithdelimiter.test.ts",
+          "tests": 14
+        },
+        {
+          "file": "blob/sas.test.ts",
+          "tests": 47
+        },
+        {
+          "file": "blob/specialnaming.test.ts",
+          "tests": 24
+        }
+      ],
+      "tests": 521,
+      "excludedTests": 77
+    },
+    "queue": {
+      "files": [
+        {
+          "file": "queue/apis/messageid.test.ts",
+          "tests": 5
+        },
+        {
+          "file": "queue/apis/messages.test.ts",
+          "tests": 9
+        },
+        {
+          "file": "queue/apis/queue.test.ts",
+          "tests": 9
+        },
+        {
+          "file": "queue/apis/queueService.test.ts",
+          "tests": 7
+        },
+        {
+          "file": "queue/oauth.test.ts",
+          "tests": 12
+        },
+        {
+          "file": "queue/queueAuthentication.test.ts",
+          "tests": 5
+        },
+        {
+          "file": "queue/queueCorsRequest.test.ts",
+          "tests": 12
+        },
+        {
+          "file": "queue/queueEnvironment.test.ts",
+          "tests": 3
+        },
+        {
+          "file": "queue/queueKeepAliveTimeout.test.ts",
+          "tests": 1
+        },
+        {
+          "file": "queue/queueSas.test.ts",
+          "tests": 16
+        },
+        {
+          "file": "queue/queueSpecialnaming.test.ts",
+          "tests": 6
+        }
+      ],
+      "tests": 85,
+      "excludedTests": 6
+    },
+    "table": {
+      "files": [
+        {
+          "file": "table/KeepAlive/tableKeepAliveTimeout.test.ts",
+          "tests": 1
+        },
+        {
+          "file": "table/apis/table.batch.errorhandling.test.ts",
+          "tests": 9
+        },
+        {
+          "file": "table/apis/table.entity.apostrophe.azure-storage.test.ts",
+          "tests": 2
+        },
+        {
+          "file": "table/apis/table.entity.apostrophe.data-tables.test.ts",
+          "tests": 2
+        },
+        {
+          "file": "table/apis/table.entity.azure.data-tables.test.ts",
+          "tests": 31
+        },
+        {
+          "file": "table/apis/table.entity.issues.test.ts",
+          "tests": 11
+        },
+        {
+          "file": "table/apis/table.entity.query.test.ts",
+          "tests": 24
+        },
+        {
+          "file": "table/apis/table.entity.rest.test.ts",
+          "tests": 14
+        },
+        {
+          "file": "table/apis/table.entity.test.ts",
+          "tests": 38
+        },
+        {
+          "file": "table/apis/table.service.test.ts",
+          "tests": 4
+        },
+        {
+          "file": "table/apis/table.test.ts",
+          "tests": 15
+        },
+        {
+          "file": "table/apis/table.validation.rest.test.ts",
+          "tests": 10
+        },
+        {
+          "file": "table/auth/oauth.test.ts",
+          "tests": 12
+        },
+        {
+          "file": "table/auth/sas.test.ts",
+          "tests": 12
+        },
+        {
+          "file": "table/auth/tableCorsRequest.test.ts",
+          "tests": 12
+        },
+        {
+          "file": "table/tableEnvironment.test.ts",
+          "tests": 3
+        }
+      ],
+      "tests": 200,
+      "excludedTests": 28
+    }
+  },
+  "swagger": {
+    "blob": {
+      "path": "swagger/blob-storage-2021-10-04.json",
+      "sha256": "4f52ead8b39974243d041f0247170539dfcc7979e06a66773f7baf45fd789339",
+      "bytes": 465986
+    },
+    "queue": {
+      "path": "swagger/queue-storage.json",
+      "sha256": "f19562a52f3ebb5a1546752c17115cff97183ea817df51da39facd88270cd246",
+      "bytes": 71907
+    },
+    "table": {
+      "path": "swagger/table/table.json",
+      "sha256": "a6d33ad6085896ee6a7f1794f46139741c1e4b2a6c5eb61b582db740cfdf73d4",
+      "bytes": 67640
+    }
+  },
+  "excludedFiles": [
+    {
+      "file": "blob/blobEnvironment.test.ts",
+      "tests": 3
+    },
+    {
+      "file": "blob/blobKeepAliveTimeout.test.ts",
+      "tests": 1
+    },
+    {
+      "file": "blob/fsStore.test.ts",
+      "tests": 5
+    },
+    {
+      "file": "blob/https.test.ts",
+      "tests": 2
+    },
+    {
+      "file": "blob/memoryStore.unit.test.ts",
+      "tests": 21
+    },
+    {
+      "file": "blob/sqlBlobMetadataStorePool.test.ts",
+      "tests": 3
+    },
+    {
+      "file": "blob/startupErrorRecovery.test.ts",
+      "tests": 3
+    },
+    {
+      "file": "blob/unit/BlobTokenAuthenticator.unit.test.ts",
+      "tests": 2
+    },
+    {
+      "file": "blob/unit/blobSASSignatureValues.unit.test.ts",
+      "tests": 7
+    },
+    {
+      "file": "blob/unit/gcErrorHandler.unit.test.ts",
+      "tests": 3
+    },
+    {
+      "file": "blob/unit/query.parser.unit.test.ts",
+      "tests": 2
+    },
+    {
+      "file": "blob/unit/sqlBlobMetadataStore.unit.test.ts",
+      "tests": 5
+    },
+    {
+      "file": "blob/upgradeRegression.test.ts",
+      "tests": 4
+    },
+    {
+      "file": "blob/utils.test.ts",
+      "tests": 16
+    },
+    {
+      "file": "queue/https.test.ts",
+      "tests": 1
+    },
+    {
+      "file": "queue/startupErrorRecovery.test.ts",
+      "tests": 2
+    },
+    {
+      "file": "queue/unit/QueueTokenAuthenticator.unit.test.ts",
+      "tests": 2
+    },
+    {
+      "file": "queue/unit/error.middleware.test.ts",
+      "tests": 1
+    },
+    {
+      "file": "table/unit/TableTokenAuthenticator.unit.test.ts",
+      "tests": 2
+    },
+    {
+      "file": "table/unit/deserialization.unit.test.ts",
+      "tests": 18
+    },
+    {
+      "file": "table/unit/query.interpreter.unit.test.ts",
+      "tests": 1
+    },
+    {
+      "file": "table/unit/query.lexer.unit.test.ts",
+      "tests": 1
+    },
+    {
+      "file": "table/unit/query.parser.unit.test.ts",
+      "tests": 2
+    },
+    {
+      "file": "table/unit/serialization.unit.test.ts",
+      "tests": 4
+    }
+  ],
+  "totalTests": 806,
+  "totalExcluded": 111
+}

@@ -176,6 +176,18 @@ func TestBootedServerGCSSection48(t *testing.T) {
 	if code != 404 || errObj == nil || errObj["message"] == nil || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("missing object %d %#v %s", code, h, b)
 	}
+	code, b, h = do(http.MethodDelete, "/storage/v1/b/bk/o/nope", "", nil)
+	miss = js(b)
+	errObj, _ = miss["error"].(map[string]any)
+	if code != 404 || errObj == nil || errObj["message"] == nil || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing object %d %#v %s", code, h, b)
+	}
+	code, b, h = do(http.MethodDelete, "/storage/v1/b/missing", "", nil)
+	miss = js(b)
+	errObj, _ = miss["error"].(map[string]any)
+	if code != 404 || errObj == nil || errObj["message"] == nil || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing bucket %d %#v %s", code, h, b)
+	}
 }
 
 func TestGCSHTTPProvenOps(t *testing.T) {

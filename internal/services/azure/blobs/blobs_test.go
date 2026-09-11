@@ -68,6 +68,23 @@ func TestContainerAndBlobLifecycle(t *testing.T) {
 	}
 }
 
+func TestDeleteMissingContainerAndBlob(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateContainer", Input: map[string]any{"container": "ctr"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteBlob", Input: map[string]any{"container": "ctr", "blob": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "BlobNotFound" {
+		t.Fatalf("delete missing blob %#v", err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteContainer", Input: map[string]any{"container": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "ContainerNotFound" {
+		t.Fatalf("delete missing container %#v", err)
+	}
+}
+
 func TestCreateContainerRejectsEmptyAndDuplicate(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

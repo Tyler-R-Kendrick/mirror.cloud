@@ -54,7 +54,7 @@ func TestAzureBlobBehavior(t *testing.T) {
 			t.Fatalf("create %d %s", code, raw)
 		}
 		code, raw, _ = call(http.MethodGet, "/?comp=list", "", nil)
-		if code != 200 || !strings.Contains(string(raw), "<Name>bdd</Name>") {
+		if code != 200 || !strings.Contains(string(raw), "EnumerationResults") || !strings.Contains(string(raw), "<Name>bdd</Name>") {
 			t.Fatalf("list %d %s", code, raw)
 		}
 		code, _, _ = call(http.MethodGet, "/bdd?restype=container", "", nil)
@@ -86,6 +86,16 @@ func TestAzureBlobBehavior(t *testing.T) {
 		code, raw, hdr := call(http.MethodGet, "/bdd/nope", "", nil)
 		if code != 404 || !strings.Contains(string(raw), "<Code>BlobNotFound</Code>") || hdr.Get("x-ms-error-code") != "BlobNotFound" || hdr.Get("x-amzn-errortype") != "" {
 			t.Fatalf("missing %d %#v %s", code, hdr, raw)
+		}
+	})
+	t.Run("Given a missing blob or container When deleted Then 404 not 202", func(t *testing.T) {
+		code, raw, hdr := call(http.MethodDelete, "/bdd/nope", "", nil)
+		if code != 404 || !strings.Contains(string(raw), "<Code>BlobNotFound</Code>") || hdr.Get("x-ms-error-code") != "BlobNotFound" || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("delete missing blob %d %#v %s", code, hdr, raw)
+		}
+		code, raw, hdr = call(http.MethodDelete, "/missing?restype=container", "", nil)
+		if code != 404 || !strings.Contains(string(raw), "<Code>ContainerNotFound</Code>") || hdr.Get("x-ms-error-code") != "ContainerNotFound" || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("delete missing container %d %#v %s", code, hdr, raw)
 		}
 	})
 }

@@ -44,5 +44,7 @@ func TestVercelLifecycleCharacterization(t *testing.T) {
 		"kv_missing":      inv("KvCommand", map[string]any{"_redis": []any{"GET", "nope"}}),
 		"missing_project": inv("GetProject", map[string]any{"id": "nope"}),
 		"missing_deploy":  inv("DeleteDeployment", map[string]any{"id": "dpl_nope"}),
+		"del_miss_p":      inv("DeleteProject", map[string]any{"id": "nope"}),
+		"del_miss_e":      inv("DeleteProjectEnv", map[string]any{"id": "snap", "envId": "env_nope"}),
 	})
 }

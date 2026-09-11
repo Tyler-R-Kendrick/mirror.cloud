@@ -103,7 +103,7 @@ Routing is the model's now, which widens the surface rather than narrowing it: t
 |---|---|
 | `POST /v2/droplets` (`DropletsCreate`) | Recording replays create, an absent name 422/`unprocessable_entity` and an explicitly empty one; booted create is 202 `{droplet, links}`; BDD create; chaos `TestDigitalOceanConcurrentDropletCreateGet` -- sixteen concurrent creates are sixteen droplets, because a droplet name is not a key |
 | `GET /v2/droplets` (`DropletsList`) | Recording replays the empty, one- and two-entry cases and the listing after a delete; booted list carries `droplets` and `meta.total`; BDD lists after create; unpaginated, which is recorded as a quirk |
-| `GET /v2/droplets/{droplet_id}` (`DropletsGet`) | Recording replays get by reference to the created id, an unknown id 404/`not_found` and a read after delete; booted get-after-set; missing droplet 404 `{id:"not_found"}` without `x-amzn-errortype` |
+| `GET /v2/droplets/{droplet_id}` (`DropletsGet`) | Recording replays get by reference to the created id, an unknown id 404/`not_found` and a read after delete; booted GET on `api.digitalocean.com` answers the same id the create issued; missing droplet 404 `{id:"not_found"}` without `x-amzn-errortype` |
 | `DELETE /v2/droplets/{droplet_id}` (`DropletsDestroy`) | Recording replays delete and delete of an unknown id 404/`not_found`; booted delete is 204 with an empty body |
 | `POST /v2/domains` (`DomainsCreate`) | Recording replays create, an absent name and an empty one 422/`unprocessable_entity`, a duplicate 409/`conflict`, a duplicate written in a different case 409/`conflict`, and re-creating a name a delete freed; booted create is 201 `{domain}`; chaos `TestDigitalOceanConcurrentDuplicateDomains` -- sixteen concurrent creates, one winner |
 | `GET /v2/domains` (`DomainsList`) | Recording replays the two-entry case and the listing after a delete; BDD lists after create |
@@ -111,26 +111,131 @@ Routing is the model's now, which widens the surface rather than narrowing it: t
 | `DELETE /v2/domains/{domain_name}` (`DomainsDelete`) | Recording replays delete by a differently-cased name, a double delete 404/`not_found`, and the re-create that follows; booted and BDD DELETE of a missing name are 404 `{id:"not_found"}` |
 | DigitalOcean faults vs AWS faults | The success envelope is the document's response shape and is projected by the bundle; `EncodeFault` still answers `{id, message}` and omits `x-amzn-errortype`, mutant `digitalocean-encode-aws-fault`. A create's response is the only union-shaped output in the tree, and the rule that reads its arms is covered by `model-union-output-hides-its-arms` and `model-union-walk-is-unbounded` |
 
-## Azure Blob baseline
+## Azure Storage baseline
 
-Authority: official Azure Blob REST (`{account}.blob.core.windows.net`, `restype=container`, `comp=list`, `x-ms-blob-type: BlockBlob`). There is no LocalStack Azure inventory; rows are operation → Mirror evidence, not a live `*.blob.core.windows.net` differential. Queue/Table/File, page/append blobs, leases, snapshots, copy, and SAS are not in this denominator.
+Authority: Azurite commit `b1f480ed345d032eced096d475f40c76466fd954` (`https://github.com/Azure/Azurite`, audited 2026-09-11), API version 2026-06-06. This is the LocalStack analogue for Azure Storage: Blob + Queue + Table. The vendor swagger Azurite generates from is pinned under `specs/azure/` (`blob-storage.json`, `queue-storage.json`, `table/table.json`). Census: `specs/azure/azurite-inventory.json`, reproduced by `python3 scripts/count-azurite-tests.py --azurite <clone> --check`.
+
+This is a source-level inventory map, not a live `*.core.windows.net` differential. Completeness is row count against the pinned Azurite tests, the same way S3 is 463/463 LocalStack functions — not “the eight Blob CRUD ops we already had are well tested.”
+
+**Not in this denominator** (unclaimed, like LocalStack-skipped S3 rows): Azure Files (`file.core.windows.net`), Data Lake Gen2 (`dfs.core.windows.net`), ARM `management.azure.com`, and REST APIs Azurite itself marks unsupported at this pin (soft delete/undelete, blob versions, query blob, encryption scope, object replication, Put Blob From URL, static website, incremental copy, SharedKey Lite). Each such API gets an explicit unclaimed row when traced; they do not shrink the census.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the emulated Azure Blob slice | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Core Azure Blob REST operations routed to emulation | 8 / 8 |
-| Live Azure probe | none (not required) |
+| Requested test forms wired for the **currently implemented** 8 Blob CRUD ops | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 8 / 59 |
+| Queue REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 0 / 11 |
+| Table REST ops in pinned swagger (`paths`) routed to emulation | 0 / 12 |
+| Azurite test functions explicitly traced | 0 / 806 (0%) |
+| Azurite test functions not yet traced | 806 / 806 (100%) |
+| Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
+
+### Pinned inventory
+
+Direct `it()`/`test()` calls, params unexpanded. Harness-only files (Azurite unit/store/https/sql/utils/upgrade/startup/environment/keepAlive) are named in `specs/azure/azurite-inventory.json` `excludedFiles` (111 tests) and are **not** in the 806.
+
+| Tree | Direct test functions |
+|---|---:|
+| `tests/blob` | 521 |
+| `tests/queue` | 85 |
+| `tests/table` | 200 |
+| **Total** | **806** |
+
+| File | Direct test functions |
+|---|---:|
+| `blob/apis/blob.test.ts` | 98 |
+| `blob/apis/blockblob.test.ts` | 60 |
+| `blob/apis/pageblob.test.ts` | 58 |
+| `blob/apis/container.test.ts` | 48 |
+| `blob/sas.test.ts` | 47 |
+| `blob/apis/appendblob.test.ts` | 38 |
+| `blob/conditions.test.ts` | 37 |
+| `blob/apis/service.test.ts` | 25 |
+| `blob/specialnaming.test.ts` | 24 |
+| `blob/oauth.test.ts` | 18 |
+| `blob/blockblob.highlevel.test.ts` | 15 |
+| `blob/pagewithdelimiter.test.ts` | 14 |
+| `blob/blobCorsRequest.test.ts` | 13 |
+| `blob/apis/blobbatch.test.ts` | 13 |
+| `blob/handlers/AppendBlobHandler.test.ts` | 7 |
+| `blob/authentication.test.ts` | 5 |
+| `blob/handlers/PageBlobRangesManager.test.ts` | 1 |
+| `queue/queueSas.test.ts` | 16 |
+| `queue/oauth.test.ts` | 12 |
+| `queue/queueCorsRequest.test.ts` | 12 |
+| `queue/apis/queue.test.ts` | 9 |
+| `queue/apis/messages.test.ts` | 9 |
+| `queue/apis/queueService.test.ts` | 7 |
+| `queue/queueSpecialnaming.test.ts` | 6 |
+| `queue/apis/messageid.test.ts` | 5 |
+| `queue/queueAuthentication.test.ts` | 5 |
+| `queue/queueEnvironment.test.ts` | 3 |
+| `queue/queueKeepAliveTimeout.test.ts` | 1 |
+| `table/apis/table.entity.test.ts` | 38 |
+| `table/apis/table.entity.azure.data-tables.test.ts` | 31 |
+| `table/apis/table.entity.query.test.ts` | 24 |
+| `table/apis/table.test.ts` | 15 |
+| `table/apis/table.entity.rest.test.ts` | 14 |
+| `table/auth/oauth.test.ts` | 12 |
+| `table/auth/sas.test.ts` | 12 |
+| `table/auth/tableCorsRequest.test.ts` | 12 |
+| `table/apis/table.entity.issues.test.ts` | 11 |
+| `table/apis/table.validation.rest.test.ts` | 10 |
+| `table/apis/table.batch.errorhandling.test.ts` | 9 |
+| `table/apis/table.service.test.ts` | 4 |
+| `table/tableEnvironment.test.ts` | 3 |
+| `table/apis/table.entity.apostrophe.data-tables.test.ts` | 2 |
+| `table/apis/table.entity.apostrophe.azure-storage.test.ts` | 2 |
+| `table/KeepAlive/tableKeepAliveTimeout.test.ts` | 1 |
+| **Total** | **806** |
+
+### Pinned swagger vs Mirror
+
+Declared surface is `x-ms-paths` (Blob 59, Queue 11) and Table `paths` (12), counted from the vendored documents. Azurite implements a subset (its README support matrix); unimplemented-by-Azurite APIs stay unclaimed rows, they do not shrink these denominators. Implemented today: Create/Get/List/Delete Container, Put/Get/List/Delete Blob (8).
+
+| Azurite Blob REST | Mirror |
+|---|---|
+| List Containers | implemented (8-op slice) |
+| Create Container | implemented |
+| Get Container Properties | implemented as GetContainer |
+| Delete Container | implemented |
+| List Blobs | implemented |
+| Put Blob | implemented (block blob bytes only; `x-ms-blob-type` not read) |
+| Get Blob | implemented |
+| Delete Blob | implemented |
+| Set/Get Service Properties | not implemented |
+| Get Stats | not implemented |
+| Get Account Information | not implemented |
+| Get/Set Container Metadata | not implemented |
+| Get/Set Container ACL | not implemented |
+| Lease Container | not implemented |
+| Put Block / Put Block From URL / Put Block List / Get Block List | not implemented |
+| Get/Set Blob Properties | not implemented |
+| Get/Set Blob Metadata | not implemented |
+| Create Append Blob / Append Block | not implemented |
+| Put Page / Get Page Ranges | not implemented |
+| Lease Blob | not implemented |
+| Snapshot Blob | not implemented |
+| Copy Blob / Abort Copy Blob / Copy Blob From URL | not implemented |
+| CORS / Preflight | not implemented |
+
+Queue (16): List/Create/Delete Queue, Get/Set Service Properties, Get Stats, Preflight, Get/Set Metadata, Get/Set ACL, Put/Get/Peek/Update/Delete/Clear Messages — **none implemented**.
+
+Table (9): List/Create/Delete Table, Insert/Update/Merge/Query/Delete Entity, Batch — **none implemented**.
+
+### Currently implemented 8-op slice (not the inventory)
+
+The seven-form evidence below covers only the eight ops already in `internal/services/azure/blobs`. It is not Azurite-inventory completeness.
 
 | Azure Blob operation | Mirror evidence |
 |---|---|
 | `PUT /{container}?restype=container` (`CreateContainer`) | Booted create is HTTP 201; atomic empty 400 `InvalidResourceName` and duplicate 409 `ContainerAlreadyExists`; BDD create; chaos `TestAzureConcurrentDuplicateContainers`; mutants `azure-accept-empty-container` and `azure-accept-duplicate-container` |
 | `GET /{container}?restype=container` (`GetContainer`) | Booted get after create; characterization `get`; missing container HTTP 404 `ContainerNotFound` with `x-ms-error-code` and no `x-amzn-errortype` |
 | `GET /?comp=list` (`ListContainers`) | Booted list XML `EnumerationResults`/`<Name>ctr</Name>`; characterization `list`; BDD lists after create |
-| `DELETE /{container}?restype=container` (`DeleteContainer`) | Atomic delete then missing get is 404 |
+| `DELETE /{container}?restype=container` (`DeleteContainer`) | Atomic delete then missing get is 404; `TestDeleteMissingContainerAndBlob` and booted DELETE of missing container are HTTP 404 `<Code>ContainerNotFound</Code>` with `x-ms-error-code` and no `x-amzn-errortype`; characterization `del_miss_c`; mutant `azure-delete-missing-container-as-success` |
 | `PUT /{container}/{blob}` (`PutBlob`) | Booted Put Blob then Get Blob round-trips bytes; characterization `put`; fuzz `FuzzBlobBytes`; chaos concurrent put/get |
-| `GET /{container}/{blob}` (`GetBlob`) | Booted GET returns stored bytes; missing blob HTTP 404 `BlobNotFound`; mutant `azure-get-missing-blob-as-empty` |
+| `GET /{container}/{blob}` (`GetBlob`) | Booted GET returns stored bytes; missing blob HTTP 404 `<Code>BlobNotFound</Code>` with `x-ms-error-code` and no `x-amzn-errortype`; mutant `azure-get-missing-blob-as-empty` |
 | `GET /{container}?restype=container&comp=list` (`ListBlobs`) | Characterization `blobs`; atomic list after put |
-| `DELETE /{container}/{blob}` (`DeleteBlob`) | Booted delete then GET is 404; characterization `delete`; BDD delete |
+| `DELETE /{container}/{blob}` (`DeleteBlob`) | Booted delete then GET is 404; characterization `delete`; BDD delete; `TestDeleteMissingContainerAndBlob` and booted DELETE of missing blob are HTTP 404 `<Code>BlobNotFound</Code>` with `x-ms-error-code` and no `x-amzn-errortype`; characterization `del_miss_b`; mutant `azure-delete-missing-blob-as-success` |
 | Azure faults vs AWS faults | restXml `EncodeFault` uses `<Error><Code/><Message/>` plus `x-ms-error-code` and omits `x-amzn-errortype`; mutant `azure-encode-aws-fault` |
 
 ## GCS baseline
@@ -149,11 +254,11 @@ Authority: official GCS JSON API v1 (`storage.googleapis.com` `/storage/v1/...` 
 | `GET /storage/v1/b/{bucket}` (`storage.buckets.get`) | Booted get after insert; characterization `get`; missing bucket HTTP 404 `{error:{code,message,errors}}` without `x-amzn-errortype` |
 | `GET /storage/v1/b` (`storage.buckets.list`) | Booted list contains the created bucket; characterization `list`; BDD lists after create |
 | `PATCH /storage/v1/b/{bucket}` (`storage.buckets.patch`) | Booted patch of `location`; atomic patch in `TestBucketCRUD` |
-| `DELETE /storage/v1/b/{bucket}` (`storage.buckets.delete`) | Atomic delete after objects are gone; non-empty bucket 409 |
+| `DELETE /storage/v1/b/{bucket}` (`storage.buckets.delete`) | Atomic delete after objects are gone; non-empty bucket 409; `TestDeleteMissingObjectAndBucket` and booted DELETE of missing bucket are HTTP 404 `{error:{code,message,errors}}` with no `x-amzn-errortype`; characterization `del_miss_b`; mutant `gcs-delete-missing-bucket-as-success` |
 | `POST /upload/storage/v1/b/{bucket}/o` (`storage.objects.insert`) | Booted media upload then `GET ?alt=media` round-trips bytes; characterization `insert`; fuzz `FuzzObjectBytes`; chaos concurrent put/get |
 | `GET /storage/v1/b/{bucket}/o/{object}` (`storage.objects.get`) | Metadata GET and `?alt=media` bytes; missing object HTTP 404; mutant `gcs-get-missing-object-as-empty` |
 | `GET /storage/v1/b/{bucket}/o` (`storage.objects.list`) | Booted prefix/delimiter list; characterization `objects` |
-| `DELETE /storage/v1/b/{bucket}/o/{object}` (`storage.objects.delete`) | Booted delete; characterization `delete`; BDD delete |
+| `DELETE /storage/v1/b/{bucket}/o/{object}` (`storage.objects.delete`) | Booted delete; characterization `delete`; BDD delete; `TestDeleteMissingObjectAndBucket` and booted DELETE of missing object are HTTP 404 with no `x-amzn-errortype`; characterization `del_miss_o`; mutant `gcs-delete-missing-object-as-success` |
 | `POST .../copyTo/...` (`storage.objects.copy`) | Booted copy; characterization `copy`; atomic copy in `TestCopyComposeDelete` |
 | `POST .../rewriteTo/...` (`storage.objects.rewrite`) | Booted rewrite `done: true`; atomic rewrite |
 | `POST .../compose` (`storage.objects.compose`) | Booted compose; atomic compose concatenates source bytes |
@@ -226,11 +331,11 @@ Authority: official Vercel REST (`api.vercel.com` `/vN/...`) plus Upstash Redis 
 | `GET /v2/user` (`GetUser`) | `TestBootedServerVercelAPI` returns username `test`; `TestVercelLifecycleCharacterization` golden; restJson1 `TestRESTJSONServiceRoutes` |
 | `POST /v11/projects` (`CreateProject`) | Atomic create + empty-name 400 + duplicate 409; BDD create; chaos `TestVercelConcurrentDuplicateProjectNames`; mutants `vercel-accept-empty-project-name` and `vercel-accept-duplicate-project-name` |
 | `GET /v9/projects` (`ListProjects`) | `TestProjectDeploymentEnvAndKV` lists one project; characterization golden `list`; BDD lists after create |
-| `GET /v9/projects/{id\|name}` (`GetProject`) | Booted create/get round-trips the same `id`; get-by-name in atomic; missing project HTTP 404 `{error.code: not_found}` |
-| `DELETE /v9/projects/{id\|name}` (`DeleteProject`) | `TestDeleteProjectByNameRemovesLookup` drops the `name:` index so the name can be reused |
+| `GET /v9/projects/{id\|name}` (`GetProject`) | Booted create/get round-trips the same `id` on `api.vercel.com`; get-by-name in atomic; missing project HTTP 404 `{error.code: not_found}` with no `x-amzn-errortype` |
+| `DELETE /v9/projects/{id\|name}` (`DeleteProject`) | `TestDeleteProjectByNameRemovesLookup` drops the `name:` index so the name can be reused; `TestDeleteMissingProjectAndEnv` and booted DELETE of missing id on `api.vercel.com` are HTTP 404 `{error.code: not_found}` with no `x-amzn-errortype`; characterization `del_miss_p`; mutant `vercel-delete-missing-project-as-success` |
 | `POST /v10/projects/{id}/env` (`CreateProjectEnv`) | Atomic env create; empty key 400; characterization `env`/`env_empty`; mutant `vercel-accept-empty-env-key` |
 | `GET /v9/projects/{id}/env` (`ListProjectEnv`) | Atomic list after create; characterization `envs` |
-| `DELETE /v9/projects/{id}/env/{envId}` (`DeleteProjectEnv`) | `TestProjectDeploymentEnvAndKV` deletes the env then lists zero |
+| `DELETE /v9/projects/{id}/env/{envId}` (`DeleteProjectEnv`) | `TestProjectDeploymentEnvAndKV` deletes the env then lists zero; `TestDeleteMissingProjectAndEnv` of missing envId is `not_found`; characterization `del_miss_e`; mutant `vercel-delete-missing-env-as-success` |
 | `POST /v10/projects/{id}/domains` (`AddProjectDomain`) | Atomic domain create; empty name 400; characterization `domain` |
 | `GET /v10/projects/{id}/domains` (`ListProjectDomains`) | Characterization golden `domains` |
 | `POST /v13/deployments` (`CreateDeployment`) | Booted + BDD `readyState` `READY`; empty name 400; characterization `deploy` |

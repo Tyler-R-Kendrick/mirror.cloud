@@ -7,6 +7,16 @@
     "name": "snap",
     "updatedAt": 0
   },
+  "del_miss_e": {
+    "error": "not_found",
+    "message": "The requested resource was not found.",
+    "status": 404
+  },
+  "del_miss_p": {
+    "error": "not_found",
+    "message": "The requested resource was not found.",
+    "status": 404
+  },
   "deploy": {
     "created": 0,
     "createdAt": 0,

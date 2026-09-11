@@ -46,6 +46,11 @@ type Pattern struct {
 	query    []constraint
 	literals int // how many segments are literal, used to rank matches
 	greedy   bool
+	// bad marks a pattern that cannot describe any request: a label with no
+	// name. `{}` and `{+}` bind nothing a caller could read, and a pattern that
+	// matched on one would put an empty key into the request's input. No model
+	// carries one -- the fuzzer does, which is what it is for.
+	bad bool
 }
 
 // Parse reads one `httpUri` value. A pattern that binds nothing and constrains
@@ -75,6 +80,7 @@ func Parse(uri string) Pattern {
 			name := part[1 : len(part)-1]
 			s := segment{label: strings.TrimSuffix(name, "+")}
 			s.greedy = strings.HasSuffix(name, "+")
+			p.bad = p.bad || s.label == ""
 			p.greedy = p.greedy || s.greedy
 			p.segments = append(p.segments, s)
 			continue
@@ -86,13 +92,28 @@ func Parse(uri string) Pattern {
 }
 
 // Match reports whether a request path and query satisfy the pattern, and
-// binds the labels it names. A greedy label takes every remaining segment,
-// separators included; a plain label takes exactly one and is percent-decoded,
-// because a path segment carrying a `/` arrives escaped.
+// binds the labels it names. A greedy label takes the segments the rest of the
+// pattern does not account for, separators included; a plain label takes
+// exactly one and is percent-decoded, because a path segment carrying a `/`
+// arrives escaped.
+//
+// A greedy label is usually last, and this used to assume it always was --
+// swallowing everything from where it sat and returning. AWS publishes four
+// patterns that break the assumption, all in S3 Control:
+// `/v20180820/mrap/instances/{Name+}/policy`, `-/policystatus`, and two
+// `{Mrap+}/routes`. Under the old reading `Name` absorbed the trailing
+// `/policy` as part of its value, the literal after it was never compared, and
+// GetMultiRegionAccessPointPolicy and GetMultiRegionAccessPointPolicyStatus
+// matched exactly the same requests -- so whichever the ranking put first
+// answered both and the other was unreachable. Counting the segments the
+// pattern still needs fixes the binding and separates the two operations.
 //
 // The path must be the escaped one -- net/url decodes `%2F` into a separator
 // on the way in, and a decoded path splits a single label into two segments.
 func (p Pattern) Match(path string, query url.Values) (map[string]string, bool) {
+	if p.bad {
+		return nil, false
+	}
 	for _, c := range p.query {
 		vs, ok := query[c.key]
 		if !ok {
@@ -118,32 +139,40 @@ func (p Pattern) Match(path string, query url.Values) (map[string]string, bool) 
 		}
 	}
 	bound := map[string]string{}
+	// The pattern and the path advance independently, because a greedy label
+	// consumes more than one segment.
+	at := 0
 	for i, seg := range p.segments {
 		if seg.greedy {
-			// A greedy label needs at least one segment, and it is the last
-			// thing in the pattern by construction.
-			if i >= len(parts) {
+			// Take everything except what the segments after this one still
+			// need. A greedy label must still match at least one segment.
+			rest := len(p.segments) - i - 1
+			take := len(parts) - at - rest
+			if take < 1 {
 				return nil, false
 			}
-			bound[seg.label] = strings.Join(parts[i:], "/")
-			return bound, true
+			bound[seg.label] = strings.Join(parts[at:at+take], "/")
+			at += take
+			continue
 		}
-		if i >= len(parts) {
+		if at >= len(parts) {
 			return nil, false
 		}
 		if seg.label == "" {
-			if parts[i] != seg.literal {
+			if parts[at] != seg.literal {
 				return nil, false
 			}
+			at++
 			continue
 		}
-		v, err := url.PathUnescape(parts[i])
+		v, err := url.PathUnescape(parts[at])
 		if err != nil {
-			v = parts[i]
+			v = parts[at]
 		}
 		bound[seg.label] = v
+		at++
 	}
-	if len(parts) != len(p.segments) {
+	if at != len(parts) {
 		return nil, false
 	}
 	return bound, true

@@ -125,10 +125,10 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Queue swagger `x-ms-paths` keys | 11 |
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
-| Blob keys fully routed | 3 / 59 |
+| Blob keys fully routed | 4 / 59 |
 | Queue keys fully routed | 4 / 11 |
 | Table method+paths routed | 6 / 12 |
-| Blob keys accounted (routed + unclaim) | 14 / 59 |
+| Blob keys accounted (routed + unclaim) | 15 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
 | Azurite test functions traced | 0 / 806 (0%) |
@@ -247,7 +247,7 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}/{blob}?restype=account&comp=properties` | missing | Blob Get Account Information |
 | `/{containerName}/{blob}?comp=block` | routed | `PutBlock` |
 | `/{containerName}/{blob}?comp=block&fromURL` | missing | Put Block From URL (same instance) |
-| `/{containerName}/{blob}?comp=blocklist` | partial | `GetBlockList` ok; `PutBlockList` stores the request body, does not fold staged blocks |
+| `/{containerName}/{blob}?comp=blocklist` | routed | `PutBlockList` folds staged blocks in request order (`TestAzurePutBlockListFoldsInRequestOrder`, booted XML commit); missing id is 400 `InvalidBlockList`; `GetBlockList` lists staged ids |
 | `/{containerName}/{blob}?comp=page&update` | missing | Put Page |
 | `/{containerName}/{blob}?comp=page&clear` | missing | Clear Pages |
 | `/{containerName}/{blob}?comp=page&update&fromUrl` | missing | Put Page From URL (same instance) |

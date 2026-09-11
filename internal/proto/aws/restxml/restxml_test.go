@@ -830,6 +830,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		{http.MethodGet, "/c/o", "GetBlob"},
 		{http.MethodGet, "/c?restype=container&comp=list", "ListBlobs"},
 		{http.MethodDelete, "/c/o", "DeleteBlob"},
+		{http.MethodPut, "/c/o?comp=block", "PutBlock"},
+		{http.MethodPut, "/c/o?comp=blocklist", "PutBlockList"},
+		{http.MethodGet, "/c/o?comp=blocklist", "GetBlockList"},
+		{http.MethodPut, "/c/o?comp=metadata", "UnsupportedQuery"},
 		{http.MethodGet, "/unknown", "Unknown"},
 	} {
 		op, err := codec.Route(az, httptest.NewRequest(test.method, test.path, nil))

@@ -362,30 +362,41 @@ func azureOp(svc *model.Service, r *http.Request) *model.Operation {
 func azureRoute(r *http.Request) string {
 	q := r.URL.Query()
 	path := strings.Trim(r.URL.Path, "/")
-	container, blob, _ := strings.Cut(path, "/")
+	_, blob, _ := strings.Cut(path, "/")
 	if path == "" {
-		container, blob = "", ""
+		blob = ""
 	}
-	_ = container
 	m := r.Method
+	comp := q.Get("comp")
 	if q.Get("restype") == "container" && blob == "" {
-		if q.Get("comp") == "list" {
+		switch comp {
+		case "list":
 			return "ListBlobs"
-		}
-		switch m {
-		case http.MethodPut:
-			return "CreateContainer"
-		case http.MethodGet, http.MethodHead:
-			return "GetContainer"
-		case http.MethodDelete:
-			return "DeleteContainer"
+		case "":
+			switch m {
+			case http.MethodPut:
+				return "CreateContainer"
+			case http.MethodGet, http.MethodHead:
+				return "GetContainer"
+			case http.MethodDelete:
+				return "DeleteContainer"
+			}
+		default:
+			return "UnsupportedQuery"
 		}
 	}
-	if path == "" && q.Get("comp") == "list" {
-		return "ListContainers"
+	if path == "" {
+		switch comp {
+		case "list":
+			return "ListContainers"
+		case "":
+			return "Unknown"
+		default:
+			return "UnsupportedQuery"
+		}
 	}
 	if blob != "" {
-		switch q.Get("comp") {
+		switch comp {
 		case "block":
 			return "PutBlock"
 		case "appendblock":
@@ -395,17 +406,98 @@ func azureRoute(r *http.Request) string {
 				return "GetBlockList"
 			}
 			return "PutBlockList"
-		}
-		switch m {
-		case http.MethodPut:
-			return "PutBlob"
-		case http.MethodGet, http.MethodHead:
-			return "GetBlob"
-		case http.MethodDelete:
-			return "DeleteBlob"
+		case "":
+			switch m {
+			case http.MethodPut:
+				return "PutBlob"
+			case http.MethodGet, http.MethodHead:
+				return "GetBlob"
+			case http.MethodDelete:
+				return "DeleteBlob"
+			}
+		default:
+			return "UnsupportedQuery"
 		}
 	}
 	return "Unknown"
+}
+
+func decodeAzureHeaders(in map[string]any, r *http.Request) {
+	meta := map[string]any{}
+	for k, vs := range r.Header {
+		if len(vs) == 0 || vs[0] == "" {
+			continue
+		}
+		lk := strings.ToLower(k)
+		if strings.HasPrefix(lk, "x-ms-meta-") {
+			meta[strings.TrimPrefix(lk, "x-ms-meta-")] = vs[0]
+			continue
+		}
+		switch lk {
+		case "x-ms-blob-type":
+			in["blob_type"] = vs[0]
+		case "x-ms-lease-action":
+			in["lease_action"] = vs[0]
+		case "x-ms-lease-id":
+			in["lease_id"] = vs[0]
+		case "x-ms-proposed-lease-id":
+			in["proposed_lease_id"] = vs[0]
+		case "x-ms-copy-source":
+			in["copy_source"] = vs[0]
+		case "x-ms-range", "range":
+			in["range"] = vs[0]
+		case "x-ms-page-write":
+			in["page_write"] = vs[0]
+		case "if-match":
+			in["if_match"] = vs[0]
+		case "if-none-match":
+			in["if_none_match"] = vs[0]
+		case "if-modified-since":
+			in["if_modified_since"] = vs[0]
+		case "content-type":
+			in["content_type"] = vs[0]
+		}
+	}
+	if len(meta) > 0 {
+		in["metadata"] = meta
+	}
+	if snap := r.URL.Query().Get("snapshot"); snap != "" {
+		in["snapshot"] = snap
+	}
+}
+
+func parseAzureBlockIDs(body []byte) []any {
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	var ids []any
+	var buf strings.Builder
+	in := false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "Latest", "Committed", "Uncommitted":
+				in = true
+				buf.Reset()
+			}
+		case xml.EndElement:
+			switch t.Name.Local {
+			case "Latest", "Committed", "Uncommitted":
+				if in {
+					ids = append(ids, strings.TrimSpace(buf.String()))
+					in = false
+				}
+			}
+		case xml.CharData:
+			if in {
+				buf.Write(t)
+			}
+		}
+	}
+	return ids
 }
 
 func azureQueueOp(svc *model.Service, r *http.Request) *model.Operation {
@@ -487,10 +579,14 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		if bid := r.URL.Query().Get("blockid"); bid != "" {
 			in["blockid"] = bid
 		}
+		decodeAzureHeaders(in, r)
 		req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
 		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList" || op.Name == "AppendBlock") && r.Body != nil {
 			body, _ := io.ReadAll(r.Body)
 			in["body"] = string(body)
+			if op.Name == "PutBlockList" {
+				in["blockids"] = parseAzureBlockIDs(body)
+			}
 			req.Body = io.NopCloser(bytes.NewReader(body))
 		}
 		return req, nil

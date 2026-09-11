@@ -59,6 +59,14 @@ errors:
     code: BlobNotFound
     http: 404
     fault: client
+  InvalidBlockList:
+    code: InvalidBlockList
+    http: 400
+    fault: client
+  InvalidQueryParameterValue:
+    code: InvalidQueryParameterValue
+    http: 400
+    fault: client
 
 operations:
   CreateContainer:
@@ -143,19 +151,26 @@ operations:
   PutBlockList:
     reads:
       ctr: { resource: container }
+      slot: { resource: blob_slot }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
+      - { cond: "'blockids' in input && input.blockids.all(id, staged.exists(b, string(b.id) == string(id)))", error: InvalidBlockList, message: "The specified block list is invalid." }
+    select: { binding: staged, resource: block }
     effects:
       - put:
           resource: blob
           record:
             container: "lower(string(input.container))"
             name: "string(input.blob)"
-            value: "('body' in input && input.body != null) ? string(input.body) : ''"
+            value: "join(input.blockids.map(id, string(staged.filter(b, string(b.id) == string(id))[0].value)), '')"
     output:
       container: "lower(string(input.container))"
       name: "string(input.blob)"
+
+  UnsupportedQuery:
+    require:
+      - { cond: "false", error: InvalidQueryParameterValue, message: "The value for one of the query parameters specified in the request URI is invalid." }
 
   GetBlockList:
     reads:

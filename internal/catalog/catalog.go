@@ -289,6 +289,7 @@ func Bundle() *model.Bundle {
 		op("PutBlockList", "PUT", "/{container}/{blob}?comp=blocklist", 201, false),
 		op("GetBlockList", "GET", "/{container}/{blob}?comp=blocklist", 200, true),
 		op("AppendBlock", "PUT", "/{container}/{blob}?comp=appendblock", 201, false),
+		op("UnsupportedQuery", "PUT", "/{container}/{blob}?comp=unsupported", 400, false),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"

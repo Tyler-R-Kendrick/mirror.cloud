@@ -112,6 +112,9 @@ func celFuncs() []cel.EnvOption {
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.
 		binaryDyn("arn", str, dyn, str),
+		// join concatenates a list of values with a separator. PutBlockList
+		// folds staged blocks in request order; CEL has no list join.
+		binaryDyn("join", dyn, str, str),
 		unaryDyn("queueFromArn", str, str),
 		binaryDyn("filterAttrs", dyn, dyn, dyn),
 

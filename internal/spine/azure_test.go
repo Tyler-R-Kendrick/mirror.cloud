@@ -102,13 +102,25 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 200 || !strings.Contains(string(raw), "BlockList") {
 		t.Fatalf("get block list %d %s", code, raw)
 	}
-	code, raw, _ = do(http.MethodPut, "/ctr/part?comp=blocklist", "AB", nil)
+	code, raw, _ = do(http.MethodPut, "/ctr/part?comp=blocklist", `<?xml version="1.0" encoding="utf-8"?><BlockList><Latest>YQ==</Latest><Latest>Yg==</Latest></BlockList>`, nil)
 	if code >= 300 {
 		t.Fatalf("put block list %d %s", code, raw)
 	}
 	code, raw, _ = do(http.MethodGet, "/ctr/part", "", nil)
 	if code != 200 || string(raw) != "AB" {
 		t.Fatalf("get assembled %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/part?comp=blocklist", `<?xml version="1.0" encoding="utf-8"?><BlockList><Latest>Yg==</Latest><Latest>YQ==</Latest></BlockList>`, nil)
+	if code >= 300 {
+		t.Fatalf("put block list reverse %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/part", "", nil)
+	if code != 200 || string(raw) != "BA" {
+		t.Fatalf("get assembled reverse %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/part?comp=blocklist", `<?xml version="1.0" encoding="utf-8"?><BlockList><Latest>missing</Latest></BlockList>`, nil)
+	if code != 400 || h.Get("x-ms-error-code") != "InvalidBlockList" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("missing block id %d %#v %s", code, h, raw)
 	}
 	code, raw, _ = do(http.MethodPut, "/ctr/log?comp=appendblock", "one", nil)
 	if code >= 300 {

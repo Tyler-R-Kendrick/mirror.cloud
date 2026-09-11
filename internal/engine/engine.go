@@ -194,7 +194,7 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if err := ev.evalLets(op); err != nil {
 		return nil, err
 	}
-	if fault := ev.checkRequires(op); fault != nil {
+	if fault := ev.checkRequires(op, false); fault != nil {
 		return nil, fault
 	}
 	// Select is the observation point: expired deadlines fire here, so what an
@@ -202,6 +202,11 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	// anyone last looked. Wait re-observes until the bundle's condition holds.
 	if err := ev.runSelect(ctx, op); err != nil {
 		return nil, err
+	}
+	if op.Select != nil {
+		if fault := ev.checkRequires(op, true); fault != nil {
+			return nil, fault
+		}
 	}
 	if err := ev.runWait(ctx, op); err != nil {
 		return nil, err

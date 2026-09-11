@@ -293,6 +293,16 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.String(strings.Join(out, ":"))
 			}))),
 
+		cel.Function("join", cel.Overload("join_2", []*cel.Type{dyn, str}, str,
+			cel.BinaryBinding(func(list, sep ref.Val) ref.Val {
+				items, _ := fromCEL(list).([]any)
+				parts := make([]string, 0, len(items))
+				for _, p := range items {
+					parts = append(parts, fmt.Sprint(p))
+				}
+				return types.String(strings.Join(parts, fmt.Sprint(sep.Value())))
+			}))),
+
 		// queueFromArn is lastSegment with the ARN separator, named for the
 		// thing bundles actually write.
 		cel.Function("queueFromArn", cel.Overload("queueFromArn_1", []*cel.Type{str}, str,

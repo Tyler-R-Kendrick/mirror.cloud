@@ -148,6 +148,34 @@ func TestAzureBlobCharacterization(t *testing.T) {
 	})
 }
 
+func TestAzurePutBlockListFoldsInRequestOrder(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	inv("PutBlock", map[string]any{"container": "ctr", "blob": "part", "blockid": "YQ==", "body": "A"})
+	inv("PutBlock", map[string]any{"container": "ctr", "blob": "part", "blockid": "Yg==", "body": "B"})
+	inv("PutBlockList", map[string]any{"container": "ctr", "blob": "part", "blockids": []any{"Yg==", "YQ=="}})
+	got := inv("GetBlob", map[string]any{"container": "ctr", "blob": "part"})
+	if got.Output["_raw"] != "BA" {
+		t.Fatalf("fold got %#v, want BA (request order, not store order)", got.Output["_raw"])
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBlockList", Input: map[string]any{
+		"container": "ctr", "blob": "part", "blockids": []any{"nope"},
+	}})
+	if f, ok := err.(*spi.Fault); !ok || f.Code != "InvalidBlockList" || f.HTTPStatus != 400 {
+		t.Fatalf("missing block %#v", err)
+	}
+}
+
 func FuzzBlobBytes(f *testing.F) {
 	f.Add("o", "hello")
 	f.Add("", "v")

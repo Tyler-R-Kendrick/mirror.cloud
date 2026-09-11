@@ -22,3 +22,4 @@ fly.machines	fly/machines.json	https://docs.machines.dev/spec/openapi3.json
 gcp.storage	gcp/storage.json	https://storage.googleapis.com/$discovery/rest?version=v1
 hetzner.v1	hetzner/v1.json	https://docs.hetzner.cloud/cloud.spec.json
 hostinger.api	hostinger/api.json	https://raw.githubusercontent.com/hostinger/api/main/openapi.json
+vercel.api	vercel/api.json	https://openapi.vercel.sh/

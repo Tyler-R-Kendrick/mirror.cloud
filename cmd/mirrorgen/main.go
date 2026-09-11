@@ -525,8 +525,20 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
-//go:embed all:aws all:gcp
+// The pattern is the layout, not a list of providers. It was
+// ` + "`" + `all:aws all:gcp` + "`" + `, so a model generated for a third provider was written
+// here, committed, and then not embedded: Model answered "no model for
+// hostinger.api" with the file sitting in the tree. Nothing failed at build
+// time, because an unembedded directory is indistinguishable from a provider
+// with no models. TestEveryGeneratedModelIsEmbedded is the guard.
+//
+//go:embed */*/model.json.gz
 var files embed.FS
+
+// FS exposes the embedded models, so a test can ask what is actually in the
+// binary rather than what is on disk. The two differing is the failure mode
+// the embed pattern above describes.
+func FS() fs.FS { return files }
 
 var (
 	mu     sync.Mutex

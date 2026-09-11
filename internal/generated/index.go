@@ -19,11 +19,12 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
-// The pattern is the layout, not a list of providers -- the same correction
-// behavior/behaviors.go carries, and for the same reason. It was
-// `all:aws all:gcp`, so a model generated for a third provider was written to
-// disk by mirrorgen, committed, and then not embedded: `Model` answered "no
-// model for hostinger.api" while the file sat right there in the tree.
+// The pattern is the layout, not a list of providers. It was
+// `all:aws all:gcp`, so a model generated for a third provider was written
+// here, committed, and then not embedded: Model answered "no model for
+// hostinger.api" with the file sitting in the tree. Nothing failed at build
+// time, because an unembedded directory is indistinguishable from a provider
+// with no models. TestEveryGeneratedModelIsEmbedded is the guard.
 //
 //go:embed */*/model.json.gz
 var files embed.FS

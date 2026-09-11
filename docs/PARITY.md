@@ -37,7 +37,7 @@ Authority: official Railway GraphQL v2 (`backboard.railway.com` `POST /graphql/v
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the emulated Railway slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Core Railway GraphQL operations routed to emulation | 6 / 6 |
+| Core Railway GraphQL operations routed to emulation | 7 / 7 |
 | Live Railway probe | none (not required) |
 
 | Railway operation | Mirror evidence |
@@ -46,8 +46,9 @@ Authority: official Railway GraphQL v2 (`backboard.railway.com` `POST /graphql/v
 | `projects` | Booted query lists under `data.projects.edges[].node`; characterization `list`; BDD lists after create |
 | `project` | Booted `project(id)` round-trips id/name; missing id is GraphQL `{errors}` with `extensions.code` `NOT_FOUND` and no `x-amzn-errortype`; mutant `railway-get-missing-project-as-data` |
 | `projectDelete` | Atomic delete then get is `NOT_FOUND`; `TestDeleteMissingProject` and booted `projectDelete` of missing id are GraphQL `{errors}`, not `data`; characterization `delete`/`del_miss`; mutant `railway-delete-missing-project-as-success` |
-| `serviceCreate` | Booted create then `service(id)` round-trips; characterization `service` |
+| `serviceCreate` | Booted create then `service(id)` round-trips; characterization `service`; atomic empty name `BAD_USER_INPUT`; mutant `railway-accept-empty-service-name` |
 | `service` | Atomic get after create; missing service `NOT_FOUND`; booted and BDD `service(id)` of missing id are GraphQL `{errors}` with no `x-amzn-errortype`; characterization `get_svc`/`miss_svc`; mutant `railway-get-missing-service-as-data` |
+| `serviceDelete` | Atomic delete then get is `NOT_FOUND`; `TestDeleteMissingService` and booted `serviceDelete` of created then missing id are GraphQL `{errors}`, not `data`; characterization `del_svc`/`del_miss_sv`; chaos `TestRailwayConcurrentServiceDelete`; mutant `railway-delete-missing-service-as-success` |
 | GraphQL faults vs AWS faults | restJson1 `Encode` wraps `{data:{...}}` with Relay `edges/node` lists; `EncodeFault` uses `{errors:[{message,extensions.code}]}` and omits `x-amzn-errortype`; mutant `railway-encode-aws-fault` |
 
 ## Hetzner baseline
@@ -87,11 +88,11 @@ Authority: official DigitalOcean API v2 (`api.digitalocean.com` `/v2/droplets` a
 | `POST /v2/droplets` (`CreateDroplet`) | Booted create returns `{droplet}`; atomic empty name 422; BDD create |
 | `GET /v2/droplets` (`ListDroplets`) | Booted list wraps `{droplets, meta.total}`; characterization `list`; BDD lists after create |
 | `GET /v2/droplets/{id}` (`GetDroplet`) | Booted get-after-set; missing droplet HTTP 404 `{id:"not_found"}` without `x-amzn-errortype` |
-| `DELETE /v2/droplets/{id}` (`DeleteDroplet`) | Booted delete is HTTP 204 empty body; characterization `delete` |
+| `DELETE /v2/droplets/{id}` (`DeleteDroplet`) | Booted delete is HTTP 204 empty body; characterization `delete`; `TestDeleteMissingDropletAndDomain` and booted DELETE of missing id are HTTP 404 `{id:"not_found"}` with no `x-amzn-errortype`; mutant `digitalocean-delete-missing-droplet-as-success` |
 | `POST /v2/domains` (`CreateDomain`) | Atomic empty 422 and duplicate 409; BDD create; chaos `TestDigitalOceanConcurrentDuplicateDomains`; mutants `digitalocean-accept-empty-domain` and `digitalocean-accept-duplicate-domain` |
 | `GET /v2/domains` (`ListDomains`) | Characterization `domains`; BDD lists after create |
 | `GET /v2/domains/{name}` (`GetDomain`) | Booted POST then GET returns the stored domain; missing domain 404; mutant `digitalocean-get-missing-domain-as-empty` |
-| `DELETE /v2/domains/{name}` (`DeleteDomain`) | Atomic 204; characterization `del_domain` |
+| `DELETE /v2/domains/{name}` (`DeleteDomain`) | Atomic 204; characterization `del_domain`; booted and BDD DELETE of missing name are HTTP 404 `{id:"not_found"}`; characterization `del_miss_n`; mutant `digitalocean-delete-missing-domain-as-success` |
 | DigitalOcean faults vs AWS faults | restJson1 `Encode` wraps singular/plural keys plus `meta.total`; `EncodeFault` uses `{id,message}` and omits `x-amzn-errortype`; mutant `digitalocean-encode-aws-fault` |
 
 ## Azure Blob baseline

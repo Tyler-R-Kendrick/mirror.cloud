@@ -14,6 +14,18 @@
     "message": "Project not found",
     "status": 200
   },
+  "del_miss_sv": {
+    "error": "NOT_FOUND",
+    "message": "Service not found",
+    "status": 200
+  },
+  "del_svc": {
+    "output": {
+      "_wrap": "serviceDelete",
+      "serviceDelete": true
+    },
+    "status": 0
+  },
   "delete": {
     "output": {
       "_wrap": "projectDelete",
@@ -58,6 +70,11 @@
       "_wrap": "projects"
     },
     "status": 0
+  },
+  "miss_after": {
+    "error": "NOT_FOUND",
+    "message": "Service not found",
+    "status": 200
   },
   "miss_svc": {
     "error": "NOT_FOUND",

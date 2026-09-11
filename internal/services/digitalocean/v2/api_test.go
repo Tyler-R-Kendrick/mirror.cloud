@@ -59,6 +59,20 @@ func TestDropletAndDomainLifecycle(t *testing.T) {
 	}
 }
 
+func TestDeleteMissingDropletAndDomain(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteDroplet", Input: map[string]any{"id": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "not_found" {
+		t.Fatalf("delete missing droplet %#v", err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteDomain", Input: map[string]any{"name": "missing.test"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "not_found" {
+		t.Fatalf("delete missing domain %#v", err)
+	}
+}
+
 func TestCreateDomainRejectsEmptyAndDuplicate(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

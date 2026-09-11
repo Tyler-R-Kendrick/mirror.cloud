@@ -844,7 +844,8 @@
       "project",
       "projectDelete",
       "serviceCreate",
-      "service"
+      "service",
+      "serviceDelete"
     ]
   },
   {

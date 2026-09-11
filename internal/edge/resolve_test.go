@@ -434,6 +434,11 @@ func TestHostLabel(t *testing.T) {
 		// The FIPS marker is stripped, so a FIPS client reaches the service it
 		// asked for rather than whatever the demux falls back to.
 		{"guardduty-fips.us-east-1.amazonaws.com", "guardduty"},
+		// A dotted prefix reads as its leading label here and is resolved by
+		// serviceByHostPrefix instead; the three in the bundle are pinned at
+		// the level that matters by TestADottedEndpointPrefixIsNotItsLeadingLabel.
+		{"api.ecr.us-east-1.amazonaws.com", "api"},
+		{"data.iot.us-east-1.amazonaws.com", "data"},
 		{"s3.amazonaws.com", "s3"},
 		{"localhost:4566", "localhost"},
 		{"127.0.0.1:4566", "127"},

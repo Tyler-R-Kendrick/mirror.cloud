@@ -41,15 +41,18 @@ func TestRailwayGraphQLCharacterization(t *testing.T) {
 		}
 	}
 	golden.AssertJSON(t, map[string]any{
-		"create":   create,
-		"get":      inv("project", map[string]any{"id": pid}),
-		"list":     inv("projects", nil),
-		"empty":    inv("projectCreate", map[string]any{}),
-		"service":  svc,
-		"get_svc":  inv("service", map[string]any{"id": sid}),
-		"delete":   inv("projectDelete", map[string]any{"id": pid}),
-		"missing":  inv("project", map[string]any{"id": pid}),
-		"del_miss": inv("projectDelete", map[string]any{"id": "missing"}),
-		"miss_svc": inv("service", map[string]any{"id": "missing"}),
+		"create":      create,
+		"get":         inv("project", map[string]any{"id": pid}),
+		"list":        inv("projects", nil),
+		"empty":       inv("projectCreate", map[string]any{}),
+		"service":     svc,
+		"get_svc":     inv("service", map[string]any{"id": sid}),
+		"del_svc":     inv("serviceDelete", map[string]any{"id": sid}),
+		"miss_after":  inv("service", map[string]any{"id": sid}),
+		"delete":      inv("projectDelete", map[string]any{"id": pid}),
+		"missing":     inv("project", map[string]any{"id": pid}),
+		"del_miss":    inv("projectDelete", map[string]any{"id": "missing"}),
+		"miss_svc":    inv("service", map[string]any{"id": "missing"}),
+		"del_miss_sv": inv("serviceDelete", map[string]any{"id": "missing"}),
 	})
 }

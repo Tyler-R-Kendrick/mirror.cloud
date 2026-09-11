@@ -31,7 +31,7 @@ func New(d spi.Deps) *Pack { return &Pack{deps: d} }
 func (p *Pack) ServiceID() string { return "railway.graphql" }
 func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
 func (p *Pack) Operations() []string {
-	return []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service"}
+	return []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"}
 }
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
@@ -66,6 +66,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.serviceCreate(ctx, req)
 	case "service":
 		return p.service(ctx, req)
+	case "serviceDelete":
+		return p.serviceDelete(ctx, req)
 	default:
 		return nil, spi.NotImplemented("railway.graphql", req.Operation, "emulate")
 	}
@@ -147,6 +149,16 @@ func (p *Pack) service(ctx context.Context, req *spi.Request) (*spi.Response, er
 	return &spi.Response{Output: map[string]any{"_wrap": "service", "service": rec}}, nil
 }
 
+func (p *Pack) serviceDelete(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	got, err := p.service(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	_ = got
+	_ = p.col(req, "rwsvc").Delete(ctx, str(req.Input["id"]))
+	return &spi.Response{Output: map[string]any{"_wrap": "serviceDelete", "serviceDelete": true}}, nil
+}
+
 func hydrate(req *spi.Request) {
 	if vars, ok := req.Input["variables"].(map[string]any); ok {
 		for k, v := range vars {
@@ -194,6 +206,8 @@ func FieldName(q string) string {
 		return "projectDelete"
 	case strings.Contains(q, "serviceCreate"):
 		return "serviceCreate"
+	case strings.Contains(q, "serviceDelete"):
+		return "serviceDelete"
 	case strings.Contains(q, "projects"):
 		return "projects"
 	case strings.Contains(q, "project"):

@@ -833,12 +833,31 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		{http.MethodPut, "/c/o?comp=block", "PutBlock"},
 		{http.MethodPut, "/c/o?comp=blocklist", "PutBlockList"},
 		{http.MethodGet, "/c/o?comp=blocklist", "GetBlockList"},
+		{http.MethodPut, "/c?restype=container&comp=metadata", "SetContainerMetadata"},
+		{http.MethodGet, "/c?restype=container&comp=metadata", "GetContainerMetadata"},
+		{http.MethodPut, "/c?restype=container&comp=acl", "SetContainerAcl"},
+		{http.MethodGet, "/c?restype=container&comp=acl", "GetContainerAcl"},
 		{http.MethodPut, "/c/o?comp=metadata", "UnsupportedQuery"},
+		{http.MethodPut, "/c?restype=container&comp=lease", "UnsupportedQuery"},
 		{http.MethodGet, "/unknown", "Unknown"},
 	} {
 		op, err := codec.Route(az, httptest.NewRequest(test.method, test.path, nil))
 		if err != nil || op.Name != test.want {
 			t.Errorf("azure %s %s: %#v %v, want %s", test.method, test.path, op, err, test.want)
+		}
+	}
+	for action, want := range map[string]string{
+		"acquire": "AcquireContainerLease",
+		"release": "ReleaseContainerLease",
+		"renew":   "RenewContainerLease",
+		"break":   "BreakContainerLease",
+		"change":  "ChangeContainerLease",
+	} {
+		req := httptest.NewRequest(http.MethodPut, "/c?restype=container&comp=lease", nil)
+		req.Header.Set("x-ms-lease-action", action)
+		op, err := codec.Route(az, req)
+		if err != nil || op.Name != want {
+			t.Errorf("azure lease %s: %#v %v, want %s", action, op, err, want)
 		}
 	}
 	w = httptest.NewRecorder()

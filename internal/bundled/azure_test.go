@@ -3,7 +3,9 @@ package bundled_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
@@ -146,6 +148,66 @@ func TestAzureBlobCharacterization(t *testing.T) {
 		"del_miss_b": inv("DeleteBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
 		"del_miss_c": inv("DeleteContainer", map[string]any{"container": "nope"}, nil),
 	})
+}
+
+func TestAzureContainerMetadataAclLease(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	meta := inv("SetContainerMetadata", map[string]any{"container": "ctr", "metadata": map[string]any{"keya": "vala"}})
+	if fmt.Sprint(meta.Output["metadata"]) == "" {
+		t.Fatalf("set metadata %#v", meta.Output)
+	}
+	got := inv("GetContainerMetadata", map[string]any{"container": "ctr"})
+	md, _ := got.Output["metadata"].(map[string]any)
+	if fmt.Sprint(md["keya"]) != "vala" {
+		t.Fatalf("get metadata %#v", got.Output)
+	}
+	inv("SetContainerAcl", map[string]any{"container": "ctr", "acl": "<SignedIdentifiers><SignedIdentifier><Id>p1</Id></SignedIdentifier></SignedIdentifiers>", "public_access": "blob"})
+	acl := inv("GetContainerAcl", map[string]any{"container": "ctr"})
+	if !strings.Contains(fmt.Sprint(acl.Output["acl"]), "p1") || fmt.Sprint(acl.Output["public_access"]) != "blob" {
+		t.Fatalf("acl %#v", acl.Output)
+	}
+	acq := inv("AcquireContainerLease", map[string]any{"container": "ctr", "proposed_lease_id": "ca761232ed4211cebacd00aa0057b223", "lease_duration": "-1"})
+	if acq.Output["lease_id"] != "ca761232ed4211cebacd00aa0057b223" || acq.Output["lease_status"] != "locked" {
+		t.Fatalf("acquire %#v", acq.Output)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "AcquireContainerLease", Input: map[string]any{"container": "ctr"}})
+	if f, ok := err.(*spi.Fault); !ok || f.Code != "LeaseAlreadyPresent" {
+		t.Fatalf("duplicate lease %#v", err)
+	}
+	chg := inv("ChangeContainerLease", map[string]any{"container": "ctr", "lease_id": "ca761232ed4211cebacd00aa0057b223", "proposed_lease_id": "3c7e72ebb4304526bc53d8ecef03798f"})
+	if chg.Output["lease_id"] != "3c7e72ebb4304526bc53d8ecef03798f" {
+		t.Fatalf("change %#v", chg.Output)
+	}
+	inv("RenewContainerLease", map[string]any{"container": "ctr", "lease_id": "3c7e72ebb4304526bc53d8ecef03798f"})
+	inv("ReleaseContainerLease", map[string]any{"container": "ctr", "lease_id": "3c7e72ebb4304526bc53d8ecef03798f"})
+	props := inv("GetContainer", map[string]any{"container": "ctr"})
+	if props.Output["lease_status"] != "unlocked" {
+		t.Fatalf("released %#v", props.Output)
+	}
+	inv("AcquireContainerLease", map[string]any{"container": "ctr", "proposed_lease_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "lease_duration": "30"})
+	brk := inv("BreakContainerLease", map[string]any{"container": "ctr"})
+	if brk.Output["lease_state"] != "broken" {
+		t.Fatalf("break %#v", brk.Output)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetContainerMetadata", Input: map[string]any{"container": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "ContainerNotFound" {
+		t.Fatalf("missing metadata %#v", err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetContainerAcl", Input: map[string]any{"container": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "ContainerNotFound" {
+		t.Fatalf("missing acl %#v", err)
+	}
 }
 
 func TestAzurePutBlockListFoldsInRequestOrder(t *testing.T) {

@@ -134,6 +134,38 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 200 || string(raw) != "onetwo" {
 		t.Fatalf("get append %d %s", code, raw)
 	}
+	code, raw, h = do(http.MethodPut, "/ctr?restype=container&comp=metadata", "", map[string]string{"x-ms-meta-keya": "vala"})
+	if code >= 300 {
+		t.Fatalf("set metadata %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr?restype=container&comp=metadata", "", nil)
+	if code != 200 || h.Get("x-ms-meta-keya") != "vala" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("get metadata %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr?restype=container&comp=acl", "<SignedIdentifiers><SignedIdentifier><Id>p1</Id></SignedIdentifier></SignedIdentifiers>", map[string]string{"x-ms-blob-public-access": "blob"})
+	if code >= 300 {
+		t.Fatalf("set acl %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr?restype=container&comp=acl", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "p1") || h.Get("x-ms-blob-public-access") != "blob" {
+		t.Fatalf("get acl %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr?restype=container&comp=lease", "", map[string]string{"x-ms-lease-action": "acquire", "x-ms-proposed-lease-id": "ca761232ed4211cebacd00aa0057b223", "x-ms-lease-duration": "-1"})
+	if code != 201 || h.Get("x-ms-lease-id") != "ca761232ed4211cebacd00aa0057b223" {
+		t.Fatalf("acquire %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr?restype=container", "", nil)
+	if code != 200 || h.Get("x-ms-lease-status") != "locked" || h.Get("x-ms-lease-state") != "leased" {
+		t.Fatalf("leased props %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr?restype=container&comp=lease", "", map[string]string{"x-ms-lease-action": "release", "x-ms-lease-id": "ca761232ed4211cebacd00aa0057b223"})
+	if code >= 300 {
+		t.Fatalf("release %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/missing?restype=container&comp=metadata", "", nil)
+	if code != 404 || !strings.Contains(string(raw), "ContainerNotFound") || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("missing metadata %d %#v %s", code, h, raw)
+	}
 }
 
 func TestBootedServerAzureQueue(t *testing.T) {

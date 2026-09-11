@@ -290,6 +290,15 @@ func Bundle() *model.Bundle {
 		op("GetBlockList", "GET", "/{container}/{blob}?comp=blocklist", 200, true),
 		op("AppendBlock", "PUT", "/{container}/{blob}?comp=appendblock", 201, false),
 		op("UnsupportedQuery", "PUT", "/{container}/{blob}?comp=unsupported", 400, false),
+		op("SetContainerMetadata", "PUT", "/{container}?restype=container&comp=metadata", 200, false),
+		op("GetContainerMetadata", "GET", "/{container}?restype=container&comp=metadata", 200, true),
+		op("SetContainerAcl", "PUT", "/{container}?restype=container&comp=acl", 200, false),
+		op("GetContainerAcl", "GET", "/{container}?restype=container&comp=acl", 200, true),
+		op("AcquireContainerLease", "PUT", "/{container}?comp=lease&restype=container&acquire", 201, false),
+		op("ReleaseContainerLease", "PUT", "/{container}?comp=lease&restype=container&release", 200, false),
+		op("RenewContainerLease", "PUT", "/{container}?comp=lease&restype=container&renew", 200, false),
+		op("BreakContainerLease", "PUT", "/{container}?comp=lease&restype=container&break", 202, false),
+		op("ChangeContainerLease", "PUT", "/{container}?comp=lease&restype=container&change", 200, false),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
@@ -301,11 +310,29 @@ func Bundle() *model.Bundle {
 	azureSvc.OperationByName("PutBlockList").Output = "Blob"
 	azureSvc.OperationByName("GetBlockList").Output = "BlockList"
 	azureSvc.OperationByName("AppendBlock").Output = "Blob"
+	azureSvc.OperationByName("SetContainerMetadata").Output = "Container"
+	azureSvc.OperationByName("GetContainerMetadata").Output = "Container"
+	azureSvc.OperationByName("SetContainerAcl").Output = "Container"
+	azureSvc.OperationByName("GetContainerAcl").Output = "Container"
+	azureSvc.OperationByName("AcquireContainerLease").Output = "Container"
+	azureSvc.OperationByName("ReleaseContainerLease").Output = "Container"
+	azureSvc.OperationByName("RenewContainerLease").Output = "Container"
+	azureSvc.OperationByName("BreakContainerLease").Output = "Container"
+	azureSvc.OperationByName("ChangeContainerLease").Output = "Container"
 	azureSvc.Shapes = map[string]model.Shape{
 		"String": {ID: "String", Kind: model.KindString},
+		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
 		"Container": {ID: "Container", Kind: model.KindStructure, Members: map[string]model.Member{
-			"name": {Shape: "String"},
+			"name":           {Shape: "String"},
+			"metadata":       {Shape: "Map"},
+			"acl":            {Shape: "String"},
+			"public_access":  {Shape: "String"},
+			"lease_id":       {Shape: "String"},
+			"lease_status":   {Shape: "String"},
+			"lease_state":    {Shape: "String"},
+			"lease_duration": {Shape: "String"},
 		}},
+
 		"ContainerList": {ID: "ContainerList", Kind: model.KindList, Member: "Container"},
 		"Blob": {ID: "Blob", Kind: model.KindStructure, Members: map[string]model.Member{
 			"name":      {Shape: "String"},

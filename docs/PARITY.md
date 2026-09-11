@@ -125,13 +125,13 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Queue swagger `x-ms-paths` keys | 11 |
 | Table swagger `paths` method+path | 12 |
 | Azurite test functions | 806 |
-| Blob keys fully routed | 4 / 59 |
+| Blob keys fully routed | 11 / 59 |
 | Queue keys fully routed | 4 / 11 |
 | Table method+paths routed | 6 / 12 |
-| Blob keys accounted (routed + unclaim) | 15 / 59 |
+| Blob keys accounted (routed + unclaim) | 22 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
-| Azurite test functions traced | 0 / 806 (0%) |
+| Azurite test functions traced | 48 / 806 (6%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -210,16 +210,16 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/?comp=batch` | missing | SubmitBatch |
 | `/?comp=blobs` | missing | FilterBlobs (tags) |
 | `/{containerName}?restype=container` | routed | `CreateContainer` / `GetContainer` / `DeleteContainer` (HEAD rides GET) |
-| `/{containerName}?restype=container&comp=metadata` | missing | Set Container Metadata |
-| `/{containerName}?restype=container&comp=acl` | missing | Get/Set Container ACL |
+| `/{containerName}?restype=container&comp=metadata` | routed | `SetContainerMetadata` / `GetContainerMetadata`; missing container 404 |
+| `/{containerName}?restype=container&comp=acl` | routed | `SetContainerAcl` / `GetContainerAcl`; stores signed-identifier XML and `x-ms-blob-public-access` |
 | `/{containerName}?restype=container&comp=undelete` | unclaim | Azurite: soft delete unsupported |
 | `/{containerName}?restype=container&comp=batch` | missing | Container SubmitBatch |
 | `/{containerName}?restype=container&comp=blobs` | missing | Container FilterBlobs |
-| `/{containerName}?comp=lease&restype=container&acquire` | missing | Lease Container acquire |
-| `/{containerName}?comp=lease&restype=container&release` | missing | Lease Container release |
-| `/{containerName}?comp=lease&restype=container&renew` | missing | Lease Container renew |
-| `/{containerName}?comp=lease&restype=container&break` | missing | Lease Container break |
-| `/{containerName}?comp=lease&restype=container&change` | missing | Lease Container change |
+| `/{containerName}?comp=lease&restype=container&acquire` | routed | `AcquireContainerLease` via `x-ms-lease-action=acquire`; 201 + `x-ms-lease-id` |
+| `/{containerName}?comp=lease&restype=container&release` | routed | `ReleaseContainerLease`; mismatch is 409 `LeaseIdMismatchWithLeaseOperation` |
+| `/{containerName}?comp=lease&restype=container&renew` | routed | `RenewContainerLease`; duration expiry unclaimed |
+| `/{containerName}?comp=lease&restype=container&break` | routed | `BreakContainerLease` immediate broken; remaining-time unclaimed |
+| `/{containerName}?comp=lease&restype=container&change` | routed | `ChangeContainerLease` |
 | `/{containerName}?restype=container&comp=list&flat` | partial | `ListBlobs` — no delimiter/hierarchy |
 | `/{containerName}?restype=container&comp=list&hierarchy` | missing | List Blobs hierarchy |
 | `/{containerName}?restype=account&comp=properties` | missing | Container Get Account Information |
@@ -298,6 +298,61 @@ Host `{account}.table.core.windows.net`. Table `x-ms-paths` service properties/s
 | `POST /{table}` | routed | `InsertEntity` |
 | `GET /{table}` | unclaim | Azurite: Get Table ACL unsupported |
 | `PUT /{table}` | unclaim | Azurite: Set Table ACL unsupported |
+
+### Traced tests
+
+Direct `it()` names from `blob/apis/container.test.ts` (48). Rows marked later-slice still count, as S3 skipped rows do.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/container.test.ts::setMetadata` | Booted PUT/GET `comp=metadata` round-trips `x-ms-meta-keya`; atomic `TestAzureContainerMetadataAclLease` | Mapped and green |
+| `blob/apis/container.test.ts::setMetadata should work with conditional headers` | Metadata PUT exists; If-Modified-Since not applied until conditions slice | Metadata mapped; condition unclaimed |
+| `blob/apis/container.test.ts::setMetadata should not work with invalid conditional headers` | Same | Metadata mapped; 412 condition unclaimed |
+| `blob/apis/container.test.ts::getProperties` | Booted GET `?restype=container` returns `x-ms-lease-status` / `x-ms-lease-state` | Mapped and green |
+| `blob/apis/container.test.ts::getProperties should return 404 for non existed container` | Missing GetContainer / GetContainerMetadata are 404 `ContainerNotFound` without `x-amzn-errortype` | Mapped and green |
+| `blob/apis/container.test.ts::getProperties should return 404 for non existed system container` | Same 404 path (`$logs` is just a name) | Mapped and green |
+| `blob/apis/container.test.ts::create with default parameters` | Booted create 201; atomic create | Mapped and green |
+| `blob/apis/container.test.ts::create with all parameters configured` | Metadata and public access stored via Set after create; create-time `x-ms-meta` / access headers not yet copied onto CreateContainer | Partial; SetMetadata/SetAcl cover the fields |
+| `blob/apis/container.test.ts::create with invalid container name` | Empty name is 400 `InvalidResourceName`; Azurite format/length table unclaimed | Partial |
+| `blob/apis/container.test.ts::delete` | Booted delete 202 then 404 | Mapped and green |
+| `blob/apis/container.test.ts::create should fail when metadata names are invalid C# identifiers` | Metadata store is a map; C# identifier 400 `InvalidMetadata` unclaimed | Not Azurite-strict |
+| `blob/apis/container.test.ts::listBlobHierarchySegment with default parameters` | List hierarchy is a later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::listBlobHierarchySegment with all parameters configured` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::acquireLease_available_proposedLeaseId_fixed` | Booted acquire with proposed id; atomic acquire | Mapped and green |
+| `blob/apis/container.test.ts::acquireLease_available_NoproposedLeaseId_infinite` | Acquire generates hex id when none proposed; `lease_duration=-1` is infinite | Mapped and green |
+| `blob/apis/container.test.ts::releaseLease` | Booted release; mismatch 409 | Mapped and green |
+| `blob/apis/container.test.ts::renewLease` | `RenewContainerLease` keeps locked; clock expiry unclaimed | Renew mapped; timeout unclaimed |
+| `blob/apis/container.test.ts::changeLease` | Atomic change to proposed id | Mapped and green |
+| `blob/apis/container.test.ts::breakLease` | Break sets `broken`/`unlocked` immediately; remaining-time loop unclaimed | Break mapped; period unclaimed |
+| `blob/apis/container.test.ts::should correctly list all blobs in the container using listBlobFlatSegment with default parameters` | ListBlobs exists without metadata/etag/snapshot | Partial; extra list fields later |
+| `blob/apis/container.test.ts::should list append blobs in container with sealed property` | Append seal unclaimed | Not mapped this slice |
+| `blob/apis/container.test.ts::should only show uncommitted blobs in listBlobFlatSegment with uncommittedblobs option` | `it.skip` at pin | Upstream skipped |
+| `blob/apis/container.test.ts::should only show uncommitted blobs in listBlobHierarchySegment with uncommittedblobs option` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::should correctly order all blobs in the container` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::returns no continuationToken when squashed by delimiter` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::returns a valid, correct continuationToken` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::list blobs whose name are all number, continuationToken works` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::getAccessPolicy` | Booted GET `comp=acl` empty `SignedIdentifiers` | Mapped and green |
+| `blob/apis/container.test.ts::setAccessPolicy_publicAccess` | Booted PUT ACL + `x-ms-blob-public-access=blob` | Mapped and green |
+| `blob/apis/container.test.ts::setAccessPolicy_signedIdentifiers` | ACL body stored and echoed | Mapped and green |
+| `blob/apis/container.test.ts::list container should success with include as empty string or deleted` | ListContainers exists; include=deleted is soft-delete unclaimed | Partial |
+| `blob/apis/container.test.ts::list container should success with different include string` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags should work on container` | Tags/filter later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with greater or less should work on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with more than limited conditions on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with conditions number equal to limitation on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with invalid key chars on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with valid special key chars on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with long key on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with invalid value chars on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with valid special value chars on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with long value on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with invalid query string` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with continuationToken on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::List blob should success with '+' in query` | `it.skip` at pin | Upstream skipped |
+| `blob/apis/container.test.ts::Delete a container with block blob, then create container/blob with same name, and delete container should success.` | DeleteContainer then recreate; PutBlock/PutBlockList fold | Mapped and green |
+| `blob/apis/container.test.ts::listBlobsFlat with startFrom should begin at that blob name` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::listBlobsByHierarchy with startFrom should begin at that blob name` | Later slice | Not mapped this slice |
 
 ### Shipped YAML evidence (not the inventory)
 

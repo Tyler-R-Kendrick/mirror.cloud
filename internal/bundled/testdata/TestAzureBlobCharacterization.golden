@@ -43,7 +43,13 @@
   },
   "get": {
     "output": {
-      "name": "snap"
+      "lease_duration": "",
+      "lease_id": "",
+      "lease_state": "available",
+      "lease_status": "unlocked",
+      "metadata": {},
+      "name": "snap",
+      "public_access": ""
     },
     "status": 0
   },

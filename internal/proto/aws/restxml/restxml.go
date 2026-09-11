@@ -372,6 +372,31 @@ func azureRoute(r *http.Request) string {
 		switch comp {
 		case "list":
 			return "ListBlobs"
+		case "metadata":
+			if m == http.MethodPut {
+				return "SetContainerMetadata"
+			}
+			return "GetContainerMetadata"
+		case "acl":
+			if m == http.MethodPut {
+				return "SetContainerAcl"
+			}
+			return "GetContainerAcl"
+		case "lease":
+			switch strings.ToLower(r.Header.Get("x-ms-lease-action")) {
+			case "acquire":
+				return "AcquireContainerLease"
+			case "release":
+				return "ReleaseContainerLease"
+			case "renew":
+				return "RenewContainerLease"
+			case "break":
+				return "BreakContainerLease"
+			case "change":
+				return "ChangeContainerLease"
+			default:
+				return "UnsupportedQuery"
+			}
 		case "":
 			switch m {
 			case http.MethodPut:
@@ -448,6 +473,12 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 			in["range"] = vs[0]
 		case "x-ms-page-write":
 			in["page_write"] = vs[0]
+		case "x-ms-blob-public-access":
+			in["public_access"] = vs[0]
+		case "x-ms-lease-duration":
+			in["lease_duration"] = vs[0]
+		case "x-ms-lease-break-period":
+			in["lease_break_period"] = vs[0]
 		case "if-match":
 			in["if_match"] = vs[0]
 		case "if-none-match":
@@ -581,11 +612,14 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		}
 		decodeAzureHeaders(in, r)
 		req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
-		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList" || op.Name == "AppendBlock") && r.Body != nil {
+		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList" || op.Name == "AppendBlock" || op.Name == "SetContainerAcl") && r.Body != nil {
 			body, _ := io.ReadAll(r.Body)
 			in["body"] = string(body)
 			if op.Name == "PutBlockList" {
 				in["blockids"] = parseAzureBlockIDs(body)
+			}
+			if op.Name == "SetContainerAcl" {
+				in["acl"] = string(body)
 			}
 			req.Body = io.NopCloser(bytes.NewReader(body))
 		}
@@ -2114,16 +2148,31 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 			w.Header().Add(k, v)
 		}
 	}
+	writeAzureContainerHeaders(w, resp)
 	if resp.Stream != nil {
 		w.WriteHeader(status)
 		_, err := io.Copy(w, resp.Stream)
 		_ = resp.Stream.Close()
 		return err
 	}
+	if resp != nil && resp.Output != nil && op == "GetContainerAcl" {
+		body := strAny(resp.Output["acl"])
+		if body == "" {
+			body = `<?xml version="1.0" encoding="utf-8"?><SignedIdentifiers></SignedIdentifiers>`
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, body)
+		return err
+	}
 	if resp != nil && resp.Output != nil {
 		if raw, ok := resp.Output["_raw"].(string); ok {
 			if w.Header().Get("Content-Type") == "" {
-				w.Header().Set("Content-Type", "application/octet-stream")
+				if op == "GetContainerAcl" {
+					w.Header().Set("Content-Type", "application/xml")
+				} else {
+					w.Header().Set("Content-Type", "application/octet-stream")
+				}
 			}
 			w.WriteHeader(status)
 			_, err := io.WriteString(w, raw)
@@ -2194,6 +2243,36 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 	}
 	w.WriteHeader(status)
 	return nil
+}
+
+func writeAzureContainerHeaders(w http.ResponseWriter, resp *spi.Response) {
+	if resp == nil || resp.Output == nil {
+		return
+	}
+	out := resp.Output
+	if meta, ok := out["metadata"].(map[string]any); ok {
+		for k, v := range meta {
+			if k == "" || v == nil {
+				continue
+			}
+			w.Header().Set("x-ms-meta-"+k, fmt.Sprint(v))
+		}
+	}
+	if id := strAny(out["lease_id"]); id != "" {
+		w.Header().Set("x-ms-lease-id", id)
+	}
+	if s := strAny(out["lease_status"]); s != "" {
+		w.Header().Set("x-ms-lease-status", s)
+	}
+	if s := strAny(out["lease_state"]); s != "" {
+		w.Header().Set("x-ms-lease-state", s)
+	}
+	if s := strAny(out["lease_duration"]); s != "" {
+		w.Header().Set("x-ms-lease-duration", s)
+	}
+	if s := strAny(out["public_access"]); s != "" {
+		w.Header().Set("x-ms-blob-public-access", s)
+	}
 }
 
 func asAny(v any) []any {

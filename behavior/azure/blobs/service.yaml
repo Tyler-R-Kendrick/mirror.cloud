@@ -67,6 +67,14 @@ errors:
     code: InvalidQueryParameterValue
     http: 400
     fault: client
+  LeaseAlreadyPresent:
+    code: LeaseAlreadyPresent
+    http: 409
+    fault: client
+  LeaseIdMismatchWithLeaseOperation:
+    code: LeaseIdMismatchWithLeaseOperation
+    http: 409
+    fault: client
 
 operations:
   CreateContainer:
@@ -87,6 +95,12 @@ operations:
       - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
     output:
       name: rec.name
+      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
+      public_access: "('public_access' in rec && rec.public_access != null) ? string(rec.public_access) : ''"
+      lease_id: "('lease_id' in rec && rec.lease_id != null) ? string(rec.lease_id) : ''"
+      lease_status: "('lease_status' in rec && rec.lease_status != null && string(rec.lease_status) != '') ? string(rec.lease_status) : 'unlocked'"
+      lease_state: "('lease_state' in rec && rec.lease_state != null && string(rec.lease_state) != '') ? string(rec.lease_state) : 'available'"
+      lease_duration: "('lease_duration' in rec && rec.lease_duration != null) ? string(rec.lease_duration) : ''"
 
   ListContainers:
     list: { resource: container, member: _list }
@@ -171,6 +185,145 @@ operations:
   UnsupportedQuery:
     require:
       - { cond: "false", error: InvalidQueryParameterValue, message: "The value for one of the query parameters specified in the request URI is invalid." }
+
+  SetContainerMetadata:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+    output:
+      name: rec.name
+      metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+
+  GetContainerMetadata:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    output:
+      name: rec.name
+      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
+
+  SetContainerAcl:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            acl: "('acl' in input && input.acl != null) ? string(input.acl) : (('body' in input && input.body != null) ? string(input.body) : '')"
+            public_access: "('public_access' in input && input.public_access != null) ? string(input.public_access) : ''"
+    output:
+      name: rec.name
+      public_access: "('public_access' in input && input.public_access != null) ? string(input.public_access) : ''"
+
+  GetContainerAcl:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    output:
+      acl: "('acl' in rec && rec.acl != null && string(rec.acl) != '') ? string(rec.acl) : '<?xml version=\"1.0\" encoding=\"utf-8\"?><SignedIdentifiers></SignedIdentifiers>'"
+      public_access: "('public_access' in rec && rec.public_access != null) ? string(rec.public_access) : ''"
+
+  AcquireContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked')", error: LeaseAlreadyPresent, message: "There is already a lease present." }
+    effects:
+      - generate: { bind: leaseid, kind: hex, bytes: 16 }
+      - patch:
+          resource: container
+          record:
+            lease_id: "('proposed_lease_id' in input && string(input.proposed_lease_id) != '') ? string(input.proposed_lease_id) : fx.leaseid"
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+            lease_duration: "('lease_duration' in input && string(input.lease_duration) == '-1') ? 'infinite' : 'fixed'"
+    output:
+      lease_id: "('proposed_lease_id' in input && string(input.proposed_lease_id) != '') ? string(input.proposed_lease_id) : fx.leaseid"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+      lease_duration: "('lease_duration' in input && string(input.lease_duration) == '-1') ? 'infinite' : 'fixed'"
+
+  ReleaseContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the container." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            lease_id: "''"
+            lease_status: "'unlocked'"
+            lease_state: "'available'"
+            lease_duration: "''"
+    output:
+      lease_status: "'unlocked'"
+      lease_state: "'available'"
+
+  RenewContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the container." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+    output:
+      lease_id: "string(rec.lease_id)"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+
+  BreakContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            lease_id: "''"
+            lease_status: "'unlocked'"
+            lease_state: "'broken'"
+            lease_duration: "''"
+    output:
+      lease_status: "'unlocked'"
+      lease_state: "'broken'"
+
+  ChangeContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the container." }
+      - { cond: "'proposed_lease_id' in input && string(input.proposed_lease_id) != ''", error: InvalidResourceName, message: "The proposed lease ID is invalid." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            lease_id: "string(input.proposed_lease_id)"
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+    output:
+      lease_id: "string(input.proposed_lease_id)"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
 
   GetBlockList:
     reads:

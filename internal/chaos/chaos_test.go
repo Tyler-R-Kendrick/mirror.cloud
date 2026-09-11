@@ -8032,3 +8032,45 @@ func TestRailwayConcurrentProjectCreate(t *testing.T) {
 		t.Fatalf("list after concurrent create %#v %v", got, err)
 	}
 }
+
+func TestRailwayConcurrentServiceDelete(t *testing.T) {
+	p := rwapi.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	proj, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"name": "web"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := proj.Output["projectCreate"].(map[string]any)["id"]
+	svc, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceCreate", Input: map[string]any{"name": "api", "projectId": pid}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := svc.Output["serviceCreate"].(map[string]any)["id"]
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceDelete", Input: map[string]any{"id": sid}})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	winners := 0
+	for err := range errCh {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "NOT_FOUND" {
+			t.Fatalf("concurrent delete: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful deletes = %d, want 1", winners)
+	}
+}

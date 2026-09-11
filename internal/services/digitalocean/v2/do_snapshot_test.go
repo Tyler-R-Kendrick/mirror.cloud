@@ -44,5 +44,7 @@ func TestDigitalOceanV2Characterization(t *testing.T) {
 		"domains":    inv("ListDomains", nil),
 		"del_domain": inv("DeleteDomain", map[string]any{"name": "snap.test"}),
 		"nodomain":   inv("GetDomain", map[string]any{"name": "nope.test"}),
+		"del_miss_d": inv("DeleteDroplet", map[string]any{"id": "missing"}),
+		"del_miss_n": inv("DeleteDomain", map[string]any{"name": "missing.test"}),
 	})
 }

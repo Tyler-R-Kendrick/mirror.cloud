@@ -79,10 +79,14 @@ func TestRailwayGraphQLBehavior(t *testing.T) {
 			t.Fatalf("delete missing %#v %v", env, hdr)
 		}
 	})
-	t.Run("Given a missing service When fetched Then GraphQL errors", func(t *testing.T) {
+	t.Run("Given a missing service When fetched or deleted Then GraphQL errors", func(t *testing.T) {
 		env, hdr := gql(`query($id:String){ service(id:$id){ id } }`, `{"id":"missing"}`)
 		if env["errors"] == nil || hdr.Get("x-amzn-errortype") != "" || env["data"] != nil {
 			t.Fatalf("missing service %#v %v", env, hdr)
+		}
+		env, hdr = gql(`mutation($id:String){ serviceDelete(id:$id) }`, `{"id":"missing"}`)
+		if env["errors"] == nil || hdr.Get("x-amzn-errortype") != "" || env["data"] != nil {
+			t.Fatalf("delete missing service %#v %v", env, hdr)
 		}
 	})
 }

@@ -89,4 +89,14 @@ func TestBootedServerDigitalOceanAPI(t *testing.T) {
 	if code != 404 || miss["id"] != "not_found" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("missing domain %d %#v %s", code, h, raw)
 	}
+	code, raw, h = do(http.MethodDelete, "/v2/droplets/missing", "")
+	_ = json.Unmarshal(raw, &miss)
+	if code != 404 || miss["id"] != "not_found" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing droplet %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/v2/domains/missing.test", "")
+	_ = json.Unmarshal(raw, &miss)
+	if code != 404 || miss["id"] != "not_found" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing domain %d %#v %s", code, h, raw)
+	}
 }

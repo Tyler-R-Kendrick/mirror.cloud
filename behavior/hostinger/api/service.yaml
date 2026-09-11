@@ -62,8 +62,9 @@ operations:
     reads:
       existing: { resource: domain }
     require:
-      - { cond: "lower(input.domain) == ''", error: ValidationFailed, message: "Domain is required" }
-      - { cond: existing_found, error: Conflict, message: "Domain already exists" }
+      # `cond` is a precondition: the error fires when it does NOT hold.
+      - { cond: "'domain' in input && string(input.domain) != ''", error: ValidationFailed, message: "Domain is required" }
+      - { cond: "!existing_found", error: Conflict, message: "Domain already exists" }
     effects:
       - create: { resource: domain }
       # A domain always has a zone, so GetDNSRecords on a fresh domain answers
@@ -89,7 +90,7 @@ operations:
     reads:
       rec: { resource: domain }
     require:
-      - { cond: "!rec_found", error: NotFound, message: "Domain not found" }
+      - { cond: rec_found, error: NotFound, message: "Domain not found" }
     output:
       domain: rec.domain
       status: rec.status
@@ -99,7 +100,7 @@ operations:
       dom: { resource: domain }
       zone: { resource: zone }
     require:
-      - { cond: "!dom_found", error: NotFound, message: "Domain not found" }
+      - { cond: dom_found, error: NotFound, message: "Domain not found" }
     output:
       # An absent zone reads as empty, which is what the pack answered when a
       # domain existed but its zone record had been removed.
@@ -110,8 +111,8 @@ operations:
       dom: { resource: domain }
       zone: { resource: zone }
     require:
-      - { cond: "!dom_found", error: NotFound, message: "Domain not found" }
-      - { cond: "!has(input.zone)", error: ValidationFailed, message: "zone is required" }
+      - { cond: dom_found, error: NotFound, message: "Domain not found" }
+      - { cond: "'zone' in input && input.zone != null", error: ValidationFailed, message: "zone is required" }
     effects:
       - put:
           resource: zone
@@ -127,7 +128,7 @@ operations:
     reads:
       dom: { resource: domain }
     require:
-      - { cond: "!dom_found", error: NotFound, message: "Domain not found" }
+      - { cond: dom_found, error: NotFound, message: "Domain not found" }
     effects:
       # The zone is emptied, not dropped: the pack wrote an empty list back so
       # a later read answers [] rather than falling to the absent-zone path.
@@ -154,6 +155,14 @@ quirks:
       those is a billing fact this emulator has no evidence for; inventing a
       currency and a total would read as recorded behaviour rather than as the
       guess it would be. A corpus recording is what fills them.
+  - operation: DNSUpdateDNSRecordsV1
+    note: >
+      The pack answered a missing `zone` with its own 422 validation_error.
+      The specification marks zone required, so the engine's own model check
+      fires first and answers ValidationException/400 instead. The rule below
+      still catches an explicit null, which the model check passes; absent and
+      null therefore answer differently, and the pack answered both the same.
+
   - operation: DNSDeleteDNSRecordsV1
     note: >
       The specification requires `filters`, naming which records to remove;

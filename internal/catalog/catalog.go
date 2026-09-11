@@ -500,19 +500,31 @@ func Bundle() *model.Bundle {
 		op("DeleteTable", "DELETE", "/Tables('{table}')", 204, false),
 		op("InsertEntity", "POST", "/{table}", 201, false),
 		op("QueryEntities", "GET", "/{table}()", 200, true),
+		op("GetEntity", "GET", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 200, true),
+		op("UpdateEntity", "PUT", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 204, false),
+		op("MergeEntity", "PATCH", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 204, false),
 		op("DeleteEntity", "DELETE", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 204, false),
+		op("SubmitBatch", "POST", "/$batch", 202, false),
 	}
 	tableSvc := svc("azure.table", "table", model.ProtoRESTJSON1, "", "", "", tableOps)
 	tableSvc.OperationByName("CreateTable").Output = "Table"
 	tableSvc.OperationByName("ListTables").Output = "TableList"
-	tableSvc.OperationByName("InsertEntity").Output = "Entity"
+	tableSvc.OperationByName("InsertEntity").Output = "EntityResult"
 	tableSvc.OperationByName("QueryEntities").Output = "EntityList"
+	tableSvc.OperationByName("GetEntity").Output = "EntityResult"
+	tableSvc.OperationByName("UpdateEntity").Output = "EntityResult"
+	tableSvc.OperationByName("MergeEntity").Output = "EntityResult"
 	tableSvc.Shapes = map[string]model.Shape{
 		"String":     {ID: "String", Kind: model.KindString},
+		"Map":        {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
 		"Table":      {ID: "Table", Kind: model.KindStructure, Members: map[string]model.Member{"TableName": {Shape: "String"}}},
 		"TableList":  {ID: "TableList", Kind: model.KindList, Member: "Table"},
 		"Entity":     {ID: "Entity", Kind: model.KindStructure, Members: map[string]model.Member{"PartitionKey": {Shape: "String"}, "RowKey": {Shape: "String"}}},
 		"EntityList": {ID: "EntityList", Kind: model.KindList, Member: "Entity"},
+		"EntityResult": {ID: "EntityResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"entity": {Shape: "Map"},
+			"prefer": {Shape: "String"},
+		}},
 	}
 	digitalocean := []string{"CreateDroplet", "ListDroplets", "GetDroplet", "DeleteDroplet", "CreateDomain", "ListDomains", "GetDomain", "DeleteDomain"}
 	// Real bindings, not mk(): mk() binds every operation to POST /, and

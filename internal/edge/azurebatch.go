@@ -81,33 +81,45 @@ func (s *Server) serveAzureBatch(w http.ResponseWriter, r *http.Request, rid str
 		writeAzureBatchResponse(w, rid, []azureBatchPart{azureBatchFaultPart(errCode, "The value for one of the HTTP headers is not in the correct format.")})
 		return
 	}
+	// Container-scoped blob batches name their container in the path; the
+	// service-level and table batches are unscoped.
+	scope := strings.Trim(r.URL.Path, "/")
+	if scope == "$batch" {
+		scope = ""
+	}
+	parts := s.serveAzureBatchParts(r, multipart.NewReader(r.Body, boundary), scope)
+	if len(parts) == 0 {
+		parts = append(parts, azureBatchFaultPart("InvalidHeaderValue", "The value for one of the HTTP headers is not in the correct format."))
+	}
+	writeAzureBatchResponse(w, rid, parts)
+}
+
+// serveAzureBatchParts dispatches every part of one multipart level,
+// recursing into changesets (table batches nest their operations in one).
+func (s *Server) serveAzureBatchParts(outer *http.Request, mr *multipart.Reader, scope string) []azureBatchPart {
 	var parts []azureBatchPart
-	scope := strings.Trim(r.URL.Path, "/") // container-scoped batches name their container
-	mr := multipart.NewReader(r.Body, boundary)
 	for i := 0; ; i++ {
 		raw, err := mr.NextPart()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			parts = append(parts, azureBatchFaultPart("InvalidHeaderValue", "The value for one of the HTTP headers is not in the correct format."))
-			break
+			return append(parts, azureBatchFaultPart("InvalidHeaderValue", "The value for one of the HTTP headers is not in the correct format."))
 		}
 		if i >= 256 {
-			parts = append(parts, azureBatchFaultPart("ExceedsMaxBatchRequestCount", "The batch operation exceeds maximum number of allowed subrequests."))
-			break
+			return append(parts, azureBatchFaultPart("ExceedsMaxBatchRequestCount", "The batch operation exceeds maximum number of allowed subrequests."))
 		}
 		body, err := io.ReadAll(raw)
 		if err != nil {
-			parts = append(parts, azureBatchFaultPart("InvalidHeaderValue", "The value for one of the HTTP headers is not in the correct format."))
-			break
+			return append(parts, azureBatchFaultPart("InvalidHeaderValue", "The value for one of the HTTP headers is not in the correct format."))
 		}
-		parts = append(parts, s.serveAzureBatchPart(r, raw.Header.Get("Content-ID"), i, scope, body))
+		if nb, _ := azureBatchBoundary(raw.Header.Get("Content-Type")); nb != "" {
+			parts = append(parts, s.serveAzureBatchParts(outer, multipart.NewReader(strings.NewReader(string(body)), nb), scope)...)
+			continue
+		}
+		parts = append(parts, s.serveAzureBatchPart(outer, raw.Header.Get("Content-ID"), i, scope, body))
 	}
-	if len(parts) == 0 {
-		parts = append(parts, azureBatchFaultPart("InvalidHeaderValue", "The value for one of the HTTP headers is not in the correct format."))
-	}
-	writeAzureBatchResponse(w, rid, parts)
+	return parts
 }
 
 // serveAzureBatchPart parses one application/http part and dispatches it

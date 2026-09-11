@@ -879,7 +879,11 @@
       "DeleteTable",
       "InsertEntity",
       "QueryEntities",
-      "DeleteEntity"
+      "GetEntity",
+      "UpdateEntity",
+      "MergeEntity",
+      "DeleteEntity",
+      "SubmitBatch"
     ]
   },
   {

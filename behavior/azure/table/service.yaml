@@ -36,6 +36,14 @@ errors:
     code: EntityNotFound
     http: 404
     fault: client
+  EntityAlreadyExists:
+    code: EntityAlreadyExists
+    http: 409
+    fault: client
+  UpdateConditionNotSatisfied:
+    code: UpdateConditionNotSatisfied
+    http: 412
+    fault: client
 
 operations:
   CreateTable:
@@ -63,15 +71,21 @@ operations:
   InsertEntity:
     reads:
       tbl: { resource: table }
+      existing: { resource: entity }
     require:
       - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
-      - { cond: "'PartitionKey' in input && string(input.PartitionKey) != ''", error: InvalidInput, message: "PartitionKey is required." }
-      - { cond: "'RowKey' in input && string(input.RowKey) != ''", error: InvalidInput, message: "RowKey is required." }
+      - { cond: "'PartitionKey' in input && input.PartitionKey != null", error: InvalidInput, message: "PartitionKey is required." }
+      - { cond: "'RowKey' in input && input.RowKey != null", error: InvalidInput, message: "RowKey is required." }
+      - { cond: "!existing_found", error: EntityAlreadyExists, message: "The specified entity already exists." }
     effects:
-      - put: { resource: entity }
+      - put:
+          resource: entity
+          spread: "input.__entity"
+          record:
+            etag: "md5hex(toJSON(input.__entity))"
     output:
-      PartitionKey: "string(input.PartitionKey)"
-      RowKey: "string(input.RowKey)"
+      entity: rec
+      prefer: "('prefer' in input && input.prefer != null) ? string(input.prefer) : ''"
 
   QueryEntities:
     reads:
@@ -80,6 +94,67 @@ operations:
       - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
     list: { resource: entity, member: _list }
 
+  GetEntity:
+    reads:
+      tbl: { resource: table }
+      rec: { resource: entity }
+    require:
+      - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
+      - { cond: rec_found, error: EntityNotFound, message: "The specified entity does not exist." }
+    output:
+      entity: rec
+
+  # PUT with no If-Match is an insert-or-replace upsert; with If-Match the
+  # entity must exist and match.
+  UpdateEntity:
+    reads:
+      tbl: { resource: table }
+      rec: { resource: entity }
+    require:
+      - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
+      - { cond: "'PartitionKey' in input && input.PartitionKey != null", error: InvalidInput, message: "PartitionKey is required." }
+      - { cond: "'RowKey' in input && input.RowKey != null", error: InvalidInput, message: "RowKey is required." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || rec_found", error: EntityNotFound, message: "The specified entity does not exist." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || string(input.if_match_list[0]) == '*' || (rec_found && string(input.if_match_list[0]) == etag)", error: UpdateConditionNotSatisfied, message: "The update condition specified in the request was not satisfied." }
+    let:
+      etag: "rec_found ? (('etag' in rec && rec.etag != null) ? string(rec.etag) : '') : ''"
+    effects:
+      # Replace means dropping properties the request does not restate, and a
+      # put over an existing record overlays it, so the old record goes first.
+      - delete:
+          when: rec_found
+          resource: entity
+      - put:
+          resource: entity
+          spread: "input.__entity"
+          record:
+            etag: "md5hex(toJSON(input.__entity))"
+    output:
+      entity: rec
+      prefer: "('prefer' in input && input.prefer != null) ? string(input.prefer) : ''"
+
+  # PATCH with no If-Match is an insert-or-merge upsert.
+  MergeEntity:
+    reads:
+      tbl: { resource: table }
+      rec: { resource: entity }
+    require:
+      - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
+      - { cond: "'PartitionKey' in input && input.PartitionKey != null", error: InvalidInput, message: "PartitionKey is required." }
+      - { cond: "'RowKey' in input && input.RowKey != null", error: InvalidInput, message: "RowKey is required." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || rec_found", error: EntityNotFound, message: "The specified entity does not exist." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || string(input.if_match_list[0]) == '*' || (rec_found && string(input.if_match_list[0]) == etag)", error: UpdateConditionNotSatisfied, message: "The update condition specified in the request was not satisfied." }
+    let:
+      etag: "rec_found ? (('etag' in rec && rec.etag != null) ? string(rec.etag) : '') : ''"
+    effects:
+      - patch:
+          resource: entity
+          spread: "input.__entity"
+          record:
+            etag: "md5hex(toJSON(merge(rec_found ? without(rec, ['etag']) : {}, input.__entity)))"
+    output:
+      entity: rec
+
   DeleteEntity:
     reads:
       tbl: { resource: table }
@@ -87,5 +162,8 @@ operations:
     require:
       - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
       - { cond: rec_found, error: EntityNotFound, message: "The specified entity does not exist." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || string(input.if_match_list[0]) == '*' || string(input.if_match_list[0]) == etag", error: UpdateConditionNotSatisfied, message: "The update condition specified in the request was not satisfied." }
+    let:
+      etag: "rec_found ? (('etag' in rec && rec.etag != null) ? string(rec.etag) : '') : ''"
     effects:
       - delete: { resource: entity }

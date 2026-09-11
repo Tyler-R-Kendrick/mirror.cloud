@@ -263,7 +263,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.fault(w, codec, svc, &model.Operation{Name: "unknown"}, err, rid)
 		return
 	}
-	if svc.ID == "azure.blobs" && op.Name == "SubmitBatch" {
+	if (svc.ID == "azure.blobs" || svc.ID == "azure.table") && op.Name == "SubmitBatch" {
 		s.serveAzureBatch(w, r, rid)
 		return
 	}

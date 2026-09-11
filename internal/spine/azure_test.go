@@ -768,7 +768,7 @@ func TestBootedServerAzureTable(t *testing.T) {
 	}
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
-	do := func(method, path, body string) (int, []byte, http.Header) {
+	do := func(method, path, body string, hdr map[string]string) (int, []byte, http.Header) {
 		t.Helper()
 		var rdr io.Reader
 		if body != "" {
@@ -781,6 +781,9 @@ func TestBootedServerAzureTable(t *testing.T) {
 		req.Host = "acct.table.core.windows.net"
 		req.Header.Set("Authorization", "Bearer test")
 		req.Header.Set("Content-Type", "application/json")
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -789,23 +792,91 @@ func TestBootedServerAzureTable(t *testing.T) {
 		res.Body.Close()
 		return res.StatusCode, b, res.Header
 	}
-	code, raw, _ := do(http.MethodPost, "/Tables", `{"TableName":"t1"}`)
+	code, raw, _ := do(http.MethodPost, "/Tables", `{"TableName":"t1"}`, nil)
 	if code >= 300 {
 		t.Fatalf("create table %d %s", code, raw)
 	}
-	code, raw, _ = do(http.MethodGet, "/Tables", "")
+	code, raw, _ = do(http.MethodGet, "/Tables", "", nil)
 	if code != 200 || !strings.Contains(string(raw), "t1") {
 		t.Fatalf("list tables %d %s", code, raw)
 	}
-	code, raw, _ = do(http.MethodPost, "/t1", `{"PartitionKey":"p","RowKey":"r"}`)
+	code, raw, _ = do(http.MethodPost, "/t1", `{"PartitionKey":"p","RowKey":"r"}`, nil)
 	if code >= 300 {
 		t.Fatalf("insert entity %d %s", code, raw)
 	}
-	code, raw, _ = do(http.MethodGet, "/t1()", "")
+	code, raw, _ = do(http.MethodGet, "/t1()", "", nil)
 	if code != 200 || !strings.Contains(string(raw), "PartitionKey") {
 		t.Fatalf("query entities %d %s", code, raw)
 	}
-	code, raw, h := do(http.MethodDelete, "/Tables('missing')", "")
+	// Single-entity read, replace, merge, conditional delete.
+	code, raw, _ = do(http.MethodPost, "/t1", `{"PartitionKey":"p","RowKey":"r2","Name":"ada"}`, nil)
+	if code != 201 || !strings.Contains(string(raw), `"Name":"ada"`) || !strings.Contains(string(raw), "odata.etag") {
+		t.Fatalf("insert with props %d %s", code, raw)
+	}
+	code, raw, h := do(http.MethodGet, "/t1(PartitionKey='p',RowKey='r2')", "", nil)
+	if code != 200 || !strings.Contains(string(raw), `"Name":"ada"`) || h.Get("ETag") == "" {
+		t.Fatalf("get entity %d %#v %s", code, h, raw)
+	}
+	_ = h.Get("ETag")
+	code, raw, _ = do(http.MethodPut, "/t1(PartitionKey='p',RowKey='r2')", `{"PartitionKey":"p","RowKey":"r2","City":"london"}`, nil)
+	if code != 204 {
+		t.Fatalf("update entity %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/t1(PartitionKey='p',RowKey='r2')", "", nil)
+	if code != 200 || strings.Contains(string(raw), "ada") || !strings.Contains(string(raw), "london") {
+		t.Fatalf("replaced entity %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPatch, "/t1(PartitionKey='p',RowKey='r2')", `{"Name":"grace"}`, nil)
+	if code != 204 {
+		t.Fatalf("merge entity %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/t1(PartitionKey='p',RowKey='r2')", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "grace") || !strings.Contains(string(raw), "london") {
+		t.Fatalf("merged entity %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodDelete, "/t1(PartitionKey='p',RowKey='r2')", "", map[string]string{"If-Match": `"stale"`})
+	if code != 412 || !strings.Contains(string(raw), "UpdateConditionNotSatisfied") {
+		t.Fatalf("delete wrong etag %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/t1(PartitionKey='p',RowKey='r2')", "", nil)
+	if code != 200 {
+		t.Fatalf("get before delete %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodDelete, "/t1(PartitionKey='p',RowKey='r2')", "", map[string]string{"If-Match": h.Get("ETag")})
+	if code != 204 {
+		t.Fatalf("delete with etag %d %s", code, raw)
+	}
+	// Batch: two inserts through a changeset, then a mixed batch with a 404.
+	batch := func(parts ...string) (string, string) {
+		var cs strings.Builder
+		for i, p := range parts {
+			fmt.Fprintf(&cs, "--cs1\r\nContent-Type: application/http\r\nContent-ID: %d\r\n\r\n%s\r\n", i, p)
+		}
+		cs.WriteString("--cs1--\r\n")
+		body := "--tb1\r\nContent-Type: multipart/mixed; boundary=cs1\r\n\r\n" + cs.String() + "--tb1--\r\n"
+		return body, "multipart/mixed; boundary=tb1"
+	}
+	subPost := func(payload string) string {
+		return fmt.Sprintf("POST https://acct.table.core.windows.net/t1 HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)
+	}
+	body, cty := batch(
+		subPost(`{"PartitionKey":"p","RowKey":"b1","Name":"one"}`),
+		subPost(`{"PartitionKey":"p","RowKey":"b2","Name":"two"}`),
+	)
+	code, raw, _ = do(http.MethodPost, "/$batch", body, map[string]string{"Content-Type": cty})
+	if code != 202 || !strings.Contains(string(raw), "HTTP/1.1 201") {
+		t.Fatalf("batch insert %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/t1(PartitionKey='p',RowKey='b1')", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "one") {
+		t.Fatalf("batch inserted %d %s", code, raw)
+	}
+	body, cty = batch("DELETE https://acct.table.core.windows.net/t1(PartitionKey='p',RowKey='ghost') HTTP/1.1\r\nIf-Match: *\r\n\r\n")
+	code, raw, _ = do(http.MethodPost, "/$batch", body, map[string]string{"Content-Type": cty})
+	if code != 202 || !strings.Contains(string(raw), "HTTP/1.1 404") || !strings.Contains(string(raw), "EntityNotFound") {
+		t.Fatalf("batch missing %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/Tables('missing')", "", nil)
 	if code != 404 || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("delete missing table %d %#v %s", code, h, raw)
 	}

@@ -430,6 +430,21 @@ func digitaloceanRoute(r *http.Request) string {
 	return "Unknown"
 }
 
+// azureTableETagList splits an If-Match header into dequoted tokens, like
+// Azurite's etag adapter.
+func azureTableETagList(v string) []any {
+	parts := strings.Split(v, ",")
+	out := make([]any, 0, len(parts))
+	for _, p := range parts {
+		p = strings.Trim(strings.TrimSpace(p), `"`)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func azureTableOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := azureTableRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -441,6 +456,9 @@ func azureTableOp(svc *model.Service, r *http.Request) *model.Operation {
 func azureTableRoute(r *http.Request) string {
 	path := strings.Trim(r.URL.Path, "/")
 	m := r.Method
+	if path == "$batch" && m == http.MethodPost {
+		return "SubmitBatch"
+	}
 	if path == "Tables" || path == "Tables()" {
 		if m == http.MethodPost {
 			return "CreateTable"
@@ -450,8 +468,18 @@ func azureTableRoute(r *http.Request) string {
 	if strings.HasPrefix(path, "Tables('") && strings.HasSuffix(path, "')") && m == http.MethodDelete {
 		return "DeleteTable"
 	}
-	if strings.Contains(path, "PartitionKey=") && m == http.MethodDelete {
-		return "DeleteEntity"
+	if strings.Contains(path, "PartitionKey=") {
+		switch m {
+		case http.MethodGet:
+			return "GetEntity"
+		case http.MethodPut:
+			return "UpdateEntity"
+		case http.MethodPatch:
+			return "MergeEntity"
+		case http.MethodDelete:
+			return "DeleteEntity"
+		}
+		return "Unknown"
 	}
 	if strings.HasSuffix(path, "()") && m == http.MethodGet {
 		return "QueryEntities"
@@ -548,13 +576,28 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		_ = json.Unmarshal(body, &in)
 	}
 	if svc.ID == "azure.table" {
-		if tn, ok := in["TableName"]; ok {
+		// The entity body spreads into the record at write time, so it must
+		// not also pollute the control members: it moves under __entity.
+		var ent map[string]any
+		if len(body) > 0 && json.Unmarshal(body, &ent) == nil {
+			in["__entity"] = ent
+			for k := range ent {
+				delete(in, k)
+			}
+		}
+		if tn, ok := ent["TableName"]; ok {
 			in["table"] = tn
+		}
+		if v := r.Header.Get("If-Match"); v != "" {
+			in["if_match_list"] = azureTableETagList(v)
+		}
+		if v := r.Header.Get("Prefer"); v != "" {
+			in["prefer"] = v
 		}
 		path := strings.Trim(r.URL.Path, "/")
 		if strings.HasPrefix(path, "Tables('") && strings.HasSuffix(path, "')") {
 			in["table"] = strings.TrimSuffix(strings.TrimPrefix(path, "Tables('"), "')")
-		} else if path != "Tables" && path != "Tables()" && path != "" && !strings.HasPrefix(path, "Tables") {
+		} else if path != "Tables" && path != "Tables()" && path != "" && !strings.HasPrefix(path, "Tables") && path != "$batch" {
 			tbl := path
 			if i := strings.IndexByte(tbl, '('); i >= 0 {
 				tbl = tbl[:i]
@@ -574,6 +617,12 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 					in["RowKey"] = rest[:j]
 				}
 			}
+		}
+		if in["PartitionKey"] == nil && ent != nil {
+			in["PartitionKey"] = ent["PartitionKey"]
+		}
+		if in["RowKey"] == nil && ent != nil {
+			in["RowKey"] = ent["RowKey"]
 		}
 	}
 	for k, vs := range r.URL.Query() {
@@ -624,21 +673,7 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		return err
 	}
 	if svc.ID == "azure.table" {
-		if w.Header().Get("Content-Type") == "" {
-			w.Header().Set("Content-Type", "application/json")
-		}
-		w.WriteHeader(status)
-		if resp.Output == nil {
-			return nil
-		}
-		if lst, ok := resp.Output["_list"]; ok {
-			items, _ := lst.([]any)
-			if items == nil {
-				items = []any{}
-			}
-			return json.NewEncoder(w).Encode(map[string]any{"value": items})
-		}
-		return json.NewEncoder(w).Encode(resp.Output)
+		return encodeAzureTable(w, status, op, resp)
 	}
 	if svc.ID == "digitalocean.v2" {
 		return encodeDigitalOcean(w, status, resp)
@@ -678,6 +713,82 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		return json.NewEncoder(w).Encode(lst)
 	}
 	return json.NewEncoder(w).Encode(resp.Output)
+}
+
+// encodeAzureTable answers the OData JSON shapes: single-entity bodies are
+// the record (etag renamed to odata.etag and echoed as the ETag header),
+// collections are {"value": [...]}, and update/merge/delete are header-only.
+func encodeAzureTable(w http.ResponseWriter, status int, op *model.Operation, resp *spi.Response) error {
+	entity := func() map[string]any {
+		m, _ := resp.Output["entity"].(map[string]any)
+		return m
+	}
+	switch op.Name {
+	case "UpdateEntity", "MergeEntity":
+		w.Header().Set("ETag", azureTableEntityETag(entity()))
+		w.WriteHeader(status)
+		return nil
+	case "DeleteEntity":
+		w.WriteHeader(status)
+		return nil
+	case "InsertEntity":
+		m := entity()
+		w.Header().Set("ETag", azureTableEntityETag(m))
+		if prefer, _ := resp.Output["prefer"].(string); strings.Contains(prefer, "return-no-content") {
+			w.Header().Set("Preference-Applied", "return-no-content")
+			w.WriteHeader(http.StatusNoContent)
+			return nil
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(azureTableEntityJSON(m))
+	case "GetEntity":
+		m := entity()
+		w.Header().Set("ETag", azureTableEntityETag(m))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(azureTableEntityJSON(m))
+	}
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(status)
+	if resp.Output == nil {
+		return nil
+	}
+	if lst, ok := resp.Output["_list"]; ok {
+		items, _ := lst.([]any)
+		out := make([]any, 0, len(items))
+		for _, item := range items {
+			m, _ := item.(map[string]any)
+			out = append(out, azureTableEntityJSON(m))
+		}
+		return json.NewEncoder(w).Encode(map[string]any{"value": out})
+	}
+	return json.NewEncoder(w).Encode(resp.Output)
+}
+
+// azureTableEntityETag reads the record's etag member.
+func azureTableEntityETag(m map[string]any) string {
+	s, _ := m["etag"].(string)
+	return s
+}
+
+// azureTableEntityJSON copies an entity record for the wire: the etag member
+// becomes odata.etag.
+func azureTableEntityJSON(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if k == "etag" {
+			out["odata.etag"] = v
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 func encodeRailway(w http.ResponseWriter, status int, resp *spi.Response) error {

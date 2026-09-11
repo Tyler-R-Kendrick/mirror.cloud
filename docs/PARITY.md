@@ -127,11 +127,11 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Azurite test functions | 806 |
 | Blob keys fully routed | 40 / 59 |
 | Queue keys fully routed | 11 / 11 |
-| Table method+paths routed | 6 / 12 |
+| Table method+paths routed | 9 / 12 |
 | Blob keys accounted (routed + unclaim) | 49 / 59 |
 | Queue keys accounted | 11 / 11 |
-| Table method+paths accounted (routed + unclaim) | 8 / 12 |
-| Azurite test functions traced | 347 / 806 (43%) |
+| Table method+paths accounted (routed + unclaim) | 11 / 12 |
+| Azurite test functions traced | 394 / 806 (49%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -288,14 +288,14 @@ Host `{account}.table.core.windows.net`. Table `x-ms-paths` service properties/s
 |---|---|---|
 | `GET /Tables` | routed | `ListTables` |
 | `POST /Tables` | routed | `CreateTable` |
-| `POST /$batch` | missing | Batch (changeset; isolation unclaimed) |
+| `POST /$batch` | partial | `SubmitBatch` — edge fan-out recursing into changesets; per-operation replay; changeset atomicity/rollback and the 100-transaction cap unclaimed |
 | `DELETE /Tables('{table}')` | routed | `DeleteTable` |
 | `GET /{table}()` | routed | `QueryEntities` |
-| `GET /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | missing | Get entity |
-| `PUT /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | missing | Update entity |
-| `PATCH /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | missing | Merge entity |
-| `DELETE /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `DeleteEntity` |
-| `POST /{table}` | routed | `InsertEntity` |
+| `GET /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `GetEntity`; full property set + `odata.etag` and ETag header; missing 404 |
+| `PUT /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `UpdateEntity` — replace (delete-then-put), no-If-Match upsert, wildcard/match honored, mismatch 412 `UpdateConditionNotSatisfied` |
+| `PATCH /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `MergeEntity` — spread patch keeps unstated properties, no-If-Match upsert, mismatch 412 |
+| `DELETE /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `DeleteEntity`; If-Match wildcard/match honored, mismatch 412 |
+| `POST /{table}` | routed | `InsertEntity` — full property spread, duplicate 409 `EntityAlreadyExists`, 201 body or 204 on `Prefer: return-no-content` |
 | `GET /{table}` | unclaim | Azurite: Get Table ACL unsupported |
 | `PUT /{table}` | unclaim | Azurite: Set Table ACL unsupported |
 
@@ -684,6 +684,58 @@ Direct `it()` names from `queue/apis/queue.test.ts` (9), `queue/apis/queueServic
 | `queue/apis/messageid.test.ts::update message with 64KB characters size which is computed after encoding` | 64KB limit on update; atomic | Mapped and green |
 | `queue/apis/messageid.test.ts::update message negative with 65537B (64KB+1B) characters size which is computed after encoding` | 400 `RequestBodyTooLarge`; atomic | Mapped and green |
 | `queue/apis/messageid.test.ts::delete message negative` | Wrong receipt is 400 `PopReceiptMismatch`; booted + atomic | Mapped and green |
+
+Direct `it()` names from `table/apis/table.entity.test.ts` (38) and `table/apis/table.batch.errorhandling.test.ts` (9). Entities spread the whole JSON body (control members ride `__entity` so they never leak into records); etags are content-derived and move on every write; table batch reuses the blob fan-out, recursing into changesets, and does not pretend to changeset atomicity.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.entity.test.ts::01. Should insert new Entity` | Booted POST 201 with `odata.etag`; atomic `TestAzureTableEntities` | Mapped and green |
+| `table/apis/table.entity.test.ts::02. Insert new Entity property with type Edm.DateTime will convert to UTC` | Values stored verbatim; Edm type coercion unclaimed | Partial |
+| `table/apis/table.entity.test.ts::03. Insert invalid Date should fail` | No date validation | Partial |
+| `table/apis/table.entity.test.ts::04. Should insert new Entity with empty RowKey` | Empty RowKey inserts and addresses; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::05. Should retrieve entity with empty RowKey` | Same | Mapped and green |
+| `table/apis/table.entity.test.ts::06. Should delete an Entity using etag wildcard` | If-Match `*` deletes; booted + atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::07. Should not delete an Entity not matching Etag` | 412 `UpdateConditionNotSatisfied`; booted + atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::08. Should delete a matching Etag` | Matching etag deletes; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::09. Update an Entity that exists` | PUT replace drops unstated properties (delete-then-put); atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::10. Should fail replacing when an Entity does not exist` | If-Match on a missing entity is 404; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::11. Should not update an Entity not matching Etag` | 412; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::12. Should update, if Etag matches` | Matching etag updates; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::13. Insert or Replace (upsert) on an Entity that does not exist` | No-If-Match PUT creates; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::14. Insert or Replace (upsert) on an Entity that exists` | Same, replaces | Mapped and green |
+| `table/apis/table.entity.test.ts::15. Insert or Merge on an Entity that exists` | PATCH keeps unstated properties; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::16. Insert or Merge on an Entity that does not exist` | No-If-Match PATCH creates; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::17. Simple Insert Or Replace of a SINGLE entity as a BATCH` | Changeset fan-out; booted | Mapped and green |
+| `table/apis/table.entity.test.ts::18. operation entity with label in a BATCH` | Insert/update/delete parts dispatch independently | Mapped and green |
+| `table/apis/table.entity.test.ts::19. operation of entity with label in a BATCH` | Same | Mapped and green |
+| `table/apis/table.entity.test.ts::20. DELETE of entity with label in a BATCH` | Delete parts replay 204/404 | Mapped and green |
+| `table/apis/table.entity.test.ts::21. Simple batch test: Inserts multiple entities as a batch` | Booted changeset of two inserts, per-part 201 | Mapped and green |
+| `table/apis/table.entity.test.ts::22. Simple batch test: Delete multiple entities as a batch` | Delete parts | Mapped and green |
+| `table/apis/table.entity.test.ts::23. Insert Or Replace multiple entities as a batch` | Upsert parts | Mapped and green |
+| `table/apis/table.entity.test.ts::24. Insert Or Merge multiple entities as a batch` | Merge parts | Mapped and green |
+| `table/apis/table.entity.test.ts::25. Insert and Update entity via a batch` | Mixed parts run in order | Mapped and green |
+| `table/apis/table.entity.test.ts::26. Insert and Merge entity via a batch` | Same | Mapped and green |
+| `table/apis/table.entity.test.ts::27. Insert and Delete entity via a batch` | Same | Mapped and green |
+| `table/apis/table.entity.test.ts::28. Query / Retrieve single entity with default options` | Booted GET single with ETag header | Mapped and green |
+| `table/apis/table.entity.test.ts::29. Single Delete entity via a batch` | Booted | Mapped and green |
+| `table/apis/table.entity.test.ts::30. Operates on batch items with complex row keys` | Path key parsing stops at the first quote; OData `''` escaping unclaimed | Partial |
+| `table/apis/table.entity.test.ts::31. Operates on batch items with complex partition keys` | Same | Partial |
+| `table/apis/table.entity.test.ts::32. Ensure Valid Etag format from Batch` | ETag headers are quoted strings on every entity response | Mapped and green |
+| `table/apis/table.entity.test.ts::33. Should expose a valid etag when inserting an entity` | ETag header + `odata.etag`; booted | Mapped and green |
+| `table/apis/table.entity.test.ts::34. Can create entities with empty string for row and partition key` | Presence-only key checks; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::35. Operates on batch items with partition keys with %25 in the middle` | URL-escape handling in key parse unclaimed | Partial |
+| `table/apis/table.entity.test.ts::36. Merge on an Entity with single quote in PartitionKey and RowKey` | Quote-escaped key parse unclaimed | Partial |
+| `table/apis/table.entity.test.ts::37. Should ignore client-supplied etag-like property when inserting entity` | Declared `etag` wins over the spread, but an `odata.etag` body property is stored verbatim | Partial |
+| `table/apis/table.entity.test.ts::38. Insert entity with Edm.Double type property whose value is bigger than MAX_VALUE, server will fail the request` | No numeric range validation | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::01. Batch API should serialize errors according to group transaction spec` | Per-operation replay; a failed changeset does not collapse to one error part | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::02. Batch API should reject request with more than 100 transactions` | The 256 blob-style cap answers instead of the table 100 | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::03. Batch API should rollback insert Entity transactions` | No changeset isolation; earlier parts stay applied | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::04. Batch API should rollback delete Entity transactions` | Same | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::05. Batch API should rollback update Entity transactions` | Same | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::06. Batch API should rollback upsert Entity transactions` | Same | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::07. Batch API should return valid batch failure index for Azure.Data.Tables` | Failure index reporting unclaimed | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::08. Batch API Etag should be rolled back after transaction failure on update` | No rollback | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::09. Batch API should fail to insert duplicate Entity with correct 400 Status and InvalidDuplicateRow error` | The part faults 409 `EntityAlreadyExists`, not the batch-mapped 400 | Partial |
 
 ### Shipped YAML evidence (not the inventory)
 

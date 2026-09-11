@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/behavior"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
@@ -89,4 +90,60 @@ func split(id string) (string, string) {
 		}
 	}
 	return "", id
+}
+
+// TestEveryBundleOnDiskIsEmbedded catches the failure that has no symptom: a
+// bundle the embed pattern does not match is not a build error and not a
+// validation error. It is simply absent, and `ServiceIDs` cannot tell an
+// unembedded provider from one with no bundles, so the service quietly keeps
+// being served by whatever it was served by before -- or by nothing.
+//
+// The pattern was `all:aws all:gcp` when this was written, which is every
+// provider that existed at the time. The first bundle added under a third
+// provider registered nothing and failed nothing.
+func TestEveryBundleOnDiskIsEmbedded(t *testing.T) {
+	embedded := map[string]bool{}
+	for _, id := range behaviors.ServiceIDs() {
+		embedded[id] = true
+	}
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, provider := range entries {
+		if !provider.IsDir() {
+			continue
+		}
+		services, err := os.ReadDir(provider.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, service := range services {
+			if !service.IsDir() {
+				continue
+			}
+			path := filepath.Join(provider.Name(), service.Name(), "service.yaml")
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			found++
+			id, err := bir.ServiceIDOf(os.DirFS("."), filepath.ToSlash(filepath.Join(provider.Name(), service.Name())))
+			if err != nil {
+				t.Errorf("%s does not declare a service ID: %v", path, err)
+				continue
+			}
+			if !embedded[id] {
+				t.Errorf("%s declares %s, which is on disk but not embedded; "+
+					"the //go:embed pattern in behaviors.go does not match it", path, id)
+			}
+		}
+	}
+	if found == 0 {
+		t.Fatal("no bundles found on disk; this test would pass vacuously")
+	}
+	if found != len(embedded) {
+		t.Errorf("%d bundles on disk, %d embedded", found, len(embedded))
+	}
 }

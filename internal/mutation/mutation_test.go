@@ -14,6 +14,25 @@ import (
 // TestMutantsAreKilled is a tiny in-tree mutation suite. Each mutant
 // rewrites one production token via `go test -overlay` and must make
 // the targeted tests fail. A surviving mutant means the tests are blind.
+//
+// This suite only means anything on a tree whose tests already pass, and the
+// failure mode when they do not is silent in the dangerous direction. A mutant
+// whose `run` target is *already red* is reported killed, because the harness
+// sees a failing test and cannot tell "the mutant broke it" from "it was
+// broken before the mutant". Every mutant pointing at such a test is laundered
+// into a green result.
+//
+// That is not hypothetical. Five SQS tests were red on main for thirty commits
+// (C35), five mutants named them, and all five reported killed the whole time.
+// The moment those tests went green, `sqs-query-url-without-action-stays-sqs`
+// survived -- it had never been verified, and the branch it points at had no
+// unsigned-request coverage at all.
+//
+// The harness is not the thing to fix: running a clean baseline per mutant
+// would double a suite that already takes twenty minutes a shard, to re-derive
+// something CI's `test` job establishes once. What has to hold is the order --
+// **a red suite invalidates these results, so read them only after `test` is
+// green.** Merging past a red suite is what made this reachable.
 // mutant is one source rewrite and the tests that must notice it.
 type mutant struct {
 	name string

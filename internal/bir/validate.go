@@ -552,12 +552,31 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 			s.ServiceID, where, op.Output))
 		return
 	}
+	if member == TopLevelList {
+		// A REST body that is a bare JSON array has no member to name, and
+		// `_list` is what the codec calls it (internal/proto/aws/restjson).
+		// The shape has to actually be a list: naming it on a structure would
+		// put a member no reader looks for into the body.
+		if shape.Kind != model.KindList {
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s: %q projects a bare array but %s is a %s, not a list",
+				s.ServiceID, where, member, op.Output, shape.Kind))
+		}
+		return
+	}
 	if _, ok := shape.Members[member]; !ok {
 		known := sortedKeys(shape.Members)
 		*problems = append(*problems, fmt.Errorf("%s: %s: %q is not a member of %s (have: %s)",
 			s.ServiceID, where, member, op.Output, strings.Join(known, ", ")))
 	}
 }
+
+// TopLevelList is the output member name that means "the body is this list",
+// for the REST operations whose response is a bare JSON array rather than an
+// object. Whole providers are shaped that way -- Hostinger returns arrays from
+// every collection endpoint -- and without it such an operation cannot be
+// expressed as a bundle at all, only as a Go pack.
+const TopLevelList = "_list"
 
 // checkListItemMembers reports a record member that the listed item's shape
 // does not declare.
@@ -581,12 +600,17 @@ func checkListItemMembers(s *Service, svc *model.Service, op model.Operation, wh
 	if !ok {
 		return
 	}
-	member, ok := outShape.Members[l.Member]
-	if !ok {
-		return
+	list := outShape
+	if l.Member != TopLevelList {
+		member, ok := outShape.Members[l.Member]
+		if !ok {
+			return
+		}
+		if list, ok = svc.Shapes[member.Shape]; !ok {
+			return
+		}
 	}
-	list, ok := svc.Shapes[member.Shape]
-	if !ok || list.Kind != model.KindList {
+	if list.Kind != model.KindList {
 		return
 	}
 	item, ok := svc.Shapes[list.Member]

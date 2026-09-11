@@ -3,12 +3,15 @@ package check
 import (
 	"compress/gzip"
 	"encoding/json"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
@@ -159,5 +162,49 @@ func TestGeneratedIDsAreCanonical(t *testing.T) {
 		if svc.Protocol == "" {
 			t.Errorf("%s: no protocol", id)
 		}
+	}
+}
+
+// TestEveryGeneratedModelIsEmbedded catches the failure with no symptom, the
+// mirror image of TestEveryBundleOnDiskIsEmbedded.
+//
+// internal/generated embeds its models with a //go:embed pattern. That pattern
+// was `all:aws all:gcp` -- every provider that existed when it was written --
+// so a model mirrorgen generated for a third provider was written to disk and
+// committed, and generated.Model still answered "no model for hostinger.api"
+// with the file sitting in the tree. Nothing failed at build time, because an
+// unembedded directory is indistinguishable from a provider with no models.
+func TestEveryGeneratedModelIsEmbedded(t *testing.T) {
+	root := generatedRoot(t)
+	providers, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, provider := range providers {
+		if !provider.IsDir() {
+			continue
+		}
+		services, err := os.ReadDir(filepath.Join(root, provider.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, service := range services {
+			if !service.IsDir() {
+				continue
+			}
+			rel := path.Join(provider.Name(), service.Name(), "model.json.gz")
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+				continue
+			}
+			found++
+			if _, err := fs.Stat(generated.FS(), rel); err != nil {
+				t.Errorf("internal/generated/%s is committed but not embedded; "+
+					"the //go:embed pattern in index.go does not match it", rel)
+			}
+		}
+	}
+	if found == 0 {
+		t.Fatal("no generated models found on disk; this test would pass vacuously")
 	}
 }

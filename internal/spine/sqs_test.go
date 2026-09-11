@@ -704,6 +704,22 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if getRes.StatusCode != http.StatusNotFound || !strings.Contains(string(getBody), "<UnknownOperationException") {
 		t.Fatalf("query URL missing action %d %s", getRes.StatusCode, getBody)
 	}
+	// The same request with no Authorization header at all. The one above is
+	// signed, so it reaches SQS through the credential scope no matter how the
+	// path is read; this is the only case where the queue path itself has to
+	// do the work, and without it the demux branch that reads it is untestable
+	// -- which is exactly what the surviving `sqs-query-url-without-action-
+	// stays-sqs` mutant was pointing at once this test went green.
+	anonReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq", nil)
+	anonRes, err := http.DefaultClient.Do(anonReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anonBody, _ := io.ReadAll(anonRes.Body)
+	anonRes.Body.Close()
+	if anonRes.StatusCode != http.StatusNotFound || !strings.Contains(string(anonBody), "<UnknownOperationException") {
+		t.Fatalf("unsigned query URL missing action %d %s", anonRes.StatusCode, anonBody)
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"CreateQueue"}, "Version": {"2012-11-05"}, "QueueName": {"queryq2"}}); code != http.StatusOK {
 		t.Fatalf("query second create %d %s", code, body)
 	}

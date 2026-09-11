@@ -273,6 +273,13 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.String(parts[len(parts)-1])
 			}))),
 
+		// lower case-folds ASCII. See the declaration in internal/bir/celenv.go
+		// for why the Unicode form is not offered.
+		cel.Function("lower", cel.Overload("lower_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(s ref.Val) ref.Val {
+				return types.String(asciiLower(fmt.Sprint(s.Value())))
+			}))),
+
 		// arn builds "arn:<partition>:<rest joined by :>" from parts. String
 		// assembly, not provider logic: the engine stays free of service names.
 		cel.Function("arn", cel.Overload("arn_2", []*cel.Type{str, dyn}, str,
@@ -359,4 +366,16 @@ func asInt(v ref.Val) int64 {
 		return n
 	}
 	return 0
+}
+
+// asciiLower folds A-Z and leaves every other byte alone, so a value that is
+// already a key stays the same length and the same bytes outside that range.
+func asciiLower(s string) string {
+	out := []byte(s)
+	for i, c := range out {
+		if c >= 'A' && c <= 'Z' {
+			out[i] = c + ('a' - 'A')
+		}
+	}
+	return string(out)
 }

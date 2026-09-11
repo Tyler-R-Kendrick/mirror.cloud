@@ -19,8 +19,19 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
-//go:embed all:aws all:gcp
+// The pattern is the layout, not a list of providers -- the same correction
+// behavior/behaviors.go carries, and for the same reason. It was
+// `all:aws all:gcp`, so a model generated for a third provider was written to
+// disk by mirrorgen, committed, and then not embedded: `Model` answered "no
+// model for hostinger.api" while the file sat right there in the tree.
+//
+//go:embed */*/model.json.gz
 var files embed.FS
+
+// FS exposes the embedded models, so a test can ask what is actually in the
+// binary rather than what is on disk. The two differing is the failure mode
+// the embed pattern above describes.
+func FS() fs.FS { return files }
 
 var (
 	mu     sync.Mutex

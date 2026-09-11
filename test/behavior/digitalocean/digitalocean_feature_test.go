@@ -86,4 +86,17 @@ func TestDigitalOceanV2Behavior(t *testing.T) {
 			t.Fatalf("missing %d %#v %s", code, hdr, raw)
 		}
 	})
+	t.Run("Given a missing droplet or domain When deleted Then 404 not 204", func(t *testing.T) {
+		code, raw, hdr := call(http.MethodDelete, "/v2/droplets/missing", "")
+		miss := map[string]any{}
+		_ = json.Unmarshal(raw, &miss)
+		if code != 404 || miss["id"] != "not_found" || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("delete missing droplet %d %#v %s", code, hdr, raw)
+		}
+		code, raw, hdr = call(http.MethodDelete, "/v2/domains/missing.test", "")
+		_ = json.Unmarshal(raw, &miss)
+		if code != 404 || miss["id"] != "not_found" || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("delete missing domain %d %#v %s", code, hdr, raw)
+		}
+	})
 }

@@ -17,6 +17,16 @@
     "output": null,
     "status": 204
   },
+  "del_miss_d": {
+    "error": "not_found",
+    "message": "The resource you were accessing could not be found.",
+    "status": 404
+  },
+  "del_miss_n": {
+    "error": "not_found",
+    "message": "The resource you were accessing could not be found.",
+    "status": 404
+  },
   "delete": {
     "output": null,
     "status": 204

@@ -280,3 +280,45 @@ func skeleton(uri string) string {
 	}
 	return string(out)
 }
+
+// TestGreedyLabelLeavesWhatTheRestOfThePatternNeeds covers the four real
+// patterns AWS publishes with a literal after a greedy label, all in S3
+// Control. Before this, `{Name+}` absorbed the trailing `/policy` and the
+// literal was never compared -- so GetMultiRegionAccessPointPolicy and
+// GetMultiRegionAccessPointPolicyStatus matched the same requests and one of
+// them could not be reached.
+func TestGreedyLabelLeavesWhatTheRestOfThePatternNeeds(t *testing.T) {
+	const policy = "/v20180820/mrap/instances/{Name+}/policy"
+	const status = "/v20180820/mrap/instances/{Name+}/policystatus"
+
+	bound, ok := httpuri.Parse(policy).Match("/v20180820/mrap/instances/acct/mrap-one/policy", nil)
+	if !ok {
+		t.Fatal("the policy pattern did not match its own path")
+	}
+	if bound["Name"] != "acct/mrap-one" {
+		t.Fatalf(`Name = %q, want "acct/mrap-one" -- the trailing literal must not be part of the label`, bound["Name"])
+	}
+	// The two operations must no longer answer each other's requests.
+	if _, ok := httpuri.Parse(status).Match("/v20180820/mrap/instances/acct/mrap-one/policy", nil); ok {
+		t.Fatal("the policystatus pattern matched a /policy request")
+	}
+	if _, ok := httpuri.Parse(policy).Match("/v20180820/mrap/instances/acct/mrap-one/policystatus", nil); ok {
+		t.Fatal("the policy pattern matched a /policystatus request")
+	}
+	// A greedy label still needs at least one segment of its own.
+	if _, ok := httpuri.Parse(policy).Match("/v20180820/mrap/instances/policy", nil); ok {
+		t.Fatal("the greedy label matched nothing and the pattern still succeeded")
+	}
+}
+
+// TestALabelWithNoNameMatchesNothing is the case the fuzzer found:
+// `Parse("{+}/{0}").Match("0")` reported success having bound the empty string,
+// so a pattern that names nothing appeared to route and the label the caller
+// asked about was absent.
+func TestALabelWithNoNameMatchesNothing(t *testing.T) {
+	for _, uri := range []string{"{+}", "{}", "{+}/{0}", "/a/{}/b"} {
+		if bound, ok := httpuri.Parse(uri).Match("0", nil); ok {
+			t.Errorf("Parse(%q) matched and bound %v; a nameless label can bind nothing a caller reads", uri, bound)
+		}
+	}
+}

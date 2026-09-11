@@ -17,6 +17,9 @@ import (
 // operation it sits in, which is unique by construction and reads as what it is.
 type shaper struct {
 	shapes map[string]model.Shape
+	// responses are the document's shared responses, so a response that is a
+	// `$ref` can be followed to the one that carries the content.
+	responses map[string]responseObject
 	// missing collects references that were swallowed rather than carried into
 	// the model, so the check at the end can still see them. A composed schema
 	// and a request body are the two places a `$ref` is dereferenced rather
@@ -138,6 +141,11 @@ func (s *shaper) response(op string, o operation) string {
 		r, ok := o.Responses[key]
 		if !ok {
 			continue
+		}
+		r, ok = s.sharedResponse(r)
+		if !ok {
+			s.missing = append(s.missing, "operation "+op+" response "+key+" -> "+r.Ref)
+			break
 		}
 		body, ok := jsonSchema(r.Content)
 		if !ok {
@@ -505,4 +513,37 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// componentResponses is where a shared response lives.
+const componentResponses = "#/components/responses/"
+
+// sharedResponse follows a response's `$ref` until it reaches one that carries
+// content, and reports false when it cannot.
+//
+// Unlike a schema reference, this one is dereferenced rather than carried: a
+// response object is not a shape, it is the wrapper that names one, so there is
+// nothing in the model for the reference itself to become. What the model
+// records is whatever schema the referenced response points at.
+//
+// A chain is followed rather than a single hop because nothing forbids a shared
+// response from being a reference to another, and the depth is bounded so a
+// document that references itself in a circle fails the receiver instead of
+// hanging it.
+func (s *shaper) sharedResponse(r responseObject) (responseObject, bool) {
+	for hops := 0; r.Ref != ""; hops++ {
+		if hops >= 8 {
+			return r, false
+		}
+		name, ok := strings.CutPrefix(r.Ref, componentResponses)
+		if !ok {
+			return r, false
+		}
+		next, ok := s.responses[name]
+		if !ok {
+			return r, false
+		}
+		r = next
+	}
+	return r, true
 }

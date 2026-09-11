@@ -34,7 +34,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
-	azblobs "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
 	doapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
@@ -7813,7 +7812,10 @@ func TestGCSConcurrentObjectPutGet(t *testing.T) {
 }
 
 func TestAzureConcurrentDuplicateContainers(t *testing.T) {
-	p := azblobs.New(spitest.Deps(t))
+	p, err := bundled.New("azure.blobs", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7845,7 +7847,10 @@ func TestAzureConcurrentDuplicateContainers(t *testing.T) {
 }
 
 func TestAzureConcurrentBlobPutGet(t *testing.T) {
-	p := azblobs.New(spitest.Deps(t))
+	p, err := bundled.New("azure.blobs", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateContainer", Input: map[string]any{"container": "race"}}); err != nil {
@@ -7869,11 +7874,9 @@ func TestAzureConcurrentBlobPutGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBlob", Input: map[string]any{"container": "race", "blob": "k"}})
-	if err != nil || got.Stream == nil {
+	if err != nil || got.Output["_raw"] == nil {
 		t.Fatalf("get after concurrent put %#v %v", got, err)
 	}
-	_, _ = io.ReadAll(got.Stream)
-	_ = got.Stream.Close()
 }
 
 func TestDigitalOceanConcurrentDuplicateDomains(t *testing.T) {

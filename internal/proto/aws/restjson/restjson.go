@@ -34,6 +34,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "aws.es" {
 		return opensearchOp(svc, r), nil
 	}
+	if svc.ID == "azure.table" {
+		return azureTableOp(svc, r), nil
+	}
 	if svc.ID == "vercel.api" {
 		return vercelOp(svc, r), nil
 	}
@@ -427,6 +430,41 @@ func digitaloceanRoute(r *http.Request) string {
 	return "Unknown"
 }
 
+func azureTableOp(svc *model.Service, r *http.Request) *model.Operation {
+	name := azureTableRoute(r)
+	if op := svc.OperationByName(name); op != nil {
+		return op
+	}
+	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+}
+
+func azureTableRoute(r *http.Request) string {
+	path := strings.Trim(r.URL.Path, "/")
+	m := r.Method
+	if path == "Tables" || path == "Tables()" {
+		if m == http.MethodPost {
+			return "CreateTable"
+		}
+		return "ListTables"
+	}
+	if strings.HasPrefix(path, "Tables('") && strings.HasSuffix(path, "')") && m == http.MethodDelete {
+		return "DeleteTable"
+	}
+	if strings.Contains(path, "PartitionKey=") && m == http.MethodDelete {
+		return "DeleteEntity"
+	}
+	if strings.HasSuffix(path, "()") && m == http.MethodGet {
+		return "QueryEntities"
+	}
+	if m == http.MethodPost {
+		return "InsertEntity"
+	}
+	if m == http.MethodGet {
+		return "QueryEntities"
+	}
+	return "Unknown"
+}
+
 func vercelOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := vercelRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -509,6 +547,35 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	} else if len(body) > 0 {
 		_ = json.Unmarshal(body, &in)
 	}
+	if svc.ID == "azure.table" {
+		if tn, ok := in["TableName"]; ok {
+			in["table"] = tn
+		}
+		path := strings.Trim(r.URL.Path, "/")
+		if strings.HasPrefix(path, "Tables('") && strings.HasSuffix(path, "')") {
+			in["table"] = strings.TrimSuffix(strings.TrimPrefix(path, "Tables('"), "')")
+		} else if path != "Tables" && path != "Tables()" && path != "" && !strings.HasPrefix(path, "Tables") {
+			tbl := path
+			if i := strings.IndexByte(tbl, '('); i >= 0 {
+				tbl = tbl[:i]
+			}
+			if in["table"] == nil {
+				in["table"] = tbl
+			}
+			if i := strings.Index(path, "PartitionKey='"); i >= 0 {
+				rest := path[i+len("PartitionKey='"):]
+				if j := strings.IndexByte(rest, '\''); j >= 0 {
+					in["PartitionKey"] = rest[:j]
+				}
+			}
+			if i := strings.Index(path, "RowKey='"); i >= 0 {
+				rest := path[i+len("RowKey='"):]
+				if j := strings.IndexByte(rest, '\''); j >= 0 {
+					in["RowKey"] = rest[:j]
+				}
+			}
+		}
+	}
 	for k, vs := range r.URL.Query() {
 		if _, ok := in[k]; !ok {
 			in[k] = vs[0]
@@ -555,6 +622,23 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		w.WriteHeader(status)
 		_, err := io.WriteString(w, raw)
 		return err
+	}
+	if svc.ID == "azure.table" {
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		w.WriteHeader(status)
+		if resp.Output == nil {
+			return nil
+		}
+		if lst, ok := resp.Output["_list"]; ok {
+			items, _ := lst.([]any)
+			if items == nil {
+				items = []any{}
+			}
+			return json.NewEncoder(w).Encode(map[string]any{"value": items})
+		}
+		return json.NewEncoder(w).Encode(resp.Output)
 	}
 	if svc.ID == "digitalocean.v2" {
 		return encodeDigitalOcean(w, status, resp)
@@ -670,6 +754,10 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	if f.Code == "MirrorNotImplemented" {
 		w.Header().Set("x-mirror-not-implemented", svc.ID+"."+op.Name)
 		status = 501
+	}
+	if svc.ID == "azure.table" {
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"odata.error": map[string]any{"code": f.Code, "message": map[string]any{"lang": "en-US", "value": f.Message}}})
 	}
 	if svc.ID == "vercel.api" {
 		w.WriteHeader(status)

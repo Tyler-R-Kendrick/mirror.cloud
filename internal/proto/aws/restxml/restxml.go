@@ -2,6 +2,7 @@
 package restxml
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -28,6 +29,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	}
 	if svc.ID == "azure.blobs" {
 		return azureOp(svc, r), nil
+	}
+	if svc.ID == "azure.queue" {
+		return azureQueueOp(svc, r), nil
 	}
 	if svc.ID == "aws.route53" {
 		return route53Op(svc, r), nil
@@ -381,6 +385,15 @@ func azureRoute(r *http.Request) string {
 		return "ListContainers"
 	}
 	if blob != "" {
+		switch q.Get("comp") {
+		case "block":
+			return "PutBlock"
+		case "blocklist":
+			if m == http.MethodGet || m == http.MethodHead {
+				return "GetBlockList"
+			}
+			return "PutBlockList"
+		}
 		switch m {
 		case http.MethodPut:
 			return "PutBlob"
@@ -393,7 +406,72 @@ func azureRoute(r *http.Request) string {
 	return "Unknown"
 }
 
+func azureQueueOp(svc *model.Service, r *http.Request) *model.Operation {
+	name := azureQueueRoute(r)
+	if op := svc.OperationByName(name); op != nil {
+		return op
+	}
+	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+}
+
+func azureQueueRoute(r *http.Request) string {
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if path == "" {
+		parts = nil
+	}
+	q := r.URL.Query()
+	m := r.Method
+	if path == "" && q.Get("comp") == "list" {
+		return "ListQueues"
+	}
+	if len(parts) == 1 {
+		switch m {
+		case http.MethodPut:
+			return "CreateQueue"
+		case http.MethodDelete:
+			return "DeleteQueue"
+		}
+	}
+	if len(parts) >= 2 && parts[1] == "messages" {
+		if len(parts) >= 3 && m == http.MethodDelete {
+			return "DeleteMessage"
+		}
+		if m == http.MethodPost {
+			return "PutMessage"
+		}
+		if m == http.MethodGet {
+			return "GetMessages"
+		}
+	}
+	return "Unknown"
+}
+
+func decodeAzureQueue(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
+	in := map[string]any{}
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if path != "" {
+		in["queue"] = parts[0]
+		if len(parts) >= 3 {
+			in["messageid"] = parts[2]
+			in["id"] = parts[2]
+		}
+	}
+	req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
+	if r.Body != nil && (op.Name == "PutMessage") {
+		body, _ := io.ReadAll(r.Body)
+		in["body"] = string(body)
+		in["message"] = string(body)
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	return req, nil
+}
+
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
+	if svc.ID == "azure.queue" {
+		return decodeAzureQueue(svc, op, r)
+	}
 	if svc.ID == "azure.blobs" {
 		in := map[string]any{}
 		path := strings.Trim(r.URL.Path, "/")
@@ -404,9 +482,14 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 				in["blob"] = blob
 			}
 		}
+		if bid := r.URL.Query().Get("blockid"); bid != "" {
+			in["blockid"] = bid
+		}
 		req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
-		if op.Name == "PutBlob" && r.Body != nil {
-			req.Body = r.Body
+		if (op.Name == "PutBlob" || op.Name == "PutBlock" || op.Name == "PutBlockList") && r.Body != nil {
+			body, _ := io.ReadAll(r.Body)
+			in["body"] = string(body)
+			req.Body = io.NopCloser(bytes.NewReader(body))
 		}
 		return req, nil
 	}
@@ -1336,10 +1419,13 @@ func namedXMLValue(node namedXMLNode) any {
 func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWriter, resp *spi.Response) error {
 	status := resp.Status
 	if status == 0 {
-		status = 200
+		status = op.HTTP.Code
+		if status == 0 {
+			status = 200
+		}
 	}
-	if svc.ID == "azure.blobs" {
-		return encodeAzure(w, status, resp)
+	if svc.ID == "azure.blobs" || svc.ID == "azure.queue" {
+		return encodeAzure(w, status, resp, op.Name)
 	}
 	for k, vs := range resp.Headers {
 		if strings.EqualFold(k, "ETag") {
@@ -1924,7 +2010,7 @@ func writeLifecycle(v any, b *strings.Builder) {
 	}
 }
 
-func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response) error {
+func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op string) error {
 	for k, vs := range resp.Headers {
 		for _, v := range vs {
 			w.Header().Add(k, v)
@@ -1936,11 +2022,52 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response) error {
 		_ = resp.Stream.Close()
 		return err
 	}
+	if resp != nil && resp.Output != nil {
+		if raw, ok := resp.Output["_raw"].(string); ok {
+			if w.Header().Get("Content-Type") == "" {
+				w.Header().Set("Content-Type", "application/octet-stream")
+			}
+			w.WriteHeader(status)
+			_, err := io.WriteString(w, raw)
+			return err
+		}
+	}
 	if resp.Output != nil {
 		if lst, ok := resp.Output["_list"]; ok {
 			w.Header().Set("Content-Type", "application/xml")
 			w.WriteHeader(status)
+			if op == "GetMessages" {
+				var b strings.Builder
+				b.WriteString(`<?xml version="1.0" encoding="utf-8"?><QueueMessagesList>`)
+				for _, item := range asAny(lst) {
+					m, _ := item.(map[string]any)
+					b.WriteString("<QueueMessage><MessageId>")
+					b.WriteString(xmlEscape(strAny(m["id"])))
+					b.WriteString("</MessageId><MessageText>")
+					b.WriteString(xmlEscape(strAny(m["message"])))
+					b.WriteString("</MessageText></QueueMessage>")
+				}
+				b.WriteString("</QueueMessagesList>")
+				_, err := io.WriteString(w, b.String())
+				return err
+			}
+			if op == "GetBlockList" {
+				var b strings.Builder
+				b.WriteString(`<?xml version="1.0" encoding="utf-8"?><BlockList>`)
+				for _, item := range asAny(lst) {
+					m, _ := item.(map[string]any)
+					b.WriteString("<Latest>")
+					b.WriteString(xmlEscape(strAny(m["id"])))
+					b.WriteString("</Latest>")
+				}
+				b.WriteString("</BlockList>")
+				_, err := io.WriteString(w, b.String())
+				return err
+			}
 			kind, _ := resp.Output["_kind"].(string)
+			if kind == "" && op == "ListBlobs" {
+				kind = "blobs"
+			}
 			var b strings.Builder
 			b.WriteString(`<?xml version="1.0" encoding="utf-8"?><EnumerationResults>`)
 			if kind == "blobs" {
@@ -1990,7 +2117,7 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.Header().Set("x-mirror-not-implemented", svc.ID+"."+op.Name)
 		status = 501
 	}
-	if svc.ID == "azure.blobs" {
+	if svc.ID == "azure.blobs" || svc.ID == "azure.queue" {
 		w.Header().Set("Content-Type", "application/xml")
 		w.Header().Set("x-ms-error-code", f.Code)
 		w.WriteHeader(status)

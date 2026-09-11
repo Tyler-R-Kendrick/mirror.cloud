@@ -276,7 +276,87 @@ func Bundle() *model.Bundle {
 		op("DNSUpdateDNSRecordsV1", "PUT", "/api/dns/v1/zones/{domain}", 200, false),
 		op("DNSDeleteDNSRecordsV1", "DELETE", "/api/dns/v1/zones/{domain}", 200, false),
 	}
-	azure := []string{"CreateContainer", "GetContainer", "ListContainers", "DeleteContainer", "PutBlob", "GetBlob", "ListBlobs", "DeleteBlob"}
+	azureOps := []model.Operation{
+		op("CreateContainer", "PUT", "/{container}?restype=container", 201, false),
+		op("GetContainer", "GET", "/{container}?restype=container", 200, true),
+		op("ListContainers", "GET", "/?comp=list", 200, true),
+		op("DeleteContainer", "DELETE", "/{container}?restype=container", 202, false),
+		op("PutBlob", "PUT", "/{container}/{blob}", 201, false),
+		op("GetBlob", "GET", "/{container}/{blob}", 200, true),
+		op("ListBlobs", "GET", "/{container}?restype=container&comp=list", 200, true),
+		op("DeleteBlob", "DELETE", "/{container}/{blob}", 202, false),
+		op("PutBlock", "PUT", "/{container}/{blob}?comp=block", 201, false),
+		op("PutBlockList", "PUT", "/{container}/{blob}?comp=blocklist", 201, false),
+		op("GetBlockList", "GET", "/{container}/{blob}?comp=blocklist", 200, true),
+	}
+	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
+	azureSvc.OperationByName("CreateContainer").Output = "Container"
+	azureSvc.OperationByName("GetContainer").Output = "Container"
+	azureSvc.OperationByName("ListContainers").Output = "ContainerList"
+	azureSvc.OperationByName("PutBlob").Output = "Blob"
+	azureSvc.OperationByName("GetBlob").Output = "BlobBody"
+	azureSvc.OperationByName("ListBlobs").Output = "BlobList"
+	azureSvc.OperationByName("PutBlockList").Output = "Blob"
+	azureSvc.OperationByName("GetBlockList").Output = "BlockList"
+	azureSvc.Shapes = map[string]model.Shape{
+		"String": {ID: "String", Kind: model.KindString},
+		"Container": {ID: "Container", Kind: model.KindStructure, Members: map[string]model.Member{
+			"name": {Shape: "String"},
+		}},
+		"ContainerList": {ID: "ContainerList", Kind: model.KindList, Member: "Container"},
+		"Blob": {ID: "Blob", Kind: model.KindStructure, Members: map[string]model.Member{
+			"name":      {Shape: "String"},
+			"container": {Shape: "String"},
+			"value":     {Shape: "String"},
+		}},
+		"BlobList": {ID: "BlobList", Kind: model.KindList, Member: "Blob"},
+		"BlobBody": {ID: "BlobBody", Kind: model.KindString},
+		"Block": {ID: "Block", Kind: model.KindStructure, Members: map[string]model.Member{
+			"id":    {Shape: "String"},
+			"value": {Shape: "String"},
+		}},
+		"BlockList": {ID: "BlockList", Kind: model.KindList, Member: "Block"},
+	}
+	queueOps := []model.Operation{
+		op("CreateQueue", "PUT", "/{queue}", 201, false),
+		op("ListQueues", "GET", "/?comp=list", 200, true),
+		op("DeleteQueue", "DELETE", "/{queue}", 204, false),
+		op("PutMessage", "POST", "/{queue}/messages", 201, false),
+		op("GetMessages", "GET", "/{queue}/messages", 200, true),
+		op("DeleteMessage", "DELETE", "/{queue}/messages/{messageid}", 204, false),
+	}
+	queueSvc := svc("azure.queue", "queue", model.ProtoRESTXML, "", "", "", queueOps)
+	queueSvc.OperationByName("CreateQueue").Output = "Queue"
+	queueSvc.OperationByName("ListQueues").Output = "QueueList"
+	queueSvc.OperationByName("PutMessage").Output = "Message"
+	queueSvc.OperationByName("GetMessages").Output = "MessageList"
+	queueSvc.Shapes = map[string]model.Shape{
+		"String":     {ID: "String", Kind: model.KindString},
+		"Queue":      {ID: "Queue", Kind: model.KindStructure, Members: map[string]model.Member{"name": {Shape: "String"}}},
+		"QueueList":  {ID: "QueueList", Kind: model.KindList, Member: "Queue"},
+		"Message":    {ID: "Message", Kind: model.KindStructure, Members: map[string]model.Member{"id": {Shape: "String"}, "message": {Shape: "String"}}},
+		"MessageList": {ID: "MessageList", Kind: model.KindList, Member: "Message"},
+	}
+	tableOps := []model.Operation{
+		op("CreateTable", "POST", "/Tables", 201, false),
+		op("ListTables", "GET", "/Tables", 200, true),
+		op("DeleteTable", "DELETE", "/Tables('{table}')", 204, false),
+		op("InsertEntity", "POST", "/{table}", 201, false),
+		op("QueryEntities", "GET", "/{table}()", 200, true),
+		op("DeleteEntity", "DELETE", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 204, false),
+	}
+	tableSvc := svc("azure.table", "table", model.ProtoRESTJSON1, "", "", "", tableOps)
+	tableSvc.OperationByName("CreateTable").Output = "Table"
+	tableSvc.OperationByName("ListTables").Output = "TableList"
+	tableSvc.OperationByName("InsertEntity").Output = "Entity"
+	tableSvc.OperationByName("QueryEntities").Output = "EntityList"
+	tableSvc.Shapes = map[string]model.Shape{
+		"String":     {ID: "String", Kind: model.KindString},
+		"Table":      {ID: "Table", Kind: model.KindStructure, Members: map[string]model.Member{"TableName": {Shape: "String"}}},
+		"TableList":  {ID: "TableList", Kind: model.KindList, Member: "Table"},
+		"Entity":     {ID: "Entity", Kind: model.KindStructure, Members: map[string]model.Member{"PartitionKey": {Shape: "String"}, "RowKey": {Shape: "String"}}},
+		"EntityList": {ID: "EntityList", Kind: model.KindList, Member: "Entity"},
+	}
 	digitalocean := []string{"CreateDroplet", "ListDroplets", "GetDroplet", "DeleteDroplet", "CreateDomain", "ListDomains", "GetDomain", "DeleteDomain"}
 	// Real bindings, not mk(): mk() binds every operation to POST /, and
 	// internal/conformance builds its request from this catalog rather than
@@ -1366,7 +1446,9 @@ func Bundle() *model.Bundle {
 			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", mk(vercel)),
 			svc("cloudflare.api", "cloudflare", model.ProtoRESTJSON1, "", "", "", cloudflare),
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
-			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),
+			azureSvc,
+			queueSvc,
+			tableSvc,
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", mk(digitalocean)),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", hetzner),
 			svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", mk(railway)),

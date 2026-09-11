@@ -1,0 +1,166 @@
+schema: bir/1
+service: azure.blobs
+
+# Extracted from internal/services/azure/blobs. Authored from that pack, not
+# from live Azure. The eight CRUD operations keep the pack's names because
+# restxml azureRoute and the catalog still resolve those names; swagger ingest
+# is a later PR.
+provenance: authored
+
+resources:
+  container:
+    collection: azctr
+    id:
+      derive: "('container' in input && input.container != null) ? lower(string(input.container)) : ''"
+    record:
+      name: id
+
+  blob:
+    collection: "azblob:{container.id}"
+    parent: container
+    id:
+      input_members: [blob]
+    record:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+      value: "('body' in input && input.body != null) ? string(input.body) : (('value' in input && input.value != null) ? string(input.value) : '')"
+
+  blob_slot:
+    collection: azslot
+    parent: container
+    id:
+      input_members: [blob]
+    record:
+      name: id
+
+  block:
+    collection: "azblock:{blob_slot.id}"
+    parent: blob_slot
+    id:
+      derive: "('blockid' in input && input.blockid != null) ? string(input.blockid) : ''"
+    record:
+      id: id
+      value: "('body' in input && input.body != null) ? string(input.body) : ''"
+
+errors:
+  InvalidResourceName:
+    code: InvalidResourceName
+    http: 400
+    fault: client
+  ContainerAlreadyExists:
+    code: ContainerAlreadyExists
+    http: 409
+    fault: client
+  ContainerNotFound:
+    code: ContainerNotFound
+    http: 404
+    fault: client
+  BlobNotFound:
+    code: BlobNotFound
+    http: 404
+    fault: client
+
+operations:
+  CreateContainer:
+    reads:
+      existing: { resource: container }
+    require:
+      - { cond: "'container' in input && string(input.container) != ''", error: InvalidResourceName, message: "The specified resource name contains invalid characters." }
+      - { cond: "!existing_found", error: ContainerAlreadyExists, message: "The specified container already exists." }
+    effects:
+      - create: { resource: container }
+    output:
+      name: id
+
+  GetContainer:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    output:
+      name: rec.name
+
+  ListContainers:
+    list: { resource: container, member: _list }
+
+  DeleteContainer:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - delete: { resource: container }
+
+  PutBlob:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
+    effects:
+      - put: { resource: blob }
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  GetBlob:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    output:
+      _raw: "string(rec.value)"
+
+  ListBlobs:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    list: { resource: blob, member: _list }
+
+  DeleteBlob:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    effects:
+      - delete: { resource: blob }
+
+  PutBlock:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'blockid' in input && string(input.blockid) != ''", error: InvalidResourceName, message: "The specified block id is invalid." }
+    effects:
+      - put: { resource: blob_slot }
+      - put: { resource: block }
+
+  PutBlockList:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
+    effects:
+      - put:
+          resource: blob
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "('body' in input && input.body != null) ? string(input.body) : ''"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  GetBlockList:
+    reads:
+      ctr: { resource: container }
+      slot: { resource: blob_slot }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    list: { resource: block, member: _list }

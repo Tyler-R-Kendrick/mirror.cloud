@@ -504,8 +504,8 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		if digitaloceanRequest(r) {
 			return s.bundle.ServiceByID("digitalocean.v2")
 		}
-		if azureRequest(r) {
-			return s.bundle.ServiceByID("azure.blobs")
+		if id := azureService(r); id != "" {
+			return s.bundle.ServiceByID(id)
 		}
 		if cloudflareRequest(r) {
 			return s.bundle.ServiceByID("cloudflare.api")
@@ -613,6 +613,23 @@ func digitaloceanRequest(r *http.Request) bool {
 	}
 	path := r.URL.Path
 	return strings.HasPrefix(path, "/v2/droplets") || strings.HasPrefix(path, "/v2/domains")
+}
+
+func azureService(r *http.Request) string {
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Contains(host, "queue.core.windows.net") {
+		return "azure.queue"
+	}
+	if strings.Contains(host, "table.core.windows.net") {
+		return "azure.table"
+	}
+	if azureRequest(r) {
+		return "azure.blobs"
+	}
+	return ""
 }
 
 func azureRequest(r *http.Request) bool {

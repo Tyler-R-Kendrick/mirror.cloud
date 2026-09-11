@@ -10,7 +10,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestBootedServerAzureBlob(t *testing.T) {
@@ -85,5 +85,134 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	code, raw, h = do(http.MethodDelete, "/missing?restype=container", "", nil)
 	if code != 404 || !strings.Contains(string(raw), "<Code>ContainerNotFound</Code>") || h.Get("x-ms-error-code") != "ContainerNotFound" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("delete missing container %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr?restype=container", "", nil)
+	if code != 201 && code != 409 {
+		t.Fatalf("recreate %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/part?comp=block&blockid=YQ==", "A", map[string]string{"x-ms-blob-type": "BlockBlob"})
+	if code >= 300 {
+		t.Fatalf("put block %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/part?comp=block&blockid=Yg==", "B", nil)
+	if code >= 300 {
+		t.Fatalf("put block 2 %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/part?comp=blocklist", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "BlockList") {
+		t.Fatalf("get block list %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/part?comp=blocklist", "AB", nil)
+	if code >= 300 {
+		t.Fatalf("put block list %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/part", "", nil)
+	if code != 200 || string(raw) != "AB" {
+		t.Fatalf("get assembled %d %s", code, raw)
+	}
+}
+
+func TestBootedServerAzureQueue(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"azure.queue"}
+	cfg.Seed = "azq-1"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	do := func(method, path, body string) (int, []byte, http.Header) {
+		t.Helper()
+		var rdr io.Reader
+		if body != "" {
+			rdr = strings.NewReader(body)
+		}
+		req, err := http.NewRequest(method, ts.URL+path, rdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = "acct.queue.core.windows.net"
+		req.Header.Set("Authorization", "Bearer test")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		return res.StatusCode, b, res.Header
+	}
+	code, raw, _ := do(http.MethodPut, "/q1", "")
+	if code >= 300 {
+		t.Fatalf("create queue %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/?comp=list", "")
+	if code != 200 || !strings.Contains(string(raw), "q1") {
+		t.Fatalf("list queues %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPost, "/q1/messages", "hello-q")
+	if code >= 300 {
+		t.Fatalf("put message %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages", "")
+	if code != 200 || !strings.Contains(string(raw), "hello-q") {
+		t.Fatalf("get messages %d %s", code, raw)
+	}
+	code, raw, h := do(http.MethodDelete, "/missing", "")
+	if code != 404 || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing queue %d %#v %s", code, h, raw)
+	}
+}
+
+func TestBootedServerAzureTable(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"azure.table"}
+	cfg.Seed = "azt-1"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	do := func(method, path, body string) (int, []byte, http.Header) {
+		t.Helper()
+		var rdr io.Reader
+		if body != "" {
+			rdr = strings.NewReader(body)
+		}
+		req, err := http.NewRequest(method, ts.URL+path, rdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = "acct.table.core.windows.net"
+		req.Header.Set("Authorization", "Bearer test")
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		return res.StatusCode, b, res.Header
+	}
+	code, raw, _ := do(http.MethodPost, "/Tables", `{"TableName":"t1"}`)
+	if code >= 300 {
+		t.Fatalf("create table %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/Tables", "")
+	if code != 200 || !strings.Contains(string(raw), "t1") {
+		t.Fatalf("list tables %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPost, "/t1", `{"PartitionKey":"p","RowKey":"r"}`)
+	if code >= 300 {
+		t.Fatalf("insert entity %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/t1()", "")
+	if code != 200 || !strings.Contains(string(raw), "PartitionKey") {
+		t.Fatalf("query entities %d %s", code, raw)
+	}
+	code, raw, h := do(http.MethodDelete, "/Tables('missing')", "")
+	if code != 404 || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing table %d %#v %s", code, h, raw)
 	}
 }

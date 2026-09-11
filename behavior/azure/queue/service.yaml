@@ -1,0 +1,89 @@
+schema: bir/1
+service: azure.queue
+provenance: authored
+
+resources:
+  queue:
+    collection: azqueue
+    id:
+      derive: "('queue' in input && input.queue != null) ? lower(string(input.queue)) : ''"
+    record:
+      name: id
+
+  message:
+    collection: "azqmsg:{queue.id}"
+    parent: queue
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      id: id
+      message: "('body' in input && input.body != null) ? string(input.body) : string(input.message)"
+
+errors:
+  QueueAlreadyExists:
+    code: QueueAlreadyExists
+    http: 409
+    fault: client
+  QueueNotFound:
+    code: QueueNotFound
+    http: 404
+    fault: client
+  InvalidResourceName:
+    code: InvalidResourceName
+    http: 400
+    fault: client
+  MessageNotFound:
+    code: MessageNotFound
+    http: 404
+    fault: client
+
+operations:
+  CreateQueue:
+    reads:
+      existing: { resource: queue }
+    require:
+      - { cond: "'queue' in input && string(input.queue) != ''", error: InvalidResourceName, message: "The specified resource name contains invalid characters." }
+      - { cond: "!existing_found", error: QueueAlreadyExists, message: "The specified queue already exists." }
+    effects:
+      - create: { resource: queue }
+    output:
+      name: id
+
+  ListQueues:
+    list: { resource: queue, member: _list }
+
+  DeleteQueue:
+    reads:
+      rec: { resource: queue }
+    require:
+      - { cond: rec_found, error: QueueNotFound, message: "The specified queue does not exist." }
+    effects:
+      - delete: { resource: queue }
+
+  PutMessage:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+    effects:
+      - create: { resource: message }
+    output:
+      id: id
+      message: "('body' in input && input.body != null) ? string(input.body) : string(input.message)"
+
+  GetMessages:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+    list: { resource: message, member: _list }
+
+  DeleteMessage:
+    reads:
+      q: { resource: queue }
+      rec: { resource: message }
+    require:
+      - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+      - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
+    effects:
+      - delete: { resource: message }

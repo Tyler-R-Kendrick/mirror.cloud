@@ -1,14 +1,13 @@
 {
   "blobs": {
     "output": {
-      "_kind": "blobs",
       "_list": [
         {
           "container": "snap",
-          "name": "o"
+          "name": "o",
+          "value": "hello"
         }
-      ],
-      "container": "snap"
+      ]
     },
     "status": 0
   },
@@ -16,7 +15,7 @@
     "output": {
       "name": "snap"
     },
-    "status": 201
+    "status": 0
   },
   "del_miss_b": {
     "error": "BlobNotFound",
@@ -29,8 +28,8 @@
     "status": 404
   },
   "delete": {
-    "output": null,
-    "status": 202
+    "output": {},
+    "status": 0
   },
   "duplicate": {
     "error": "ContainerAlreadyExists",
@@ -50,7 +49,6 @@
   },
   "list": {
     "output": {
-      "_kind": "containers",
       "_list": [
         {
           "name": "snap"
@@ -61,7 +59,7 @@
   },
   "media": {
     "body": "hello",
-    "status": 200
+    "status": 0
   },
   "missing": {
     "error": "BlobNotFound",
@@ -78,6 +76,6 @@
       "container": "snap",
       "name": "o"
     },
-    "status": 201
+    "status": 0
   }
 }

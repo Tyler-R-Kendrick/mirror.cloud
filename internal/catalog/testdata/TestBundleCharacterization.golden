@@ -807,7 +807,34 @@
       "PutBlob",
       "GetBlob",
       "ListBlobs",
-      "DeleteBlob"
+      "DeleteBlob",
+      "PutBlock",
+      "PutBlockList",
+      "GetBlockList"
+    ]
+  },
+  {
+    "ID": "azure.queue",
+    "Protocol": "restXml",
+    "Ops": [
+      "CreateQueue",
+      "ListQueues",
+      "DeleteQueue",
+      "PutMessage",
+      "GetMessages",
+      "DeleteMessage"
+    ]
+  },
+  {
+    "ID": "azure.table",
+    "Protocol": "restJson1",
+    "Ops": [
+      "CreateTable",
+      "ListTables",
+      "DeleteTable",
+      "InsertEntity",
+      "QueryEntities",
+      "DeleteEntity"
     ]
   },
   {

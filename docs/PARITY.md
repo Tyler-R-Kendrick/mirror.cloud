@@ -114,9 +114,9 @@ This is a source-level inventory map, not a live `*.core.windows.net` differenti
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the **currently implemented** 8 Blob CRUD ops | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 8 / 59 |
-| Queue REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 0 / 11 |
-| Table REST ops in pinned swagger (`paths`) routed to emulation | 0 / 12 |
+| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 11 / 59 |
+| Queue REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 6 / 11 |
+| Table REST ops in pinned swagger (`paths`) routed to emulation | 6 / 12 |
 | Azurite test functions explicitly traced | 0 / 806 (0%) |
 | Azurite test functions not yet traced | 806 / 806 (100%) |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
@@ -194,6 +194,7 @@ Declared surface is `x-ms-paths` (Blob 59, Queue 11) and Table `paths` (12), cou
 | Put Blob | implemented (block blob bytes only; `x-ms-blob-type` not read) |
 | Get Blob | implemented |
 | Delete Blob | implemented |
+| Put Block / Put Block List / Get Block List | implemented (authored; PutBlockList commits the request body as the blob) |
 | Set/Get Service Properties | not implemented |
 | Get Stats | not implemented |
 | Get Account Information | not implemented |
@@ -210,13 +211,13 @@ Declared surface is `x-ms-paths` (Blob 59, Queue 11) and Table `paths` (12), cou
 | Copy Blob / Abort Copy Blob / Copy Blob From URL | not implemented |
 | CORS / Preflight | not implemented |
 
-Queue (16): List/Create/Delete Queue, Get/Set Service Properties, Get Stats, Preflight, Get/Set Metadata, Get/Set ACL, Put/Get/Peek/Update/Delete/Clear Messages — **none implemented**.
+Queue: Create/List/Delete Queue, Put/Get/Delete Message implemented on `{account}.queue.core.windows.net`. Get/Set Service Properties, ACL, metadata, peek/update/clear not yet.
 
-Table (9): List/Create/Delete Table, Insert/Update/Merge/Query/Delete Entity, Batch — **none implemented**.
+Table: Create/List/Delete Table, Insert/Query/Delete Entity implemented on `{account}.table.core.windows.net`. Merge/Update/Batch not yet.
 
 ### Currently implemented 8-op slice (not the inventory)
 
-The seven-form evidence below covers only the eight ops already in `internal/services/azure/blobs`. It is not Azurite-inventory completeness.
+The seven-form evidence below covers only the eight ops now in `behavior/azure/blobs/service.yaml`. It is not Azurite-inventory completeness.
 
 | Azure Blob operation | Mirror evidence |
 |---|---|

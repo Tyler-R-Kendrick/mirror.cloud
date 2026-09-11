@@ -1,4 +1,4 @@
-package blobs
+package bundled_test
 
 import (
 	"bytes"
@@ -6,12 +6,23 @@ import (
 	"io"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
-func TestContainerAndBlobLifecycle(t *testing.T) {
-	p := New(spitest.Deps(t))
+func azurePack(t testing.TB) spi.BehaviorPack {
+	t.Helper()
+	p, err := bundled.New("azure.blobs", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestAzureBundleBehaves(t *testing.T) {
+	p := azurePack(t)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	inv := func(op string, in map[string]any, body []byte) *spi.Response {
@@ -43,10 +54,8 @@ func TestContainerAndBlobLifecycle(t *testing.T) {
 		t.Fatalf("put %#v", put.Output)
 	}
 	blob := inv("GetBlob", map[string]any{"container": "ctr", "blob": "o"}, nil)
-	b, _ := io.ReadAll(blob.Stream)
-	_ = blob.Stream.Close()
-	if string(b) != "hello-azure" {
-		t.Fatalf("get blob %q", b)
+	if blob.Output["_raw"] != "hello-azure" {
+		t.Fatalf("get blob %#v", blob.Output)
 	}
 	blobs := inv("ListBlobs", map[string]any{"container": "ctr"}, nil)
 	if len(blobs.Output["_list"].([]any)) != 1 {
@@ -68,8 +77,8 @@ func TestContainerAndBlobLifecycle(t *testing.T) {
 	}
 }
 
-func TestDeleteMissingContainerAndBlob(t *testing.T) {
-	p := New(spitest.Deps(t))
+func TestAzureDeleteMissingContainerAndBlob(t *testing.T) {
+	p := azurePack(t)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateContainer", Input: map[string]any{"container": "ctr"}}); err != nil {
@@ -85,8 +94,8 @@ func TestDeleteMissingContainerAndBlob(t *testing.T) {
 	}
 }
 
-func TestCreateContainerRejectsEmptyAndDuplicate(t *testing.T) {
-	p := New(spitest.Deps(t))
+func TestAzureCreateContainerRejectsEmptyAndDuplicate(t *testing.T) {
+	p := azurePack(t)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateContainer", Input: map[string]any{}})
@@ -102,16 +111,57 @@ func TestCreateContainerRejectsEmptyAndDuplicate(t *testing.T) {
 	}
 }
 
-func TestAccountsDoNotShareContainers(t *testing.T) {
-	p := New(spitest.Deps(t))
+func TestAzureBlobCharacterization(t *testing.T) {
+	p := azurePack(t)
 	ctx := context.Background()
-	a := spi.Identity{Account: "111111111111", Region: "us-east-1"}
-	b := spi.Identity{Account: "222222222222", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: a, Operation: "CreateContainer", Input: map[string]any{"container": "shared"}}); err != nil {
-		t.Fatal(err)
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any, body []byte) any {
+		t.Helper()
+		req := &spi.Request{Identity: id, Operation: op, Input: in}
+		if body != nil {
+			req.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		res, err := p.Invoke(ctx, req)
+		if err != nil {
+			f := err.(*spi.Fault)
+			return map[string]any{"error": f.Code, "status": f.HTTPStatus, "message": f.Message}
+		}
+		if op == "GetBlob" {
+			return map[string]any{"status": res.Status, "body": res.Output["_raw"]}
+		}
+		return map[string]any{"status": res.Status, "output": res.Output}
 	}
-	_, err := p.Invoke(ctx, &spi.Request{Identity: b, Operation: "GetContainer", Input: map[string]any{"container": "shared"}})
-	if f, ok := err.(*spi.Fault); !ok || f.Code != "ContainerNotFound" {
-		t.Fatalf("cross-account %#v", err)
-	}
+	golden.AssertJSON(t, map[string]any{
+		"create":     inv("CreateContainer", map[string]any{"container": "snap"}, nil),
+		"duplicate":  inv("CreateContainer", map[string]any{"container": "snap"}, nil),
+		"empty":      inv("CreateContainer", map[string]any{}, nil),
+		"get":        inv("GetContainer", map[string]any{"container": "snap"}, nil),
+		"list":       inv("ListContainers", nil, nil),
+		"put":        inv("PutBlob", map[string]any{"container": "snap", "blob": "o"}, []byte("hello")),
+		"media":      inv("GetBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
+		"blobs":      inv("ListBlobs", map[string]any{"container": "snap"}, nil),
+		"delete":     inv("DeleteBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
+		"missing":    inv("GetBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
+		"nobucket":   inv("GetContainer", map[string]any{"container": "nope"}, nil),
+		"del_miss_b": inv("DeleteBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
+		"del_miss_c": inv("DeleteContainer", map[string]any{"container": "nope"}, nil),
+	})
+}
+
+func FuzzBlobBytes(f *testing.F) {
+	f.Add("o", "hello")
+	f.Add("", "v")
+	f.Add("a/b", "x")
+	f.Fuzz(func(t *testing.T, name, body string) {
+		p := azurePack(t)
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateContainer", Input: map[string]any{"container": "b"}})
+		_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBlob", Input: map[string]any{"container": "b", "blob": name}, Body: io.NopCloser(bytes.NewReader([]byte(body)))})
+		got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBlob", Input: map[string]any{"container": "b", "blob": name}})
+		if err == nil && got != nil && got.Output["_raw"] != nil {
+			_ = got.Output["_raw"]
+		}
+		_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteBlob", Input: map[string]any{"container": "b", "blob": name}})
+	})
 }

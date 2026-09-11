@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -155,6 +156,15 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		return nil, spi.NotImplemented(e.ServiceID(), req.Operation, string(model.TierEmulate))
 	}
 	modelOp := e.modelOps[req.Operation]
+	if req.Input == nil {
+		req.Input = map[string]any{}
+	}
+	if req.Body != nil {
+		if _, ok := req.Input["body"]; !ok {
+			body, _ := io.ReadAll(req.Body)
+			req.Input["body"] = string(body)
+		}
+	}
 
 	if fault := e.validateInput(modelOp, req); fault != nil {
 		return nil, fault

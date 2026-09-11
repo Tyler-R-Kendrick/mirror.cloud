@@ -1,0 +1,91 @@
+schema: bir/1
+service: azure.table
+provenance: authored
+
+resources:
+  table:
+    collection: aztbl
+    id:
+      derive: "('table' in input && input.table != null) ? string(input.table) : ''"
+    record:
+      TableName: id
+
+  entity:
+    collection: "azent:{table.id}"
+    parent: table
+    id:
+      derive: "(('PartitionKey' in input && input.PartitionKey != null) && ('RowKey' in input && input.RowKey != null)) ? (string(input.PartitionKey) + '/' + string(input.RowKey)) : ''"
+    record:
+      PartitionKey: "string(input.PartitionKey)"
+      RowKey: "string(input.RowKey)"
+
+errors:
+  TableAlreadyExists:
+    code: TableAlreadyExists
+    http: 409
+    fault: client
+  TableNotFound:
+    code: TableNotFound
+    http: 404
+    fault: client
+  InvalidInput:
+    code: InvalidInput
+    http: 400
+    fault: client
+  EntityNotFound:
+    code: EntityNotFound
+    http: 404
+    fault: client
+
+operations:
+  CreateTable:
+    reads:
+      existing: { resource: table }
+    require:
+      - { cond: "'table' in input && string(input.table) != ''", error: InvalidInput, message: "Table name is required." }
+      - { cond: "!existing_found", error: TableAlreadyExists, message: "The table specified already exists." }
+    effects:
+      - create: { resource: table }
+    output:
+      TableName: id
+
+  ListTables:
+    list: { resource: table, member: _list }
+
+  DeleteTable:
+    reads:
+      rec: { resource: table }
+    require:
+      - { cond: rec_found, error: TableNotFound, message: "The table specified does not exist." }
+    effects:
+      - delete: { resource: table }
+
+  InsertEntity:
+    reads:
+      tbl: { resource: table }
+    require:
+      - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
+      - { cond: "'PartitionKey' in input && string(input.PartitionKey) != ''", error: InvalidInput, message: "PartitionKey is required." }
+      - { cond: "'RowKey' in input && string(input.RowKey) != ''", error: InvalidInput, message: "RowKey is required." }
+    effects:
+      - put: { resource: entity }
+    output:
+      PartitionKey: "string(input.PartitionKey)"
+      RowKey: "string(input.RowKey)"
+
+  QueryEntities:
+    reads:
+      tbl: { resource: table }
+    require:
+      - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
+    list: { resource: entity, member: _list }
+
+  DeleteEntity:
+    reads:
+      tbl: { resource: table }
+      rec: { resource: entity }
+    require:
+      - { cond: tbl_found, error: TableNotFound, message: "The table specified does not exist." }
+      - { cond: rec_found, error: EntityNotFound, message: "The specified entity does not exist." }
+    effects:
+      - delete: { resource: entity }

@@ -95,36 +95,40 @@ func loadBundle(ctx context.Context, specsDir string, forceCatalog bool) (model.
 		b := catalog.Bundle()
 		return *b, "mirrorgen: no vendored specs; using bootstrap catalog", nil
 	}
-	var aws, gcp [][]model.Service
+	// Fragments are fused per provider, and the provider is the first segment
+	// of the service ID -- the same thing the rest of the system reads it as.
+	//
+	// This used to be `if strings.HasPrefix(id, "gcp.")` with everything else
+	// falling to AWS, which was true while there were two providers and
+	// silently wrong for a third: a `hostinger.api` document would have been
+	// fused as AWS. `internal/model`'s own doc comment says nothing may branch
+	// on a specific Provider value, and this was the branch.
+	byProvider := map[model.Provider][][]model.Service{}
+	var order []model.Provider
 	for _, g := range groups {
 		if len(g) == 0 {
 			continue
 		}
-		if strings.HasPrefix(g[0].ID, "gcp.") {
-			gcp = append(gcp, g)
-		} else {
-			aws = append(aws, g)
+		provider := model.ProviderAWS
+		if name, _, ok := strings.Cut(g[0].ID, "."); ok && name != "" {
+			provider = model.Provider(name)
 		}
+		if _, seen := byProvider[provider]; !seen {
+			order = append(order, provider)
+		}
+		byProvider[provider] = append(byProvider[provider], g)
 	}
+	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
 	out := model.Bundle{SchemaVersion: "1"}
-	if len(aws) > 0 {
-		b, _, err := fusion.Fuse(ctx, model.ProviderAWS, aws)
-		if err != nil {
-			return model.Bundle{}, "", err
-		}
-		out.Services = append(out.Services, b.Services...)
-		out.Sources = append(out.Sources, b.Sources...)
-		out.Provider = model.ProviderAWS
-	}
-	if len(gcp) > 0 {
-		b, _, err := fusion.Fuse(ctx, model.ProviderGCP, gcp)
+	for _, provider := range order {
+		b, _, err := fusion.Fuse(ctx, provider, byProvider[provider])
 		if err != nil {
 			return model.Bundle{}, "", err
 		}
 		out.Services = append(out.Services, b.Services...)
 		out.Sources = append(out.Sources, b.Sources...)
 		if out.Provider == "" {
-			out.Provider = model.ProviderGCP
+			out.Provider = provider
 		}
 	}
 	sort.Slice(out.Services, func(i, j int) bool { return out.Services[i].ID < out.Services[j].ID })

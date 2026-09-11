@@ -155,3 +155,4 @@ aws.codeconnections emulate
 aws.iot-data emulate
 aws.managedblockchain emulate
 aws.kinesisanalyticsv2 emulate
+hostinger.api emulate

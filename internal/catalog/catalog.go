@@ -392,6 +392,8 @@ func Bundle() *model.Bundle {
 			"copy_status":         {Shape: "String"},
 			"blob_type":           {Shape: "String"},
 			"content_length":      {Shape: "String"},
+			"etag":                {Shape: "String"},
+			"last_modified":       {Shape: "String"},
 		}},
 		"BlobList": {ID: "BlobList", Kind: model.KindList, Member: "Blob"},
 		"BlobBody": {ID: "BlobBody", Kind: model.KindString},

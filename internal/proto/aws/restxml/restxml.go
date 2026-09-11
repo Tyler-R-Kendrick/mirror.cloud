@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -516,6 +517,22 @@ func azureRoute(r *http.Request) string {
 	return "Unknown"
 }
 
+// azureETagList splits an If-Match/If-None-Match header into ETag tokens with
+// surrounding quotes stripped (Azurite's ConditionalHeadersAdapter dequotes
+// before comparing). "*" survives as a token.
+func azureETagList(v string) []any {
+	parts := strings.Split(v, ",")
+	out := make([]any, 0, len(parts))
+	for _, p := range parts {
+		p = strings.Trim(strings.TrimSpace(p), `"`)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func decodeAzureHeaders(in map[string]any, r *http.Request) {
 	meta := map[string]any{}
 	for k, vs := range r.Header {
@@ -549,11 +566,27 @@ func decodeAzureHeaders(in map[string]any, r *http.Request) {
 		case "x-ms-lease-break-period":
 			in["lease_break_period"] = vs[0]
 		case "if-match":
-			in["if_match"] = vs[0]
+			in["if_match_list"] = azureETagList(vs[0])
 		case "if-none-match":
-			in["if_none_match"] = vs[0]
+			in["if_none_match_list"] = azureETagList(vs[0])
 		case "if-modified-since":
-			in["if_modified_since"] = vs[0]
+			if t, err := http.ParseTime(vs[0]); err == nil {
+				in["if_modified_since_unix"] = t.Unix()
+			}
+		case "if-unmodified-since":
+			if t, err := http.ParseTime(vs[0]); err == nil {
+				in["if_unmodified_since_unix"] = t.Unix()
+			}
+		case "x-ms-if-sequence-number-eq":
+			in["seq_eq"] = vs[0]
+		case "x-ms-if-sequence-number-lt":
+			in["seq_lt"] = vs[0]
+		case "x-ms-if-sequence-number-le":
+			in["seq_le"] = vs[0]
+		case "x-ms-blob-condition-appendpos":
+			in["append_pos"] = vs[0]
+		case "x-ms-blob-condition-maxsize":
+			in["max_size"] = vs[0]
 		case "content-type":
 			in["content_type"] = vs[0]
 		case "x-ms-blob-cache-control":
@@ -2498,6 +2531,20 @@ func writeAzureBlobHeaders(w http.ResponseWriter, resp *spi.Response) {
 	if s := strAny(out["content_length"]); s != "" {
 		w.Header().Set("Content-Length", s)
 	}
+	writeAzureEntityHeaders(w, out)
+}
+
+// writeAzureEntityHeaders emits ETag and Last-Modified from output members;
+// last_modified is unix seconds as a string.
+func writeAzureEntityHeaders(w http.ResponseWriter, out map[string]any) {
+	if s := strAny(out["etag"]); s != "" {
+		w.Header().Set("ETag", s)
+	}
+	if s := strAny(out["last_modified"]); s != "" {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+			w.Header().Set("Last-Modified", time.Unix(n, 0).UTC().Format(http.TimeFormat))
+		}
+	}
 }
 
 func writeAzureContainerHeaders(w http.ResponseWriter, resp *spi.Response) {
@@ -2548,6 +2595,11 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	if f.Code == "MirrorNotImplemented" {
 		w.Header().Set("x-mirror-not-implemented", svc.ID+"."+op.Name)
 		status = 501
+	}
+	if status == 304 {
+		// Conditional read miss: no body, no x-ms-error-code.
+		w.WriteHeader(status)
+		return nil
 	}
 	if svc.ID == "azure.blobs" || svc.ID == "azure.queue" {
 		w.Header().Set("x-ms-error-code", f.Code)

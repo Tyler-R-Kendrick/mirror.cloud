@@ -554,6 +554,136 @@ func TestAzurePutBlockListFoldsInRequestOrder(t *testing.T) {
 	}
 }
 
+func TestAzureConditions(t *testing.T) {
+	p := azurePack(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) *spi.Response {
+		t.Helper()
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res
+	}
+	fault := func(op string, in map[string]any, status int, code string) {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		f, ok := err.(*spi.Fault)
+		if !ok || f.HTTPStatus != status || f.Code != code {
+			t.Fatalf("%s: got %#v, want %d %s", op, err, status, code)
+		}
+	}
+	etagOf := func(blob string) string {
+		t.Helper()
+		props := inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": blob})
+		q := fmt.Sprint(props.Output["etag"])
+		if !strings.HasPrefix(q, "\"") || !strings.HasSuffix(q, "\"") || props.Output["last_modified"] != "0" {
+			t.Fatalf("properties %#v", props.Output)
+		}
+		return strings.Trim(q, "\"")
+	}
+
+	inv("CreateContainer", map[string]any{"container": "ctr"})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "hello"})
+	etag := etagOf("o")
+
+	// Read conditions (download and HEAD share the validator).
+	inv("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{etag}})
+	inv("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{"*"}})
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{"bogus"}}, 412, "ConditionNotMet")
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_none_match_list": []any{etag}}, 304, "ConditionNotMet")
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_none_match_list": []any{"*"}}, 400, "UnsatisfiableCondition")
+	// Azurite validates read conditions before the 404.
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "missing", "if_match_list": []any{"x"}}, 412, "ConditionNotMet")
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "missing", "if_none_match_list": []any{"*"}}, 400, "UnsatisfiableCondition")
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "missing"}, 404, "BlobNotFound")
+	// The atomic clock is frozen at epoch, so last_modified == 0 and the
+	// boundary rows (same-instant) are what these values exercise.
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_modified_since_unix": int64(0)}, 304, "ConditionNotMet")
+	inv("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_modified_since_unix": int64(-1)})
+	fault("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_unmodified_since_unix": int64(-1)}, 412, "ConditionNotMet")
+	inv("GetBlobProperties", map[string]any{"container": "ctr", "blob": "o", "if_unmodified_since_unix": int64(0)})
+	// Azurite read precedence: a passing if-modified-since overrides an
+	// if-none-match hit, and a passing if-none-match overrides an
+	// if-modified-since miss.
+	inv("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_none_match_list": []any{etag}, "if_modified_since_unix": int64(-1)})
+	inv("GetBlob", map[string]any{"container": "ctr", "blob": "o", "if_none_match_list": []any{"bogus"}, "if_modified_since_unix": int64(0)})
+
+	// The etag tracks content.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "changed"})
+	if etagOf("o") == etag {
+		t.Fatalf("etag did not change after overwrite")
+	}
+	etag = etagOf("o")
+
+	// Write conditions on delete.
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{"bogus"}}, 412, "ConditionNotMet")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_none_match_list": []any{etag}}, 412, "ConditionNotMet")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{"a", "b"}}, 400, "MultipleConditionHeadersNotSupported")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_none_match_list": []any{"a", "b"}}, 400, "MultipleConditionHeadersNotSupported")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{etag}, "if_none_match_list": []any{"x"}}, 400, "MultipleConditionHeadersNotSupported")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{etag}, "if_modified_since_unix": int64(-1), "if_unmodified_since_unix": int64(1)}, 400, "MultipleConditionHeadersNotSupported")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_modified_since_unix": int64(1)}, 412, "ConditionNotMet")
+	fault("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_unmodified_since_unix": int64(-1)}, 412, "ConditionNotMet")
+	// The one allowed pair is if-none-match + if-modified-since.
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_none_match_list": []any{"bogus"}, "if_modified_since_unix": int64(-1)})
+
+	// if-none-match * passes a write, if-match * passes, if-match etag passes.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "v1"})
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_none_match_list": []any{"*"}})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "v1"})
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{"*"}})
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o", "body": "v1"})
+	inv("DeleteBlob", map[string]any{"container": "ctr", "blob": "o", "if_match_list": []any{etagOf("o")}})
+
+	// PutBlob with if-none-match * on an existing blob is a 409.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o2", "body": "x"})
+	fault("PutBlob", map[string]any{"container": "ctr", "blob": "o2", "body": "y", "if_none_match_list": []any{"*"}}, 409, "BlobAlreadyExists")
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "o3", "body": "y", "if_none_match_list": []any{"*"}})
+
+	// Page blob sequence-number conditions.
+	inv("CreatePageBlob", map[string]any{"container": "ctr", "blob": "p", "content_length": "512"})
+	inv("SetBlobSequenceNumber", map[string]any{"container": "ctr", "blob": "p", "sequence_number_action": "update", "sequence_number": "5"})
+	pg := func(extra map[string]any) map[string]any {
+		in := map[string]any{"container": "ctr", "blob": "p", "page_write": "update",
+			"range_start": int64(0), "range_end": int64(511), "body": strings.Repeat("a", 512)}
+		for k, v := range extra {
+			in[k] = v
+		}
+		return in
+	}
+	inv("PutPage", pg(map[string]any{"seq_eq": "5"}))
+	fault("PutPage", pg(map[string]any{"seq_eq": "4"}), 412, "SequenceNumberConditionNotMet")
+	inv("PutPage", pg(map[string]any{"seq_lt": "6"}))
+	fault("PutPage", pg(map[string]any{"seq_lt": "5"}), 412, "SequenceNumberConditionNotMet")
+	inv("PutPage", pg(map[string]any{"seq_le": "5"}))
+	fault("PutPage", pg(map[string]any{"seq_le": "4"}), 412, "SequenceNumberConditionNotMet")
+	clr := func(extra map[string]any) map[string]any {
+		in := map[string]any{"container": "ctr", "blob": "p", "range_start": int64(0), "range_end": int64(511)}
+		for k, v := range extra {
+			in[k] = v
+		}
+		return in
+	}
+	inv("ClearPages", clr(map[string]any{"seq_eq": "5"}))
+	fault("ClearPages", clr(map[string]any{"seq_eq": "9"}), 412, "SequenceNumberConditionNotMet")
+
+	// Append conditions: max size is checked before append position.
+	inv("CreateAppendBlob", map[string]any{"container": "ctr", "blob": "a"})
+	inv("AppendBlock", map[string]any{"container": "ctr", "blob": "a", "body": "x", "max_size": "1"})
+	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "a", "body": "y", "max_size": "1"}, 412, "MaxBlobSizeConditionNotMet")
+	inv("AppendBlock", map[string]any{"container": "ctr", "blob": "a", "body": "y", "append_pos": "1"})
+	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "a", "body": "z", "append_pos": "0"}, 412, "AppendPositionConditionNotMet")
+	fault("AppendBlock", map[string]any{"container": "ctr", "blob": "a", "body": "z", "if_match_list": []any{"bogus"}}, 412, "ConditionNotMet")
+
+	// Copy with if-none-match * fails only when the destination exists.
+	inv("PutBlob", map[string]any{"container": "ctr", "blob": "src", "body": "s"})
+	fault("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "o2", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src", "if_none_match_list": []any{"*"}}, 409, "BlobAlreadyExists")
+	inv("StartCopyFromURL", map[string]any{"container": "ctr", "blob": "c9", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src", "if_none_match_list": []any{"*"}})
+	fault("CopyBlobFromURL", map[string]any{"container": "ctr", "blob": "o2", "copy_source": "http://acct.blob.core.windows.net/ctr/src", "source_container": "ctr", "source_blob": "src", "if_none_match_list": []any{"*"}}, 409, "BlobAlreadyExists")
+}
+
 func FuzzBlobBytes(f *testing.F) {
 	f.Add("o", "hello")
 	f.Add("", "v")

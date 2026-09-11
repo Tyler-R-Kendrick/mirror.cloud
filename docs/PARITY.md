@@ -131,7 +131,7 @@ YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and 
 | Blob keys accounted (routed + unclaim) | 42 / 59 |
 | Queue keys accounted | 4 / 11 |
 | Table method+paths accounted (routed + unclaim) | 8 / 12 |
-| Azurite test functions traced | 267 / 806 (33%) |
+| Azurite test functions traced | 304 / 806 (38%) |
 | Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
@@ -223,7 +223,7 @@ Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `path
 | `/{containerName}?restype=container&comp=list&flat` | partial | `ListBlobs` — no delimiter/hierarchy |
 | `/{containerName}?restype=container&comp=list&hierarchy` | missing | List Blobs hierarchy |
 | `/{containerName}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
-| `/{containerName}/{blob}` | routed | `PutBlob` / `GetBlob` / `DeleteBlob`; HEAD is `GetBlobProperties` (stored metadata + `x-ms-blob-*` headers, no body; missing is 404 `BlobNotFound` with no XML body) |
+| `/{containerName}/{blob}` | routed | `PutBlob` / `GetBlob` / `DeleteBlob`; HEAD is `GetBlobProperties` (stored metadata + `x-ms-blob-*` headers, no body; missing is 404 `BlobNotFound` with no XML body). If-Match/If-None-Match/If-Modified-Since/If-Unmodified-Since honored in Azurite validator order (read conditions before the 404); HEAD emits `ETag`/`Last-Modified`; download response omits them (BlobBody shape ceiling) |
 | `/{containerName}/{blob}?PageBlob` | routed | `CreatePageBlob` — born as `zeros(N)`, N must be 512-aligned; stores `x-ms-blob-sequence-number`; duplicate is 409 `BlobAlreadyExists`; size above the engine `zerosMax` (16 MiB) is a known ceiling |
 | `/{containerName}/{blob}?AppendBlob` | routed | `CreateAppendBlob` — born empty; overwrites an existing blob of any type (Azurite `override existing pageblob`) |
 | `/{containerName}/{blob}?BlockBlob` | routed | `PutBlob` reads `x-ms-blob-type` and stores it; `GetBlobProperties` returns it |
@@ -384,18 +384,18 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 | Azurite test | Mirror evidence | Result |
 |---|---|---|
 | `blob/apis/blob.test.ts::download with default parameters` | Booted GET `/ctr/o` returns stored bytes | Mapped and green |
-| `blob/apis/blob.test.ts::download should work with conditional headers` | GET exists; If-* not applied until conditions slice | Download mapped; condition unclaimed |
+| `blob/apis/blob.test.ts::download should work with conditional headers` | Booted GET passes with matching ifMatch, non-matching ifNoneMatch, past ifModifiedSince, future ifUnmodifiedSince; atomic `TestAzureConditions` | Mapped and green |
 | `blob/apis/blob.test.ts::download with ifTags condition` | Tags not routed until tags slice | Later |
 | `blob/apis/blob.test.ts::getProperties with ifTags condition` | Same | Later |
 | `blob/apis/blob.test.ts::setProperties with ifTags condition` | Same | Later |
 | `blob/apis/blob.test.ts::setMetadata with ifTags condition` | Same | Later |
-| `blob/apis/blob.test.ts::download should work with ifMatch value *` | Conditions slice | Later |
-| `blob/apis/blob.test.ts::download should not work with invalid conditional header ifMatch` | Same | Later |
-| `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch` | Same | Later |
-| `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch *` | Same | Later |
-| `blob/apis/blob.test.ts::download should not work with conditional header ifModifiedSince` | Same | Later |
+| `blob/apis/blob.test.ts::download should work with ifMatch value *` | GET If-Match `*` (and `*,abc` list) is 200; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with invalid conditional header ifMatch` | Booted HEAD/GET with bogus If-Match is 412 `ConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch` | If-None-Match with the stored ETag is 304 header-only; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch *` | Booted GET If-None-Match `*` is 400 `UnsatisfiableCondition`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifModifiedSince` | Booted future If-Modified-Since is 304 header-only; same-instant is 304 atomically | Mapped and green |
 | `blob/apis/blob.test.ts::download should not work when blob in Archive tier` | Tier is `unclaim` in the path table | Unclaim |
-| `blob/apis/blob.test.ts::download should not work with conditional header ifUnmodifiedSince` | Conditions slice | Later |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifUnmodifiedSince` | Booted past If-Unmodified-Since is 412 `ConditionNotMet`; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::download all parameters set` | `Range` header not honored; full body always returned | Partial; range GET unclaimed |
 | `blob/apis/blob.test.ts::download entire with range` | Same | Range unclaimed |
 | `blob/apis/blob.test.ts::download out of range` | Same | Range unclaimed |
@@ -403,16 +403,16 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 | `blob/apis/blob.test.ts::download partial range (via custom policy)` | Same | Range unclaimed |
 | `blob/apis/blob.test.ts::get properties response should not set content-type` | HEAD writes `Content-Type` only when one was stored | Mapped and green |
 | `blob/apis/blob.test.ts::delete` | Booted DELETE 202 then GET 404 | Mapped and green |
-| `blob/apis/blob.test.ts::delete should work for valid ifMatch` | Conditions slice | Later |
-| `blob/apis/blob.test.ts::delete should work for * ifMatch` | Same | Later |
-| `blob/apis/blob.test.ts::delete should not work for invalid ifMatch` | Same | Later |
-| `blob/apis/blob.test.ts::delete should work for valid ifNoneMatch` | Same | Later |
-| `blob/apis/blob.test.ts::delete should not work for invalid ifNoneMatch` | Same | Later |
-| `blob/apis/blob.test.ts::delete should work for ifNoneMatch *` | Same | Later |
-| `blob/apis/blob.test.ts::delete should work for valid ifModifiedSince *` | Same | Later |
-| `blob/apis/blob.test.ts::delete should not work for invalid ifModifiedSince` | Same | Later |
-| `blob/apis/blob.test.ts::delete should work for valid ifUnmodifiedSince *` | Same | Later |
-| `blob/apis/blob.test.ts::delete should not work for invalid ifUnmodifiedSince` | Same | Later |
+| `blob/apis/blob.test.ts::delete should work for valid ifMatch` | DELETE with the stored ETag succeeds; atomic `TestAzureConditions` | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for * ifMatch` | DELETE If-Match `*` succeeds; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifMatch` | DELETE with bogus If-Match is 412 `ConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for valid ifNoneMatch` | DELETE with non-matching If-None-Match succeeds; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifNoneMatch` | DELETE If-None-Match with the stored ETag is 412; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for ifNoneMatch *` | DELETE If-None-Match `*` succeeds (Azurite write validator skips `*`); atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for valid ifModifiedSince *` | DELETE with past If-Modified-Since succeeds; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifModifiedSince` | DELETE with future If-Modified-Since is 412; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for valid ifUnmodifiedSince *` | DELETE with future If-Unmodified-Since succeeds; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifUnmodifiedSince` | DELETE with past If-Unmodified-Since is 412; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::Delete with ifTags should work` | Tags slice | Later |
 | `blob/apis/blob.test.ts::should create a snapshot from a blob` | Booted PUT `comp=snapshot` 201 with `x-ms-snapshot`; snapshot survives base overwrite; atomic `TestAzureSnapshotCopy` | Mapped and green |
 | `blob/apis/blob.test.ts::Create a snapshot from a blob with ifTags` | Same | Later |
@@ -448,7 +448,7 @@ Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/cond
 | `blob/apis/blob.test.ts::Copy blob should work for page blob` | Page copy preserves `PageBlob` type, content length, and sequence number | Mapped and green |
 | `blob/apis/blob.test.ts::Copy blob should not work for page blob and set tier` | Same | Later |
 | `blob/apis/blob.test.ts::Copy blob should fail with 400 when copy source is invalid` | Booted path-only source is 400 `InvalidHeaderValue` | Mapped and green |
-| `blob/apis/blob.test.ts::Copy blob should not work with  ifNoneMatch * when dest exist` | Copy then conditions | Later |
+| `blob/apis/blob.test.ts::Copy blob should not work with  ifNoneMatch * when dest exist` | Both copy ops with If-None-Match `*` and an existing destination are 409 `BlobAlreadyExists`; atomic | Mapped and green |
 | `blob/apis/blob.test.ts::Synchronized copy blob should work` | `x-ms-requires-sync: true` routes `CopyBlobFromURL`; 202 success | Mapped and green |
 | `blob/apis/blob.test.ts::Synchronized copy blob echoes source Content-MD5 in response when supplied` | Sync copy echoes source `Content-MD5` header when set | Mapped and green |
 | `blob/apis/blob.test.ts::Synchronized copy blob omits Content-MD5 in response when not supplied` | No `Content-MD5` header when the source has none | Mapped and green |
@@ -497,11 +497,11 @@ Direct `it()` names from `blob/apis/pageblob.test.ts` (58). Page blobs are a fix
 | `blob/apis/pageblob.test.ts::download a 0 size page blob with range > 0 will get error` | Range GET unclaimed (same ceiling as blob.test.ts range rows) | Range unclaimed |
 | `blob/apis/pageblob.test.ts::Download a blob range should only return ContentMD5 when has request header x-ms-range-get-content-md5 ` | Range GET and range Content-MD5 unclaimed | Range unclaimed |
 | `blob/apis/pageblob.test.ts::uploadPages` | Booted PUT `comp=page` 201 twice; atomic splice | Mapped and green |
-| `blob/apis/pageblob.test.ts::uploadPages should work with sequence number conditions` | `ifSequenceNumber*` conditions are the conditions slice (412 `ConditionNotMet`) | Later |
+| `blob/apis/pageblob.test.ts::uploadPages should work with sequence number conditions` | PutPage honors `x-ms-if-sequence-number-eq/lt/le` against the stored sequence number; atomic `TestAzureConditions` | Mapped and green |
 | `blob/apis/pageblob.test.ts::uploadPages with ifTags should work` | Tags slice | Later |
-| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberEqualTo doesn't match` | Conditions slice | Later |
-| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberLessThan doesn't match` | Same | Later |
-| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberLessThanOrEqualTo doesn't match` | Same | Later |
+| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberEqualTo doesn't match` | Mismatched eq is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberLessThan doesn't match` | lt <= sequence number is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberLessThanOrEqualTo doesn't match` | le < sequence number is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
 | `blob/apis/pageblob.test.ts::uploadPages with correct crc64 should succeed and echo crc64` | CRC64 not computed or echoed | Checksum unclaimed |
 | `blob/apis/pageblob.test.ts::uploadPages with wrong crc64 should throw mismatch` | Same | Checksum unclaimed |
 | `blob/apis/pageblob.test.ts::uploadPages with wrong md5 should throw mismatch` | Content-MD5 stored verbatim, never validated | Checksum unclaimed |
@@ -525,10 +525,10 @@ Direct `it()` names from `blob/apis/pageblob.test.ts` (58). Page blobs are a fix
 | `blob/apis/pageblob.test.ts::uploadPages to insert into a non-sequential range` | Same | Mapped and green |
 | `blob/apis/pageblob.test.ts::uploadPages to right override a non-sequential range` | Same | Mapped and green |
 | `blob/apis/pageblob.test.ts::clearPages` | Booted `x-ms-page-write: clear` 201; zero-fill splice | Mapped and green |
-| `blob/apis/pageblob.test.ts::clearPages should work with sequence number conditions` | Conditions slice | Later |
-| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberEqualTo` | Same | Later |
-| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberLessThan` | Same | Later |
-| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberLessThanOrEqualTo` | Same | Later |
+| `blob/apis/pageblob.test.ts::clearPages should work with sequence number conditions` | ClearPages honors the same three headers; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberEqualTo` | Mismatched eq is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberLessThan` | Failing lt is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberLessThanOrEqualTo` | Failing le is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
 | `blob/apis/pageblob.test.ts::clearPages to internally override a sequential range` | Zero-fill splice | Mapped and green |
 | `blob/apis/pageblob.test.ts::clearPages to totally override a sequential range` | Same | Mapped and green |
 | `blob/apis/pageblob.test.ts::clearPages to left override a sequential range` | Same | Mapped and green |
@@ -573,9 +573,9 @@ Direct `it()` names from `blob/apis/appendblob.test.ts` (38). Append blobs are b
 | `blob/apis/appendblob.test.ts::Download append blob should work for copied blob` | Copy destination downloads the source bytes | Mapped and green |
 | `blob/apis/appendblob.test.ts::Append block with invalid blob type should not work` | Booted append to block blob 409 `InvalidBlobType` | Mapped and green |
 | `blob/apis/appendblob.test.ts::Append block with content length 0 should not work` | Empty body 400 `InvalidHeaderValue`; atomic | Mapped and green |
-| `blob/apis/appendblob.test.ts::Append block append position access condition should work` | `x-ms-blob-condition-appendpos` is the conditions slice (412) | Later |
+| `blob/apis/appendblob.test.ts::Append block append position access condition should work` | `x-ms-blob-condition-maxsize` over the post-append length is 412 `MaxBlobSizeConditionNotMet`; `x-ms-blob-condition-appendpos` mismatch is 412 `AppendPositionConditionNotMet` (max size checked first); booted + atomic | Mapped and green |
 | `blob/apis/appendblob.test.ts::Append block md5 validation should work` | Content-MD5 validation unclaimed | Checksum unclaimed |
-| `blob/apis/appendblob.test.ts::Append block access condition should work` | Conditions slice | Later |
+| `blob/apis/appendblob.test.ts::Append block access condition should work` | AppendBlock honors If-Match/If-None-Match/If-Modified-Since/If-Unmodified-Since; wrong If-Match is 412 `ConditionNotMet`; atomic | Mapped and green |
 | `blob/apis/appendblob.test.ts::Append block lease condition should work` | Blob lease keys still `missing` | Later |
 | `blob/apis/appendblob.test.ts::Append block should refresh lease state ` | Same | Later |
 | `blob/apis/appendblob.test.ts::Seal append blob should work` | Seal is `unclaim` in the path table | Unclaim |
@@ -587,6 +587,48 @@ Direct `it()` names from `blob/apis/appendblob.test.ts` (38). Append blobs are b
 | `blob/apis/appendblob.test.ts::Seal append blob can set blob properties` | Same | Unclaim |
 | `blob/apis/appendblob.test.ts::Seal append blob can set blob meta data` | Same | Unclaim |
 | `blob/apis/appendblob.test.ts::Seal append blob cannot append` | Same | Unclaim |
+
+Direct `it()` names from `blob/conditions.test.ts` (37). This file unit-tests Azurite-internal validator classes (`ReadConditionalHeadersValidator`, `WriteConditionalHeadersValidator`, and the header adapters) rather than HTTP; each row names where the same semantics are answered at HTTP in Mirror. The HTTP mapping lives in the GetBlob/GetBlobProperties read requires, the DeleteBlob/AppendBlock write requires, and `azureETagList` header decode, proven by atomic `TestAzureConditions`, booted condition blocks, and `TestAzureConditionalHeadersDecode`.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/conditions.test.ts::Should work with undefined values` | Absent conditional headers skip every require (adapter unit) | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with single etags` | `azureETagList` keeps one token; `TestAzureConditionalHeadersDecode` | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with multi etags` | Comma list splits to a multi-token list; read path allows it | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with etags with quotes` | Tokens are dequoted before comparison, like Azurite's adapter | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with undefined or null resource` | Missing blob: If-Match is 412 and If-None-Match `*` is 400 before the 404, matching the validator order in `downloadBlob` | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with blob model` | Blob record carries etag/last_modified inputs to the same checks | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with container model` | Container ops do not evaluate If-* headers | Partial |
+| `blob/conditions.test.ts::Should work with etag with quotes` | Write-path comparisons use the dequoted token | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 precondition failed for failed if-match results` | GET/HEAD with non-matching If-Match is 412 `ConditionNotMet` | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 412 precondition failed for successful if-match results` | Matching If-Match passes | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 304 Not Modified for failed if-none-match results` | If-None-Match hit is 304 header-only | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 304 Not Modified for successful if-none-match results` | Non-matching If-None-Match passes | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 304 Not Modified for failed if-modified-since results` | Not-modified-since is 304 header-only | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 304 Not Modified when if-modified-since same with lastModified` | Equal instant fails strictly-less, so 304; atomic epoch row | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 304 Not Modified for successful if-modified-since results` | Past If-Modified-Since passes (booted) | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 precondition failed for failed if-unmodified-since results` | Past If-Unmodified-Since is 412 (booted) | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 412 precondition failed when if-unmodified-since same with lastModified` | Equal instant passes; atomic epoch row and booted equal header | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 412 precondition failed for successful if-unmodified-since results` | Future If-Unmodified-Since passes | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 OK when all conditions match` | Combined passing headers return content | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 Precondition Failed when if-none-match and if-unmodified-since fail among all conditions` | If-Unmodified-Since failure is checked before the 304 pair, so 412 | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 OK when if-none-match fails all conditions` | A passing If-Modified-Since overrides an If-None-Match hit (no 304); atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 Precondition Failed when if-match and if-modified-since fail among all conditions` | If-Match failure is checked first, so 412 | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 OK when if-modified-since fails all conditions` | A passing If-None-Match overrides an If-Modified-Since miss (no 304); atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 304 Not Modified when if-none-match and if-modified-since fail` | Both fail together, so 304 | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 Precondition Failed for any ifMatch` | Validator unit for a missing resource; Mirror answers the missing blob 404 before write conditions | Partial |
+| `blob/conditions.test.ts::Should return 400 getUnsatisfiableCondition for if none-match value *` | Missing blob with If-None-Match `*` is 400 `UnsatisfiableCondition` before the 404; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should throw 400 Bad Request for invalid combinations conditional headers` | >2 condition types, or any pair other than if-none-match + if-modified-since, is 400 `MultipleConditionHeadersNotSupported`; atomic and booted | Mapped at HTTP |
+| `blob/conditions.test.ts::Should throw 400 Bad Request for multi etags in ifMatch` | Multi-token If-Match on a write is 400; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should throw 400 Bad Request for multi etags in if-none-match` | Multi-token If-None-Match on a write is 400; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should throw 412 Precondition Failed for any values in if-match` | Validator unit for a missing resource; Mirror 404s first | Partial |
+| `blob/conditions.test.ts::Should throw 412 Precondition Failed for * if-match` | Same | Partial |
+| `blob/conditions.test.ts::Should return 200 for successful if-none-match and failed if-modified-since` | Write precedence: present If-None-Match decides, later types ignored; atomic pair row | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 for successful if-match and failed if-unmodified-since` | Write precedence: present If-Match decides; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 for if-unmodified-since equal with lastModified` | Equal instant passes (`date >= lastModified`); atomic epoch row | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 for if-modified-since equal with lastModifiedSince` | Equal instant fails (`lastModified <= date`); atomic epoch row | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 for failed if-modified-since results` | Future If-Modified-Since on a write is 412; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 for failed if-unmodified-since results` | Past If-Unmodified-Since on a write is 412; atomic | Mapped at HTTP |
 
 ### Shipped YAML evidence (not the inventory)
 

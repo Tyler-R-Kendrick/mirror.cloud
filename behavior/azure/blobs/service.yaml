@@ -15,15 +15,19 @@ resources:
     record:
       name: id
 
-  # No resource-level record: every write re-evaluates it, so a metadata or
-  # properties patch would re-run the template against a body-less request and
-  # wipe the value it was not touching. PutBlob carries the full record;
-  # patches and folds declare only the fields they mean to change.
+  # No input-derived resource-level record: every write re-evaluates it, so a
+  # metadata or properties patch would re-run the template against a body-less
+  # request and wipe the value it was not touching. PutBlob carries the full
+  # record; patches and folds declare only the fields they mean to change.
+  # last_modified is input-independent, so re-evaluating it only bumps mtime
+  # (which every Azure write does).
   blob:
     collection: "azblob:{container.id}"
     parent: container
     id:
       input_members: [blob]
+    record:
+      last_modified: "int(now)"
 
   blob_slot:
     collection: azslot
@@ -114,6 +118,36 @@ errors:
     code: NoPendingCopyOperation
     http: 409
     fault: client
+  ConditionNotMet:
+    code: ConditionNotMet
+    http: 412
+    fault: client
+  # Azurite's NotModified carries the ConditionNotMet code with a 304 status;
+  # EncodeFault writes it header-only.
+  NotModified:
+    code: ConditionNotMet
+    http: 304
+    fault: client
+  MultipleConditionHeadersNotSupported:
+    code: MultipleConditionHeadersNotSupported
+    http: 400
+    fault: client
+  UnsatisfiableCondition:
+    code: UnsatisfiableCondition
+    http: 400
+    fault: client
+  SequenceNumberConditionNotMet:
+    code: SequenceNumberConditionNotMet
+    http: 412
+    fault: client
+  AppendPositionConditionNotMet:
+    code: AppendPositionConditionNotMet
+    http: 412
+    fault: client
+  MaxBlobSizeConditionNotMet:
+    code: MaxBlobSizeConditionNotMet
+    http: 412
+    fault: client
 
 operations:
   CreateContainer:
@@ -155,9 +189,13 @@ operations:
   PutBlob:
     reads:
       ctr: { resource: container }
+      existing: { resource: blob }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
+      # Azurite createBlob special case: If-None-Match * on an existing blob
+      # is a 409, not the write validator's 412.
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
     effects:
       - put:
           resource: blob
@@ -183,10 +221,27 @@ operations:
       rec: { resource: blob }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      # Azurite's metadata store validates read conditions before throwing
+      # BlobNotFound: any If-Match on a missing blob is 412, and If-None-Match
+      # * on a missing blob is 400.
+      - { cond: "rec_found || !('if_match_list' in input && size(input.if_match_list) > 0)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "rec_found || !('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      # Read conditions (Azurite ReadConditionalHeadersValidator).
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || string(input.if_match_list[0]) == '*' || input.if_match_list.exists(m, string(m) == etag)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_unmodified_since_unix' in input) || last_mod <= int(input.if_unmodified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_none_match_list' in input && input.if_none_match_list.exists(m, string(m) == etag)) || (('if_modified_since_unix' in input) && int(input.if_modified_since_unix) < last_mod)", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_modified_since_unix' in input) || int(input.if_modified_since_unix) < last_mod || (('if_none_match_list' in input && size(input.if_none_match_list) > 0) && !input.if_none_match_list.exists(m, string(m) == etag))", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      # Guard the snapshot index: an unknown snapshot id must 404 via the
+      # require above, not fault the let before requires run.
+      src: "rec_found ? (('snapshot' in input && input.snapshot != null && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
+      etag: "rec_found ? md5hex(string(src.value) + '|' + toJSON(('metadata' in src && src.metadata != null) ? src.metadata : {}) + '|' + (('content_type' in src && src.content_type != null) ? string(src.content_type) : '')) : ''"
+      last_mod: "rec_found ? (('last_modified' in src && src.last_modified != null) ? int(src.last_modified) : 0) : 0"
     output:
-      _raw: "('snapshot' in input && input.snapshot != null) ? string(rec.snapshots.filter(s, s.id == string(input.snapshot))[0].value) : string(rec.value)"
+      _raw: "string(src.value)"
 
   CreateSnapshot:
     reads:
@@ -197,7 +252,7 @@ operations:
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
     let:
       snap_id: "rec_found ? string(now) + '-' + string((('snapshots' in rec && rec.snapshots != null) ? size(rec.snapshots) : 0)) : ''"
-      snap: "rec_found ? {'id': snap_id, 'value': string(rec.value), 'metadata': (('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in rec && rec.metadata != null) ? rec.metadata : {})), 'content_type': (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : ''), 'cache_control': (('cache_control' in rec && rec.cache_control != null) ? string(rec.cache_control) : ''), 'content_encoding': (('content_encoding' in rec && rec.content_encoding != null) ? string(rec.content_encoding) : ''), 'content_language': (('content_language' in rec && rec.content_language != null) ? string(rec.content_language) : ''), 'content_disposition': (('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''), 'content_md5': (('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''), 'blob_type': (('blob_type' in rec && rec.blob_type != null) ? string(rec.blob_type) : 'BlockBlob')} : {}"
+      snap: "rec_found ? {'id': snap_id, 'value': string(rec.value), 'metadata': (('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in rec && rec.metadata != null) ? rec.metadata : {})), 'content_type': (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : ''), 'cache_control': (('cache_control' in rec && rec.cache_control != null) ? string(rec.cache_control) : ''), 'content_encoding': (('content_encoding' in rec && rec.content_encoding != null) ? string(rec.content_encoding) : ''), 'content_language': (('content_language' in rec && rec.content_language != null) ? string(rec.content_language) : ''), 'content_disposition': (('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''), 'content_md5': (('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''), 'blob_type': (('blob_type' in rec && rec.blob_type != null) ? string(rec.blob_type) : 'BlockBlob'), 'last_modified': int(now)} : {}"
     effects:
       - patch:
           resource: blob
@@ -210,11 +265,13 @@ operations:
     reads:
       ctr: { resource: container }
       src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+      dst: { resource: blob }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('source_snapshot' in input && input.source_snapshot != null) || ('snapshots' in src && src.snapshots != null && size(src.snapshots.filter(s, s.id == string(input.source_snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !dst_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
     let:
       srcrec: "src_found ? (('source_snapshot' in input && input.source_snapshot != null) ? src.snapshots.filter(s, s.id == string(input.source_snapshot))[0] : src) : {}"
       smeta: "('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in srcrec && srcrec.metadata != null) ? srcrec.metadata : {})"
@@ -247,11 +304,13 @@ operations:
     reads:
       ctr: { resource: container }
       src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+      dst: { resource: blob }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('source_snapshot' in input && input.source_snapshot != null) || ('snapshots' in src && src.snapshots != null && size(src.snapshots.filter(s, s.id == string(input.source_snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !dst_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
     let:
       srcrec: "src_found ? (('source_snapshot' in input && input.source_snapshot != null) ? src.snapshots.filter(s, s.id == string(input.source_snapshot))[0] : src) : {}"
       smeta: "('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in srcrec && srcrec.metadata != null) ? srcrec.metadata : {})"
@@ -314,10 +373,21 @@ operations:
       rec: { resource: blob }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      # Conditions validate before the 404, same as GetBlob.
+      - { cond: "rec_found || !('if_match_list' in input && size(input.if_match_list) > 0)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "rec_found || !('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      # Read conditions (Azurite ReadConditionalHeadersValidator).
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || string(input.if_match_list[0]) == '*' || input.if_match_list.exists(m, string(m) == etag)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_unmodified_since_unix' in input) || last_mod <= int(input.if_unmodified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_none_match_list' in input && input.if_none_match_list.exists(m, string(m) == etag)) || (('if_modified_since_unix' in input) && int(input.if_modified_since_unix) < last_mod)", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_modified_since_unix' in input) || int(input.if_modified_since_unix) < last_mod || (('if_none_match_list' in input && size(input.if_none_match_list) > 0) && !input.if_none_match_list.exists(m, string(m) == etag))", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
     let:
-      src: "rec_found ? (('snapshot' in input && input.snapshot != null) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
+      src: "rec_found ? (('snapshot' in input && input.snapshot != null && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
+      etag: "rec_found ? md5hex(string(src.value) + '|' + toJSON(('metadata' in src && src.metadata != null) ? src.metadata : {}) + '|' + (('content_type' in src && src.content_type != null) ? string(src.content_type) : '')) : ''"
+      last_mod: "rec_found ? (('last_modified' in src && src.last_modified != null) ? int(src.last_modified) : 0) : 0"
     output:
       metadata: "('metadata' in src && src.metadata != null) ? src.metadata : {}"
       content_type: "('content_type' in src && src.content_type != null) ? string(src.content_type) : ''"
@@ -329,6 +399,8 @@ operations:
       blob_type: "('blob_type' in src && src.blob_type != null && string(src.blob_type) != '') ? string(src.blob_type) : 'BlockBlob'"
       content_length: "string(blen(string(src.value)))"
       sequence_number: "('sequence_number' in src && src.sequence_number != null) ? string(src.sequence_number) : ''"
+      etag: "rec_found ? '\"' + etag + '\"' : ''"
+      last_modified: "string(last_mod)"
 
   SetBlobMetadata:
     reads:
@@ -422,6 +494,11 @@ operations:
       - { cond: "int(input.range_start) % 512 == 0 && (int(input.range_end) + 1) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: "int(input.range_end) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
       - { cond: "blen(('body' in input && input.body != null) ? string(input.body) : '') == int(input.range_end) - int(input.range_start) + 1", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('seq_le' in input) || int(input.seq_le) >= seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('seq_lt' in input) || int(input.seq_lt) > seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('seq_eq' in input) || int(input.seq_eq) == seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      seq: "rec_found ? (('sequence_number' in rec && rec.sequence_number != null) ? int(rec.sequence_number) : 0) : 0"
     effects:
       - patch:
           resource: blob
@@ -442,6 +519,11 @@ operations:
       - { cond: "'range_start' in input", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: "int(input.range_start) % 512 == 0 && (int(input.range_end) + 1) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: "int(input.range_end) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+      - { cond: "!('seq_le' in input) || int(input.seq_le) >= seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('seq_lt' in input) || int(input.seq_lt) > seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('seq_eq' in input) || int(input.seq_eq) == seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      seq: "rec_found ? (('sequence_number' in rec && rec.sequence_number != null) ? int(rec.sequence_number) : 0) : 0"
     effects:
       - patch:
           resource: blob
@@ -524,6 +606,23 @@ operations:
       - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
       - { cond: "('snapshot' in input && input.snapshot != null) || !('snapshots' in rec && rec.snapshots != null && size(rec.snapshots) > 0) || ('delete_snapshots' in input && input.delete_snapshots != null)", error: SnapshotsPresent, message: "The blob has one or more snapshots. Specify the x-ms-delete-snapshots header." }
+      # Write conditions (Azurite WriteConditionalHeadersValidator):
+      # combination 400s, then the first present condition type decides.
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "cond_types <= 2", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "cond_types != 2 || (inm && ims)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "!inm || string(input.if_none_match_list[0]) != etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || !im || string(input.if_match_list[0]) == '*' || string(input.if_match_list[0]) == etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || im || !ims || last_mod > int(input.if_modified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || im || ims || !('if_unmodified_since_unix' in input) || int(input.if_unmodified_since_unix) >= last_mod", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      inm: "('if_none_match_list' in input && size(input.if_none_match_list) > 0)"
+      im: "('if_match_list' in input && size(input.if_match_list) > 0)"
+      ims: "('if_modified_since_unix' in input)"
+      cond_types: "(inm ? 1 : 0) + (im ? 1 : 0) + (ims ? 1 : 0) + (('if_unmodified_since_unix' in input) ? 1 : 0)"
+      etag: "rec_found ? md5hex(string(rec.value) + '|' + toJSON(('metadata' in rec && rec.metadata != null) ? rec.metadata : {}) + '|' + (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : '')) : ''"
+      last_mod: "rec_found ? (('last_modified' in rec && rec.last_modified != null) ? int(rec.last_modified) : 0) : 0"
     effects:
       # Deleting one snapshot removes it from the base record.
       - patch:
@@ -556,10 +655,14 @@ operations:
     reads:
       ctr: { resource: container }
       slot: { resource: blob_slot }
+      existing: { resource: blob }
     require:
       - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
       - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
       - { cond: "'blockids' in input && input.blockids.all(id, staged.exists(b, string(b.id) == string(id)))", error: InvalidBlockList, message: "The specified block list is invalid." }
+      # Same createBlob special case as PutBlob: If-None-Match * on an
+      # existing blob is a 409.
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
     select: { binding: staged, resource: block }
     effects:
       - put:
@@ -759,9 +862,27 @@ operations:
       - { cond: "'body' in input && input.body != null && blen(string(input.body)) > 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
       - { cond: "blen(string(input.body)) <= 4194304", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
       - { cond: "!('append_count' in rec && rec.append_count != null) || int(rec.append_count) < 50000", error: BlockCountExceedsLimit, message: "The committed block count has exceeded the maximum permissible limit." }
+      # Write conditions, then the append-specific pair (max size first,
+      # matching Azurite's append handler order).
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "cond_types <= 2", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "cond_types != 2 || (inm && ims)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "!inm || string(input.if_none_match_list[0]) != etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || !im || string(input.if_match_list[0]) == '*' || string(input.if_match_list[0]) == etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || im || !ims || last_mod > int(input.if_modified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || im || ims || !('if_unmodified_since_unix' in input) || int(input.if_unmodified_since_unix) >= last_mod", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('max_size' in input) || blen(string(rec.value)) + blen(string(input.body)) <= int(input.max_size)", error: MaxBlobSizeConditionNotMet, message: "The max blob size condition specified was not met." }
+      - { cond: "!('append_pos' in input) || blen(string(rec.value)) == int(input.append_pos)", error: AppendPositionConditionNotMet, message: "The append position condition specified was not met." }
     let:
       offset: "rec_found ? blen(string(rec.value)) : 0"
       count: "rec_found ? ((('append_count' in rec && rec.append_count != null) ? int(rec.append_count) : 0) + 1) : 0"
+      inm: "('if_none_match_list' in input && size(input.if_none_match_list) > 0)"
+      im: "('if_match_list' in input && size(input.if_match_list) > 0)"
+      ims: "('if_modified_since_unix' in input)"
+      cond_types: "(inm ? 1 : 0) + (im ? 1 : 0) + (ims ? 1 : 0) + (('if_unmodified_since_unix' in input) ? 1 : 0)"
+      etag: "rec_found ? md5hex(string(rec.value) + '|' + toJSON(('metadata' in rec && rec.metadata != null) ? rec.metadata : {}) + '|' + (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : '')) : ''"
+      last_mod: "rec_found ? (('last_modified' in rec && rec.last_modified != null) ? int(rec.last_modified) : 0) : 0"
     effects:
       - patch:
           resource: blob

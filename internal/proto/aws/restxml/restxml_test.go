@@ -1,6 +1,7 @@
 package restxml
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -926,6 +927,48 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || w.Header().Get("x-ms-error-code") != "BlobNotFound" || !strings.Contains(w.Body.String(), "<Code>BlobNotFound</Code>") {
 		t.Fatalf("azure fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+}
+
+func TestAzureConditionalHeadersDecode(t *testing.T) {
+	codec := Codec{}
+	az := &model.Service{ID: "azure.blobs"}
+	req := httptest.NewRequest(http.MethodGet, "/c/o", nil)
+	req.Header.Set("If-Match", `"etag1", "etag2"`)
+	req.Header.Set("If-None-Match", `*`)
+	req.Header.Set("If-Modified-Since", "Mon, 01 Jan 2018 00:00:00 GMT")
+	req.Header.Set("If-Unmodified-Since", "Wed, 01 Jan 2020 00:00:00 GMT")
+	req.Header.Set("x-ms-if-sequence-number-eq", "5")
+	req.Header.Set("x-ms-blob-condition-appendpos", "3")
+	req.Header.Set("x-ms-blob-condition-maxsize", "100")
+	op, err := codec.Route(az, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := codec.Decode(az, op, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := dec.Input
+	if got := fmt.Sprint(in["if_match_list"]); got != "[etag1 etag2]" {
+		t.Fatalf("if_match_list %#v", in["if_match_list"])
+	}
+	if got := fmt.Sprint(in["if_none_match_list"]); got != "[*]" {
+		t.Fatalf("if_none_match_list %#v", in["if_none_match_list"])
+	}
+	if in["if_modified_since_unix"] != int64(1514764800) || in["if_unmodified_since_unix"] != int64(1577836800) {
+		t.Fatalf("time headers %#v %#v", in["if_modified_since_unix"], in["if_unmodified_since_unix"])
+	}
+	if in["seq_eq"] != "5" || in["append_pos"] != "3" || in["max_size"] != "100" {
+		t.Fatalf("condition headers %#v", in)
+	}
+
+	w := httptest.NewRecorder()
+	if err := codec.EncodeFault(az, &model.Operation{Name: "GetBlob"}, w, &spi.Fault{Code: "ConditionNotMet", HTTPStatus: 304, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 304 || w.Body.Len() != 0 || w.Header().Get("x-ms-error-code") != "" {
+		t.Fatalf("304 fault %d %#v %q", w.Code, w.Header(), w.Body.String())
 	}
 }
 

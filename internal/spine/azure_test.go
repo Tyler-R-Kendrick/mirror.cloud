@@ -242,6 +242,67 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 200 || h.Get("x-ms-meta-a") != "b" || h.Get("Content-Type") != "text/plain" || h.Get("Cache-Control") != "no-cache" || h.Get("x-ms-blob-type") != "BlockBlob" || len(raw) != 0 {
 		t.Fatalf("head properties %d %#v %q", code, h, raw)
 	}
+	etag, lastmod := h.Get("ETag"), h.Get("Last-Modified")
+	if etag == "" || lastmod == "" {
+		t.Fatalf("head missing entity headers %#v", h)
+	}
+	// Conditional headers against the real clock.
+	code, raw, h = do(http.MethodHead, "/ctr/o", "", map[string]string{"If-None-Match": etag})
+	if code != 304 || len(raw) != 0 || h.Get("x-ms-error-code") != "" {
+		t.Fatalf("if-none-match %d %#v %q", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodHead, "/ctr/o", "", map[string]string{"If-Match": etag})
+	if code != 200 {
+		t.Fatalf("if-match %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodHead, "/ctr/o", "", map[string]string{"If-Match": `"bogus"`})
+	if code != 412 || h.Get("x-ms-error-code") != "ConditionNotMet" {
+		t.Fatalf("if-match bogus %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/o", "", map[string]string{"If-Modified-Since": "Mon, 01 Jan 2018 00:00:00 GMT"})
+	if code != 200 {
+		t.Fatalf("if-modified-since past %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/o", "", map[string]string{"If-Modified-Since": "Wed, 01 Jan 2120 00:00:00 GMT"})
+	if code != 304 || len(raw) != 0 {
+		t.Fatalf("if-modified-since future %d %q", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/o", "", map[string]string{"If-Unmodified-Since": "Mon, 01 Jan 2018 00:00:00 GMT"})
+	if code != 412 || h.Get("x-ms-error-code") != "ConditionNotMet" {
+		t.Fatalf("if-unmodified-since past %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/ctr/o", "", map[string]string{"If-Unmodified-Since": lastmod})
+	if code != 200 {
+		t.Fatalf("if-unmodified-since equal %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/ctr/o", "", map[string]string{"If-None-Match": "*"})
+	if code != 400 || h.Get("x-ms-error-code") != "UnsatisfiableCondition" {
+		t.Fatalf("if-none-match star %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/ctr/o", "", map[string]string{"If-Match": etag, "If-Modified-Since": "Mon, 01 Jan 2018 00:00:00 GMT"})
+	if code != 400 || h.Get("x-ms-error-code") != "MultipleConditionHeadersNotSupported" {
+		t.Fatalf("condition combination %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/ap", "", map[string]string{"x-ms-blob-type": "AppendBlob"})
+	if code != 201 {
+		t.Fatalf("create append blob %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/ap?comp=appendblock", "x", nil)
+	if code != 201 {
+		t.Fatalf("append block %d %s", code, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/ap?comp=appendblock", "y", map[string]string{"x-ms-blob-condition-appendpos": "0"})
+	if code != 412 || h.Get("x-ms-error-code") != "AppendPositionConditionNotMet" {
+		t.Fatalf("append position %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodPut, "/ctr/ap?comp=appendblock", "y", map[string]string{"x-ms-blob-condition-maxsize": "1"})
+	if code != 412 || h.Get("x-ms-error-code") != "MaxBlobSizeConditionNotMet" {
+		t.Fatalf("append max size %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodPut, "/ctr/ap?comp=appendblock", "y", map[string]string{"x-ms-blob-condition-appendpos": "1"})
+	if code != 201 {
+		t.Fatalf("append position ok %d %s", code, raw)
+	}
 	code, raw, h = do(http.MethodHead, "/ctr/missing", "", nil)
 	if code != 404 || h.Get("x-ms-error-code") != "BlobNotFound" || h.Get("Content-Type") != "" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("head missing %d %#v %s", code, h, raw)

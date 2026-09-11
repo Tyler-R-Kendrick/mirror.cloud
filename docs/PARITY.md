@@ -46,7 +46,7 @@ Authority: official Railway GraphQL v2 (`backboard.railway.com` `POST /graphql/v
 | `projects` | Booted query lists under `data.projects.edges[].node`; characterization `list`; BDD lists after create |
 | `project` | Booted `project(id)` round-trips id/name; missing id is GraphQL `{errors}` with `extensions.code` `NOT_FOUND` and no `x-amzn-errortype`; mutant `railway-get-missing-project-as-data` |
 | `projectDelete` | Atomic delete then get is `NOT_FOUND`; `TestDeleteMissingProject` and booted `projectDelete` of missing id are GraphQL `{errors}`, not `data`; characterization `delete`/`del_miss`; mutant `railway-delete-missing-project-as-success` |
-| `serviceCreate` | Booted create then `service(id)` round-trips; characterization `service` |
+| `serviceCreate` | Booted create then `service(id)` round-trips; characterization `service`; atomic empty name `BAD_USER_INPUT`; mutant `railway-accept-empty-service-name` |
 | `service` | Atomic get after create; missing service `NOT_FOUND`; booted and BDD `service(id)` of missing id are GraphQL `{errors}` with no `x-amzn-errortype`; characterization `get_svc`/`miss_svc`; mutant `railway-get-missing-service-as-data` |
 | GraphQL faults vs AWS faults | restJson1 `Encode` wraps `{data:{...}}` with Relay `edges/node` lists; `EncodeFault` uses `{errors:[{message,extensions.code}]}` and omits `x-amzn-errortype`; mutant `railway-encode-aws-fault` |
 

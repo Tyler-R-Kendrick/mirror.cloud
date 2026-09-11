@@ -432,6 +432,7 @@ func TestHostLabel(t *testing.T) {
 		{"GuardDuty.us-east-1.amazonaws.com:443", "guardduty"},
 		{"api.ecr.us-east-1.amazonaws.com", "api.ecr"},
 		{"api.iotwireless.us-east-1.amazonaws.com", "api.iotwireless"},
+		{"data.iot.us-east-1.amazonaws.com", "data.iot"},
 		{"s3.amazonaws.com", "s3"},
 		{"localhost:4566", "localhost"},
 		{"127.0.0.1:4566", "127"},

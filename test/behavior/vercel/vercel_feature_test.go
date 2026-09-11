@@ -106,4 +106,14 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("shape %#v", body)
 		}
 	})
+	t.Run("Given a missing project When deleted Then not_found is returned", func(t *testing.T) {
+		code, body := call(http.MethodDelete, "/v9/projects/nope", "", "")
+		if code != 404 {
+			t.Fatalf("delete missing %d %#v", code, body)
+		}
+		errObj, _ := body["error"].(map[string]any)
+		if errObj["code"] != "not_found" {
+			t.Fatalf("delete missing shape %#v", body)
+		}
+	})
 }

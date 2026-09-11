@@ -95,4 +95,19 @@ func TestGCSJSONBehavior(t *testing.T) {
 			t.Fatalf("missing %d %#v %s", code, hdr, raw)
 		}
 	})
+	t.Run("Given a missing object or bucket When deleted Then 404 not 204", func(t *testing.T) {
+		code, raw, hdr := call(http.MethodDelete, "/storage/v1/b/bdd/o/nope", "", "")
+		miss := map[string]any{}
+		_ = json.Unmarshal(raw, &miss)
+		errObj, _ := miss["error"].(map[string]any)
+		if code != 404 || errObj == nil || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("delete missing object %d %#v %s", code, hdr, raw)
+		}
+		code, raw, hdr = call(http.MethodDelete, "/storage/v1/b/missing", "", "")
+		_ = json.Unmarshal(raw, &miss)
+		errObj, _ = miss["error"].(map[string]any)
+		if code != 404 || errObj == nil || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("delete missing bucket %d %#v %s", code, hdr, raw)
+		}
+	})
 }

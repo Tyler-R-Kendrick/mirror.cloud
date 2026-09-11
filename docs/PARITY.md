@@ -118,11 +118,11 @@ Authority: official Azure Blob REST (`{account}.blob.core.windows.net`, `restype
 | `PUT /{container}?restype=container` (`CreateContainer`) | Booted create is HTTP 201; atomic empty 400 `InvalidResourceName` and duplicate 409 `ContainerAlreadyExists`; BDD create; chaos `TestAzureConcurrentDuplicateContainers`; mutants `azure-accept-empty-container` and `azure-accept-duplicate-container` |
 | `GET /{container}?restype=container` (`GetContainer`) | Booted get after create; characterization `get`; missing container HTTP 404 `ContainerNotFound` with `x-ms-error-code` and no `x-amzn-errortype` |
 | `GET /?comp=list` (`ListContainers`) | Booted list XML `EnumerationResults`/`<Name>ctr</Name>`; characterization `list`; BDD lists after create |
-| `DELETE /{container}?restype=container` (`DeleteContainer`) | Atomic delete then missing get is 404 |
+| `DELETE /{container}?restype=container` (`DeleteContainer`) | Atomic delete then missing get is 404; `TestDeleteMissingContainerAndBlob` and booted DELETE of missing container are HTTP 404 `ContainerNotFound` with no `x-amzn-errortype`; characterization `del_miss_c`; mutant `azure-delete-missing-container-as-success` |
 | `PUT /{container}/{blob}` (`PutBlob`) | Booted Put Blob then Get Blob round-trips bytes; characterization `put`; fuzz `FuzzBlobBytes`; chaos concurrent put/get |
 | `GET /{container}/{blob}` (`GetBlob`) | Booted GET returns stored bytes; missing blob HTTP 404 `BlobNotFound`; mutant `azure-get-missing-blob-as-empty` |
 | `GET /{container}?restype=container&comp=list` (`ListBlobs`) | Characterization `blobs`; atomic list after put |
-| `DELETE /{container}/{blob}` (`DeleteBlob`) | Booted delete then GET is 404; characterization `delete`; BDD delete |
+| `DELETE /{container}/{blob}` (`DeleteBlob`) | Booted delete then GET is 404; characterization `delete`; BDD delete; `TestDeleteMissingContainerAndBlob` and booted DELETE of missing blob are HTTP 404 `BlobNotFound` with no `x-amzn-errortype`; characterization `del_miss_b`; mutant `azure-delete-missing-blob-as-success` |
 | Azure faults vs AWS faults | restXml `EncodeFault` uses `<Error><Code/><Message/>` plus `x-ms-error-code` and omits `x-amzn-errortype`; mutant `azure-encode-aws-fault` |
 
 ## GCS baseline
@@ -141,11 +141,11 @@ Authority: official GCS JSON API v1 (`storage.googleapis.com` `/storage/v1/...` 
 | `GET /storage/v1/b/{bucket}` (`storage.buckets.get`) | Booted get after insert; characterization `get`; missing bucket HTTP 404 `{error:{code,message,errors}}` without `x-amzn-errortype` |
 | `GET /storage/v1/b` (`storage.buckets.list`) | Booted list contains the created bucket; characterization `list`; BDD lists after create |
 | `PATCH /storage/v1/b/{bucket}` (`storage.buckets.patch`) | Booted patch of `location`; atomic patch in `TestBucketCRUD` |
-| `DELETE /storage/v1/b/{bucket}` (`storage.buckets.delete`) | Atomic delete after objects are gone; non-empty bucket 409 |
+| `DELETE /storage/v1/b/{bucket}` (`storage.buckets.delete`) | Atomic delete after objects are gone; non-empty bucket 409; `TestDeleteMissingObjectAndBucket` and booted DELETE of missing bucket are HTTP 404 `{error:{code,message,errors}}` with no `x-amzn-errortype`; characterization `del_miss_b`; mutant `gcs-delete-missing-bucket-as-success` |
 | `POST /upload/storage/v1/b/{bucket}/o` (`storage.objects.insert`) | Booted media upload then `GET ?alt=media` round-trips bytes; characterization `insert`; fuzz `FuzzObjectBytes`; chaos concurrent put/get |
 | `GET /storage/v1/b/{bucket}/o/{object}` (`storage.objects.get`) | Metadata GET and `?alt=media` bytes; missing object HTTP 404; mutant `gcs-get-missing-object-as-empty` |
 | `GET /storage/v1/b/{bucket}/o` (`storage.objects.list`) | Booted prefix/delimiter list; characterization `objects` |
-| `DELETE /storage/v1/b/{bucket}/o/{object}` (`storage.objects.delete`) | Booted delete; characterization `delete`; BDD delete |
+| `DELETE /storage/v1/b/{bucket}/o/{object}` (`storage.objects.delete`) | Booted delete; characterization `delete`; BDD delete; `TestDeleteMissingObjectAndBucket` and booted DELETE of missing object are HTTP 404 with no `x-amzn-errortype`; characterization `del_miss_o`; mutant `gcs-delete-missing-object-as-success` |
 | `POST .../copyTo/...` (`storage.objects.copy`) | Booted copy; characterization `copy`; atomic copy in `TestCopyComposeDelete` |
 | `POST .../rewriteTo/...` (`storage.objects.rewrite`) | Booted rewrite `done: true`; atomic rewrite |
 | `POST .../compose` (`storage.objects.compose`) | Booted compose; atomic compose concatenates source bytes |
@@ -219,10 +219,10 @@ Authority: official Vercel REST (`api.vercel.com` `/vN/...`) plus Upstash Redis 
 | `POST /v11/projects` (`CreateProject`) | Atomic create + empty-name 400 + duplicate 409; BDD create; chaos `TestVercelConcurrentDuplicateProjectNames`; mutants `vercel-accept-empty-project-name` and `vercel-accept-duplicate-project-name` |
 | `GET /v9/projects` (`ListProjects`) | `TestProjectDeploymentEnvAndKV` lists one project; characterization golden `list`; BDD lists after create |
 | `GET /v9/projects/{id\|name}` (`GetProject`) | Booted create/get round-trips the same `id`; get-by-name in atomic; missing project HTTP 404 `{error.code: not_found}` |
-| `DELETE /v9/projects/{id\|name}` (`DeleteProject`) | `TestDeleteProjectByNameRemovesLookup` drops the `name:` index so the name can be reused |
+| `DELETE /v9/projects/{id\|name}` (`DeleteProject`) | `TestDeleteProjectByNameRemovesLookup` drops the `name:` index so the name can be reused; `TestDeleteMissingProjectAndEnv` and booted DELETE of missing id are HTTP 404 `{error.code: not_found}`; characterization `del_miss_p`; mutant `vercel-delete-missing-project-as-success` |
 | `POST /v10/projects/{id}/env` (`CreateProjectEnv`) | Atomic env create; empty key 400; characterization `env`/`env_empty`; mutant `vercel-accept-empty-env-key` |
 | `GET /v9/projects/{id}/env` (`ListProjectEnv`) | Atomic list after create; characterization `envs` |
-| `DELETE /v9/projects/{id}/env/{envId}` (`DeleteProjectEnv`) | `TestProjectDeploymentEnvAndKV` deletes the env then lists zero |
+| `DELETE /v9/projects/{id}/env/{envId}` (`DeleteProjectEnv`) | `TestProjectDeploymentEnvAndKV` deletes the env then lists zero; `TestDeleteMissingProjectAndEnv` of missing envId is `not_found`; characterization `del_miss_e`; mutant `vercel-delete-missing-env-as-success` |
 | `POST /v10/projects/{id}/domains` (`AddProjectDomain`) | Atomic domain create; empty name 400; characterization `domain` |
 | `GET /v10/projects/{id}/domains` (`ListProjectDomains`) | Characterization golden `domains` |
 | `POST /v13/deployments` (`CreateDeployment`) | Booted + BDD `readyState` `READY`; empty name 400; characterization `deploy` |

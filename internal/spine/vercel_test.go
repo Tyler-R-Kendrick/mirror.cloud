@@ -89,4 +89,12 @@ func TestBootedServerVercelAPI(t *testing.T) {
 	if errObj["code"] != "not_found" {
 		t.Fatalf("error shape %#v", missing)
 	}
+	code, missing = do(http.MethodDelete, "/v9/projects/missing", "", "")
+	if code != 404 {
+		t.Fatalf("delete missing %d %#v", code, missing)
+	}
+	errObj, _ = missing["error"].(map[string]any)
+	if errObj["code"] != "not_found" {
+		t.Fatalf("delete missing shape %#v", missing)
+	}
 }

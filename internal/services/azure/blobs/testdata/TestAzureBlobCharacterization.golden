@@ -18,6 +18,16 @@
     },
     "status": 201
   },
+  "del_miss_b": {
+    "error": "BlobNotFound",
+    "message": "The specified blob does not exist.",
+    "status": 404
+  },
+  "del_miss_c": {
+    "error": "ContainerNotFound",
+    "message": "The specified container does not exist.",
+    "status": 404
+  },
   "delete": {
     "output": null,
     "status": 202

@@ -44,8 +44,10 @@ func TestGCSJSONCharacterization(t *testing.T) {
 		"media":     inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "o", "alt": "media"}, nil),
 		"copy":      inv("storage.objects.copy", map[string]any{"bucket": "snap", "object": "o", "destinationBucket": "snap", "destinationObject": "o2"}, nil),
 		"objects":   inv("storage.objects.list", map[string]any{"bucket": "snap"}, nil),
-		"delete":    inv("storage.objects.delete", map[string]any{"bucket": "snap", "object": "o2"}, nil),
-		"missing":   inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "nope"}, nil),
-		"nobucket":  inv("storage.buckets.get", map[string]any{"bucket": "nope"}, nil),
+		"delete":     inv("storage.objects.delete", map[string]any{"bucket": "snap", "object": "o2"}, nil),
+		"missing":    inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "nope"}, nil),
+		"nobucket":   inv("storage.buckets.get", map[string]any{"bucket": "nope"}, nil),
+		"del_miss_o": inv("storage.objects.delete", map[string]any{"bucket": "snap", "object": "nope"}, nil),
+		"del_miss_b": inv("storage.buckets.delete", map[string]any{"bucket": "nope"}, nil),
 	})
 }

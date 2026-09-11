@@ -43,8 +43,10 @@ func TestAzureBlobCharacterization(t *testing.T) {
 		"put":       inv("PutBlob", map[string]any{"container": "snap", "blob": "o"}, []byte("hello")),
 		"media":     inv("GetBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
 		"blobs":     inv("ListBlobs", map[string]any{"container": "snap"}, nil),
-		"delete":    inv("DeleteBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
-		"missing":   inv("GetBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
-		"nobucket":  inv("GetContainer", map[string]any{"container": "nope"}, nil),
+		"delete":     inv("DeleteBlob", map[string]any{"container": "snap", "blob": "o"}, nil),
+		"missing":    inv("GetBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
+		"nobucket":   inv("GetContainer", map[string]any{"container": "nope"}, nil),
+		"del_miss_b": inv("DeleteBlob", map[string]any{"container": "snap", "blob": "nope"}, nil),
+		"del_miss_c": inv("DeleteContainer", map[string]any{"container": "nope"}, nil),
 	})
 }

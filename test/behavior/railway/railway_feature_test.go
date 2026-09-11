@@ -79,6 +79,12 @@ func TestRailwayGraphQLBehavior(t *testing.T) {
 			t.Fatalf("delete missing %#v %v", env, hdr)
 		}
 	})
+	t.Run("Given a missing service When fetched Then GraphQL errors", func(t *testing.T) {
+		env, hdr := gql(`query($id:String){ service(id:$id){ id } }`, `{"id":"missing"}`)
+		if env["errors"] == nil || hdr.Get("x-amzn-errortype") != "" || env["data"] != nil {
+			t.Fatalf("missing service %#v %v", env, hdr)
+		}
+	})
 }
 
 func marshal(s string) string {

@@ -21789,6 +21789,14 @@ var mutants = []mutant{
 		run:  "TestProjectAndServiceLifecycle",
 	},
 	{
+		name: "railway-get-missing-service-as-data",
+		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
+		old:  "b, ok, _ := p.col(req, \"rwsvc\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Service not found\", 200)",
+		new:  "b, ok, _ := p.col(req, \"rwsvc\").Get(ctx, id)\n\tif false {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Service not found\", 200)",
+		pkg:  "./internal/services/railway/graphql",
+		run:  "TestProjectAndServiceLifecycle",
+	},
+	{
 		name: "railway-delete-missing-project-as-success",
 		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
 		old:  "got, err := p.project(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",

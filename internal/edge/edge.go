@@ -508,7 +508,7 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			return s.bundle.ServiceByID("azure.blobs")
 		}
 		if cloudflareRequest(r) {
-			return s.bundle.ServiceByID("cloudflare.kv")
+			return s.bundle.ServiceByID("cloudflare.api")
 		}
 		if hostingerRequest(r) {
 			return s.bundle.ServiceByID("hostinger.api")

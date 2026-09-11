@@ -11,12 +11,14 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
+	// Served from behavior/cloudflare/api since the pack was deleted; this
+	// import is what registers it.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestBootedServerCloudflareAPI(t *testing.T) {
 	cfg := config.Default()
-	cfg.Services = []string{"cloudflare.kv"}
+	cfg.Services = []string{"cloudflare.api"}
 	cfg.Seed = "cf-1"
 	rt, err := rtpkg.Boot(cfg)
 	if err != nil {

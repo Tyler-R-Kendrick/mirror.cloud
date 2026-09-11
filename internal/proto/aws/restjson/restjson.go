@@ -37,9 +37,6 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "vercel.api" {
 		return vercelOp(svc, r), nil
 	}
-	if svc.ID == "cloudflare.kv" {
-		return cloudflareOp(svc, r), nil
-	}
 	if svc.ID == "digitalocean.v2" {
 		return digitaloceanOp(svc, r), nil
 	}
@@ -430,44 +427,6 @@ func digitaloceanRoute(r *http.Request) string {
 	return "Unknown"
 }
 
-func cloudflareOp(svc *model.Service, r *http.Request) *model.Operation {
-	name := cloudflareRoute(r)
-	if op := svc.OperationByName(name); op != nil {
-		return op
-	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
-}
-
-func cloudflareRoute(r *http.Request) string {
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) >= 2 && parts[0] == "client" && parts[1] == "v4" {
-		parts = parts[2:]
-	}
-	m := r.Method
-	if len(parts) >= 5 && parts[0] == "accounts" && parts[2] == "storage" && parts[3] == "kv" && parts[4] == "namespaces" {
-		if len(parts) == 5 && m == http.MethodPost {
-			return "CreateNamespace"
-		}
-		if len(parts) == 5 && m == http.MethodGet {
-			return "ListNamespaces"
-		}
-		if len(parts) == 6 && m == http.MethodGet {
-			return "GetNamespace"
-		}
-		if len(parts) >= 8 && parts[6] == "values" {
-			switch m {
-			case http.MethodPut:
-				return "PutValue"
-			case http.MethodGet:
-				return "GetValue"
-			case http.MethodDelete:
-				return "DeleteValue"
-			}
-		}
-	}
-	return "Unknown"
-}
-
 func vercelOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := vercelRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -528,9 +487,20 @@ func vercelRoute(r *http.Request) string {
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
 	body, _ := io.ReadAll(r.Body)
 	in := map[string]any{}
-	if svc.ID == "cloudflare.kv" && op.Name == "PutValue" {
-		in["value"] = string(body)
-		return &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}, nil
+	// A member bound to the payload whose shape is a string or a blob IS the
+	// request body: Cloudflare's KV write declares `body` that way, Lambda
+	// declares `Payload`, Glacier declares `body`. Parsing such a body as JSON
+	// and splattering its keys across the input is how a value that happens to
+	// be an object arrives as several inputs and never as itself.
+	//
+	// A payload member that is a structure says the opposite -- CloudFront's
+	// DistributionConfig means "the body is this structure, serialized" -- so
+	// model.PayloadMember answers only for the opaque case and everything else
+	// decodes as before. This was a branch keyed on one service id and one
+	// operation name, which is C41's shape: what in it mentioned the provider?
+	if name, ok := svc.PayloadMember(op); ok {
+		in[name] = string(body)
+		body = nil
 	}
 	if len(body) > 0 && body[0] == '[' {
 		var cmd []any
@@ -572,8 +542,19 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			w.Header().Add(k, v)
 		}
 	}
-	if svc.ID == "cloudflare.kv" {
-		return encodeCloudflare(w, status, resp)
+	// `_raw` is the engine's name for an operation whose body is the value
+	// itself -- bir.TopLevelRaw -- and it is answered before any provider
+	// envelope, because an opaque body has nowhere to put one. Cloudflare's KV
+	// read is the first such operation; its document answers the stored bytes
+	// as application/octet-stream, not the {success, errors, result} envelope
+	// every other Cloudflare operation carries.
+	if raw, ok := rawBody(resp); ok {
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+		}
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, raw)
+		return err
 	}
 	if svc.ID == "digitalocean.v2" {
 		return encodeDigitalOcean(w, status, resp)
@@ -613,34 +594,6 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		return json.NewEncoder(w).Encode(lst)
 	}
 	return json.NewEncoder(w).Encode(resp.Output)
-}
-
-func encodeCloudflare(w http.ResponseWriter, status int, resp *spi.Response) error {
-	if resp.Output != nil {
-		if raw, ok := resp.Output["_raw"].(string); ok {
-			if w.Header().Get("Content-Type") == "" {
-				w.Header().Set("Content-Type", "text/plain")
-			}
-			w.WriteHeader(status)
-			_, err := io.WriteString(w, raw)
-			return err
-		}
-	}
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-	}
-	w.WriteHeader(status)
-	var result any
-	if resp.Output != nil {
-		if lst, ok := resp.Output["_list"]; ok {
-			result = lst
-		} else if _, ok := resp.Output["_null"]; ok {
-			result = nil
-		} else {
-			result = resp.Output
-		}
-	}
-	return json.NewEncoder(w).Encode(map[string]any{"success": true, "errors": []any{}, "messages": []any{}, "result": result})
 }
 
 func encodeRailway(w http.ResponseWriter, status int, resp *spi.Response) error {
@@ -722,7 +675,7 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
 	}
-	if svc.ID == "cloudflare.kv" {
+	if svc.ID == "cloudflare.api" {
 		var code any = f.Code
 		if n, err := strconv.Atoi(f.Code); err == nil {
 			code = n
@@ -758,4 +711,13 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	w.Header().Set("x-amzn-errortype", f.Code)
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(map[string]any{"message": f.Message, "__type": f.Code})
+}
+
+// rawBody reports the opaque body an operation projected, if it projected one.
+func rawBody(resp *spi.Response) (string, bool) {
+	if resp == nil || resp.Output == nil {
+		return "", false
+	}
+	raw, ok := resp.Output[bir.TopLevelRaw].(string)
+	return raw, ok
 }

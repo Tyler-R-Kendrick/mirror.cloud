@@ -35,7 +35,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	azblobs "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
-	cfapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
 	doapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
@@ -7605,7 +7604,13 @@ func TestVercelConcurrentKVSetGet(t *testing.T) {
 }
 
 func TestCloudflareConcurrentDuplicateNamespaceTitles(t *testing.T) {
-	p := cfapi.New(spitest.Deps(t))
+	// The pack these exercised is gone; the property is not. Exactly one
+	// concurrent create may win, and the engine has to hold that the same way
+	// the hand-written mutex did.
+	p, err := bundled.New("cloudflare.api", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7614,7 +7619,7 @@ func TestCloudflareConcurrentDuplicateNamespaceTitles(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateNamespace", Input: map[string]any{"account_id": "acct1", "title": "race"}})
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "WorkersKvNamespaceCreateANamespace", Input: map[string]any{"account_id": "acct1", "title": "race"}})
 			errCh <- err
 		}()
 	}
@@ -7637,21 +7642,26 @@ func TestCloudflareConcurrentDuplicateNamespaceTitles(t *testing.T) {
 }
 
 func TestCloudflareConcurrentKVPutGet(t *testing.T) {
-	p := cfapi.New(spitest.Deps(t))
-	ctx := context.Background()
-	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	ns, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateNamespace", Input: map[string]any{"account_id": "acct1", "title": "kv"}})
+	p, err := bundled.New("cloudflare.api", spitest.Deps(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	nid := ns.Output["id"]
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	ns, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "WorkersKvNamespaceCreateANamespace", Input: map[string]any{"account_id": "acct1", "title": "kv"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The id sits inside the envelope the document declares, where the pack
+	// answered it at the top level.
+	nid := ns.Output["result"].(map[string]any)["id"]
 	var wg sync.WaitGroup
 	errCh := make(chan error, 32)
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutValue", Input: map[string]any{"account_id": "acct1", "namespace_id": nid, "key": "k", "value": fmt.Sprintf("%d", n)}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "WorkersKvNamespaceWriteKeyValuePairWithMetadata", Input: map[string]any{"account_id": "acct1", "namespace_id": nid, "key_name": "k", "body": fmt.Sprintf("%d", n)}}); err != nil {
 				errCh <- err
 			}
 		}(i)
@@ -7661,7 +7671,7 @@ func TestCloudflareConcurrentKVPutGet(t *testing.T) {
 	for err := range errCh {
 		t.Fatal(err)
 	}
-	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetValue", Input: map[string]any{"account_id": "acct1", "namespace_id": nid, "key": "k"}})
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "WorkersKvNamespaceReadKeyValuePair", Input: map[string]any{"account_id": "acct1", "namespace_id": nid, "key_name": "k"}})
 	if err != nil || got.Output["_raw"] == nil {
 		t.Fatalf("get after concurrent put %#v %v", got, err)
 	}

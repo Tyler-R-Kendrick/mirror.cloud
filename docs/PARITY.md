@@ -176,23 +176,32 @@ Served from `behavior/hostinger/api/service.yaml` since the hand-written pack wa
 
 ## Cloudflare baseline
 
-Authority: official Cloudflare REST v4 (`api.cloudflare.com` `/client/v4/...`) plus Workers KV namespace and value APIs. There is no LocalStack Cloudflare inventory; rows are operation → Mirror evidence, not a live `api.cloudflare.com` differential.
+Authority: the official Cloudflare OpenAPI document, vendored at `specs/cloudflare/api.json` and pinned in `specs/mirror.lock`. Rows are operation → Mirror evidence, not a live `api.cloudflare.com` differential.
+
+The pack's own characterization golden went with it; the 22-step equivalence recording replaces it and asserts more, because it replays rather than compares one frozen answer.
+
+Served from `behavior/cloudflare/api/service.yaml` since the hand-written pack was deleted. Three things changed with it. The service id is `cloudflare.api`, which is what the document produces, where the pack registered as `cloudflare.kv`. The operation names are the document's -- `workers-kv_namespace_create_a_namespace` exports as `WorkersKvNamespaceCreateANamespace` -- where the pack invented six of its own and bound them to these same URIs, so the requests are unchanged and the recording carries both names per step. And the `{success, errors, messages, result}` envelope is the response shape the document declares rather than something a branch of the REST/JSON codec wrapped around a bare body.
+
+The document is 24 MB and 3,462 operations. `specs/mirror.set` narrows it to the KV path prefix, so the generated model is fourteen operations over ninety-seven shapes; the whole document is still vendored and hashed, because the lock's hash is the pin.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the emulated Cloudflare slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Cloudflare operations routed to emulation | 6 / 6 |
+| Requested test forms wired for the emulated Cloudflare slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the fault envelope and the two generic codec rules this service is the first to need) |
+| Cloudflare operations served by the bundle | 9 / 14 (the five bulk and metadata operations answer 501, as they did under the pack) |
 | Live Cloudflare probe | none (not required) |
 
 | Cloudflare operation | Mirror evidence |
 |---|---|
-| `POST /client/v4/accounts/{account_id}/storage/kv/namespaces` (`CreateNamespace`) | Booted create returns `success: true` and `result.id`; atomic empty title 400/`10007` and duplicate 400/`10014`; BDD create; chaos `TestCloudflareConcurrentDuplicateNamespaceTitles`; mutants `cloudflare-accept-empty-namespace-title` and `cloudflare-accept-duplicate-namespace-title` |
-| `GET /client/v4/accounts/{account_id}/storage/kv/namespaces` (`ListNamespaces`) | Atomic lists one namespace; characterization `list`; BDD lists after create |
-| `GET /client/v4/accounts/{account_id}/storage/kv/namespaces/{id}` (`GetNamespace`) | Atomic get by id; missing namespace HTTP 404 `success: false` with numeric `errors[].code`; characterization `get`/`missing_ns`; BDD missing-namespace envelope |
-| `PUT .../namespaces/{id}/values/{key}` (`PutValue`) | Booted PUT then GET round-trips the raw body; atomic put; characterization `put`; fuzz `FuzzKVValue`; chaos concurrent put/get |
-| `GET .../namespaces/{id}/values/{key}` (`GetValue`) | Booted GET returns stored bytes (not a JSON envelope); missing key HTTP 404; mutant `cloudflare-get-missing-value-as-empty` |
-| `DELETE .../namespaces/{id}/values/{key}` (`DeleteValue`) | Booted DELETE then GET is 404; atomic delete; characterization `del`/`after_del`; BDD delete |
-| v4 envelope vs AWS faults | restJson1 `Encode` wraps `{success,errors,messages,result}`; `EncodeFault` uses numeric `errors[].code` and omits `x-amzn-errortype`; mutant `cloudflare-encode-aws-fault` |
+| `POST .../storage/kv/namespaces` (`WorkersKvNamespaceCreateANamespace`) | Recording replays create, empty title 400/`10007`, absent title 400/`10007` and duplicate title 400/`10014`; BDD create; chaos `TestCloudflareConcurrentDuplicateNamespaceTitles` -- sixteen concurrent creates, one winner |
+| `GET .../storage/kv/namespaces` (`WorkersKvNamespaceListNamespaces`) | Recording replays the one- and two-entry cases; BDD lists after create; unpaginated, which is recorded as a quirk |
+| `GET .../namespaces/{namespace_id}` (`WorkersKvNamespaceGetANamespace`) | Recording replays get by id, an unknown id 404/`10013` and an empty id 404/`10013`; BDD get after remove |
+| `PUT .../namespaces/{namespace_id}` (`WorkersKvNamespaceRenameANamespace`) | New surface the pack did not serve; BDD renames and then re-creates the freed title |
+| `DELETE .../namespaces/{namespace_id}` (`WorkersKvNamespaceRemoveANamespace`) | New surface; BDD removes and then reads 404/`10013` |
+| `GET .../namespaces/{namespace_id}/keys` (`WorkersKvNamespaceListANamespace'SKeys`) | New surface; BDD asserts the key is named and its value does not leak into the listing |
+| `PUT .../values/{key_name}` (`WorkersKvNamespaceWriteKeyValuePairWithMetadata`) | Recording replays write, overwrite, an unknown namespace 404/`10013` and an empty key 400/`10007`; BDD write; chaos concurrent put/get; the body binds from the model's payload member, mutants `restjson-ignore-payload-member` and `restjson-payload-swallows-structures` |
+| `GET .../values/{key_name}` (`WorkersKvNamespaceReadKeyValuePair`) | The one success body the recording compares in full, twice, because a KV read answers the stored bytes with no envelope to rename; missing key 404/`10009`; an unknown namespace fails first with 404/`10013`; BDD asserts `application/octet-stream` and a percent-encoded slash round-trip; mutant `restjson-encode-raw-as-json` |
+| `DELETE .../values/{key_name}` (`WorkersKvNamespaceDeleteKeyValuePair`) | Recording replays delete, read-after-delete 404/`10009` and double delete 404/`10009`; BDD delete |
+| v4 envelope vs AWS faults | The success envelope is the document's response shape and is projected by the bundle; `EncodeFault` still answers `{success: false, errors: [{code, message}]}` with a numeric code and no `x-amzn-errortype`, mutant `cloudflare-encode-aws-fault` |
 
 ## Vercel baseline
 

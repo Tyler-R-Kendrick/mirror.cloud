@@ -552,6 +552,19 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 			s.ServiceID, where, op.Output))
 		return
 	}
+	if member == TopLevelRaw {
+		// The body is the value itself, so there is no member to name -- but
+		// only a shape that can BE a body may claim it. Naming `_raw` on a
+		// structure would write an opaque string where every reader expects
+		// an object, which is the same class of mistake as naming `_list` on
+		// one.
+		if !svc.ScalarBody(op.Output) {
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s: %q projects an opaque body but %s is a %s, not a string, a blob or a union of those",
+				s.ServiceID, where, member, op.Output, shape.Kind))
+		}
+		return
+	}
 	if member == TopLevelList {
 		// A REST body that is a bare JSON array has no member to name, and
 		// `_list` is what the codec calls it (internal/proto/aws/restjson).
@@ -577,6 +590,22 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 // every collection endpoint -- and without it such an operation cannot be
 // expressed as a bundle at all, only as a Go pack.
 const TopLevelList = "_list"
+
+// TopLevelRaw is the output member name that means "the body is this opaque
+// string", for the operations whose response is neither an object nor an
+// array but the stored bytes themselves.
+//
+// Cloudflare's KV read is the first: the document answers it as
+// application/octet-stream, and a client asking for a value gets the value,
+// not a value wrapped in Cloudflare's usual {success, errors, result}
+// envelope. Without it such an operation cannot be expressed as a bundle at
+// all, which is how the KV data plane stayed a Go pack.
+//
+// Like `_list` this is a convention between the engine and the REST/JSON
+// codec rather than a fact about any provider, and it cannot collide with a
+// real member: the loader checks every output member against the model, and
+// no shape declares `_raw`.
+const TopLevelRaw = "_raw"
 
 // checkListItemMembers reports a record member that the listed item's shape
 // does not declare.

@@ -392,13 +392,24 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Status: http.StatusNoContent, Output: map[string]any{"StatusCode": http.StatusNoContent}}, nil
 	}
 	var payload []byte
-	if req.Body != nil {
+	switch raw := str(req.Input["Payload"]); {
+	case req.Body != nil:
 		var err error
 		payload, err = io.ReadAll(req.Body)
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	case raw != "":
+		// The model binds `Payload` to the request payload, and the REST/JSON
+		// codec now hands it over as the body rather than parsing the event
+		// and scattering its keys across the input. Reading it here is what
+		// makes an invocation over HTTP see the event a client actually sent.
+		payload = []byte(raw)
+	default:
+		// The legacy shape, for a caller that builds the request by hand and
+		// names the event's members as input. It cannot be removed: the
+		// event-source mapping below invokes this pack directly, and so do
+		// several tests.
 		ev := map[string]any{}
 		for k, v := range req.Input {
 			if k == "FunctionName" || k == "InvocationType" || k == "LogType" || k == "Qualifier" {

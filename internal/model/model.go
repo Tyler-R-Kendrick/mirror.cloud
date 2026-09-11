@@ -212,3 +212,69 @@ func (s *Service) OperationByName(name string) *Operation {
 	}
 	return nil
 }
+
+// ScalarBody reports whether a shape is an opaque body rather than a structure
+// to serialize: a string, a blob, or a union of nothing but those.
+//
+// It is the difference between a payload that IS the bytes and a payload that
+// is the body's structure, and both spellings appear in the same models.
+// CloudFront binds `DistributionConfig` to the payload and means "the body is
+// this structure, serialized"; Lambda binds `Payload` and means "the body is
+// these bytes, untouched". Reading the two the same way either drops the
+// structure or invents members out of a blob, so the protocol asks here.
+//
+// The union arm is not hypothetical: an OpenAPI `oneOf` of a string and a
+// binary is how a document says "text or bytes", which is what Cloudflare's
+// KV value is, and the receiver normalizes it to a union of the two.
+func (s *Service) ScalarBody(shapeID string) bool {
+	if s == nil {
+		return false
+	}
+	shape, ok := s.Shapes[shapeID]
+	if !ok {
+		return false
+	}
+	switch shape.Kind {
+	case KindString, KindBlob:
+		return true
+	case KindUnion:
+		if len(shape.Members) == 0 {
+			return false
+		}
+		for _, m := range shape.Members {
+			opt, ok := s.Shapes[m.Shape]
+			if !ok || (opt.Kind != KindString && opt.Kind != KindBlob) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// PayloadMember names the input member an operation binds to the whole request
+// body, when that member is an opaque body rather than a structure. The second
+// result is false when the operation has no such member.
+//
+// Ties are broken by name so a model with two payload members -- which no
+// protocol permits and no receiver should produce -- still decodes the same
+// way on every run rather than following map order.
+func (s *Service) PayloadMember(op *Operation) (string, bool) {
+	if s == nil || op == nil {
+		return "", false
+	}
+	shape, ok := s.Shapes[op.Input]
+	if !ok {
+		return "", false
+	}
+	best := ""
+	for name, m := range shape.Members {
+		if m.Binding.Location != "payload" || !s.ScalarBody(m.Shape) {
+			continue
+		}
+		if best == "" || name < best {
+			best = name
+		}
+	}
+	return best, best != ""
+}

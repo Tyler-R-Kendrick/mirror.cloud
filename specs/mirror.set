@@ -1,6 +1,16 @@
 # specs/mirror.set — services generated into internal/generated.
-# format: <service-id> <tier>
+# format: <service-id> <tier> [paths=<prefix>[,<prefix>...]]
 # comments start with #. `mirror spec add <id>` appends a line.
+#
+# `paths=` narrows a service to the operations whose URI begins with one of
+# the prefixes, and drops every shape they cannot reach. It is for the vendor
+# who publishes one document for an entire platform: Cloudflare's is 2,164
+# paths and 3,462 operations, which ingests to 56,854 shapes, where the surface
+# mirror serves is a few dozen. The whole document is still vendored and
+# hashed -- the lock pins the vendor's bytes, never a copy we trimmed -- so the
+# narrowing is a declared property of this file rather than an edit to the
+# input. A service that declares no prefixes is generated whole, which is all
+# of them today.
 # emulate-tier (behavior packs in internal/services)
 aws.s3 emulate
 aws.dynamodb emulate

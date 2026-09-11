@@ -74,6 +74,15 @@ func main() {
 	svcs := ingested.Services
 	if len(want) > 0 {
 		svcs = filterSet(svcs, want)
+		// After the set decides which services are generated, and before they
+		// are emitted: a service may also declare which of its operations it
+		// wants, for the vendor that publishes one document per platform.
+		narrowed, err := narrowAll(svcs, want)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		svcs = narrowed
 	}
 	if err := emitAll(*outDir, svcs); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -239,6 +248,11 @@ func readBundle(path string) (model.Bundle, error) {
 type setEntry struct {
 	ID   string
 	Tier model.Tier
+	// Paths narrows a service to the operations whose URI begins with one of
+	// these prefixes, for the vendor that publishes one document per platform
+	// rather than one per service. Empty means the whole document, which is
+	// every service today. See narrow.go.
+	Paths []string
 }
 
 func loadSet(path string) ([]setEntry, error) {
@@ -256,6 +270,13 @@ func loadSet(path string) ([]setEntry, error) {
 		e := setEntry{ID: fields[0], Tier: model.TierMock}
 		if len(fields) > 1 {
 			e.Tier = model.Tier(fields[1])
+		}
+		if len(fields) > 2 {
+			paths, err := parseSelector(fields[2:])
+			if err != nil {
+				return nil, fmt.Errorf("%s: %s: %w", path, fields[0], err)
+			}
+			e.Paths = paths
 		}
 		out = append(out, e)
 	}

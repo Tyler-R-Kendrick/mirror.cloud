@@ -116,8 +116,37 @@ func requestFor(svc *model.Service, op *model.Operation) *http.Request {
 	case model.ProtoGCPRESTSON:
 		return httptest.NewRequest(http.MethodGet, "/storage/v1/b", nil)
 	default:
-		r := httptest.NewRequest(http.MethodGet, "/bucket", nil)
-		return r
+		// Build the request from the operation's own binding when it has one.
+		// The fixed `GET /bucket` below predates services whose catalog entry
+		// carries real URIs, and it only ever routed for the REST providers
+		// because the codec had a hand-written table that answered any path
+		// with a synthetic operation. Hostinger's table went away with its
+		// pack, and the fixed path then matched nothing -- correctly, which is
+		// what made this worth fixing rather than special-casing.
+		if uri := op.HTTP.URI; uri != "" && uri != "/" {
+			method := op.HTTP.Method
+			if method == "" {
+				method = http.MethodGet
+			}
+			return httptest.NewRequest(method, fillLabels(uri), nil)
+		}
+		return httptest.NewRequest(http.MethodGet, "/bucket", nil)
+	}
+}
+
+// fillLabels substitutes a value for each `{label}` in a URI so the result is
+// a concrete path the router can match.
+func fillLabels(uri string) string {
+	for {
+		open := strings.IndexByte(uri, '{')
+		if open < 0 {
+			return uri
+		}
+		close := strings.IndexByte(uri[open:], '}')
+		if close < 0 {
+			return uri
+		}
+		uri = uri[:open] + "conformance" + uri[open+close+1:]
 	}
 }
 

@@ -235,7 +235,26 @@ func Bundle() *model.Bundle {
 		"KvCommand",
 	}
 	cloudflare := []string{"CreateNamespace", "ListNamespaces", "GetNamespace", "PutValue", "GetValue", "DeleteValue"}
-	hostinger := []string{"CreateDomain", "ListDomains", "GetDomain", "GetDNSRecords", "UpdateDNSRecords", "DeleteDNSRecords"}
+	// Hostinger is served from behavior/hostinger/api now, under the names its
+	// specification declares rather than the six the deleted pack invented.
+	// adoptGenerated replaces this list with the generated model's 377; what
+	// it cannot do is invent the entry, so the ID has to be the one the bundle
+	// registers under.
+	//
+	// These carry their real method and URI rather than going through `mk`,
+	// which binds everything to POST /. The other providers here can get away
+	// with that because the REST/JSON codec still has a hand-written route
+	// table for each of them; Hostinger's went away with its pack, so this
+	// entry has to be routable on its own -- internal/conformance reads the
+	// catalog directly, without adoptGenerated.
+	hostinger := []model.Operation{
+		op("DomainsPurchaseNewDomainV1", "POST", "/api/domains/v1/portfolio", 200, false),
+		op("DomainsGetDomainListV1", "GET", "/api/domains/v1/portfolio", 200, true),
+		op("DomainsGetDomainDetailsV1", "GET", "/api/domains/v1/portfolio/{domain}", 200, true),
+		op("DNSGetDNSRecordsV1", "GET", "/api/dns/v1/zones/{domain}", 200, true),
+		op("DNSUpdateDNSRecordsV1", "PUT", "/api/dns/v1/zones/{domain}", 200, false),
+		op("DNSDeleteDNSRecordsV1", "DELETE", "/api/dns/v1/zones/{domain}", 200, false),
+	}
 	azure := []string{"CreateContainer", "GetContainer", "ListContainers", "DeleteContainer", "PutBlob", "GetBlob", "ListBlobs", "DeleteBlob"}
 	digitalocean := []string{"CreateDroplet", "ListDroplets", "GetDroplet", "DeleteDroplet", "CreateDomain", "ListDomains", "GetDomain", "DeleteDomain"}
 	hetzner := []string{"CreateServer", "ListServers", "GetServer", "DeleteServer", "CreateSSHKey", "ListSSHKeys", "GetSSHKey", "DeleteSSHKey"}
@@ -1299,7 +1318,7 @@ func Bundle() *model.Bundle {
 			svc("gcp.storage", "storage", model.ProtoGCPRESTSON, "", "", "", mk(gcs)),
 			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", mk(vercel)),
 			svc("cloudflare.kv", "cloudflare", model.ProtoRESTJSON1, "", "", "", mk(cloudflare)),
-			svc("hostinger.dns", "hostinger", model.ProtoRESTJSON1, "", "", "", mk(hostinger)),
+			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
 			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", mk(digitalocean)),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", mk(hetzner)),

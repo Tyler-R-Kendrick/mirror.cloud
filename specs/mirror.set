@@ -174,3 +174,4 @@ fly.machines emulate
 cloudflare.api emulate paths=/client/v4/accounts/{account_id}/storage/kv
 digitalocean.v2 emulate paths=/v2/droplets,/v2/domains
 vercel.api emulate paths=/v2/user,/v9/projects,/v10/projects,/v11/projects,/v7/deployments,/v13/deployments
+vercel.kv emulate

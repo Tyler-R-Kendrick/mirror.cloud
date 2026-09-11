@@ -33,6 +33,10 @@
     "vercel.api": {
       "source": "https://openapi.vercel.sh/",
       "ref": "2026-09-11T16:02:48Z"
+    },
+    "vercel.kv": {
+      "source": "authored",
+      "ref": "2026-09-11T22:29:30Z"
     }
   },
   "files": [
@@ -1275,6 +1279,14 @@
       "path": "vercel/api.json",
       "sha256": "0c88ca09d296363d1769fff0054ea129e944e91e9a32ef2779dcf8e3fccf4aa4",
       "ingested": "2026-09-11T16:02:49Z"
+    },
+    {
+      "serviceId": "vercel.kv",
+      "source": "authored",
+      "ref": "2026-09-11T22:29:30Z",
+      "path": "vercel/kv.json",
+      "sha256": "723f1ca621f2f9f01915afd108c37380e81afe27c173bf3beb5c02749bd07c81",
+      "ingested": "2026-09-11T22:29:30Z"
     }
   ]
 }

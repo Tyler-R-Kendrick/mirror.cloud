@@ -425,6 +425,8 @@ func railwayRoute(r *http.Request) string {
 		return "projectDelete"
 	case strings.Contains(q, "serviceCreate"):
 		return "serviceCreate"
+	case strings.Contains(q, "serviceDelete"):
+		return "serviceDelete"
 	case strings.Contains(q, "projects"):
 		return "projects"
 	case strings.Contains(q, "project"):

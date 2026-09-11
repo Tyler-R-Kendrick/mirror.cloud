@@ -390,6 +390,7 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		{`{ project(id:"x") { id } }`, "project"},
 		{`mutation { projectDelete(id:"x") }`, "projectDelete"},
 		{`mutation { serviceCreate(input:{name:"api"}) { id } }`, "serviceCreate"},
+		{`mutation { serviceDelete(id:"x") }`, "serviceDelete"},
 		{`{ service(id:"x") { id } }`, "service"},
 		{`{ unknown }`, "Unknown"},
 	} {

@@ -80,7 +80,16 @@ func TestBootedServerRailwayGraphQL(t *testing.T) {
 	if data["service"].(map[string]any)["id"] != sid {
 		t.Fatalf("service get %#v", env)
 	}
-	_, env, h := gql(`query($id:String){ project(id:$id){ id } }`, `{"id":"missing"}`)
+	_, env, _ = gql(`mutation($id:String){ serviceDelete(id:$id) }`, `{"id":"`+sid+`"}`)
+	data, _ = env["data"].(map[string]any)
+	if data["serviceDelete"] != true {
+		t.Fatalf("service delete %#v", env)
+	}
+	_, env, h := gql(`query($id:String){ service(id:$id){ id } }`, `{"id":"`+sid+`"}`)
+	if env["errors"] == nil || h.Get("x-amzn-errortype") != "" || env["data"] != nil {
+		t.Fatalf("service after delete %#v %v", env, h)
+	}
+	_, env, h = gql(`query($id:String){ project(id:$id){ id } }`, `{"id":"missing"}`)
 	if env["errors"] == nil || h.Get("x-amzn-errortype") != "" || env["data"] != nil {
 		t.Fatalf("missing project %#v %v", env, h)
 	}
@@ -91,6 +100,10 @@ func TestBootedServerRailwayGraphQL(t *testing.T) {
 	_, env, h = gql(`mutation($id:String){ projectDelete(id:$id) }`, `{"id":"missing"}`)
 	if env["errors"] == nil || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("delete missing %#v %v", env, h)
+	}
+	_, env, h = gql(`mutation($id:String){ serviceDelete(id:$id) }`, `{"id":"missing"}`)
+	if env["errors"] == nil || h.Get("x-amzn-errortype") != "" || env["data"] != nil {
+		t.Fatalf("delete missing service %#v %v", env, h)
 	}
 	_, env, h = gql(`mutation($input:ProjectCreateInput){ projectCreate(input:$input){ id } }`, `{"input":{"name":""}}`)
 	if env["errors"] == nil || h.Get("x-amzn-errortype") != "" {

@@ -14,6 +14,7 @@ func FuzzRailwayRoute(f *testing.F) {
 	f.Add("POST", "/graphql/v2", `{"query":"{ project(id:\"x\") { id } }"}`)
 	f.Add("POST", "/graphql/v2", `{"query":"mutation { projectDelete(id:\"x\") }"}`)
 	f.Add("POST", "/graphql/v2", `{"query":"mutation { serviceCreate(input:{name:\"api\"}) { id } }"}`)
+	f.Add("POST", "/graphql/v2", `{"query":"mutation { serviceDelete(id:\"x\") }"}`)
 	f.Add("GET", "/graphql/v2", `{}`)
 	f.Fuzz(func(t *testing.T, method, path, body string) {
 		if method == "" {

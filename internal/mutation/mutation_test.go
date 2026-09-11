@@ -21743,6 +21743,22 @@ var mutants = []mutant{
 		run:  "TestDropletAndDomainLifecycle",
 	},
 	{
+		name: "digitalocean-delete-missing-droplet-as-success",
+		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
+		old:  "if _, err := p.getDroplet(ctx, req); err != nil {\n\t\treturn nil, err\n\t}",
+		new:  "if _, err := p.getDroplet(ctx, req); false && err != nil {\n\t\treturn nil, err\n\t}",
+		pkg:  "./internal/services/digitalocean/v2",
+		run:  "TestDeleteMissingDropletAndDomain",
+	},
+	{
+		name: "digitalocean-delete-missing-domain-as-success",
+		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
+		old:  "if _, err := p.getDomain(ctx, req); err != nil {\n\t\treturn nil, err\n\t}",
+		new:  "if _, err := p.getDomain(ctx, req); false && err != nil {\n\t\treturn nil, err\n\t}",
+		pkg:  "./internal/services/digitalocean/v2",
+		run:  "TestDeleteMissingDropletAndDomain",
+	},
+	{
 		name: "digitalocean-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
 		old:  "if svc.ID == \"digitalocean.v2\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"id\": f.Code, \"message\": f.Message})",
@@ -21837,6 +21853,14 @@ var mutants = []mutant{
 		new:  "got, err := p.project(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
 		pkg:  "./internal/services/railway/graphql",
 		run:  "TestDeleteMissingProject",
+	},
+	{
+		name: "railway-delete-missing-service-as-success",
+		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
+		old:  "got, err := p.service(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
+		new:  "got, err := p.service(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
+		pkg:  "./internal/services/railway/graphql",
+		run:  "TestDeleteMissingService",
 	},
 	{
 		name: "railway-encode-aws-fault",

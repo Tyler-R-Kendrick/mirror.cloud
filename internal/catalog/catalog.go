@@ -239,7 +239,7 @@ func Bundle() *model.Bundle {
 	azure := []string{"CreateContainer", "GetContainer", "ListContainers", "DeleteContainer", "PutBlob", "GetBlob", "ListBlobs", "DeleteBlob"}
 	digitalocean := []string{"CreateDroplet", "ListDroplets", "GetDroplet", "DeleteDroplet", "CreateDomain", "ListDomains", "GetDomain", "DeleteDomain"}
 	hetzner := []string{"CreateServer", "ListServers", "GetServer", "DeleteServer", "CreateSSHKey", "ListSSHKeys", "GetSSHKey", "DeleteSSHKey"}
-	railway := []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service"}
+	railway := []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"}
 	fly := []string{"CreateApp", "ListApps", "GetApp", "DeleteApp", "CreateMachine", "ListMachines", "GetMachine", "DeleteMachine"}
 	gcs := []string{"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list",
 		"storage.buckets.delete", "storage.buckets.patch",

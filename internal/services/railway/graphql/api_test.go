@@ -43,10 +43,17 @@ func TestProjectAndServiceLifecycle(t *testing.T) {
 	if gots.Output["service"].(map[string]any)["id"] != sid {
 		t.Fatalf("get service %#v", gots.Output)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceDelete", Input: map[string]any{"id": sid}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "service", Input: map[string]any{"id": sid}})
+	if f, ok := err.(*spi.Fault); !ok || f.Code != "NOT_FOUND" {
+		t.Fatalf("deleted service %#v", err)
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectDelete", Input: map[string]any{"id": pid}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "project", Input: map[string]any{"id": pid}})
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "project", Input: map[string]any{"id": pid}})
 	if f, ok := err.(*spi.Fault); !ok || f.Code != "NOT_FOUND" {
 		t.Fatalf("missing project %#v", err)
 	}
@@ -83,5 +90,15 @@ func TestDeleteMissingProject(t *testing.T) {
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectDelete", Input: map[string]any{"id": "missing"}})
 	if f, ok := err.(*spi.Fault); !ok || f.Code != "NOT_FOUND" {
 		t.Fatalf("delete missing %#v", err)
+	}
+}
+
+func TestDeleteMissingService(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceDelete", Input: map[string]any{"id": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.Code != "NOT_FOUND" {
+		t.Fatalf("delete missing service %#v", err)
 	}
 }

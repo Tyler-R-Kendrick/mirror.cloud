@@ -26,7 +26,7 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 	}
 	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
 	defer ts.Close()
-	call := func(method, path, body, host string) (int, map[string]any) {
+	call := func(method, path, body, host string) (int, map[string]any, http.Header) {
 		t.Helper()
 		var rdr io.Reader
 		if body != "" {
@@ -36,9 +36,10 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if host != "" {
-			req.Host = host
+		if host == "" {
+			host = "api.vercel.com"
 		}
+		req.Host = host
 		req.Header.Set("Authorization", "Bearer test")
 		req.Header.Set("Content-Type", "application/json")
 		res, err := http.DefaultClient.Do(req)
@@ -49,57 +50,57 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		res.Body.Close()
 		m := map[string]any{}
 		_ = json.Unmarshal(b, &m)
-		return res.StatusCode, m
+		return res.StatusCode, m, res.Header
 	}
 
 	t.Run("Given a project name When created Then it is listed and fetched by name", func(t *testing.T) {
-		code, created := call(http.MethodPost, "/v11/projects", `{"name":"bdd-app"}`, "")
+		code, created, _ := call(http.MethodPost, "/v11/projects", `{"name":"bdd-app"}`, "")
 		if code != 200 || created["name"] != "bdd-app" {
 			t.Fatalf("create %d %#v", code, created)
 		}
-		code, listed := call(http.MethodGet, "/v9/projects", "", "")
+		code, listed, _ := call(http.MethodGet, "/v9/projects", "", "")
 		if code != 200 || len(listed["projects"].([]any)) != 1 {
 			t.Fatalf("list %d %#v", code, listed)
 		}
-		code, got := call(http.MethodGet, "/v9/projects/bdd-app", "", "")
+		code, got, _ := call(http.MethodGet, "/v9/projects/bdd-app", "", "")
 		if code != 200 || got["id"] != created["id"] {
 			t.Fatalf("get %d %#v", code, got)
 		}
 	})
 	t.Run("Given a duplicate project name When created Then conflict is returned", func(t *testing.T) {
-		code, body := call(http.MethodPost, "/v11/projects", `{"name":"bdd-app"}`, "")
+		code, body, _ := call(http.MethodPost, "/v11/projects", `{"name":"bdd-app"}`, "")
 		if code != 409 {
 			t.Fatalf("dup %d %#v", code, body)
 		}
 	})
 	t.Run("Given a project When deployed Then readyState is READY", func(t *testing.T) {
-		code, dpl := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-app","project":"bdd-app"}`, "")
+		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-app","project":"bdd-app"}`, "")
 		if code != 200 || dpl["readyState"] != "READY" || dpl["url"] == nil {
 			t.Fatalf("deploy %d %#v", code, dpl)
 		}
 	})
 	t.Run("Given KV SET When GET Then the value is returned", func(t *testing.T) {
-		code, set := call(http.MethodPost, "/", `["SET","k","v"]`, "kv.vercel-storage.com")
+		code, set, _ := call(http.MethodPost, "/", `["SET","k","v"]`, "kv.vercel-storage.com")
 		if code != 200 || set["result"] != "OK" {
 			t.Fatalf("set %d %#v", code, set)
 		}
-		code, get := call(http.MethodPost, "/", `["GET","k"]`, "kv.vercel-storage.com")
+		code, get, _ := call(http.MethodPost, "/", `["GET","k"]`, "kv.vercel-storage.com")
 		if code != 200 || get["result"] != "v" {
 			t.Fatalf("get %d %#v", code, get)
 		}
-		code, del := call(http.MethodPost, "/", `["DEL","k"]`, "kv.vercel-storage.com")
+		code, del, _ := call(http.MethodPost, "/", `["DEL","k"]`, "kv.vercel-storage.com")
 		if code != 200 || del["result"] != float64(1) {
 			t.Fatalf("del %d %#v", code, del)
 		}
-		code, gone := call(http.MethodPost, "/", `["GET","k"]`, "kv.vercel-storage.com")
+		code, gone, _ := call(http.MethodPost, "/", `["GET","k"]`, "kv.vercel-storage.com")
 		if code != 200 || gone["result"] != nil {
 			t.Fatalf("get after del %d %#v", code, gone)
 		}
 	})
 	t.Run("Given a missing project When fetched Then not_found is returned", func(t *testing.T) {
-		code, body := call(http.MethodGet, "/v9/projects/nope", "", "")
-		if code != 404 {
-			t.Fatalf("missing %d %#v", code, body)
+		code, body, hdr := call(http.MethodGet, "/v9/projects/nope", "", "")
+		if code != 404 || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("missing %d %#v %#v", code, hdr, body)
 		}
 		errObj, _ := body["error"].(map[string]any)
 		if errObj["code"] != "not_found" {
@@ -107,9 +108,9 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		}
 	})
 	t.Run("Given a missing project When deleted Then not_found is returned", func(t *testing.T) {
-		code, body := call(http.MethodDelete, "/v9/projects/nope", "", "")
-		if code != 404 {
-			t.Fatalf("delete missing %d %#v", code, body)
+		code, body, hdr := call(http.MethodDelete, "/v9/projects/nope", "", "")
+		if code != 404 || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("delete missing %d %#v %#v", code, hdr, body)
 		}
 		errObj, _ := body["error"].(map[string]any)
 		if errObj["code"] != "not_found" {

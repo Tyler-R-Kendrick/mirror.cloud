@@ -166,7 +166,8 @@ func ingestSpecs(ctx context.Context, specsDir string) ([][]model.Service, int, 
 			return nil
 		}
 		base := d.Name()
-		if !strings.HasSuffix(strings.ToLower(base), ".json") {
+		yamlSpec := isYAMLSpec(base)
+		if !strings.HasSuffix(strings.ToLower(base), ".json") && !yamlSpec {
 			return nil
 		}
 		if base == "mirror.lock" {
@@ -176,12 +177,27 @@ func ingestSpecs(ctx context.Context, specsDir string) ([][]model.Service, int, 
 		if err != nil {
 			return err
 		}
+		rel, _ := filepath.Rel(specsDir, path)
+		// The hash is taken before any conversion, and that ordering is the
+		// whole point: the lock pins the vendor's own bytes, so hashing a
+		// document we re-serialized would pin our serialization instead and an
+		// unannounced upstream change would stop being visible.
+		src := model.SourceRef{Path: rel, SHA256: sha256Hex(data)}
+		// Detect is shown the head of the file, which for a vendor's own JSON
+		// is enough: such a document leads with `openapi` or `smithy`. A
+		// re-serialized one does not -- json.Marshal sorts keys -- so a YAML
+		// document is detected on its top-level scalars instead. See yamlToJSON.
 		head := data
-		if len(head) > 4096 {
+		if yamlSpec {
+			converted, probe, err := yamlToJSON(data)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "mirrorgen: skip %s: %v\n", path, err)
+				return nil
+			}
+			data, head = converted, probe
+		} else if len(head) > 4096 {
 			head = head[:4096]
 		}
-		rel, _ := filepath.Rel(specsDir, path)
-		src := model.SourceRef{Path: rel, SHA256: sha256Hex(data)}
 		for _, r := range recvs {
 			if !r.Detect(path, head) {
 				continue

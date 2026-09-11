@@ -9,6 +9,12 @@
 #
 # A service is fetched only when specs/mirror.set asks for it.
 #
+# The path may name a .yaml or .yml document as well as a .json one. YAML and
+# JSON are two spellings of one data model, so mirrorgen re-serializes YAML
+# before asking which specification a document is -- and hashes the vendor's
+# original bytes, never the re-serialization, because those are what the lock
+# pins. DigitalOcean publishes only YAML.
+#
 # format: <service-id>	<path under specs/>	<url>
 cloudflare.api	cloudflare/api.json	https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json
 fly.machines	fly/machines.json	https://docs.machines.dev/spec/openapi3.json

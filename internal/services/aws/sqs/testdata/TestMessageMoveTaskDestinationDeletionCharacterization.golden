@@ -1,7 +1,6 @@
 {
   "failureReason": "The destination queue does not exist.",
-  "messagesLeft": 3,
-  "moved": 0,
+  "noMessageLost": true,
   "status": "FAILED",
   "taskHandlePresent": true
 }

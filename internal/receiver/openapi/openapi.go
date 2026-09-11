@@ -372,7 +372,18 @@ func basePath(doc document) string {
 // is the same identity the lock and the rest of the system use. specs/
 // hostinger/api.json is hostinger.api.
 func serviceID(rel string) string {
-	rel = strings.TrimSuffix(strings.ToLower(path.Clean(rel)), ".json")
+	// Every serialization the ingest walk accepts, because the identity is the
+	// path and not the spelling: `digitalocean/v2.yaml` is `digitalocean.v2`
+	// exactly as `vercel/api.json` is `vercel.api`. Trimming only `.json` made
+	// a YAML document `digitalocean.v2.yaml`, which matches no line of
+	// specs/mirror.set and so generated nothing.
+	rel = strings.ToLower(path.Clean(rel))
+	for _, ext := range []string{".json", ".yaml", ".yml"} {
+		if trimmed := strings.TrimSuffix(rel, ext); trimmed != rel {
+			rel = trimmed
+			break
+		}
+	}
 	parts := strings.Split(rel, "/")
 	for i, p := range parts {
 		parts[i] = strings.TrimSuffix(p, ".openapi")

@@ -18,6 +18,13 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 )
 
+// moveTaskPolls bounds the wait for a throttled message-move task to reach a
+// terminal status: four seconds at twenty milliseconds a poll, against the one
+// second the task sleeps between messages. A test that finishes early still
+// finishes early -- it returns on the first poll that sees the status -- so the
+// only thing the larger bound changes is what happens when the runner is slow.
+const moveTaskPolls = 200
+
 func TestSQSQueueListing(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.sqs"}
@@ -1541,7 +1548,14 @@ func TestSQSQueueListing(t *testing.T) {
 		if status != http.StatusOK || !bytes.Contains(body, []byte("ApproximateNumberOfMessagesMoved")) {
 			t.Fatalf("cancel %d %s", status, body)
 		}
-		for i := 0; i < 50; i++ {
+		// The budget has to exceed the interval the task itself is sleeping
+		// on. MaxNumberOfMessagesPerSecond is 1, so the move loop sleeps
+		// `time.Second / 1` between iterations and only writes CANCELLED when
+		// it next wakes -- and fifty twenty-millisecond polls is exactly one
+		// second, so this was a dead heat with a sleep the test configured.
+		// It passed only because the HTTP round-trips pushed the loop just
+		// past the deadline, and lost on a loaded runner.
+		for i := 0; i < moveTaskPolls; i++ {
 			status, body = call("ListMessageMoveTasks", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-cancel-dlq"}`)
 			if status == http.StatusOK && bytes.Contains(body, []byte(`"Status":"CANCELLED"`)) {
 				return
@@ -1573,7 +1587,8 @@ func TestSQSQueueListing(t *testing.T) {
 		if status, body := call("DeleteQueue", `{"QueueUrl":"http://queue/000000000000/bdd-move-delete-destination"}`); status != http.StatusOK {
 			t.Fatalf("delete destination %d %s", status, body)
 		}
-		for i := 0; i < 50; i++ {
+		// Same arithmetic as the cancel case above.
+		for i := 0; i < moveTaskPolls; i++ {
 			status, body = call("ListMessageMoveTasks", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-delete-dlq"}`)
 			if status == http.StatusOK && bytes.Contains(body, []byte(`"Status":"FAILED"`)) && bytes.Contains(body, []byte("destination queue does not exist")) {
 				return

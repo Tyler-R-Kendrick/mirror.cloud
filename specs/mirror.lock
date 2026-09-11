@@ -29,6 +29,10 @@
     "digitalocean.v2": {
       "source": "https://api-engineering.nyc3.cdn.digitaloceanspaces.com/spec-ci/DigitalOcean-public.v2.yaml",
       "ref": "2026-09-11T10:32:02Z"
+    },
+    "vercel.api": {
+      "source": "https://openapi.vercel.sh/",
+      "ref": "2026-09-11T16:02:48Z"
     }
   },
   "files": [
@@ -1263,6 +1267,14 @@
       "path": "hostinger/api.json",
       "sha256": "b0a41fa77d2a6ec50cda065cd28310e057b0fc0fd75c1ea6d8bfb838e983a05c",
       "ingested": "2026-09-11T00:55:54Z"
+    },
+    {
+      "serviceId": "vercel.api",
+      "source": "https://openapi.vercel.sh/",
+      "ref": "2026-09-11T16:02:48Z",
+      "path": "vercel/api.json",
+      "sha256": "0c88ca09d296363d1769fff0054ea129e944e91e9a32ef2779dcf8e3fccf4aa4",
+      "ingested": "2026-09-11T16:02:49Z"
     }
   ]
 }

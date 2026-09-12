@@ -1,0 +1,901 @@
+{
+  "schema": "trace/1",
+  "service": "vercel.api",
+  "source": "pack:internal/services/vercel/api",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetAuthUser",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "email": "test@mirror.cloud",
+        "id": "usr_000000000000",
+        "name": "Mirror",
+        "username": "test"
+      },
+      "recorded_as": "GetUser",
+      "superseded_members": {
+        "email": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user",
+        "id": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user",
+        "name": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user",
+        "user": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user",
+        "username": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user"
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "framework": "nextjs",
+        "name": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": "nextjs",
+        "id": "prj_7c5891299f64",
+        "name": "docs",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "name": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "conflict",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "name": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": "nextjs",
+        "id": "prj_7c5891299f64",
+        "name": "docs",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": "nextjs",
+        "id": "prj_7c5891299f64",
+        "name": "docs",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetProjects",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pagination": {
+          "count": 1
+        },
+        "projects": [
+          {
+            "accountId": "000000000000",
+            "createdAt": 0,
+            "framework": "nextjs",
+            "id": "prj_7c5891299f64",
+            "name": "docs",
+            "updatedAt": 0
+          }
+        ]
+      },
+      "recorded_as": "ListProjects"
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": "ghost",
+        "key": "K"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": "docs",
+        "key": "FOO",
+        "value": "bar"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "env_5f59f223d7",
+        "key": "FOO",
+        "target": [
+          "production",
+          "preview",
+          "development"
+        ],
+        "type": "encrypted",
+        "value": "bar"
+      },
+      "superseded_members": {
+        "created": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "id": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "key": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "target": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "type": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "value": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`"
+      }
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": "docs",
+        "key": "T",
+        "target": [
+          "production"
+        ],
+        "type": "plain",
+        "value": "v"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "env_9c8e2cb007",
+        "key": "T",
+        "target": [
+          "production"
+        ],
+        "type": "plain",
+        "value": "v"
+      },
+      "superseded_members": {
+        "created": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "id": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "key": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "target": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "type": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
+        "value": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`"
+      }
+    },
+    {
+      "operation": "FilterProjectEnvs",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "envs": [
+          {
+            "id": "env_5f59f223d7",
+            "key": "FOO",
+            "target": [
+              "production",
+              "preview",
+              "development"
+            ],
+            "type": "encrypted",
+            "value": "bar"
+          },
+          {
+            "id": "env_9c8e2cb007",
+            "key": "T",
+            "target": [
+              "production"
+            ],
+            "type": "plain",
+            "value": "v"
+          }
+        ]
+      },
+      "recorded_as": "ListProjectEnv"
+    },
+    {
+      "operation": "FilterProjectEnvs",
+      "input": {
+        "idOrName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "envs": []
+      },
+      "recorded_as": "ListProjectEnv"
+    },
+    {
+      "operation": "RemoveProjectEnv",
+      "input": {
+        "id": "env_nope",
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recorded_as": "DeleteProjectEnv"
+    },
+    {
+      "operation": "RemoveProjectEnv",
+      "input": {
+        "id": {
+          "$fromPath": "created.id",
+          "$fromStep": 11
+        },
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "recorded_as": "DeleteProjectEnv"
+    },
+    {
+      "operation": "FilterProjectEnvs",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "envs": [
+          {
+            "id": "env_9c8e2cb007",
+            "key": "T",
+            "target": [
+              "production"
+            ],
+            "type": "plain",
+            "value": "v"
+          }
+        ]
+      },
+      "recorded_as": "ListProjectEnv"
+    },
+    {
+      "operation": "AddProjectDomain",
+      "input": {
+        "idOrName": "ghost",
+        "name": "x.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddProjectDomain",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddProjectDomain",
+      "input": {
+        "idOrName": "docs",
+        "name": "docs.example.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apexName": "docs.example.test",
+        "createdAt": 0,
+        "name": "docs.example.test",
+        "projectId": "prj_7c5891299f64",
+        "updatedAt": 0,
+        "verified": true
+      }
+    },
+    {
+      "operation": "GetProjectDomains",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domains": [
+          {
+            "apexName": "docs.example.test",
+            "createdAt": 0,
+            "name": "docs.example.test",
+            "projectId": "prj_7c5891299f64",
+            "updatedAt": 0,
+            "verified": true
+          }
+        ]
+      },
+      "recorded_as": "ListProjectDomains",
+      "superseded_members": {
+        "pagination": "the pack answered no pagination here; both arms of the document's response union declare it required, so the bundle answers it and the pack's shape loses"
+      }
+    },
+    {
+      "operation": "GetProjectDomains",
+      "input": {
+        "idOrName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domains": []
+      },
+      "recorded_as": "ListProjectDomains",
+      "superseded_members": {
+        "pagination": "the pack answered no pagination here; both arms of the document's response union declare it required, so the bundle answers it and the pack's shape loses"
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "name": "docs",
+        "project": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "created": 0,
+        "createdAt": 0,
+        "id": "dpl_33f6fc5d83b79b8e",
+        "name": "docs",
+        "projectId": "prj_7c5891299f64",
+        "readyState": "READY",
+        "state": "READY",
+        "type": "LAMBDAS",
+        "uid": "dpl_33f6fc5d83b79b8e",
+        "url": "docs-83d495.vercel.app"
+      },
+      "superseded_members": {
+        "created": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
+        "state": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
+        "uid": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape"
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "name": "solo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "created": 0,
+        "createdAt": 0,
+        "id": "dpl_3ed10eca83a29db2",
+        "name": "solo",
+        "projectId": "prj_100aa4e60b96",
+        "readyState": "READY",
+        "state": "READY",
+        "type": "LAMBDAS",
+        "uid": "dpl_3ed10eca83a29db2",
+        "url": "solo-4da7b6.vercel.app"
+      },
+      "superseded_members": {
+        "created": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
+        "state": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
+        "uid": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape"
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": "solo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": null,
+        "id": "prj_100aa4e60b96",
+        "name": "solo",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "name": "direct",
+        "project": "prj_000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "created": 0,
+        "createdAt": 0,
+        "id": "dpl_e7175ec1cd1d60f2",
+        "name": "direct",
+        "projectId": "prj_000000000000",
+        "readyState": "READY",
+        "state": "READY",
+        "type": "LAMBDAS",
+        "uid": "dpl_e7175ec1cd1d60f2",
+        "url": "direct-77df67.vercel.app"
+      },
+      "superseded_members": {
+        "created": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
+        "state": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
+        "uid": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape"
+      }
+    },
+    {
+      "operation": "GetDeployments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deployments": [
+          {
+            "created": 0,
+            "createdAt": 0,
+            "id": "dpl_33f6fc5d83b79b8e",
+            "name": "docs",
+            "projectId": "prj_7c5891299f64",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_33f6fc5d83b79b8e",
+            "url": "docs-83d495.vercel.app"
+          },
+          {
+            "created": 0,
+            "createdAt": 0,
+            "id": "dpl_3ed10eca83a29db2",
+            "name": "solo",
+            "projectId": "prj_100aa4e60b96",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_3ed10eca83a29db2",
+            "url": "solo-4da7b6.vercel.app"
+          },
+          {
+            "created": 0,
+            "createdAt": 0,
+            "id": "dpl_e7175ec1cd1d60f2",
+            "name": "direct",
+            "projectId": "prj_000000000000",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_e7175ec1cd1d60f2",
+            "url": "direct-77df67.vercel.app"
+          }
+        ],
+        "pagination": {
+          "count": 3
+        }
+      },
+      "recorded_as": "ListDeployments",
+      "superseded_members": {
+        "deployments[0].id": "the pack answered both id and uid; the document's deployment list item declares uid and not id, so the id survives only on the single-deployment operations",
+        "deployments[1].id": "the pack answered both id and uid; the document's deployment list item declares uid and not id, so the id survives only on the single-deployment operations",
+        "deployments[2].id": "the pack answered both id and uid; the document's deployment list item declares uid and not id, so the id survives only on the single-deployment operations"
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "idOrUrl": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "created": 0,
+        "createdAt": 0,
+        "id": "dpl_33f6fc5d83b79b8e",
+        "name": "docs",
+        "projectId": "prj_7c5891299f64",
+        "readyState": "READY",
+        "state": "READY",
+        "type": "LAMBDAS",
+        "uid": "dpl_33f6fc5d83b79b8e",
+        "url": "docs-83d495.vercel.app"
+      },
+      "superseded_members": {
+        "created": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
+        "state": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
+        "uid": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape"
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "idOrUrl": "dpl_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDeployment",
+      "input": {
+        "id": "dpl_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDeployment",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "state": "DELETED",
+        "uid": "dpl_33f6fc5d83b79b8e"
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "idOrUrl": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteProject",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "name": "docs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": null,
+        "id": "prj_9045051ba67c",
+        "name": "docs",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": "docs"
+      },
+      "identity": {
+        "Account": "222222222222",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    }
+  ]
+}

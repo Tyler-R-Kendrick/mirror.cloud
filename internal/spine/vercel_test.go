@@ -11,12 +11,16 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
+	// Links the bundles' registration in. Without it the registry has no pack
+	// for vercel.api or vercel.kv and the edge answers from the mock tier --
+	// which looks like a working service returning synthesized data, not like
+	// a failure.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestBootedServerVercelAPI(t *testing.T) {
 	cfg := config.Default()
-	cfg.Services = []string{"vercel.api"}
+	cfg.Services = []string{"vercel.api", "vercel.kv"}
 	cfg.Seed = "vercel-1"
 	rt, err := rtpkg.Boot(cfg)
 	if err != nil {
@@ -51,7 +55,10 @@ func TestBootedServerVercelAPI(t *testing.T) {
 		return res.StatusCode, m, res.Header
 	}
 	code, user, _ := do(http.MethodGet, "/v2/user", "", "")
-	if code != 200 || user["username"] != "test" {
+	// The document wraps the user object in `user`; the pack answered the
+	// members bare.
+	u, _ := user["user"].(map[string]any)
+	if code != 200 || u["username"] != "test" {
 		t.Fatalf("user %d %#v", code, user)
 	}
 	code, prj, _ := do(http.MethodPost, "/v11/projects", `{"name":"app"}`, "")

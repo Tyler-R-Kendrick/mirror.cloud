@@ -35,7 +35,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -7542,7 +7541,13 @@ func TestConcurrentSQSMessageMoveTaskStartsAllowOneActiveTask(t *testing.T) {
 }
 
 func TestVercelConcurrentDuplicateProjectNames(t *testing.T) {
-	p := api.New(spitest.Deps(t))
+	// The pack these exercised is gone; the property is not. Exactly one
+	// concurrent create may win a project name, and the engine has to hold
+	// that the same way the hand-written mutex did.
+	p, err := bundled.New("vercel.api", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7574,7 +7579,10 @@ func TestVercelConcurrentDuplicateProjectNames(t *testing.T) {
 }
 
 func TestVercelConcurrentKVSetGet(t *testing.T) {
-	p := api.New(spitest.Deps(t))
+	p, err := bundled.New("vercel.kv", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	var wg sync.WaitGroup
@@ -7584,7 +7592,7 @@ func TestVercelConcurrentKVSetGet(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			key := "k"
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "KvCommand", Input: map[string]any{"_redis": []any{"SET", key, n}}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Command", Input: map[string]any{"_redis": []any{"SET", key, n}}}); err != nil {
 				errCh <- err
 			}
 		}(i)
@@ -7594,7 +7602,7 @@ func TestVercelConcurrentKVSetGet(t *testing.T) {
 	for err := range errCh {
 		t.Fatal(err)
 	}
-	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "KvCommand", Input: map[string]any{"_redis": []any{"GET", "k"}}})
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Command", Input: map[string]any{"_redis": []any{"GET", "k"}}})
 	if err != nil || got.Output["result"] == nil {
 		t.Fatalf("get after concurrent set %#v %v", got, err)
 	}

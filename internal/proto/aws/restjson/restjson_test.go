@@ -9,14 +9,21 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
-	generatedpp "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/aws/pinpoint"
-	generatedcf "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/cloudflare/api"
-	generateddo "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/digitalocean/v2"
-	generatedvercel "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/vercel/api"
-	generatedkv "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/vercel/kv"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
+
+// generatedModel loads a canonical model through the generic registry; the
+// per-service packages that used to wrap it are gone.
+func generatedModel(tb testing.TB, id string) *model.Service {
+	tb.Helper()
+	svc, err := generated.Model(id)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return svc
+}
 
 func TestRESTJSONServiceRoutes(t *testing.T) {
 	codec := Codec{}
@@ -246,7 +253,7 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	// by name and call the array `_redis`; it is a generic rule now -- the
 	// model declares `body` a LIST bound to the payload -- and the service is
 	// vercel.kv, because the command endpoint was always a second product.
-	kv := generatedkv.Model()
+	kv := generatedModel(t, "vercel.kv")
 	kvOp := kv.OperationByName("Command")
 	decoded, err = codec.Decode(kv, kvOp, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`["GET","k"]`)))
 	if err != nil {
@@ -279,7 +286,7 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	// the real shapes: `body` is the payload member and `workers-kv_value` is
 	// a union of a string and a blob, which is what makes it the body rather
 	// than something to parse.
-	cf := generatedcf.Model()
+	cf := generatedModel(t, "cloudflare.api")
 	putReq := httptest.NewRequest(http.MethodPut, "/client/v4/accounts/a/storage/kv/namespaces/n/values/k", strings.NewReader("hello"))
 	decoded, err = codec.Decode(cf, cf.OperationByName("WorkersKvNamespaceWriteKeyValuePairWithMetadata"), putReq)
 	if err != nil || decoded.Input["body"] != "hello" {
@@ -459,7 +466,7 @@ func jsonQuote(s string) string {
 // is asserted here rather than left to be discovered: the deleted table joined
 // every remaining segment into the key and this does not.
 func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
-	cf := generatedcf.Model()
+	cf := generatedModel(t, "cloudflare.api")
 	const base = "/client/v4/accounts/a/storage/kv/namespaces"
 	for _, test := range []struct{ method, path, want string }{
 		{http.MethodPost, base, "WorkersKvNamespaceCreateANamespace"},
@@ -499,7 +506,7 @@ func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
 // DELETE /v2/droplets is a different operation from the one addressing a
 // droplet, which a table keyed on segment count had to special-case.
 func TestDigitalOceanRoutesFromItsGeneratedModel(t *testing.T) {
-	do := generateddo.Model()
+	do := generatedModel(t, "digitalocean.v2")
 	for _, test := range []struct{ method, path, want string }{
 		{http.MethodPost, "/v2/droplets", "DropletsCreate"},
 		{http.MethodGet, "/v2/droplets", "DropletsList"},
@@ -540,7 +547,7 @@ func TestDigitalOceanRoutesFromItsGeneratedModel(t *testing.T) {
 // The KV row is gone for a different reason: POST / was Vercel KV, which is a
 // second product on a second host and is its own service now.
 func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
-	vercel := generatedvercel.Model()
+	vercel := generatedModel(t, "vercel.api")
 	for _, test := range []struct{ method, path, want string }{
 		{http.MethodGet, "/v2/user", "GetAuthUser"},
 		{http.MethodPost, "/v11/projects", "CreateProject"},
@@ -599,7 +606,7 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 // same way would either drop the structure or hand a pack a JSON string where
 // it expects members.
 func TestStructuredPayloadStillDecodesAsAStructure(t *testing.T) {
-	pp := generatedpp.Model()
+	pp := generatedModel(t, "aws.pinpoint")
 	op := pp.OperationByName("CreateApp")
 	if op == nil {
 		t.Fatal("pinpoint has no CreateApp")

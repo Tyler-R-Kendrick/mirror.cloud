@@ -5,8 +5,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-
-	generatedcf "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/cloudflare/api"
 )
 
 // FuzzCloudflareRoute used to drive a hand-written route table. That table
@@ -22,7 +20,7 @@ func FuzzCloudflareRoute(f *testing.F) {
 	f.Add("GET", "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k")
 	f.Add("DELETE", "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k")
 	f.Add("GET", "/client/v4/accounts/a/storage/kv/namespaces/nid/keys")
-	cf := generatedcf.Model()
+	cf := generatedModel(f, "cloudflare.api")
 	f.Fuzz(func(t *testing.T, method, path string) {
 		if method == "" {
 			method = http.MethodGet

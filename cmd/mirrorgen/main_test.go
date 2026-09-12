@@ -40,12 +40,8 @@ func TestEmitRoundTrip(t *testing.T) {
 	if got.ID != "aws.s3" || len(got.Operations) == 0 {
 		t.Fatalf("got %+v", got)
 	}
-	goSrc, err := os.ReadFile(filepath.Join(dir, "aws", "s3", "model.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(goSrc)[:len("// Code generated")] != "// Code generated" {
-		t.Fatalf("header %s", goSrc[:40])
+	if _, err := os.Stat(filepath.Join(dir, "aws", "s3", "model.go")); !os.IsNotExist(err) {
+		t.Fatalf("per-service model.go should not be emitted: %v", err)
 	}
 
 	// Regenerating must produce identical bytes, including the gzip container:
@@ -157,7 +153,7 @@ func TestDiffFilteringAndEmission(t *testing.T) {
 	if err := emitAll(out, filtered); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "gcp", "keep", "model.go")); err != nil {
+	if _, err := os.Stat(filepath.Join(out, "gcp", "keep", "model.json.gz")); err != nil {
 		t.Fatal(err)
 	}
 	provider, pkg := splitID("123-service")

@@ -9,15 +9,18 @@ import "testing"
 //
 // The schema declares both `project` and `projectId` on Service, so selecting a
 // service's project is the natural query and the old switch answered it with
-// the project handler. These cases are the ones that were broken, plus the ones
-// that were not, so a future rewrite has to keep both halves.
+// the project handler. These cases are the ones that were broken, plus the
+// ones that were not and the shapes the scan has to understand at all, so a
+// future rewrite -- a real parser, per C53 -- has to keep every half.
 func TestGraphQLRootField(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		doc  string
 		want string
 	}{
-		// The three the substring switch got wrong.
+		// Reinstating the substring switch fails six of the cases below. Three
+		// are this group: a document that names the parent of the thing it asks
+		// for, which Railway's schema makes the natural query.
 		{"scalar naming the parent", `query { service(id:"s") { id projectId } }`, "service"},
 		{"selecting the parent object", `query { service(id:"s") { id project { name } } }`, "service"},
 		{"variable naming the parent", `query GetService($projectId: String!) { service(id: $projectId) { id } }`, "service"},
@@ -28,7 +31,9 @@ func TestGraphQLRootField(t *testing.T) {
 		{"delete", `mutation Kill { projectDelete(id:"p") }`, "projectDelete"},
 		{"parent selecting children", `query { project(id:"p") { services { edges { node { id } } } } }`, "project"},
 
-		// Places a field name can hide that are not the root field at all.
+		// The other three. Each is a place a field name can sit that is not the
+		// root field, and the string-literal one is the sharpest: a service whose
+		// NAME contains a field name sent a create to the delete handler.
 		{"comment", "# projectCreate is not what this asks for\nquery { projects { edges { node { id } } } }", "projects"},
 		{"string literal", `mutation { serviceCreate(input:{name:"projectDelete"}) { id } }`, "serviceCreate"},
 		{"paren in a default", `query Q($n: String = "a)b") { projects { edges { node { id } } } }`, "projects"},

@@ -73,7 +73,7 @@ type document struct {
 	// collapsing all three Azure services onto `azure` would change which
 	// services the demux considers for those labels.
 	MirrorEndpointPrefix string `json:"x-mirror-endpoint-prefix"`
-	Servers []struct {
+	Servers              []struct {
 		URL string `json:"url"`
 	} `json:"servers"`
 	Paths      map[string]json.RawMessage `json:"paths"`

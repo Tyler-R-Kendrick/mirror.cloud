@@ -2782,6 +2782,9 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 	if err := validateListEncodingType(req); err != nil {
 		return nil, err
 	}
+	// prefix/delimiter/key-marker/encoding-type are bound into Input by the
+	// router's query normalization; upload-id-marker and max-uploads are the
+	// two the router does not name, so they keep the query fallback.
 	parameter := func(input, query string) string {
 		if value := str(req.Input[input]); value != "" {
 			return value
@@ -2791,11 +2794,11 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 		}
 		return ""
 	}
-	prefix := parameter("Prefix", "prefix")
-	delimiter := parameter("Delimiter", "delimiter")
-	keyMarker := parameter("KeyMarker", "key-marker")
+	prefix := str(req.Input["Prefix"])
+	delimiter := str(req.Input["Delimiter"])
+	keyMarker := str(req.Input["KeyMarker"])
 	uploadMarker := parameter("UploadIdMarker", "upload-id-marker")
-	encoding := parameter("EncodingType", "encoding-type")
+	encoding := str(req.Input["EncodingType"])
 	maxUploads := 1000
 	if _, provided := req.Input["MaxUploads"]; provided {
 		maxUploads = asInt(req.Input["MaxUploads"])

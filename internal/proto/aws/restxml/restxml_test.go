@@ -906,14 +906,14 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	for name, test := range map[string]struct {
 		path, header, value, want string
 	}{
-		"create page blob": {"/c/o", "x-ms-blob-type", "PageBlob", "CreatePageBlob"},
+		"create page blob":   {"/c/o", "x-ms-blob-type", "PageBlob", "CreatePageBlob"},
 		"create append blob": {"/c/o", "x-ms-blob-type", "AppendBlob", "CreateAppendBlob"},
 		"async copy":         {"/c/o", "x-ms-copy-source", "http://acct.blob.core.windows.net/c/s", "StartCopyFromURL"},
 		"stage from url":     {"/c/o?comp=block", "x-ms-copy-source", "http://acct.blob.core.windows.net/c/s", "StageBlockFromURL"},
-		"put page":         {"/c/o?comp=page", "x-ms-page-write", "update", "PutPage"},
-		"clear pages":      {"/c/o?comp=page", "x-ms-page-write", "clear", "ClearPages"},
-		"resize":           {"/c/o?comp=properties", "x-ms-blob-content-length", "512", "ResizePageBlob"},
-		"sequence number":  {"/c/o?comp=properties", "x-ms-sequence-number-action", "increment", "SetBlobSequenceNumber"},
+		"put page":           {"/c/o?comp=page", "x-ms-page-write", "update", "PutPage"},
+		"clear pages":        {"/c/o?comp=page", "x-ms-page-write", "clear", "ClearPages"},
+		"resize":             {"/c/o?comp=properties", "x-ms-blob-content-length", "512", "ResizePageBlob"},
+		"sequence number":    {"/c/o?comp=properties", "x-ms-sequence-number-action", "increment", "SetBlobSequenceNumber"},
 	} {
 		req := httptest.NewRequest(http.MethodPut, test.path, nil)
 		req.Header.Set(test.header, test.value)

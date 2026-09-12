@@ -7428,6 +7428,10 @@ func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 	if encoded.Output["Uploads"].([]any)[0].(map[string]any)["Key"] != "space%20key" || encoded.Output["EncodingType"] != "url" {
 		t.Fatalf("encoded multipart uploads = %v", encoded.Output)
 	}
+	zeroLimit := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "MaxUploads": 0}, nil)
+	if zeroLimit.Output["MaxUploads"] != 1000 || zeroLimit.Output["IsTruncated"] != false {
+		t.Fatalf("zero max-uploads defaults to 1000 = %v", zeroLimit.Output)
+	}
 	for _, test := range []struct {
 		input      map[string]any
 		code       string

@@ -3,7 +3,6 @@ package engine
 import (
 	"sort"
 	"strings"
-
 )
 
 // hierList folds blob names into a flat-or-hierarchical listing: names under

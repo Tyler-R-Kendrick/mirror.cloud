@@ -17,11 +17,5 @@
     "goes green. TestKnownRedIsDeclaredHonestly enforces both halves: every entry must name a test",
     "that exists in the tree and carry a non-empty reason."
   ],
-  "expected": [
-    {
-      "test": "TestEveryServedServiceIsDescribedByASpecification",
-      "package": "./internal/specboot",
-      "why": "Three AWS services are served with no generated model: their Smithy models are ones the receiver cannot yet ingest (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb). azure.blobs, azure.queue, azure.table and railway.graphql left this list on this branch, each with an authored document and a generated model. The count may only fall."
-    }
-  ]
+  "expected": []
 }

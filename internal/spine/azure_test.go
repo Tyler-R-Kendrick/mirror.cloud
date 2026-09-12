@@ -491,8 +491,8 @@ func TestBootedServerAzureBlob(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("sharedkey parsed %d %s", code, raw)
 	}
-	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	past := "2000-01-01T00:00:00Z"
+	future := "2999-01-01T00:00:00Z"
 	code, raw, h = rawDo(http.MethodGet, "/ctr/o?sv=2020-10-02&sp=r&se="+url.QueryEscape(past)+"&sig=AAAA", nil)
 	if code != 403 || h.Get("x-ms-error-code") != "AuthenticationFailed" {
 		t.Fatalf("expired sas %d %#v %s", code, h, raw)

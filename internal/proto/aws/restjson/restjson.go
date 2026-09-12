@@ -34,9 +34,6 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "aws.es" {
 		return opensearchOp(svc, r), nil
 	}
-	if svc.ID == "vercel.api" {
-		return vercelOp(svc, r), nil
-	}
 	if svc.ID == "railway.graphql" {
 		return railwayOp(svc, r), nil
 	}
@@ -381,63 +378,6 @@ func railwayRoute(r *http.Request) string {
 		return "Unknown"
 	}
 }
-func vercelOp(svc *model.Service, r *http.Request) *model.Operation {
-	name := vercelRoute(r)
-	if op := svc.OperationByName(name); op != nil {
-		return op
-	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
-}
-
-func vercelRoute(r *http.Request) string {
-	path := strings.Trim(r.URL.Path, "/")
-	if path == "" {
-		return "KvCommand"
-	}
-	parts := strings.Split(path, "/")
-	if len(parts) > 0 && len(parts[0]) >= 2 && parts[0][0] == 'v' && parts[0][1] >= '0' && parts[0][1] <= '9' {
-		parts = parts[1:]
-	}
-	if len(parts) == 0 || parts[0] == "" {
-		return "KvCommand"
-	}
-	m := r.Method
-	join := strings.Join(parts, "/")
-	switch {
-	case len(parts) == 0:
-		return "KvCommand"
-	case parts[0] == "user":
-		return "GetUser"
-	case join == "projects" && m == http.MethodPost:
-		return "CreateProject"
-	case join == "projects" && m == http.MethodGet:
-		return "ListProjects"
-	case len(parts) == 2 && parts[0] == "projects" && m == http.MethodGet:
-		return "GetProject"
-	case len(parts) == 2 && parts[0] == "projects" && m == http.MethodDelete:
-		return "DeleteProject"
-	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodGet:
-		return "ListProjectEnv"
-	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodPost:
-		return "CreateProjectEnv"
-	case len(parts) >= 4 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodDelete:
-		return "DeleteProjectEnv"
-	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "domains" && m == http.MethodGet:
-		return "ListProjectDomains"
-	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "domains" && m == http.MethodPost:
-		return "AddProjectDomain"
-	case join == "deployments" && m == http.MethodPost:
-		return "CreateDeployment"
-	case join == "deployments" && m == http.MethodGet:
-		return "ListDeployments"
-	case len(parts) == 2 && parts[0] == "deployments" && m == http.MethodGet:
-		return "GetDeployment"
-	case len(parts) == 2 && parts[0] == "deployments" && m == http.MethodDelete:
-		return "DeleteDeployment"
-	}
-	return "Unknown"
-}
-
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
 	body, _ := io.ReadAll(r.Body)
 	in := map[string]any{}
@@ -456,11 +396,20 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		in[name] = string(body)
 		body = nil
 	}
-	if len(body) > 0 && body[0] == '[' {
-		var cmd []any
-		_ = json.Unmarshal(body, &cmd)
-		in["_redis"] = cmd
-	} else if len(body) > 0 {
+	// The third answer to "what is this payload": a bare JSON array, which has
+	// no object to splat into the input. Unmarshalling one into a map fails, so
+	// without this the operation is handed nothing and the error is dropped --
+	// which is what `_redis` was for. That name was the provider's for a rule
+	// the model states: Cloudflare's bulk write and both bulk deletes are
+	// shaped this way too, and they decode to an empty input today.
+	if name, ok := svc.ListPayloadMember(op); ok {
+		var list []any
+		if err := json.Unmarshal(body, &list); err == nil {
+			in[name] = list
+		}
+		body = nil
+	}
+	if len(body) > 0 {
 		_ = json.Unmarshal(body, &in)
 	}
 	for k, vs := range r.URL.Query() {
@@ -593,6 +542,18 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	if svc.ID == "vercel.api" {
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
+	}
+	// Vercel KV is a second product on a second host, and its errors are not
+	// shaped like the REST API's. The deleted pack served both through one
+	// registration and therefore through the envelope above, wrapping an
+	// Upstash error in Vercel's {error: {code, message}}. The KV document
+	// declares `error` as a plain string, which is what Upstash answers, so
+	// this follows the document rather than the pack -- a fault envelope is
+	// not compared by the equivalence recording, which gates the code, status
+	// and class, so the change is stated as a quirk instead of hidden by one.
+	if svc.ID == "vercel.kv" {
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"error": f.Message})
 	}
 	if svc.ID == "cloudflare.api" {
 		var code any = f.Code

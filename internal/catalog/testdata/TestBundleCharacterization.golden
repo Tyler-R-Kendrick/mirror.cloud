@@ -752,21 +752,27 @@
     "ID": "vercel.api",
     "Protocol": "restJson1",
     "Ops": [
-      "GetUser",
+      "GetAuthUser",
       "CreateProject",
-      "ListProjects",
+      "GetProjects",
       "GetProject",
       "DeleteProject",
-      "ListProjectEnv",
+      "FilterProjectEnvs",
       "CreateProjectEnv",
-      "DeleteProjectEnv",
-      "ListProjectDomains",
+      "RemoveProjectEnv",
+      "GetProjectDomains",
       "AddProjectDomain",
       "CreateDeployment",
-      "ListDeployments",
+      "GetDeployments",
       "GetDeployment",
-      "DeleteDeployment",
-      "KvCommand"
+      "DeleteDeployment"
+    ]
+  },
+  {
+    "ID": "vercel.kv",
+    "Protocol": "restJson1",
+    "Ops": [
+      "Command"
     ]
   },
   {

@@ -227,12 +227,39 @@ func Bundle() *model.Bundle {
 		"BatchGetSecretValue", "CancelRotateSecret", "DeleteResourcePolicy", "GetResourcePolicy",
 		"PutResourcePolicy", "RemoveRegionsFromReplication", "ReplicateSecretToRegions", "RotateSecret",
 		"StopReplicationToReplica", "UpdateSecretVersionStage", "ValidateResourcePolicy"}
-	vercel := []string{
-		"GetUser", "CreateProject", "ListProjects", "GetProject", "DeleteProject",
-		"ListProjectEnv", "CreateProjectEnv", "DeleteProjectEnv",
-		"ListProjectDomains", "AddProjectDomain",
-		"CreateDeployment", "ListDeployments", "GetDeployment", "DeleteDeployment",
-		"KvCommand",
+	// Vercel is served from behavior/vercel/api and behavior/vercel/kv now,
+	// under the names its documents declare rather than the fifteen the
+	// deleted pack invented -- and as two services, because the pack carried
+	// two products on two hosts under one registration.
+	//
+	// Real bindings rather than mk(), which binds everything to POST /: the
+	// REST/JSON codec's Vercel route table went away with the pack, and
+	// internal/conformance reads this catalog directly, without
+	// adoptGenerated. The versions are the document's, which is the visible
+	// break -- the pack's table stripped the leading version segment before
+	// matching, so it answered every version of every path.
+	vercel := []model.Operation{
+		op("GetAuthUser", "GET", "/v2/user", 200, true),
+		op("CreateProject", "POST", "/v11/projects", 200, false),
+		op("GetProjects", "GET", "/v10/projects", 200, true),
+		op("GetProject", "GET", "/v9/projects/{idOrName}", 200, true),
+		op("DeleteProject", "DELETE", "/v9/projects/{idOrName}", 204, false),
+		op("FilterProjectEnvs", "GET", "/v10/projects/{idOrName}/env", 200, true),
+		op("CreateProjectEnv", "POST", "/v10/projects/{idOrName}/env", 201, false),
+		op("RemoveProjectEnv", "DELETE", "/v9/projects/{idOrName}/env/{id}", 200, false),
+		op("GetProjectDomains", "GET", "/v9/projects/{idOrName}/domains", 200, true),
+		op("AddProjectDomain", "POST", "/v10/projects/{idOrName}/domains", 200, false),
+		op("CreateDeployment", "POST", "/v13/deployments", 200, false),
+		op("GetDeployments", "GET", "/v7/deployments", 200, true),
+		op("GetDeployment", "GET", "/v13/deployments/{idOrUrl}", 200, true),
+		op("DeleteDeployment", "DELETE", "/v13/deployments/{id}", 200, false),
+	}
+	// Vercel KV is the data plane -- Upstash Redis behind a Vercel host -- and
+	// its whole surface is one operation: POST / with the command as a JSON
+	// array. It needs its own catalog entry because it is its own service id,
+	// and adoptGenerated cannot invent one.
+	vercelkv := []model.Operation{
+		op("Command", "POST", "/", 200, false),
 	}
 	// Cloudflare is served from behavior/cloudflare/api now, under the id its
 	// document produces -- cloudflare.api -- and the names that document
@@ -1383,7 +1410,8 @@ func Bundle() *model.Bundle {
 			svc("aws.ssm", "ssm", model.ProtoAWSJSON11, "AmazonSSM", "", "", mk(ssm)),
 			svc("aws.secretsmanager", "secretsmanager", model.ProtoAWSJSON11, "secretsmanager", "", "", mk(sm)),
 			svc("gcp.storage", "storage", model.ProtoGCPRESTSON, "", "", "", mk(gcs)),
-			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", mk(vercel)),
+			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", vercel),
+			svc("vercel.kv", "vercel", model.ProtoRESTJSON1, "", "", "", vercelkv),
 			svc("cloudflare.api", "cloudflare", model.ProtoRESTJSON1, "", "", "", cloudflare),
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
 			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),

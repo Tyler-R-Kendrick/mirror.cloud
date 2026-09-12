@@ -249,6 +249,18 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 // validateInput enforces the model's required members and constraints. This is
 // the check the empty-shape catalog silently disabled; it runs before any
 // behavior so a malformed request never reaches an effect.
+// splatPayload reports whether the codec presents this payload member by
+// spreading the body's members across the input rather than by setting it.
+func (e *Engine) splatPayload(m model.Member) bool {
+	if m.Binding.Location != "payload" {
+		return false
+	}
+	if e.model.ScalarBody(m.Shape) {
+		return false
+	}
+	return e.model.Shapes[m.Shape].Kind != model.KindList
+}
+
 func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault {
 	if op.Input == "" {
 		return nil
@@ -265,23 +277,32 @@ func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault 
 	for _, name := range names {
 		m := shape.Members[name]
 		v, present := req.Input[name]
-		// A payload member whose shape is a structure or a union IS the
-		// request body: the codec decodes that body's members into the input,
-		// so the member itself is never present. Vercel's env create and KV
-		// command are the first operations whose document marks such a member
-		// required, and requiring it here would fail every one of those calls
-		// before a rule ran -- the member cannot be absent without the whole
-		// body being absent, which the operation's own rules check. Opaque
-		// payload members are bound from the body by the codec
-		// (model.PayloadMember), so the check still stands for them.
-		if m.Required && !present && m.Binding.Location == "payload" && !e.model.ScalarBody(m.Shape) {
-			continue
-		}
 		// Required means present, not non-empty. Whether an empty value is
 		// acceptable is a length constraint, which the model already carries
 		// -- and conflating the two took the decision away from the service:
 		// Polly answers an empty Text with InvalidSsmlException, which it
 		// could never do if the engine had already rejected it as missing.
+		// A member bound to the payload is not something the caller names: it
+		// IS the body, and the codec decides how to present it. Where the
+		// shape is opaque bytes or a bare array the codec sets the member, so
+		// asking whether it is present is a real question. Where it is a
+		// structure -- or a union the receiver could not resolve to one -- the
+		// codec splats the body's own members across the input instead, and
+		// the member is then structurally never present. Requiring it there
+		// rejects every well-formed request.
+		//
+		// This is not one operation. 111 across the generated models have a
+		// required payload member of that shape -- every CloudFront Create and
+		// Update, all of Pinpoint, twenty-four of S3's Put -- and each would
+		// fail here the moment it is served from a bundle rather than a pack.
+		// Nothing had noticed because no bundle served one yet.
+		//
+		// What a body must contain is the bundle's to state, in rules that can
+		// name the member and the reason, rather than the model's to enforce
+		// through a member no request can carry.
+		if m.Required && !present && e.splatPayload(m) {
+			continue
+		}
 		if m.Required && !present {
 			if ref := e.ir.MissingInput; ref != "" {
 				return e.fault(ref, name)

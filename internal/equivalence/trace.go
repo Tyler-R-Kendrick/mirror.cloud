@@ -411,6 +411,47 @@ func asRef(m map[string]any) (step int, path string, ok bool) {
 
 // lookupPath follows a dotted path into an answer.
 func lookupPath(out map[string]any, path string) (any, bool) {
+	if v, ok := walkPath(out, path); ok {
+		return v, ok
+	}
+	// A pack and the bundle replacing it can disagree about nesting as well as
+	// about names, and CanonicalPath -- which resolves the second -- cannot
+	// see the first: it rewrites a path through the model's own member names,
+	// and a wrapper is not a rename.
+	//
+	// Vercel's CreateProjectEnv is the case that found this. The pack answered
+	// the environment variable at the top level; the document declares the
+	// response as {created, failed}, bulk-shaped because the real operation
+	// takes several variables at once. So the variable's id sits at `id` in
+	// the recording and at `created.id` in the answer, and the later step that
+	// deletes that variable by reference resolved to nothing and reported a
+	// 404 -- a divergence naming the wrong step, for a reason that is not a
+	// divergence at all.
+	//
+	// So one declared wrapper is crossed, and only when exactly one member of
+	// the answer carries the path. Two candidates mean the reference really is
+	// ambiguous, and resolving that by luck would turn a question into a
+	// silent answer; there the lookup fails as before and the divergence is
+	// reported. The search is over the answer rather than over the shape
+	// because a wrapper's declared shape may be a document -- Vercel's
+	// `created` is a union of two -- which says nothing about what is inside.
+	found, hit := any(nil), 0
+	for _, v := range out {
+		inner, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		if got, ok := walkPath(inner, path); ok {
+			found, hit = got, hit+1
+		}
+	}
+	if hit == 1 {
+		return found, true
+	}
+	return nil, false
+}
+
+func walkPath(out map[string]any, path string) (any, bool) {
 	var cur any = out
 	for _, part := range strings.Split(path, ".") {
 		switch c := cur.(type) {

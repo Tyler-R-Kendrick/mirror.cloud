@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -171,22 +172,6 @@ var mutants = []mutant{
 		new:  `headers.Set("x-amz-delete-marker", "false")`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCopyObjectSourceVersions",
-	},
-	{
-		name: "s3-hide-delete-marker-version",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old: `	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
-	h.Set("Last-Modified", str(meta["mtime"]))
-	if version := str(meta["versionId"]); version != "" {
-		h.Set("x-amz-version-id", version)
-	}`,
-		new: `	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
-	h.Set("Last-Modified", str(meta["mtime"]))
-	if version := str(meta["versionId"]); false {
-		h.Set("x-amz-version-id", version)
-	}`,
-		pkg: "./internal/services/aws/s3",
-		run: "TestCopyObjectSourceVersions",
 	},
 	{
 		name: "s3-hide-delete-marker-time",
@@ -1119,8 +1104,8 @@ var mutants = []mutant{
 	{
 		name: "s3-list-uploads-accept-zero-limit",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if maxUploads == 0 {\n\t\tmaxUploads = 1000\n\t}",
-		new:  "if false {\n\t\tmaxUploads = 1000\n\t}",
+		old:  `maxUploads < 0 || maxUploads > 1000`,
+		new:  `maxUploads < -1 || maxUploads > 1000`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestListMultipartUploadsPaginationAndDelimiter",
 	},
@@ -1143,40 +1128,32 @@ var mutants = []mutant{
 	{
 		name: "s3-list-uploads-ignore-http-limit",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `parameter("", "max-uploads")`,
-		new:  `parameter("", "mutated-max-uploads")`,
+		old:  `req.Input["MaxUploads"] = q.Get("max-uploads")`,
+		new:  `req.Input["MaxUploads"] = q.Get("mutated-max-uploads")`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
 	{
 		name: "s3-list-uploads-ignore-http-key-marker",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if has(\"key-marker\") {\n\t\treq.Input[\"KeyMarker\"] = q.Get(\"key-marker\")\n\t}",
-		new:  "if false {\n\t\treq.Input[\"KeyMarker\"] = q.Get(\"key-marker\")\n\t}",
+		old:  `req.Input["KeyMarker"] = q.Get("key-marker")`,
+		new:  `req.Input["KeyMarker"] = q.Get("mutated-key-marker")`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
 	{
 		name: "s3-list-uploads-ignore-http-upload-marker",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `parameter("UploadIdMarker", "upload-id-marker")`,
-		new:  `parameter("UploadIdMarker", "mutated-upload-id-marker")`,
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerS3QuerySemantics",
-	},
-	{
-		name: "s3-list-uploads-ignore-prefix",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if has(\"prefix\") {\n\t\treq.Input[\"Prefix\"] = q.Get(\"prefix\")\n\t}",
-		new:  "if false {\n\t\treq.Input[\"Prefix\"] = q.Get(\"prefix\")\n\t}",
+		old:  `req.Input["UploadIdMarker"] = q.Get("upload-id-marker")`,
+		new:  `req.Input["UploadIdMarker"] = q.Get("mutated-upload-id-marker")`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
 	{
 		name: "s3-list-uploads-ignore-http-delimiter",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if has(\"delimiter\") {\n\t\treq.Input[\"Delimiter\"] = q.Get(\"delimiter\")\n\t}",
-		new:  "if false {\n\t\treq.Input[\"Delimiter\"] = q.Get(\"delimiter\")\n\t}",
+		old:  `req.Input["Delimiter"] = q.Get("delimiter")`,
+		new:  `req.Input["Delimiter"] = q.Get("mutated-delimiter")`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
@@ -2951,14 +2928,6 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `_ = p.col(req, "versioning").Put(ctx, b, []byte(st))`,
 		new:  `_ = p.col(req, "versioning").Put(ctx, b, []byte("Suspended"))`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestBucketVersioningState",
-	},
-	{
-		name: "s3-versioning-return-put-status",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "_ = p.col(req, \"versioning\").Put(ctx, b, []byte(st))",
-		new:  "_ = p.col(req, \"versioning\").Put(ctx, b, []byte(\"Suspended\"))",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketVersioningState",
 	},
@@ -5411,12 +5380,12 @@ var mutants = []mutant{
 		// excuses nothing still reads as a documented divergence.
 		name: "equivalence-stale-member-exemption-unreported",
 		file: filepath.Join("internal", "equivalence", "equivalence.go"),
-		old: `				if used[path] {
-					continue
-				}`,
-		new: `				if true {
-					continue
-				}`,
+		old: `		if used[path] {
+			continue
+		}`,
+		new: `		if true {
+			continue
+		}`,
 		pkg: "./internal/equivalence",
 		run: "TestSupersededMemberThatExcusesNothingIsReported",
 	},
@@ -5468,11 +5437,13 @@ var mutants = []mutant{
 		// cost of every real assertion beside it.
 		name: "equivalence-superseded-member-exempts-the-step",
 		file: filepath.Join("internal", "equivalence", "equivalence.go"),
-		old: `				if _, exempt := step.SupersededMembers[d.Path]; exempt {
+		old: `				t.canonical(step.Operation, got.Output)) {
+				if _, exempt := step.SupersededMembers[d.Path]; exempt {
 					used[d.Path] = true
 					continue
 				}`,
-		new: `				if len(step.SupersededMembers) > 0 {
+		new: `				t.canonical(step.Operation, got.Output)) {
+				if len(step.SupersededMembers) > 0 {
 					used[d.Path] = true
 					continue
 				}`,
@@ -6996,7 +6967,7 @@ var mutants = []mutant{
 		run:  "TestStatesMapValidation",
 	},
 	{
-		name: "states-accept-oversized-map-batch",
+		name: "states-widen-max-input-bytes-bound",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 		old:  `validateInteger(batcher, path, "MaxInputBytesPerBatch", 1, 262144)`,
 		new:  `validateInteger(batcher, path, "MaxInputBytesPerBatch", 1, 262145)`,
@@ -13815,14 +13786,6 @@ var mutants = []mutant{
 		run:  "TestObjectSSECustomerKey",
 	},
 	{
-		name: "s3-skip-multipart-customer-encryption-validation",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "sseCustomerKeyMD5, err := requestSSECustomerKey(req)\n\tif err != nil {",
-		new:  "sseCustomerKeyMD5, err := requestSSECustomerKey(req)\n\tif false && err != nil {",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestMultipartSSECustomerKey",
-	},
-	{
 		name: "s3-drop-multipart-customer-encryption-state",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled`,
@@ -16542,8 +16505,8 @@ var mutants = []mutant{
 	{
 		name: "s3-list-multipart-reject-zero-limit",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if maxUploads == 0 {\n\t\tmaxUploads = 1000\n\t}\n\tif maxUploads < 1 || maxUploads > 1000 {",
-		new:  "if maxUploads < 0 {\n\t\tmaxUploads = 1000\n\t}\n\tif maxUploads < 1 || maxUploads > 1000 {",
+		old:  "if maxUploads == 0 {\n\t\tmaxUploads = 1000\n\t}",
+		new:  "if false {\n\t\tmaxUploads = 1000\n\t}",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestMultipartZeroLimitsUseDefaults",
 	},
@@ -16678,8 +16641,8 @@ var mutants = []mutant{
 	{
 		name: "s3-list-uploads-ignore-http-prefix",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if has(\"prefix\") {\n\t\treq.Input[\"Prefix\"] = q.Get(\"prefix\")\n\t}",
-		new:  "if false {\n\t\treq.Input[\"Prefix\"] = q.Get(\"prefix\")\n\t}",
+		old:  `prefix := str(req.Input["Prefix"])`,
+		new:  `prefix := ""`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
@@ -17332,14 +17295,6 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `Fields: map[string]any{"ETag": etag, "PartNumber": strconv.Itoa(number), "MinSizeAllowed": 5 << 20, "ProposedSize": len(part.body)}`,
 		new:  `Fields: map[string]any{}`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCompleteMultipartUploadManifest",
-	},
-	{
-		name: "s3-complete-drop-checksum-part-message",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `Message: "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag."`,
-		new:  `Message: ""`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCompleteMultipartUploadManifest",
 	},
@@ -21592,29 +21547,85 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSConfirmSubscriptionTokenValidation",
 	},
-	// The eight mutants that guarded the Vercel pack's empty-name,
-	// duplicate-name, missing-resource, root-route and KV-delete branches are
-	// gone with the Go they rewrote, the same way DigitalOcean's were. The
-	// behaviour is `require` rules and effects in behavior/vercel/api and
-	// behavior/vercel/kv, and the equivalence recordings replay every one of
-	// them on their own steps: an empty or absent name answers
-	// bad_request/400, a duplicate answers conflict/409, an unknown id answers
-	// not_found/404, and a KV DEL of a missing key answers 0.
+	// The eight mutants that rewrote the Vercel pack's empty-name,
+	// duplicate-name, empty-env-key, missing-deployment, missing-project,
+	// missing-env and KV-delete branches are gone with the Go they rewrote,
+	// the same way DigitalOcean's and Hetzner's were. The behaviour is
+	// `require` rules in behavior/vercel/api and behavior/vercel/kv, and the
+	// equivalence recordings replay every one of them on its own step.
 	//
-	// What replaced them here is the generic rule this service is the first
-	// to need. Vercel's env create and KV command are the first operations
-	// whose document marks a structured payload member -- the request body --
-	// required: the codec decodes that body's members into the input, so the
-	// member itself is never present, and requiring it would fail every one
-	// of those calls. That rule is Go, is not about Vercel, and would be
-	// silent if it broke: both operations would answer 400 to every request.
+	// vercel-route-root-as-unknown went with the route table it mutated. POST
+	// / was the pack's way of saying "this is the KV command endpoint", which
+	// is now a service of its own reached by host, and every other Vercel path
+	// routes through httpuri.Match over the generated model.
+	//
+	// What replaces them is better placed, and most of it is not about Vercel.
+	// Extracting this pack needed three generic rules, each of which would be
+	// silent for every provider if it broke.
 	{
-		name: "engine-structured-payload-member-required",
+		// A payload member whose shape is a LIST takes the body, which is what
+		// the `_redis` branch in this codec was a provider-specific spelling
+		// of. Four payload members across the tree are lists and three are
+		// Cloudflare's bulk KV operations; without this they decode to an
+		// empty input and the error is discarded.
+		name: "restjson-ignore-list-payload",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if name, ok := svc.ListPayloadMember(op); ok {",
+		new:  "if name, ok := svc.ListPayloadMember(op); false && ok {",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
+	},
+	{
+		// The other half of the payload rules. A STRUCTURE payload arrives
+		// splatted -- the codec unmarshals the body into the input map -- so
+		// the member the document marks required is never present under its
+		// own name, and the engine's required check must not fail it. 111
+		// operations across the tree bind a structure payload that way,
+		// including every CloudFront create and update; without this every one
+		// of them answers a validation failure the moment it is extracted.
+		name: "engine-splat-payload-fails-required",
 		file: filepath.Join("internal", "engine", "engine.go"),
-		old:  `if m.Required && !present && m.Binding.Location == "payload" && !e.model.ScalarBody(m.Shape) {`,
-		new:  `if m.Required && !present && false && m.Binding.Location == "payload" {`,
+		old:  "if m.Required && !present && e.splatPayload(m) {",
+		new:  "if false && m.Required && !present && e.splatPayload(m) {",
 		pkg:  "./internal/engine",
-		run:  "TestAStructuredPayloadMemberIsTheBodyNotAnInput",
+		run:  "TestASplattedPayloadDoesNotFailTheRequiredCheck",
+	},
+	{
+		// A recorded reference names a value by where the PACK put it, and a
+		// bundle may nest it one level deeper because the document declares a
+		// wrapper. Without the crossing the reference resolves to nothing, the
+		// step that uses it diverges, and the report names that step rather
+		// than the nesting -- a false failure pointing at the wrong place,
+		// which is worse than none.
+		name: "equivalence-reference-ignores-a-wrapper",
+		file: filepath.Join("internal", "equivalence", "trace.go"),
+		old:  "	if hit == 1 {",
+		new:  "	if false {",
+		pkg:  "./internal/equivalence",
+		run:  "TestBundlesMatchRecordedPacks",
+	},
+	{
+		// Two products on two hosts, and the KV host contains the REST API's
+		// name. Test this before the general one or every KV command routes to
+		// vercel.api, which serves no operation at `/` and answers 501.
+		name: "vercel-kv-host-falls-through",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  "	if strings.Contains(host, \"vercel-storage\") {",
+		new:  "	if false {",
+		pkg:  "./internal/spine",
+		run:  "TestBootedServerVercelAPI",
+	},
+	{
+		// KV's errors are a plain string, which is what its document declares
+		// and what Upstash answers. Without this branch they fall through to
+		// the REST API's {error: {code, message}}, which no Upstash client
+		// parses.
+		name: "vercel-kv-encodes-the-rest-fault",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if svc.ID == \"vercel.kv\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"error\": f.Message})",
+		new:  "if false && svc.ID == \"vercel.kv\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"error\": f.Message})",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
 	},
 	// The three mutants that guarded the Cloudflare pack's empty-title,
 	// duplicate-title and missing-key branches are gone with the Go they
@@ -21644,8 +21655,8 @@ var mutants = []mutant{
 		// reads is absent.
 		name: "restjson-payload-swallows-structures",
 		file: filepath.Join("internal", "model", "model.go"),
-		old:  `if m.Binding.Location != "payload" || !s.ScalarBody(m.Shape) {`,
-		new:  `if m.Binding.Location != "payload" {`,
+		old:  `	return s.payloadMember(op, s.ScalarBody)`,
+		new:  `	return s.payloadMember(op, func(string) bool { return true })`,
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestStructuredPayloadStillDecodesAsAStructure",
 	},
@@ -22062,6 +22073,55 @@ func TestMutantsAreKilled(t *testing.T) {
 	// A shard that matched nothing is a misconfiguration, not a fast pass.
 	if ran == 0 {
 		t.Fatalf("shard %d of %d selected none of the %d mutants", index, count, len(mutants))
+	}
+}
+
+// TestMutantNamesAreUniqueAndDistinct catches two ways this table can overstate
+// how much it proves. It was doing both when this was written.
+//
+// A NAME is an identity: what a shard selects, what the harness reports, and --
+// since known-red.json exists -- what an expected failure is declared by. Two
+// mutants sharing one make all three ambiguous, because Go runs the second
+// subtest as `name#01`, so anything naming it speaks for only one of them.
+//
+// A REWRITE plus what is asserted to catch it is the experiment. Two mutants
+// making the same rewrite to the same line AND naming the same package and
+// test are one experiment run twice: the suite pays a full build and test round
+// for the second and learns nothing. Two mutants making the same rewrite but
+// naming DIFFERENT tests are two claims, not one -- the SQS receive/redrive
+// pair says a line must be caught by a pack characterization and by a booted
+// server, which is more than either says alone -- so the key includes both.
+//
+// Getting that distinction wrong is why this is worth stating: keyed on the
+// rewrite alone it reports ten pairs, of which six are legitimate.
+//
+// Both checks run in milliseconds, in the fast suite, for the same reason
+// TestMutantNeedlesExist does.
+func TestMutantNamesAreUniqueAndDistinct(t *testing.T) {
+	byName := map[string]int{}
+	byExperiment := map[string][]string{}
+	for _, m := range mutants {
+		byName[m.name]++
+		key := strings.Join([]string{m.file, m.old, m.new, m.pkg, m.run}, "\x00")
+		byExperiment[key] = append(byExperiment[key], m.name)
+	}
+	for _, m := range mutants {
+		if byName[m.name] > 1 {
+			t.Errorf("%s is declared %d times. A name is what a shard selects, what the "+
+				"harness reports, and what known-red.json declares an expected failure by; "+
+				"two mutants sharing one become `name` and `name#01`, and anything naming it "+
+				"speaks for only one of them.", m.name, byName[m.name])
+			byName[m.name] = 1 // report each name once
+		}
+	}
+	for _, names := range byExperiment {
+		if len(names) > 1 {
+			sort.Strings(names)
+			t.Errorf("%v are the same rewrite asserted by the same test, so they are one "+
+				"experiment run %d times: the suite pays a build and a test round per copy "+
+				"and learns nothing from the extras. Delete all but one, or point the others "+
+				"at the distinct behaviour they were meant to defend.", names, len(names))
+		}
 	}
 }
 

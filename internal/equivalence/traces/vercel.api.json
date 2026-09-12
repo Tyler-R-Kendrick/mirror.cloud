@@ -2,7 +2,7 @@
   "schema": "trace/1",
   "service": "vercel.api",
   "source": "pack:internal/services/vercel/api",
-  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.\n\nMost steps carry recorded_as, because the pack invented names for operations the document already names: GetUser for GetAuthUser, ListProjects for GetProjects, ListProjectEnv for FilterProjectEnvs, DeleteProjectEnv for RemoveProjectEnv, ListProjectDomains for GetProjectDomains, ListDeployments for GetDeployments. `operation` is what the replay invokes; `recorded_as` is the pack operation the expectation came from.\n\nInput members were renamed the same way, and there is no field to say so, so it is said here. The pack read a project from `id` where the document calls that label `idOrName`; it read an environment variable from `envId` where the document calls it `id`; and it read a deployment from `id` where a get calls it `idOrUrl`. Everything else -- name, framework, key, value, type, target, project -- the pack and the document already agreed on. The recorder that drove the pack and applied both renames went with the pack, because it imported it.\n\nCreateProjectEnv's members arrive splatted rather than under `body`, which is how the REST/JSON codec delivers a structure payload: it unmarshals the body into the input map. That is why a required payload member absent from the input is not a validation failure.\n\nThe KV half of the same pack is recorded separately as vercel.kv, because it was always a different product on a different host.",
   "steps": [
     {
       "operation": "GetAuthUser",
@@ -22,11 +22,51 @@
       },
       "recorded_as": "GetUser",
       "superseded_members": {
-        "email": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user",
-        "id": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user",
-        "name": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user",
-        "user": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user",
-        "username": "the pack answered the four members bare; the document wraps the user object in `user`, and every v2 client reads response.user"
+        "email": "The pack answered the user's members at the top level. GetAuthUserResponse declares exactly one member, `user`, and the identity sits inside it -- so the bundle answers {user: {...}} with the same four values. The document is `declared` and outranks the pack's `authored` shape; a client reading `.user.email` against the pack got nothing.",
+        "id": "The pack answered the user's members at the top level. GetAuthUserResponse declares exactly one member, `user`, and the identity sits inside it -- so the bundle answers {user: {...}} with the same four values. The document is `declared` and outranks the pack's `authored` shape; a client reading `.user.email` against the pack got nothing.",
+        "name": "The pack answered the user's members at the top level. GetAuthUserResponse declares exactly one member, `user`, and the identity sits inside it -- so the bundle answers {user: {...}} with the same four values. The document is `declared` and outranks the pack's `authored` shape; a client reading `.user.email` against the pack got nothing.",
+        "user": "The pack answered the user's members at the top level. GetAuthUserResponse declares exactly one member, `user`, and the identity sits inside it -- so the bundle answers {user: {...}} with the same four values. The document is `declared` and outranks the pack's `authored` shape; a client reading `.user.email` against the pack got nothing.",
+        "username": "The pack answered the user's members at the top level. GetAuthUserResponse declares exactly one member, `user`, and the identity sits inside it -- so the bundle answers {user: {...}} with the same four values. The document is `declared` and outranks the pack's `authored` shape; a client reading `.user.email` against the pack got nothing."
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "framework": "nextjs",
+        "name": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": "nextjs",
+        "id": "prj_7c5891299f64",
+        "name": "web",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "name": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "conflict",
+        "http_status": 409,
+        "fault": "client"
       }
     },
     {
@@ -42,46 +82,6 @@
       "fault": {
         "code": "bad_request",
         "http_status": 400,
-        "fault": "client"
-      }
-    },
-    {
-      "operation": "CreateProject",
-      "input": {
-        "framework": "nextjs",
-        "name": "docs"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "accountId": "000000000000",
-        "createdAt": 0,
-        "framework": "nextjs",
-        "id": "prj_7c5891299f64",
-        "name": "docs",
-        "updatedAt": 0
-      }
-    },
-    {
-      "operation": "CreateProject",
-      "input": {
-        "name": "docs"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "fault": {
-        "code": "conflict",
-        "http_status": 409,
         "fault": "client"
       }
     },
@@ -106,30 +106,9 @@
     {
       "operation": "GetProject",
       "input": {
-        "idOrName": "docs"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "accountId": "000000000000",
-        "createdAt": 0,
-        "framework": "nextjs",
-        "id": "prj_7c5891299f64",
-        "name": "docs",
-        "updatedAt": 0
-      }
-    },
-    {
-      "operation": "GetProject",
-      "input": {
         "idOrName": {
           "$fromPath": "id",
-          "$fromStep": 2
+          "$fromStep": 1
         }
       },
       "identity": {
@@ -144,14 +123,35 @@
         "createdAt": 0,
         "framework": "nextjs",
         "id": "prj_7c5891299f64",
-        "name": "docs",
+        "name": "web",
         "updatedAt": 0
       }
     },
     {
       "operation": "GetProject",
       "input": {
-        "idOrName": "nope"
+        "idOrName": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": "nextjs",
+        "id": "prj_7c5891299f64",
+        "name": "web",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": "prj_nope"
       },
       "identity": {
         "Account": "000000000000",
@@ -167,6 +167,47 @@
       }
     },
     {
+      "operation": "GetProject",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "superseded_members": {
+        "fault.code": "Invoked with no `idOrName` at all, which is a shape no HTTP request has: the label is part of the URI, so a request missing it does not route to this operation. Reached directly, the document marks the label required and the engine's model check answers first, with this service's name for that failure -- 400 bad_request, where the pack's own lookup fell through to 404. The step is kept because it still gates that the engine refuses rather than serving a project keyed on the empty string, which is what the pack's fallthrough was one branch away from.",
+        "fault.status": "Invoked with no `idOrName` at all, which is a shape no HTTP request has: the label is part of the URI, so a request missing it does not route to this operation. Reached directly, the document marks the label required and the engine's model check answers first, with this service's name for that failure -- 400 bad_request, where the pack's own lookup fell through to 404. The step is kept because it still gates that the engine refuses rather than serving a project keyed on the empty string, which is what the pack's fallthrough was one branch away from."
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "name": "api"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": null,
+        "id": "prj_5f59f223d797",
+        "name": "api",
+        "updatedAt": 0
+      }
+    },
+    {
       "operation": "GetProjects",
       "input": {},
       "identity": {
@@ -178,15 +219,23 @@
       },
       "output": {
         "pagination": {
-          "count": 1
+          "count": 2
         },
         "projects": [
           {
             "accountId": "000000000000",
             "createdAt": 0,
+            "framework": null,
+            "id": "prj_5f59f223d797",
+            "name": "api",
+            "updatedAt": 0
+          },
+          {
+            "accountId": "000000000000",
+            "createdAt": 0,
             "framework": "nextjs",
             "id": "prj_7c5891299f64",
-            "name": "docs",
+            "name": "web",
             "updatedAt": 0
           }
         ]
@@ -196,7 +245,130 @@
     {
       "operation": "CreateProjectEnv",
       "input": {
-        "idOrName": "ghost",
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "key": "TOKEN",
+        "value": "s3cret"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "env_9c8e2cb007",
+        "key": "TOKEN",
+        "target": [
+          "production",
+          "preview",
+          "development"
+        ],
+        "type": "encrypted",
+        "value": "s3cret"
+      },
+      "superseded_members": {
+        "created": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "id": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "key": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "target": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "type": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "value": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them."
+      }
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "key": "REGION",
+        "target": [
+          {
+            "$fromPath": "target.0",
+            "$fromStep": 11
+          }
+        ],
+        "type": "plain",
+        "value": "iad1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "env_33f6fc5d83",
+        "key": "REGION",
+        "target": [
+          "production"
+        ],
+        "type": "plain",
+        "value": "iad1"
+      },
+      "superseded_members": {
+        "created": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "id": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "key": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "target": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "type": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them.",
+        "value": "The pack answered the environment variable at the top level. CreateProjectEnvResponse declares {created, failed}, because the real operation takes several variables at once and reports which were made and which were not -- so the bundle answers the variable under `created` with `failed` empty, one variable at a time being what the pack did. Same values, the nesting the document gives them."
+      }
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "value": "novalue"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "key": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": "prj_nope",
         "key": "K"
       },
       "identity": {
@@ -213,97 +385,12 @@
       }
     },
     {
-      "operation": "CreateProjectEnv",
-      "input": {
-        "idOrName": "docs"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "fault": {
-        "code": "bad_request",
-        "http_status": 400,
-        "fault": "client"
-      }
-    },
-    {
-      "operation": "CreateProjectEnv",
-      "input": {
-        "idOrName": "docs",
-        "key": "FOO",
-        "value": "bar"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "id": "env_5f59f223d7",
-        "key": "FOO",
-        "target": [
-          "production",
-          "preview",
-          "development"
-        ],
-        "type": "encrypted",
-        "value": "bar"
-      },
-      "superseded_members": {
-        "created": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "id": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "key": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "target": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "type": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "value": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`"
-      }
-    },
-    {
-      "operation": "CreateProjectEnv",
-      "input": {
-        "idOrName": "docs",
-        "key": "T",
-        "target": [
-          "production"
-        ],
-        "type": "plain",
-        "value": "v"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "id": "env_9c8e2cb007",
-        "key": "T",
-        "target": [
-          "production"
-        ],
-        "type": "plain",
-        "value": "v"
-      },
-      "superseded_members": {
-        "created": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "id": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "key": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "target": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "type": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`",
-        "value": "the pack answered the env record bare; the document declares the response as {created, failed} -- create can partially fail, which is what `failed` is for -- so the record moved under `created`"
-      }
-    },
-    {
       "operation": "FilterProjectEnvs",
       "input": {
-        "idOrName": "docs"
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -315,24 +402,24 @@
       "output": {
         "envs": [
           {
-            "id": "env_5f59f223d7",
-            "key": "FOO",
+            "id": "env_33f6fc5d83",
+            "key": "REGION",
+            "target": [
+              "production"
+            ],
+            "type": "plain",
+            "value": "iad1"
+          },
+          {
+            "id": "env_9c8e2cb007",
+            "key": "TOKEN",
             "target": [
               "production",
               "preview",
               "development"
             ],
             "type": "encrypted",
-            "value": "bar"
-          },
-          {
-            "id": "env_9c8e2cb007",
-            "key": "T",
-            "target": [
-              "production"
-            ],
-            "type": "plain",
-            "value": "v"
+            "value": "s3cret"
           }
         ]
       },
@@ -341,7 +428,7 @@
     {
       "operation": "FilterProjectEnvs",
       "input": {
-        "idOrName": "ghost"
+        "idOrName": "api"
       },
       "identity": {
         "Account": "000000000000",
@@ -358,8 +445,35 @@
     {
       "operation": "RemoveProjectEnv",
       "input": {
-        "id": "env_nope",
-        "idOrName": "docs"
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 11
+        },
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "recorded_as": "DeleteProjectEnv"
+    },
+    {
+      "operation": "RemoveProjectEnv",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 11
+        },
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -376,27 +490,12 @@
       "recorded_as": "DeleteProjectEnv"
     },
     {
-      "operation": "RemoveProjectEnv",
-      "input": {
-        "id": {
-          "$fromPath": "created.id",
-          "$fromStep": 11
-        },
-        "idOrName": "docs"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "recorded_as": "DeleteProjectEnv"
-    },
-    {
       "operation": "FilterProjectEnvs",
       "input": {
-        "idOrName": "docs"
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -408,13 +507,13 @@
       "output": {
         "envs": [
           {
-            "id": "env_9c8e2cb007",
-            "key": "T",
+            "id": "env_33f6fc5d83",
+            "key": "REGION",
             "target": [
               "production"
             ],
             "type": "plain",
-            "value": "v"
+            "value": "iad1"
           }
         ]
       },
@@ -423,8 +522,76 @@
     {
       "operation": "AddProjectDomain",
       "input": {
-        "idOrName": "ghost",
-        "name": "x.test"
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "name": "example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apexName": "example.com",
+        "createdAt": 0,
+        "name": "example.com",
+        "projectId": "prj_7c5891299f64",
+        "updatedAt": 0,
+        "verified": true
+      }
+    },
+    {
+      "operation": "AddProjectDomain",
+      "input": {
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddProjectDomain",
+      "input": {
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "name": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddProjectDomain",
+      "input": {
+        "idOrName": "prj_nope",
+        "name": "x.com"
       },
       "identity": {
         "Account": "000000000000",
@@ -440,49 +607,12 @@
       }
     },
     {
-      "operation": "AddProjectDomain",
-      "input": {
-        "idOrName": "docs"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "fault": {
-        "code": "bad_request",
-        "http_status": 400,
-        "fault": "client"
-      }
-    },
-    {
-      "operation": "AddProjectDomain",
-      "input": {
-        "idOrName": "docs",
-        "name": "docs.example.test"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "apexName": "docs.example.test",
-        "createdAt": 0,
-        "name": "docs.example.test",
-        "projectId": "prj_7c5891299f64",
-        "updatedAt": 0,
-        "verified": true
-      }
-    },
-    {
       "operation": "GetProjectDomains",
       "input": {
-        "idOrName": "docs"
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -494,24 +624,22 @@
       "output": {
         "domains": [
           {
-            "apexName": "docs.example.test",
+            "apexName": "example.com",
             "createdAt": 0,
-            "name": "docs.example.test",
+            "name": "example.com",
             "projectId": "prj_7c5891299f64",
             "updatedAt": 0,
             "verified": true
           }
         ]
       },
-      "recorded_as": "ListProjectDomains",
-      "superseded_members": {
-        "pagination": "the pack answered no pagination here; both arms of the document's response union declare it required, so the bundle answers it and the pack's shape loses"
-      }
+      "recorded_as": "ListProjectDomains"
     },
     {
-      "operation": "GetProjectDomains",
+      "operation": "CreateDeployment",
       "input": {
-        "idOrName": "ghost"
+        "name": "web",
+        "project": "web"
       },
       "identity": {
         "Account": "000000000000",
@@ -521,11 +649,51 @@
         "Project": ""
       },
       "output": {
-        "domains": []
+        "created": 0,
+        "createdAt": 0,
+        "id": "dpl_83d4958a39f75457",
+        "name": "web",
+        "projectId": "prj_7c5891299f64",
+        "readyState": "READY",
+        "state": "READY",
+        "type": "LAMBDAS",
+        "uid": "dpl_83d4958a39f75457",
+        "url": "web-100aa4.vercel.app"
       },
-      "recorded_as": "ListProjectDomains",
       "superseded_members": {
-        "pagination": "the pack answered no pagination here; both arms of the document's response union declare it required, so the bundle answers it and the pack's shape loses"
+        "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "state": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares."
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "created": 0,
+        "createdAt": 0,
+        "id": "dpl_4da7b6a4902c3235",
+        "name": "ghost",
+        "projectId": "prj_3ed10eca83a2",
+        "readyState": "READY",
+        "state": "READY",
+        "type": "LAMBDAS",
+        "uid": "dpl_4da7b6a4902c3235",
+        "url": "ghost-e7175e.vercel.app"
+      },
+      "superseded_members": {
+        "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "state": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares."
       }
     },
     {
@@ -547,8 +715,7 @@
     {
       "operation": "CreateDeployment",
       "input": {
-        "name": "docs",
-        "project": "docs"
+        "name": ""
       },
       "identity": {
         "Account": "000000000000",
@@ -557,164 +724,10 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "created": 0,
-        "createdAt": 0,
-        "id": "dpl_33f6fc5d83b79b8e",
-        "name": "docs",
-        "projectId": "prj_7c5891299f64",
-        "readyState": "READY",
-        "state": "READY",
-        "type": "LAMBDAS",
-        "uid": "dpl_33f6fc5d83b79b8e",
-        "url": "docs-83d495.vercel.app"
-      },
-      "superseded_members": {
-        "created": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
-        "state": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
-        "uid": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape"
-      }
-    },
-    {
-      "operation": "CreateDeployment",
-      "input": {
-        "name": "solo"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "created": 0,
-        "createdAt": 0,
-        "id": "dpl_3ed10eca83a29db2",
-        "name": "solo",
-        "projectId": "prj_100aa4e60b96",
-        "readyState": "READY",
-        "state": "READY",
-        "type": "LAMBDAS",
-        "uid": "dpl_3ed10eca83a29db2",
-        "url": "solo-4da7b6.vercel.app"
-      },
-      "superseded_members": {
-        "created": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
-        "state": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
-        "uid": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape"
-      }
-    },
-    {
-      "operation": "GetProject",
-      "input": {
-        "idOrName": "solo"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "accountId": "000000000000",
-        "createdAt": 0,
-        "framework": null,
-        "id": "prj_100aa4e60b96",
-        "name": "solo",
-        "updatedAt": 0
-      }
-    },
-    {
-      "operation": "CreateDeployment",
-      "input": {
-        "name": "direct",
-        "project": "prj_000000000000"
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "created": 0,
-        "createdAt": 0,
-        "id": "dpl_e7175ec1cd1d60f2",
-        "name": "direct",
-        "projectId": "prj_000000000000",
-        "readyState": "READY",
-        "state": "READY",
-        "type": "LAMBDAS",
-        "uid": "dpl_e7175ec1cd1d60f2",
-        "url": "direct-77df67.vercel.app"
-      },
-      "superseded_members": {
-        "created": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
-        "state": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
-        "uid": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape"
-      }
-    },
-    {
-      "operation": "GetDeployments",
-      "input": {},
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "deployments": [
-          {
-            "created": 0,
-            "createdAt": 0,
-            "id": "dpl_33f6fc5d83b79b8e",
-            "name": "docs",
-            "projectId": "prj_7c5891299f64",
-            "readyState": "READY",
-            "state": "READY",
-            "type": "LAMBDAS",
-            "uid": "dpl_33f6fc5d83b79b8e",
-            "url": "docs-83d495.vercel.app"
-          },
-          {
-            "created": 0,
-            "createdAt": 0,
-            "id": "dpl_3ed10eca83a29db2",
-            "name": "solo",
-            "projectId": "prj_100aa4e60b96",
-            "readyState": "READY",
-            "state": "READY",
-            "type": "LAMBDAS",
-            "uid": "dpl_3ed10eca83a29db2",
-            "url": "solo-4da7b6.vercel.app"
-          },
-          {
-            "created": 0,
-            "createdAt": 0,
-            "id": "dpl_e7175ec1cd1d60f2",
-            "name": "direct",
-            "projectId": "prj_000000000000",
-            "readyState": "READY",
-            "state": "READY",
-            "type": "LAMBDAS",
-            "uid": "dpl_e7175ec1cd1d60f2",
-            "url": "direct-77df67.vercel.app"
-          }
-        ],
-        "pagination": {
-          "count": 3
-        }
-      },
-      "recorded_as": "ListDeployments",
-      "superseded_members": {
-        "deployments[0].id": "the pack answered both id and uid; the document's deployment list item declares uid and not id, so the id survives only on the single-deployment operations",
-        "deployments[1].id": "the pack answered both id and uid; the document's deployment list item declares uid and not id, so the id survives only on the single-deployment operations",
-        "deployments[2].id": "the pack answered both id and uid; the document's deployment list item declares uid and not id, so the id survives only on the single-deployment operations"
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
       }
     },
     {
@@ -722,7 +735,7 @@
       "input": {
         "idOrUrl": {
           "$fromPath": "id",
-          "$fromStep": 24
+          "$fromStep": 26
         }
       },
       "identity": {
@@ -735,19 +748,19 @@
       "output": {
         "created": 0,
         "createdAt": 0,
-        "id": "dpl_33f6fc5d83b79b8e",
-        "name": "docs",
+        "id": "dpl_83d4958a39f75457",
+        "name": "web",
         "projectId": "prj_7c5891299f64",
         "readyState": "READY",
         "state": "READY",
         "type": "LAMBDAS",
-        "uid": "dpl_33f6fc5d83b79b8e",
-        "url": "docs-83d495.vercel.app"
+        "uid": "dpl_83d4958a39f75457",
+        "url": "web-100aa4.vercel.app"
       },
       "superseded_members": {
-        "created": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
-        "state": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape",
-        "uid": "the pack answered this member, and the operation's own response shape does not declare it; `declared` outranks the pack's `authored` shape"
+        "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "state": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares."
       }
     },
     {
@@ -769,10 +782,8 @@
       }
     },
     {
-      "operation": "DeleteDeployment",
-      "input": {
-        "id": "dpl_nope"
-      },
+      "operation": "GetDeployments",
+      "input": {},
       "identity": {
         "Account": "000000000000",
         "Region": "us-east-1",
@@ -780,10 +791,41 @@
         "ARN": "",
         "Project": ""
       },
-      "fault": {
-        "code": "not_found",
-        "http_status": 404,
-        "fault": "client"
+      "output": {
+        "deployments": [
+          {
+            "created": 0,
+            "createdAt": 0,
+            "id": "dpl_4da7b6a4902c3235",
+            "name": "ghost",
+            "projectId": "prj_3ed10eca83a2",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_4da7b6a4902c3235",
+            "url": "ghost-e7175e.vercel.app"
+          },
+          {
+            "created": 0,
+            "createdAt": 0,
+            "id": "dpl_83d4958a39f75457",
+            "name": "web",
+            "projectId": "prj_7c5891299f64",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_83d4958a39f75457",
+            "url": "web-100aa4.vercel.app"
+          }
+        ],
+        "pagination": {
+          "count": 2
+        }
+      },
+      "recorded_as": "ListDeployments",
+      "superseded_members": {
+        "deployments[0].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it.",
+        "deployments[1].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it."
       }
     },
     {
@@ -791,7 +833,7 @@
       "input": {
         "id": {
           "$fromPath": "id",
-          "$fromStep": 24
+          "$fromStep": 26
         }
       },
       "identity": {
@@ -803,15 +845,15 @@
       },
       "output": {
         "state": "DELETED",
-        "uid": "dpl_33f6fc5d83b79b8e"
+        "uid": "dpl_83d4958a39f75457"
       }
     },
     {
-      "operation": "GetDeployment",
+      "operation": "DeleteDeployment",
       "input": {
-        "idOrUrl": {
+        "id": {
           "$fromPath": "id",
-          "$fromStep": 24
+          "$fromStep": 26
         }
       },
       "identity": {
@@ -828,9 +870,46 @@
       }
     },
     {
+      "operation": "GetDeployments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deployments": [
+          {
+            "created": 0,
+            "createdAt": 0,
+            "id": "dpl_4da7b6a4902c3235",
+            "name": "ghost",
+            "projectId": "prj_3ed10eca83a2",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_4da7b6a4902c3235",
+            "url": "ghost-e7175e.vercel.app"
+          }
+        ],
+        "pagination": {
+          "count": 1
+        }
+      },
+      "recorded_as": "ListDeployments",
+      "superseded_members": {
+        "deployments[0].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it."
+      }
+    },
+    {
       "operation": "DeleteProject",
       "input": {
-        "idOrName": "docs"
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -841,9 +920,30 @@
       }
     },
     {
+      "operation": "DeleteProject",
+      "input": {
+        "idOrName": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
       "operation": "GetProject",
       "input": {
-        "idOrName": "docs"
+        "idOrName": "web"
       },
       "identity": {
         "Account": "000000000000",
@@ -861,7 +961,7 @@
     {
       "operation": "CreateProject",
       "input": {
-        "name": "docs"
+        "name": "web"
       },
       "identity": {
         "Account": "000000000000",
@@ -874,28 +974,53 @@
         "accountId": "000000000000",
         "createdAt": 0,
         "framework": null,
-        "id": "prj_9045051ba67c",
-        "name": "docs",
+        "id": "prj_77df676fe2a7",
+        "name": "web",
         "updatedAt": 0
       }
     },
     {
-      "operation": "GetProject",
-      "input": {
-        "idOrName": "docs"
-      },
+      "operation": "GetProjects",
+      "input": {},
       "identity": {
-        "Account": "222222222222",
+        "Account": "000000000000",
         "Region": "us-east-1",
         "AccessKeyID": "",
         "ARN": "",
         "Project": ""
       },
-      "fault": {
-        "code": "not_found",
-        "http_status": 404,
-        "fault": "client"
-      }
+      "output": {
+        "pagination": {
+          "count": 3
+        },
+        "projects": [
+          {
+            "accountId": "000000000000",
+            "createdAt": 0,
+            "framework": null,
+            "id": "prj_3ed10eca83a2",
+            "name": "ghost",
+            "updatedAt": 0
+          },
+          {
+            "accountId": "000000000000",
+            "createdAt": 0,
+            "framework": null,
+            "id": "prj_5f59f223d797",
+            "name": "api",
+            "updatedAt": 0
+          },
+          {
+            "accountId": "000000000000",
+            "createdAt": 0,
+            "framework": null,
+            "id": "prj_77df676fe2a7",
+            "name": "web",
+            "updatedAt": 0
+          }
+        ]
+      },
+      "recorded_as": "ListProjects"
     }
   ]
 }

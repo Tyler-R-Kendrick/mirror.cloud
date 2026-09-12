@@ -123,17 +123,20 @@ func requestFor(svc *model.Service, op *model.Operation) *http.Request {
 		// with a synthetic operation. Hostinger's table went away with its
 		// pack, and the fixed path then matched nothing -- correctly, which is
 		// what made this worth fixing rather than special-casing.
+		//
+		// A URI of "/" counts. It used to be excluded along with the empty
+		// one, on the assumption that it meant "no binding" -- which it does
+		// for the catalog entries built by mk(), and does not for a service
+		// whose whole surface IS the root. Vercel KV is that: POST / with the
+		// command as a JSON array, one operation, and the excluded case sent
+		// it GET /bucket and reported a 501 against a service that routes
+		// perfectly well.
 		if uri := op.HTTP.URI; uri != "" {
 			method := op.HTTP.Method
 			if method == "" {
 				method = http.MethodGet
 			}
-			// A GET / binding is the catalog's way of saying "unrouted", so
-			// the fixed path still stands in for it; a POST / binding is a
-			// real endpoint -- Vercel KV's one operation lives at the root.
-			if uri != "/" || method != http.MethodGet {
-				return httptest.NewRequest(method, fillLabels(uri), nil)
-			}
+			return httptest.NewRequest(method, fillLabels(uri), nil)
 		}
 		return httptest.NewRequest(http.MethodGet, "/bucket", nil)
 	}

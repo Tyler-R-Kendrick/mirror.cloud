@@ -2,12 +2,12 @@
   "schema": "trace/1",
   "service": "vercel.kv",
   "source": "pack:internal/services/vercel/api",
-  "note": "Recorded from the KvCommand half of the hand-written vercel.api pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel KV data plane; a probe run replaces cells with observed evidence and cites the cassette.",
+  "note": "Recorded from the KV half of the hand-written vercel.api pack, in the commit that deleted it. Vercel KV is Upstash Redis on kv.vercel-storage.com, a second product the one registration was carrying, and it is its own service here.\n\nEvery step is `Command`, which the pack called `KvCommand`, and the command array moved from the pack's invented `_redis` input member to `body` -- the operation's payload, which the document declares as a list of strings. That member is why the REST/JSON codec grew a rule for a list-shaped payload: it had one for a scalar body and otherwise unmarshalled into a map, which fails on an array and discarded the error.\n\nThe subset is SET, GET and DEL, which is what the pack implemented and therefore all there is evidence for. INCR is recorded answering 501, because an unimplemented verb answering 501 rather than a Redis error is itself behaviour a client can see.",
   "steps": [
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "SET",
           "k",
           "v"
@@ -28,7 +28,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "GET",
           "k"
         ]
@@ -48,7 +48,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "get",
           "k"
         ]
@@ -68,7 +68,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "GET",
           "nope"
         ]
@@ -88,7 +88,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "DEL",
           "k"
         ]
@@ -108,7 +108,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "DEL",
           "k"
         ]
@@ -128,7 +128,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "GET",
           "k"
         ]
@@ -148,11 +148,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
-          "SET",
-          "n",
-          3
-        ]
+        "body": []
       },
       "identity": {
         "Account": "000000000000",
@@ -161,35 +157,17 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "result": "OK"
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
       },
       "recorded_as": "KvCommand"
     },
     {
       "operation": "Command",
       "input": {
-        "_redis": [
-          "GET",
-          "n"
-        ]
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "output": {
-        "result": "3"
-      },
-      "recorded_as": "KvCommand"
-    },
-    {
-      "operation": "Command",
-      "input": {
-        "_redis": [
+        "body": [
           "SET",
           "k"
         ]
@@ -211,7 +189,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "GET"
         ]
       },
@@ -232,7 +210,7 @@
     {
       "operation": "Command",
       "input": {
-        "_redis": [
+        "body": [
           "DEL"
         ]
       },
@@ -252,66 +230,10 @@
     },
     {
       "operation": "Command",
-      "input": {},
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "fault": {
-        "code": "bad_request",
-        "http_status": 400,
-        "fault": "client"
-      },
-      "recorded_as": "KvCommand"
-    },
-    {
-      "operation": "Command",
       "input": {
-        "_redis": []
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "fault": {
-        "code": "bad_request",
-        "http_status": 400,
-        "fault": "client"
-      },
-      "recorded_as": "KvCommand"
-    },
-    {
-      "operation": "Command",
-      "input": {
-        "_redis": [
-          "PING"
-        ]
-      },
-      "identity": {
-        "Account": "000000000000",
-        "Region": "us-east-1",
-        "AccessKeyID": "",
-        "ARN": "",
-        "Project": ""
-      },
-      "fault": {
-        "code": "MirrorNotImplemented",
-        "http_status": 501,
-        "fault": "client"
-      },
-      "recorded_as": "KvCommand"
-    },
-    {
-      "operation": "Command",
-      "input": {
-        "_redis": [
-          ""
+        "body": [
+          "INCR",
+          "k"
         ]
       },
       "identity": {

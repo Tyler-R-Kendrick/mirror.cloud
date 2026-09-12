@@ -91,6 +91,13 @@ func celFuncs() []cel.EnvOption {
 		// (Turkish dotless i is the standard example), and an identifier that
 		// folds differently by locale is a key that does not round-trip.
 		unaryDyn("lower", str, str),
+		// upper is lower's other half, and exists for the same reason: a
+		// protocol that folds a token one way needs the fold expressible here
+		// or it happens in Go. Upstash upper-cases a Redis verb before
+		// dispatching on it, so ["get","k"] and ["GET","k"] are one command.
+		//
+		// ASCII only, for the reason above.
+		unaryDyn("upper", str, str),
 		// indices answers with 0..n-1 for a list. CEL's `map` binds the
 		// element and never its position, and an AWS batch response is
 		// correlated to its request by position.

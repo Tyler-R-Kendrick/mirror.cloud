@@ -2,7 +2,7 @@ BIN := bin
 GO  := go
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence
+.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
 
 all: build
 
@@ -199,6 +199,21 @@ test-mutation-shard:
 
 test-race:
 	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$')
+
+# Say which of a run's failures were expected, by name, and which were not.
+#
+# It changes nothing about what passes. Every entry in known-red.json is still
+# a failing test and still fails its step -- the ratchet ones exist to stay red
+# until the packs they measure are gone, and suppressing them would trade one
+# kind of blindness for another. What it changes is that the end of a red step
+# says WHICH red, which is the difference between a gate and a colour: a step
+# already red for the ratchet absorbed TestGenerateCatalogIdempotent for two
+# merges and a Firehose flake for one, and neither was hidden cleverly.
+#
+# Reads a saved `go test` run, so a step tees its output and passes the file:
+#   $(GO) test ./... 2>&1 | tee out.txt; $(MAKE) known-red RUN=out.txt
+known-red:
+	@python3 scripts/known-red.py $(RUN)
 
 test-coverage:
 	@packages="$$($(GO) list ./... | grep -v '/internal/mutation$$' | grep -v '/internal/generated/')"; $(GO) test $$packages -covermode=atomic -coverprofile=coverage-unit.out

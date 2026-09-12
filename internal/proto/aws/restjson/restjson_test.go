@@ -12,8 +12,8 @@ import (
 	generatedpp "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/aws/pinpoint"
 	generatedcf "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/cloudflare/api"
 	generateddo "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/digitalocean/v2"
-	generatedvc "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/vercel/api"
-	generatedvckv "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/vercel/kv"
+	generatedvercel "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/vercel/api"
+	generatedkv "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/vercel/kv"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -127,7 +127,9 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 
 		// Vercel's rows are gone with its route table, exactly as
 		// DigitalOcean's were. TestVercelRoutesFromItsGeneratedModel below
-		// routes the same URIs against the model instead.
+		// routes the same URIs against the model instead -- and asserts the
+		// four versions that move, which is what the table could not express
+		// because it stripped the version segment before matching.
 
 		// Cloudflare's rows are gone with its route table, exactly as
 		// Hostinger's were. TestCloudflareRoutesFromItsGeneratedModel below
@@ -250,18 +252,24 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		t.Fatalf("fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 
-	// The array body decode is the codec's, not the pack's: a KV command
-	// arrives as a JSON array and the engine reads it as `_redis`.
-	vercel := &model.Service{ID: "vercel.kv"}
-	decoded, err = codec.Decode(vercel, &model.Operation{Name: "Command"}, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`["GET","k"]`)))
+	// A bare JSON array as the body. The codec used to recognise this service
+	// by name and call the array `_redis`; it is a generic rule now -- the
+	// model declares `body` a LIST bound to the payload -- and the service is
+	// vercel.kv, because the command endpoint was always a second product.
+	kv := generatedkv.Model()
+	kvOp := kv.OperationByName("Command")
+	decoded, err = codec.Decode(kv, kvOp, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`["GET","k"]`)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd, _ := decoded.Input["_redis"].([]any)
+	cmd, _ := decoded.Input["body"].([]any)
 	if len(cmd) != 2 || cmd[0] != "GET" || cmd[1] != "k" {
-		t.Fatalf("redis decode %#v", decoded.Input)
+		t.Fatalf("list payload decode %#v", decoded.Input)
 	}
-	// The fault envelope outlives the pack, for both Vercel services.
+	// The two providers' fault envelopes are different documents' answers, not
+	// one provider's: the REST API wraps a code and a message, and KV answers
+	// the bare string Upstash answers.
+	vercel := &model.Service{ID: "vercel.api"}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(vercel, &model.Operation{Name: "Command"}, w, &spi.Fault{Code: "bad_request", Message: "GET needs key", HTTPStatus: 400, Fault: "client"}, "id"); err != nil {
 		t.Fatal(err)
@@ -275,6 +283,13 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"not_found"`) {
 		t.Fatalf("vercel fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(kv, kvOp, w, &spi.Fault{Code: "bad_request", Message: "GET needs key", HTTPStatus: 400, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 400 || !strings.Contains(w.Body.String(), `{"error":"GET needs key"}`) {
+		t.Fatalf("vercel kv fault %d %s", w.Code, w.Body.String())
 	}
 
 	// The bundle is served from the generated model, so the codec is handed
@@ -495,42 +510,6 @@ func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
 // the last case pins one: GET /v9/projects matched ListProjects in the table
 // and matches nothing in the document, which lists projects at /v10. The
 // table could not say so; the model can.
-func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
-	vc := generatedvc.Model()
-	for _, test := range []struct{ method, path, want string }{
-		{http.MethodGet, "/v2/user", "GetAuthUser"},
-		{http.MethodPost, "/v11/projects", "CreateProject"},
-		{http.MethodGet, "/v10/projects", "GetProjects"},
-		{http.MethodGet, "/v9/projects/app", "GetProject"},
-		{http.MethodDelete, "/v9/projects/app", "DeleteProject"},
-		{http.MethodGet, "/v10/projects/app/env", "FilterProjectEnvs"},
-		{http.MethodPost, "/v10/projects/app/env", "CreateProjectEnv"},
-		{http.MethodDelete, "/v9/projects/app/env/env_1", "RemoveProjectEnv"},
-		{http.MethodGet, "/v9/projects/app/domains", "GetProjectDomains"},
-		{http.MethodPost, "/v10/projects/app/domains", "AddProjectDomain"},
-		{http.MethodPost, "/v13/deployments", "CreateDeployment"},
-		{http.MethodGet, "/v7/deployments", "GetDeployments"},
-		{http.MethodGet, "/v13/deployments/dpl_1", "GetDeployment"},
-		{http.MethodDelete, "/v13/deployments/dpl_1", "DeleteDeployment"},
-	} {
-		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
-		op, err := (Codec{}).Route(vc, req)
-		if err != nil || op == nil || op.Name != test.want {
-			t.Fatalf("%s %s: op %v err %v, want %s", test.method, test.path, op, err, test.want)
-		}
-	}
-	kv := generatedvckv.Model()
-	req := httptest.NewRequest(http.MethodPost, "https://id.kv.vercel-storage.com/", nil)
-	op, err := (Codec{}).Route(kv, req)
-	if err != nil || op == nil || op.Name != "Command" {
-		t.Fatalf("kv command: op %v err %v", op, err)
-	}
-	// A version the document does not serve routes nowhere.
-	req = httptest.NewRequest(http.MethodGet, "http://api.vercel.com/v9/projects", nil)
-	if op, err := (Codec{}).Route(vc, req); err == nil && op != nil && op.Name == "GetProjects" {
-		t.Fatal("/v9/projects routed to GetProjects; the document lists projects at /v10")
-	}
-}
 
 // TestDigitalOceanRoutesFromItsGeneratedModel replaces the eight route-table
 // rows that went with the pack. The URIs are the same; what answers them is
@@ -567,6 +546,68 @@ func TestDigitalOceanRoutesFromItsGeneratedModel(t *testing.T) {
 		op, err := (Codec{}).Route(do, req)
 		if err != nil || op == nil || op.Name != test.want {
 			t.Fatalf("%s %s: op %v err %v, want %s", test.method, test.path, op, err, test.want)
+		}
+	}
+}
+
+// TestVercelRoutesFromItsGeneratedModel replaces the fifteen route-table rows
+// that went with the pack, and pins the one thing routing from the model
+// changes for a client.
+//
+// vercelRoute stripped the leading version segment before matching -- any `v`
+// followed by a digit -- so /v1/projects, /v9/projects and /v99/projects were
+// one route. That is not four transcription slips in the table; it is the
+// table erasing versioning, which made four of its rows name a version the
+// document does not serve. Each operation now binds to the one version its
+// document declares, so the four move and an undeclared version is a 501
+// rather than a silent success.
+//
+// The KV row is gone for a different reason: POST / was Vercel KV, which is a
+// second product on a second host and is its own service now.
+func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
+	vercel := generatedvercel.Model()
+	for _, test := range []struct{ method, path, want string }{
+		{http.MethodGet, "/v2/user", "GetAuthUser"},
+		{http.MethodPost, "/v11/projects", "CreateProject"},
+		{http.MethodGet, "/v10/projects", "GetProjects"},
+		{http.MethodGet, "/v9/projects/app", "GetProject"},
+		{http.MethodDelete, "/v9/projects/app", "DeleteProject"},
+		{http.MethodGet, "/v10/projects/app/env", "FilterProjectEnvs"},
+		{http.MethodPost, "/v10/projects/app/env", "CreateProjectEnv"},
+		{http.MethodDelete, "/v9/projects/app/env/env_1", "RemoveProjectEnv"},
+		{http.MethodGet, "/v9/projects/app/domains", "GetProjectDomains"},
+		{http.MethodPost, "/v10/projects/app/domains", "AddProjectDomain"},
+		{http.MethodPost, "/v13/deployments", "CreateDeployment"},
+		{http.MethodGet, "/v7/deployments", "GetDeployments"},
+		{http.MethodGet, "/v13/deployments/dpl_1", "GetDeployment"},
+		{http.MethodDelete, "/v13/deployments/dpl_1", "DeleteDeployment"},
+		// Beyond what the table knew:
+		{http.MethodPatch, "/v9/projects/app", "UpdateProject"},
+		{http.MethodGet, "/v9/projects/app/domains/ex.test", "GetProjectDomain"},
+		{http.MethodPost, "/v9/projects/app/domains/ex.test/verify", "VerifyProjectDomain"},
+		{http.MethodDelete, "/v9/projects/app/domains/ex.test", "RemoveProjectDomain"},
+		{http.MethodPatch, "/v9/projects/app/env/env_1", "EditProjectEnv"},
+	} {
+		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
+		op, err := (Codec{}).Route(vercel, req)
+		if err != nil || op == nil || op.Name != test.want {
+			t.Fatalf("%s %s: op %v err %v, want %s", test.method, test.path, op, err, test.want)
+		}
+	}
+	// The four the pack answered at a version the document does not serve,
+	// and one arbitrary version to show the stripping is really gone.
+	for _, test := range []struct{ method, path string }{
+		{http.MethodGet, "/v9/projects"},
+		{http.MethodGet, "/v9/projects/app/env"},
+		{http.MethodGet, "/v10/projects/app/domains"},
+		{http.MethodGet, "/v6/deployments"},
+		{http.MethodGet, "/v99/projects"},
+	} {
+		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
+		op, err := (Codec{}).Route(vercel, req)
+		if err == nil && op != nil {
+			t.Errorf("%s %s routed to %s; the pack answered it by stripping the version segment, "+
+				"and the document does not declare it", test.method, test.path, op.Name)
 		}
 	}
 }

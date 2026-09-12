@@ -1,88 +1,131 @@
 schema: bir/1
 service: vercel.kv
 
-# Extracted from the KV half of internal/services/vercel/api, which served
-# Upstash Redis commands as KvCommand inside the REST pack. It is its own
-# service now, described by specs/vercel/kv.json -- the document nobody
-# publishes, written down and marked `authored` rather than left in Go. The
-# edge routes the kv.vercel-storage.com hosts here; everything else Vercel is
-# vercel.api.
+# Extracted from the KV half of internal/services/vercel/api (38 of its 342
+# lines of Go), which served this surface under the id `vercel.api` alongside
+# that provider's REST API. They are two products on two hosts -- this one
+# answers on kv.vercel-storage.com and is Upstash Redis -- so the extraction
+# gives each its own service rather than preserving a registration that
+# carried both.
 #
-# Every cell is `authored`: transcribed from that pack, not established
-# against the real Vercel KV data plane.
+# Every cell is `authored`, and more so than usual: the document this is
+# validated against is authored too, because neither Vercel nor Upstash
+# publishes a machine-readable description of the command endpoint. See the
+# description inside specs/vercel/kv.json, and treat both as the same grade of
+# evidence -- a transcription of the pack, not a reading of the real service.
 provenance: authored
 
+# The engine's model check runs before any rule here. The document marks the
+# body required, so a request with no body at all fails there, and it has to
+# fail with the name this API gives that failure rather than the
+# ValidationException default.
+missing_input_error: BadRequest
+
 resources:
+  # One entry per key. The pack kept these in `vkv` scoped to the account, and
+  # the collection name is kept so a store written by the pack is still
+  # readable by the bundle.
   entry:
     collection: vkv
-    # No id spec: every access names the key explicitly, because the key is
-    # the command's first argument -- a member of the request body the
-    # document binds to a payload member, not a declared input member.
+    id:
+      # Reads `input` rather than the operation's `cmd` binding: a resource is
+      # addressed wherever it is named, and `let` belongs to one operation.
+      #
+      # Total, and twice over. A command too short to carry a key must yield an
+      # empty key rather than an evaluation error, because the `require` rules
+      # below are what answer such a request and they cannot run if addressing
+      # the resource has already failed.
+      derive: >
+        ('body' in input && input.body != null && size(input.body) > 1)
+          ? string(input.body[1]) : ''
+    record:
+      value: >
+        ('body' in input && input.body != null && size(input.body) > 2)
+          ? string(input.body[2]) : ''
 
 errors:
   BadRequest:
     code: bad_request
     http: 400
     fault: client
+  # An unsupported verb is not a malformed request. INCR is a real Redis
+  # command that the real service answers and this emulator does not, which is
+  # what 501 MirrorNotImplemented says -- and the REST/JSON codec puts the
+  # x-mirror-not-implemented header on any fault carrying that code, so a
+  # client can tell "mirror has not got to this yet" from "you sent nonsense"
+  # without reading the message. The pack answered exactly this, through
+  # spi.NotImplemented; declaring it here keeps the distinction rather than
+  # flattening every unknown command into a 400.
   NotImplemented:
-    # The pack answered an unknown command the way it answered an unknown
-    # operation, so the code is the engine's own rather than a Redis error.
     code: MirrorNotImplemented
     http: 501
     fault: client
 
 operations:
   Command:
-    reads:
-      # The key is the command's first argument. Total: a command short on
-      # arguments must yield an empty key rather than an evaluation error --
-      # the require rules below are what rejects it, in the pack's order.
-      entry: { resource: entry, key: "('_redis' in input && input._redis != null && size(input._redis) > 1) ? string(input._redis[1]) : ''" }
+    # `body` is the whole request body, which is a bare JSON array: the codec
+    # binds it because the model declares the member a list bound to the
+    # payload. That rule is generic -- Cloudflare's bulk key operations are
+    # shaped the same way -- and it replaced a branch of the REST/JSON codec
+    # that recognised this provider by name and called the array `_redis`.
     let:
-      # `_redis` is the codec's name for a body that is a JSON array: POST /
-      # with ["SET", "k", "v"], which is the Upstash REST convention the
-      # authored document transcribes. Command names are case-insensitive,
-      # as the pack had them.
-      cmd: "('_redis' in input && input._redis != null && size(input._redis) > 0) ? lower(string(input._redis[0])) : ''"
-      argc: "('_redis' in input && input._redis != null) ? size(input._redis) : 0"
+      # Upstash upper-cases the command, so ["get","k"] and ["GET","k"] are one
+      # command. The pack did the same.
+      cmd: "('body' in input && input.body != null) ? input.body : []"
+      verb: "size(cmd) > 0 ? upper(string(cmd[0])) : ''"
+    reads:
+      # Read unconditionally rather than per command: GET answers the value,
+      # and DEL answers how many keys it removed, which is whether this read
+      # found one. A read costs the same as asking whether to read.
+      entry: { resource: entry }
     require:
-      # `cond` is a precondition: the error fires when it does NOT hold. The
-      # order is the pack's: an empty or absent command is 400, a known
-      # command short on arguments is 400, and anything else is 501 --
-      # a SET with too few arguments is a bad request, not an unknown
-      # command.
-      # Presence, not non-emptiness: an empty string is a command the pack
-      # did not implement (501), not a missing one, so the 400 is for the
-      # empty or absent array alone.
-      - { cond: "argc > 0", error: BadRequest, message: "redis command required" }
-      - { cond: "cmd != 'set' || argc >= 3", error: BadRequest, message: "SET needs key and value" }
-      - { cond: "cmd != 'get' || argc >= 2", error: BadRequest, message: "GET needs key" }
-      - { cond: "cmd != 'del' || argc >= 2", error: BadRequest, message: "DEL needs key" }
-      - { cond: "cmd in ['set', 'get', 'del']", error: NotImplemented, message: "command not implemented" }
+      # `cond` is a precondition: the error fires when it does NOT hold.
+      - { cond: "size(cmd) > 0", error: BadRequest, message: "redis command required" }
+      - { cond: "verb != 'SET' || size(cmd) > 2", error: BadRequest, message: "SET needs key and value" }
+      - { cond: "verb != 'GET' || size(cmd) > 1", error: BadRequest, message: "GET needs key" }
+      - { cond: "verb != 'DEL' || size(cmd) > 1", error: BadRequest, message: "DEL needs key" }
+      # Last, so a malformed SET still reads as malformed rather than as an
+      # unimplemented command.
+      - { cond: "verb == 'SET' || verb == 'GET' || verb == 'DEL'", error: NotImplemented, message: "vercel.kv Command is not implemented for this verb at the requested fidelity; required tier: emulate" }
     effects:
       - put:
           resource: entry
-          key: "string(input._redis[1])"
-          when: "cmd == 'set'"
-          record:
-            # The pack stored the value stringified, so SET n 3 reads back
-            # as "3".
-            value: "string(input._redis[2])"
+          when: "verb == 'SET'"
       - delete:
           resource: entry
-          key: "string(input._redis[1])"
-          when: "cmd == 'del'"
+          when: "verb == 'DEL'"
+          # A DEL of a key that is not there is not an error; it answers 0.
+          missing: ignore
     output:
-      # The reply under `result`, typed by command as the document says: a
-      # status string for SET, the stored value or null for GET, the count of
-      # keys removed for DEL -- 1 only if the key was there.
-      result: "cmd == 'set' ? 'OK' : (cmd == 'get' ? (entry_found ? entry.value : null) : (entry_found ? 1 : 0))"
+      # One member, three shapes, because one endpoint answers three commands:
+      # OK for a write, the stored value or null for a read that missed, and
+      # the number of keys removed for a delete. The response shape declares
+      # `result` as a union of a string and an integer, which is what lets a
+      # single member carry all three.
+      #
+      # dyn() on each arm because CEL requires a conditional's branches to
+      # agree on a type and these deliberately do not: the response shape
+      # declares `result` a union of a string and an integer, and a GET that
+      # missed answers null.
+      result: >
+        verb == 'SET' ? dyn('OK')
+          : (verb == 'GET' ? (entry_found ? dyn(string(entry.value)) : dyn(null))
+          : (entry_found ? dyn(1) : dyn(0)))
 
 quirks:
   - operation: Command
     note: >
-      Three commands of the whole Redis set, which is what the pack served
-      and what the authored document declares: SET, GET and DEL. Anything
-      else -- PING, INCR, EXPIRE -- is 501, not a Redis error, because the
-      pack answered it through its own not-implemented path and no evidence
-      says what the real data plane would answer.
+      Three commands of Redis, not Redis. SET, GET and DEL are what the pack
+      implemented and therefore all this has evidence for; every other verb
+      answers 501 `MirrorNotImplemented`, with the x-mirror-not-implemented
+      header the codec puts on that code. The real service answers the whole
+      command set, so a client doing anything else -- INCR, EXPIRE, a pipeline
+      -- gets a refusal here where production would work, and the refusal says
+      which kind it is: the emulator has not got to this verb, not that the
+      caller sent something malformed. That is a narrower surface honestly
+      labelled rather than a guess at semantics nobody recorded.
+
+      SET takes no options. EX, PX, NX and XX are accepted by the real API and
+      ignored here, because the pack ignored them: a caller setting a TTL gets
+      a key that never expires, which is the kind of silence a probe run is
+      meant to turn into evidence.

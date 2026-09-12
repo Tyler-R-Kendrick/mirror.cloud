@@ -1406,32 +1406,44 @@ The document is 24 MB and 3,462 operations. `specs/mirror.set` narrows it to the
 
 ## Vercel baseline
 
-Authority: official Vercel REST (`api.vercel.com` `/vN/...`) plus Upstash Redis JSON-array KV on `*.kv.vercel-storage.com`. There is no LocalStack Vercel inventory; rows are operation → Mirror evidence, not a live `api.vercel.com` differential.
+Authority: the official Vercel REST document, vendored at `specs/vercel/api.json` and pinned in `specs/mirror.lock`, plus an AUTHORED document for Vercel KV at `specs/vercel/kv.json`. Rows are operation -> Mirror evidence, not a live `api.vercel.com` differential.
+
+The pack's own characterization golden went with it; two equivalence recordings replace it -- 41 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer.
+
+**One pack became two services.** `internal/services/vercel/api` served two products under one registration: the REST API on `api.vercel.com`, and Vercel KV on `kv.vercel-storage.com`, which is Upstash Redis behind a Vercel name. They are `vercel.api` and `vercel.kv` now, and the demux tells them apart by host -- KV first, because its host contains the other's name.
+
+KV's document is authored rather than vendored, and is the first such entry in the tree. Neither Vercel nor Upstash publishes a machine-readable description of the command endpoint: Upstash publishes OpenAPI for QStash, for Workflow and for the management plane at `api.upstash.com/v2`, and none of them describes it; Vercel's own document has blob-store management and no KV commands. Both describe the data plane in prose. So `specs/urls.tsv` records the source as `authored`, the lock still pins its sha256, and every cell it feeds carries `authored` provenance -- see the description inside the document itself.
+
+**Versioning is restored, and it is a visible break.** `vercelRoute` stripped the leading version segment before matching -- any `v` followed by a digit -- so `/v1/projects`, `/v9/projects` and `/v99/projects` were one route. That is not four transcription slips in the table; it is the table erasing versioning, which made four of its rows name a version the document does not serve. Listing projects is `/v10` where the pack answered `/v9`; project env is `/v10` where it answered `/v9`; project domains is `/v9` where it answered `/v10`; listing deployments is `/v7` where it answered `/v6`. A client written against the emulator's laxity breaks, which is the same shape as Cloudflare's percent-encoded slash: the document is `declared` and the pack's tolerance was `authored`.
+
+Routing is the model's now, which widens the surface rather than narrowing it. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it to the six prefixes the pack served, giving 26 operations over 12,363 shapes -- the largest model in the tree. The bundle serves 14 of those 26; the other 12 answer 501 as unimplemented operations rather than as unknown paths, which the deleted table could not express.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the emulated Vercel slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Vercel operations routed to emulation | 15 / 15 |
+| Requested test forms wired for the emulated Vercel slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the two fault envelopes and the three generic rules this extraction needed) |
+| Vercel REST operations served by the bundle | 14 / 26 (the twelve the pack never served answer 501, as they did under it) |
+| Vercel KV commands served | 3 / the Redis command set (SET, GET, DEL; every other verb answers 501 `MirrorNotImplemented`) |
 | Live Vercel probe | none (not required) |
 
 | Vercel operation | Mirror evidence |
 |---|---|
-| `GET /v2/user` (`GetUser`) | `TestBootedServerVercelAPI` returns username `test`; `TestVercelLifecycleCharacterization` golden; restJson1 `TestRESTJSONServiceRoutes` |
-| `POST /v11/projects` (`CreateProject`) | Atomic create + empty-name 400 + duplicate 409; BDD create; chaos `TestVercelConcurrentDuplicateProjectNames`; mutants `vercel-accept-empty-project-name` and `vercel-accept-duplicate-project-name` |
-| `GET /v9/projects` (`ListProjects`) | `TestProjectDeploymentEnvAndKV` lists one project; characterization golden `list`; BDD lists after create |
-| `GET /v9/projects/{id\|name}` (`GetProject`) | Booted create/get round-trips the same `id` on `api.vercel.com`; get-by-name in atomic; missing project HTTP 404 `{error.code: not_found}` with no `x-amzn-errortype` |
-| `DELETE /v9/projects/{id\|name}` (`DeleteProject`) | `TestDeleteProjectByNameRemovesLookup` drops the `name:` index so the name can be reused; `TestDeleteMissingProjectAndEnv` and booted DELETE of missing id on `api.vercel.com` are HTTP 404 `{error.code: not_found}` with no `x-amzn-errortype`; characterization `del_miss_p`; mutant `vercel-delete-missing-project-as-success` |
-| `POST /v10/projects/{id}/env` (`CreateProjectEnv`) | Atomic env create; empty key 400; characterization `env`/`env_empty`; mutant `vercel-accept-empty-env-key` |
-| `GET /v9/projects/{id}/env` (`ListProjectEnv`) | Atomic list after create; characterization `envs` |
-| `DELETE /v9/projects/{id}/env/{envId}` (`DeleteProjectEnv`) | `TestProjectDeploymentEnvAndKV` deletes the env then lists zero; `TestDeleteMissingProjectAndEnv` of missing envId is `not_found`; characterization `del_miss_e`; mutant `vercel-delete-missing-env-as-success` |
-| `POST /v10/projects/{id}/domains` (`AddProjectDomain`) | Atomic domain create; empty name 400; characterization `domain` |
-| `GET /v10/projects/{id}/domains` (`ListProjectDomains`) | Characterization golden `domains` |
-| `POST /v13/deployments` (`CreateDeployment`) | Booted + BDD `readyState` `READY`; empty name 400; characterization `deploy` |
-| `GET /v6/deployments` (`ListDeployments`) | Characterization golden `deploys` |
-| `GET /v13/deployments/{id}` (`GetDeployment`) | `TestProjectDeploymentEnvAndKV` fetches the created deployment id; characterization `get_deploy` |
-| `DELETE /v13/deployments/{id}` (`DeleteDeployment`) | Atomic delete of the created deployment; missing id 404; mutant `vercel-delete-missing-deployment` |
-| `POST /` on `*.kv.vercel-storage.com` (`KvCommand` SET/GET/DEL) | Booted SET/GET/DEL on `id.kv.vercel-storage.com`; BDD SET/GET/DEL; atomic numeric SET/GET and DEL; fuzz `FuzzKvCommand`; chaos concurrent SET/GET; mutants `vercel-route-root-as-unknown` and `vercel-skip-kv-del` |
-| Unknown REST path | restJson1 routes to `Unknown` (not KV); `FuzzVercelRoute` |
+| `GET /v2/user` (`GetAuthUser`) | Recording replays the fixed identity; booted `TestBootedServerVercelAPI` reads `user.username`. The four members sit under `user`, which is the one member the response shape declares and which the pack answered at the top level -- superseded in the recording with that reason |
+| `POST /v11/projects` (`CreateProject`) | Recording replays create, a duplicate 409/`conflict`, an absent name 400/`bad_request` and an explicitly empty one, and re-creating a name a delete freed; BDD create; chaos `TestVercelConcurrentDuplicateProjectNames` -- sixteen concurrent creates, one winner |
+| `GET /v10/projects` (`GetProjects`) | Recording replays the two-entry listing and the listing after a delete; BDD lists after create at `/v10`, and asserts `/v99/projects` is NOT served; unpaginated, recorded as a quirk |
+| `GET /v9/projects/{idOrName}` (`GetProject`) | Recording replays get by id, get by NAME through the name index, an unknown id 404/`not_found`, and a read after delete; booted create/get round-trips the same id. A request carrying no label at all answers 400 where the pack's lookup fell through to 404 -- the document marks the label required, superseded in the recording with that reason |
+| `DELETE /v9/projects/{idOrName}` (`DeleteProject`) | Recording replays delete, a double delete 404/`not_found`, and that the name index goes with the project so the name is free again; booted and BDD DELETE of a missing project are 404 `{error.code: not_found}` without `x-amzn-errortype` |
+| `POST /v10/projects/{idOrName}/env` (`CreateProjectEnv`) | Recording replays create with and without an explicit `target` and `type`, an absent key and an empty one 400/`bad_request`, and an unknown project 404. Answers `{created, failed}`, which the document declares and the pack answered flat -- superseded with that reason. Its members arrive splatted, which is why the engine does not fail a required payload member that is absent under its own name |
+| `GET /v10/projects/{idOrName}/env` (`FilterProjectEnvs`) | Recording replays the two-entry listing, an empty one for a project addressed by NAME, and the listing after a delete; no `pagination`, because the pack answered it only from the two unscoped listings |
+| `DELETE /v9/projects/{idOrName}/env/{id}` (`RemoveProjectEnv`) | Recording replays delete by reference to the created variable, a double delete 404/`not_found`, and the listing that shrinks |
+| `POST /v10/projects/{idOrName}/domains` (`AddProjectDomain`) | Recording replays create, an absent name and an empty one 400/`bad_request`, and an unknown project 404. A domain is `verified: true` immediately, which is the pack's behaviour and not the real API's -- recorded as a quirk |
+| `GET /v9/projects/{idOrName}/domains` (`GetProjectDomains`) | Recording replays the listing; `projectId` is projected back onto each row, because a parent-scoped record cannot see its parent |
+| `POST /v13/deployments` (`CreateDeployment`) | Recording replays create against an existing project, create against one that does not exist -- which creates the project too, the pack's behaviour and not the real API's, recorded as a quirk -- and an absent or empty name 400. Booted and BDD assert `readyState: READY`. `uid`, `state` and `created` are superseded: the document declares them on a LISTED deployment and not on this response |
+| `GET /v7/deployments` (`GetDeployments`) | Recording replays the two-entry listing and the listing after a delete. `deployments[i].id` is superseded -- the listed item shape declares `uid` and the pack answered both |
+| `GET /v13/deployments/{idOrUrl}` (`GetDeployment`) | Recording replays get by reference and an unknown id 404/`not_found` |
+| `DELETE /v13/deployments/{id}` (`DeleteDeployment`) | Recording replays delete answering `{uid, state: DELETED}` and a double delete 404/`not_found` |
+| `POST /` on `*.kv.vercel-storage.com` (`Command`) | Its own recording: SET, GET, a GET that misses answering `{result: null}` rather than a fault, `get` folding to `GET`, DEL answering 1 then 0, and four malformed commands answering 400. Chaos `TestVercelConcurrentKVSetGet`. An unsupported verb answers 501 `MirrorNotImplemented` with the `x-mirror-not-implemented` header, which distinguishes "mirror has not got to this" from "you sent nonsense" |
+| Vercel faults vs AWS faults | Two envelopes, because they are two documents' answers. The REST API answers `{error: {code, message}}` and KV the bare `{error: "..."}` Upstash answers; neither carries `x-amzn-errortype`. Mutant `vercel-kv-encodes-the-rest-fault` |
+| Routing | `FuzzVercelRoute` drives `httpuri.Match` over the generated model, seeded with both the document's versions and the four the pack answered. `TestVercelRoutesFromItsGeneratedModel` asserts all fourteen, five operations beyond what the table knew, and that each of the four moved versions is now unserved. `vercel-kv-host-falls-through` covers the host split |
 
 ## SNS baseline
 

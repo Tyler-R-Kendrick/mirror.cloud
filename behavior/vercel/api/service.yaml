@@ -1,78 +1,81 @@
 schema: bir/1
 service: vercel.api
 
-# Extracted from internal/services/vercel/api (342 lines of Go), which served
-# fifteen operations under names of its own -- GetUser, ListProjects,
-# DeleteProjectEnv -- bound to the URIs Vercel's document gives GetAuthUser,
-# GetProjects and RemoveProjectEnv. The recording carries both names, so the
-# renames are visible rather than silently applied. The KV half of that pack
-# moved with it: it is vercel.kv now, described by the authored document
-# specs/vercel/kv.json, because no vendor publishes one.
+# Extracted from the REST half of internal/services/vercel/api (304 of its 342
+# lines of Go). The other 38 served Vercel KV, which is a different product on
+# a different host and is now behavior/vercel/kv.
 #
 # Every cell is `authored`: transcribed from that pack, not established against
 # the real Vercel API. Where the document contradicts the pack the document
 # wins, and each of those is stated per operation and in `quirks`.
 provenance: authored
 
-# The pack answered a missing name or key with `bad_request` / 400 before
-# looking at anything else, and the document marks name, idOrName, id and
-# idOrUrl required across these operations. The engine's model check runs
-# before any rule here, so the name of that failure has to be Vercel's rather
-# than the ValidationException default.
+# The pack answered a missing name with `bad_request` / 400. The document marks
+# the path labels required and the engine's model check runs before any rule
+# here, so that failure has to carry Vercel's name for it rather than the
+# ValidationException default.
 missing_input_error: BadRequest
 
 resources:
   project:
     collection: vproj
+    # The identifier carries a prj_ prefix, so the record member rather than
+    # the raw generated id is the store key.
+    key: id
     id:
-      # A create draws the id as a `generate` effect and writes with an
-      # explicit key, so CreateDeployment can auto-create a project and still
-      # know the id it drew. Reads address the record by idOrName -- an id or,
-      # through the project_name index, a name.
+      # No `generate` here. Both operations that create a project draw the id
+      # as an effect and pass it as the key, because two writes need the same
+      # one; a resource generate beside that would draw a SECOND id per create
+      # and throw it away. That is invisible in an answer and not invisible in
+      # a recording: the two sides read the same seeded Rand, so a wasted draw
+      # moves every later identifier, and the store sorts a listing by key --
+      # so a discarded draw reorders a list.
+      # The document calls the label `idOrName` because the real API accepts
+      # either, and the pack's lookup did too -- it tried the key, then the
+      # name index, then the id the index pointed at. Addressing by id is what
+      # this resolves; addressing by name goes through project_name below.
       input_members: [idOrName]
     record:
-      id: id
+      id: "'prj_' + id"
       name: "string(input.name)"
-      accountId: "string(identity.account)"
-      # The pack stored Unix milliseconds. `now` is a timestamp, so the
-      # expression rebuilds epoch millis from it; double because the recording
-      # round-trips through JSON, where every number is one.
-      createdAt: "double(int(now) * 1000 + now.getMilliseconds())"
-      updatedAt: "double(int(now) * 1000 + now.getMilliseconds())"
-      framework: "'framework' in input ? input.framework : null"
+      accountId: "identity.account"
+      createdAt: "int(now) * 1000"
+      updatedAt: "int(now) * 1000"
+      framework: "('framework' in input && input.framework != null) ? input.framework : null"
 
-  # Project names are unique per account, and get-by-name is a lookup by the
-  # name: a record keyed by the generated id cannot answer one, so the index
-  # is its own resource, exactly the pack's `name:<name>` rows made visible.
+  # Project names are unique, and the pack enforced that with a second row in
+  # the SAME collection keyed `name:<name>`, skipped when listing. It is a
+  # separate collection here for the reasons Cloudflare's title index is: a
+  # listing should not have to know which of its rows are really an index, and
+  # a project actually named `name:something` was indistinguishable from one.
   project_name:
     collection: vprojname
     id:
-      # Total, and three-way: a get or delete names the project idOrName, a
-      # deployment names it `project` (falling back to the deployment's own
-      # name, which is what the pack did), and a project create names it
-      # `name`. A request carrying none must yield an empty key rather than
-      # an evaluation error.
+      # Total: evaluated wherever the resource is addressed, so a request
+      # carrying neither member must yield an empty key rather than an
+      # evaluation error. `idOrName` first, because a get and a delete name the
+      # project that way and a create names it `name`.
       derive: >
         ('idOrName' in input && input.idOrName != null) ? string(input.idOrName)
-        : (('project' in input && input.project != null && string(input.project) != '') ? string(input.project)
-        : (('name' in input && input.name != null) ? string(input.name) : ''))
+          : (('name' in input && input.name != null) ? string(input.name) : '')
 
   env:
-    # Parent-scoped: each project's variables are their own collection, named
-    # for the project, exactly the pack's `venv` keys `<pid>/<env_id>`.
+    # Parent-scoped: each project's variables are their own collection, as the
+    # pack's `<project id>/<env id>` key prefix was.
     collection: "venv:{project.id}"
     parent: project
+    key: id
     id:
-      generate: { kind: hex, bytes: 10, prefix: "env_" }
+      generate: { kind: hex, bytes: 10 }
       input_members: [id]
     record:
-      id: id
+      id: "'env_' + id"
       key: "string(input.key)"
       value: "('value' in input && input.value != null) ? string(input.value) : ''"
-      type: "('type' in input && input.type != null && string(input.type) != '') ? string(input.type) : 'encrypted'"
-      # Absent, not empty, means all three targets: the pack defaulted a nil
-      # target to every environment and stored an empty list as one.
-      target: "('target' in input && input.target != null) ? input.target : ['production', 'preview', 'development']"
+      type: "('type' in input && input.type != null) ? string(input.type) : 'encrypted'"
+      target: >
+        ('target' in input && input.target != null) ? input.target
+          : ['production', 'preview', 'development']
 
   domain:
     collection: "vdom:{project.id}"
@@ -80,28 +83,51 @@ resources:
     id:
       derive: "('name' in input && input.name != null) ? string(input.name) : ''"
     record:
-      name: "string(input.name)"
-      apexName: "string(input.name)"
+      name: id
+      apexName: id
+      # No projectId here: a parent-scoped resource's record cannot see its
+      # parent, which binds for the collection template and not in this scope.
+      # The two operations that answer a domain project it from their own read
+      # of the project, which is the same value by construction -- a domain
+      # lives in its project's collection.
+      #
+      # The pack answered a domain verified the moment it was added. A real one
+      # is not, and a client that waits for verification waits forever against
+      # the real API and not at all against this -- recorded as a quirk.
       verified: "true"
-      createdAt: "double(int(now) * 1000 + now.getMilliseconds())"
-      updatedAt: "double(int(now) * 1000 + now.getMilliseconds())"
+      createdAt: "int(now) * 1000"
+      updatedAt: "int(now) * 1000"
 
   deployment:
     collection: vdeploy
+    # Keyed on uid, which is what the record carries; see the note below.
+    key: uid
     id:
-      # GetDeployment's path calls it idOrUrl, DeleteDeployment's calls it id.
+      # No `generate`, for the reason the project has none, and with a second:
+      # a deployment costs TWO draws, the id and the six random bytes in its
+      # hostname, and they have to be drawn in that order. A resource generate
+      # cannot express the second at all.
+      # A get names it `idOrUrl` and a delete names it `id`; the first member
+      # the request carries is the one that addresses it.
       input_members: [idOrUrl, id]
     record:
-      # The pack answered both `id` and `uid` with the same value. The list
-      # item shape declares `uid` and not `id`, the single-deployment shapes
-      # the reverse, so the record keeps `uid` and the single-deployment
-      # operations project it under `id`.
+      # `uid` is the key itself, spelled `id` because that is what a record
+      # calls its own key. The one writer passes the key explicitly -- it has
+      # to, since the value is drawn by an effect and a record sees `input` and
+      # `id` but never `fx` -- and this carries it into the record, which is
+      # where the validator requires the key member to be set.
+      #
+      # `uid` and not `id`: the listed deployment's item shape declares uid,
+      # where the single-deployment response declares id. The pack stored both
+      # with the same value, which an unprojected list cannot do -- the record
+      # IS the item, so every member it carries has to be one the item shape
+      # declares. The two operations that answer `id` project it from here.
       uid: id
       name: "string(input.name)"
       readyState: "'READY'"
       state: "'READY'"
-      createdAt: "double(int(now) * 1000 + now.getMilliseconds())"
-      created: "double(int(now) * 1000 + now.getMilliseconds())"
+      createdAt: "int(now) * 1000"
+      created: "int(now) * 1000"
       type: "'LAMBDAS'"
 
 errors:
@@ -109,40 +135,49 @@ errors:
     code: bad_request
     http: 400
     fault: client
-  Conflict:
-    code: conflict
-    http: 409
-    fault: client
   NotFound:
     code: not_found
     http: 404
     fault: client
+  Conflict:
+    code: conflict
+    http: 409
+    fault: client
 
 operations:
   GetAuthUser:
+    # No stored state at all: the pack answered a fixed identity derived from
+    # the caller's account, and so does this.
     output:
-      # The pack answered the four members bare. The document wraps them in
-      # `user` -- declared outranks authored, and every v2 client reads
-      # response.user -- so the bundle projects the wrapper. See the quirk.
-      user: "{'id': 'usr_' + string(identity.account), 'email': 'test@mirror.cloud', 'name': 'Mirror', 'username': 'test'}"
+      user: >
+        {
+          'id': 'usr_' + identity.account,
+          'email': 'test@mirror.cloud',
+          'name': 'Mirror',
+          'username': 'test'
+        }
 
   CreateProject:
     reads:
       taken: { resource: project_name }
     require:
       # `cond` is a precondition: the error fires when it does NOT hold. The
-      # engine's model check asks whether the required `name` is present, not
-      # whether it is non-empty, so an explicitly empty name reaches here,
-      # which is where the pack rejected it.
-      - { cond: "string(input.name) != ''", error: BadRequest, message: "Project name is required" }
+      # document marks `name` required, so a request omitting it entirely fails
+      # the engine's model check before reaching here -- same code and status,
+      # different wording, which is the quirk below. This rule is what answers
+      # a name that is present and empty, which the model check permits.
+      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Project name is required" }
       - { cond: "!taken_found", error: Conflict, message: "A project with the same name already exists." }
     effects:
-      # The id is drawn by hand rather than by the resource, because the same
-      # draw has to be written to three places: the record's key, its `id`
-      # member and the name index. The index goes first so the create is last
-      # and `rec` is the project the output projects -- every write effect
-      # rebinds it.
+      # The id is drawn first, because both writes need the same one and
+      # neither can borrow it from the other: inside a write effect's record,
+      # `id` is THAT resource's own key -- for the index that is the project's
+      # name, so `'prj_' + id` there indexes `prj_web`, a key no project has.
+      # A generate effect binds under `fx` and rebinds neither `rec` nor `id`.
       - generate: { bind: pid, kind: hex, bytes: 12 }
+      # The index is written first, and the order still matters: every write
+      # effect rebinds `rec`, and the output projects the project from it.
+      # Reversing these answers with the index row.
       - put:
           resource: project_name
           record:
@@ -150,10 +185,12 @@ operations:
       - create:
           resource: project
           key: "'prj_' + fx.pid"
+          record:
+            id: "'prj_' + fx.pid"
     output:
-      id: "string(rec.id)"
-      name: "string(rec.name)"
-      accountId: "string(rec.accountId)"
+      id: rec.id
+      name: rec.name
+      accountId: rec.accountId
       createdAt: rec.createdAt
       updatedAt: rec.updatedAt
       framework: rec.framework
@@ -161,173 +198,275 @@ operations:
   GetProjects:
     list: { resource: project, member: projects }
     output:
-      # Unpaginated -- every project is on page one, which is what the pack
-      # answered. The document declares pagination required on both arms.
-      pagination: "{'count': double(size(items))}"
+      # The pack answered `pagination.count` and nothing else. The listing is
+      # unpaginated -- see the quirk -- so every project is on the one page.
+      pagination: "{'count': size(items)}"
 
   GetProject:
     reads:
-      named: { resource: project_name }
-      # idOrName: the name index resolves a name to its id, and an id
-      # addresses the record directly because the index lookup then misses.
-      proj: { resource: project, key: "named_found ? string(named.project) : ('idOrName' in input && input.idOrName != null ? string(input.idOrName) : '')" }
+      # Two reads, not three, and in this order because reads resolve in
+      # dependency order and `by_name` sorts first: the index answers whether
+      # `idOrName` is a name, and the project read prefers what it found over
+      # the raw input. The pack did the same lookup in Go -- key, then name
+      # index, then the id the index pointed at.
+      #
+      # One read of `project` rather than one per spelling, because a
+      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
+      # resolves against whichever read of `project` ran last, so two of them
+      # make a child's collection depend on alphabetical order. That is how the
+      # environment and domain operations failed to see a project addressed by
+      # name at all.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
     output:
-      id: "string(proj.id)"
-      name: "string(proj.name)"
-      accountId: "string(proj.accountId)"
+      id: proj.id
+      name: proj.name
+      accountId: proj.accountId
       createdAt: proj.createdAt
       updatedAt: proj.updatedAt
       framework: proj.framework
 
   DeleteProject:
     reads:
-      named: { resource: project_name }
-      proj: { resource: project, key: "named_found ? string(named.project) : ('idOrName' in input && input.idOrName != null ? string(input.idOrName) : '')" }
+      # Two reads, not three, and in this order because reads resolve in
+      # dependency order and `by_name` sorts first: the index answers whether
+      # `idOrName` is a name, and the project read prefers what it found over
+      # the raw input. The pack did the same lookup in Go -- key, then name
+      # index, then the id the index pointed at.
+      #
+      # One read of `project` rather than one per spelling, because a
+      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
+      # resolves against whichever read of `project` ran last, so two of them
+      # make a child's collection depend on alphabetical order. That is how the
+      # environment and domain operations failed to see a project addressed by
+      # name at all.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
     effects:
-      - delete: { resource: project, key: "string(proj.id)" }
-      # Keyed off the stored record, not the request: addressed by id, the
-      # request never carried the name, and freeing it is what lets the name
-      # be created again.
-      - delete: { resource: project_name, key: "string(proj.name)" }
-    # No output: the document answers 204, where the pack answered 200 with
-    # an empty object. The recording compares the body, which is empty both
-    # ways.
+      - delete:
+          resource: project
+          key: "string(proj.id)"
+      # Keyed off the stored record, not the request: a delete may address the
+      # project by id and never carry its name.
+      - delete:
+          resource: project_name
+          key: "string(proj.name)"
+          missing: ignore
+
+  FilterProjectEnvs:
+    reads:
+      # Two reads, not three, and in this order because reads resolve in
+      # dependency order and `by_name` sorts first: the index answers whether
+      # `idOrName` is a name, and the project read prefers what it found over
+      # the raw input. The pack did the same lookup in Go -- key, then name
+      # index, then the id the index pointed at.
+      #
+      # One read of `project` rather than one per spelling, because a
+      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
+      # resolves against whichever read of `project` ran last, so two of them
+      # make a child's collection depend on alphabetical order. That is how the
+      # environment and domain operations failed to see a project addressed by
+      # name at all.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    # No `pagination`. The document declares the member, but the pack answered
+    # it only from the two unscoped listings -- projects and deployments -- and
+    # not from the two scoped ones. A member the document permits and the pack
+    # never sent is not evidence of anything, so it is not sent.
+    list: { resource: env, member: envs }
 
   CreateProjectEnv:
     reads:
-      named: { resource: project_name }
-      proj: { resource: project, key: "named_found ? string(named.project) : ('idOrName' in input && input.idOrName != null ? string(input.idOrName) : '')" }
+      # Two reads, not three, and in this order because reads resolve in
+      # dependency order and `by_name` sorts first: the index answers whether
+      # `idOrName` is a name, and the project read prefers what it found over
+      # the raw input. The pack did the same lookup in Go -- key, then name
+      # index, then the id the index pointed at.
+      #
+      # One read of `project` rather than one per spelling, because a
+      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
+      # resolves against whichever read of `project` ran last, so two of them
+      # make a child's collection depend on alphabetical order. That is how the
+      # environment and domain operations failed to see a project addressed by
+      # name at all.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
     require:
-      # Precedence is the pack's: an unknown project fails before the key is
-      # looked at, so a create against a missing project is 404 and never 400.
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      # The document marks the whole body required and nothing inside it --
-      # the key lives in a oneOf arm the receiver describes as a free-form
-      # document -- so the key check is a rule, as it was in the pack.
       - { cond: "'key' in input && input.key != null && string(input.key) != ''", error: BadRequest, message: "Env key is required" }
     effects:
       - create: { resource: env }
     output:
-      # The envelope is the document's: it declares {created, failed}, where
-      # the pack answered the record bare. See the quirk.
+      # The document declares {created, failed} for this operation where the
+      # pack answered the variable itself -- see the quirk.
       created: rec
       failed: "[]"
 
-  FilterProjectEnvs:
-    reads:
-      named: { resource: project_name }
-      proj: { resource: project, key: "named_found ? string(named.project) : ('idOrName' in input && input.idOrName != null ? string(input.idOrName) : '')" }
-    list: { resource: env, member: envs }
-    # No require: the pack listed the prefix a missing project would have
-    # owned and answered an empty list, not a fault. The reads still run, so
-    # a project addressed by name scopes the collection by its real id.
-    #
-    # No pagination, although one arm of the document's union declares it:
-    # the other arm does not, and the pack answered none, so there is no
-    # single declared shape to follow.
-
   RemoveProjectEnv:
     reads:
-      named: { resource: project_name }
-      proj: { resource: project, key: "named_found ? string(named.project) : ('idOrName' in input && input.idOrName != null ? string(input.idOrName) : '')" }
-      env: { resource: env }
+      # Two reads, not three, and in this order because reads resolve in
+      # dependency order and `by_name` sorts first: the index answers whether
+      # `idOrName` is a name, and the project read prefers what it found over
+      # the raw input. The pack did the same lookup in Go -- key, then name
+      # index, then the id the index pointed at.
+      #
+      # One read of `project` rather than one per spelling, because a
+      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
+      # resolves against whichever read of `project` ran last, so two of them
+      # make a child's collection depend on alphabetical order. That is how the
+      # environment and domain operations failed to see a project addressed by
+      # name at all.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      variable: { resource: env }
     require:
-      - { cond: env_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: variable_found, error: NotFound, message: "The requested resource was not found." }
     effects:
       - delete: { resource: env }
 
+  GetProjectDomains:
+    reads:
+      # Two reads, not three, and in this order because reads resolve in
+      # dependency order and `by_name` sorts first: the index answers whether
+      # `idOrName` is a name, and the project read prefers what it found over
+      # the raw input. The pack did the same lookup in Go -- key, then name
+      # index, then the id the index pointed at.
+      #
+      # One read of `project` rather than one per spelling, because a
+      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
+      # resolves against whichever read of `project` ran last, so two of them
+      # make a child's collection depend on alphabetical order. That is how the
+      # environment and domain operations failed to see a project addressed by
+      # name at all.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    # No `pagination`, for the reason FilterProjectEnvs has none.
+    list: { resource: domain, member: domains }
+    output:
+      # The listed record carries no projectId -- see the resource -- so the
+      # projection puts it back, which an unprojected list could not do.
+      domains: "items.map(i, merge(i, {'projectId': proj.id}))"
+
   AddProjectDomain:
     reads:
-      named: { resource: project_name }
-      proj: { resource: project, key: "named_found ? string(named.project) : ('idOrName' in input && input.idOrName != null ? string(input.idOrName) : '')" }
+      # Two reads, not three, and in this order because reads resolve in
+      # dependency order and `by_name` sorts first: the index answers whether
+      # `idOrName` is a name, and the project read prefers what it found over
+      # the raw input. The pack did the same lookup in Go -- key, then name
+      # index, then the id the index pointed at.
+      #
+      # One read of `project` rather than one per spelling, because a
+      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
+      # resolves against whichever read of `project` ran last, so two of them
+      # make a child's collection depend on alphabetical order. That is how the
+      # environment and domain operations failed to see a project addressed by
+      # name at all.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
       - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Domain name is required" }
     effects:
-      - create:
-          resource: domain
-          record:
-            projectId: "string(proj.id)"
+      - put: { resource: domain }
     output:
-      name: "string(rec.name)"
-      apexName: "string(rec.apexName)"
-      projectId: "string(rec.projectId)"
+      name: rec.name
+      apexName: rec.apexName
+      projectId: proj.id
       verified: rec.verified
       createdAt: rec.createdAt
       updatedAt: rec.updatedAt
 
-  GetProjectDomains:
-    reads:
-      named: { resource: project_name }
-      proj: { resource: project, key: "named_found ? string(named.project) : ('idOrName' in input && input.idOrName != null ? string(input.idOrName) : '')" }
-    list: { resource: domain, member: domains }
-    output:
-      # The pack answered no pagination here; both arms of the document's
-      # union declare it required, so the document wins. The recording
-      # supersedes the member on each step.
-      pagination: "{'count': double(size(items))}"
-
   CreateDeployment:
     reads:
-      named: { resource: project_name }
-    let:
-      # The pack: `project` names the project, falling back to the
-      # deployment's own name; a value already shaped like an id is used
-      # verbatim, with no lookup and no existence check.
-      wanted: "('project' in input && input.project != null && string(input.project) != '') ? string(input.project) : string(input.name)"
-      autocreate: "!wanted.startsWith('prj_') && !named_found"
+      # A deployment names its project by name, and creates it when there is
+      # none. The index answers whether there is.
+      by_name: { resource: project_name, key: "('project' in input && input.project != null) ? string(input.project) : (('name' in input && input.name != null) ? string(input.name) : '')" }
     require:
-      - { cond: "string(input.name) != ''", error: BadRequest, message: "Deployment name is required" }
+      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Deployment name is required" }
     effects:
-      # A deployment for a project nobody created creates the project, name
-      # index and all -- the pack recursed into its own createProject. The id
-      # draw comes first and only when it is needed: the pack drew nothing
-      # for a project that already existed, and the recording's identifiers
-      # only line up if the draws do.
-      - generate: { bind: pid, kind: hex, bytes: 12, when: autocreate }
+      # Three draws, in this order, because that is the order the pack drew
+      # them and the recording gates every identifier after them: the project
+      # id ONLY when there is no project, then the deployment id, then the six
+      # bytes in the hostname. A generate effect binds under `fx` and rebinds
+      # neither `rec` nor `id`, where every write effect rebinds both -- and a
+      # generate carrying `when` does not draw at all when the guard is false,
+      # which is what keeps a deployment into an existing project costing two
+      # draws rather than three.
+      - generate: { bind: newproj, kind: hex, bytes: 12, when: "!by_name_found" }
+      - generate: { bind: depid, kind: hex, bytes: 16 }
+      - generate: { bind: host, kind: hex, bytes: 6 }
       - put:
           resource: project_name
-          when: autocreate
+          when: "!by_name_found"
           record:
-            project: "'prj_' + fx.pid"
+            project: "'prj_' + fx.newproj"
       - create:
           resource: project
-          key: "'prj_' + fx.pid"
-          when: autocreate
+          key: "'prj_' + fx.newproj"
+          when: "!by_name_found"
           record:
-            name: wanted
-      # Drawn in the pack's order -- the deployment id, then the host label
-      # -- and written with an explicit key, so the id draw and the host draw
-      # stay in that order for the recording.
-      - generate: { bind: did, kind: hex, bytes: 16 }
-      - generate: { bind: host, kind: hex, bytes: 6 }
+            id: "'prj_' + fx.newproj"
+            name: "('project' in input && input.project != null) ? string(input.project) : string(input.name)"
       - create:
           resource: deployment
-          key: "'dpl_' + fx.did"
+          key: "'dpl_' + fx.depid"
           record:
-            projectId: "wanted.startsWith('prj_') ? wanted : (named_found ? string(named.project) : 'prj_' + fx.pid)"
+            # Six random bytes in the hostname, which is what makes two
+            # deployments of one project addressable apart.
             url: "string(input.name) + '-' + fx.host + '.vercel.app'"
+            projectId: "by_name_found ? string(by_name.project) : 'prj_' + fx.newproj"
     output:
-      # The single-deployment arms declare id, name, url, projectId,
-      # readyState, type and createdAt -- not uid, state or created, which
-      # the pack also answered. The document wins; the recording supersedes
-      # those three members on each step.
-      id: "string(rec.uid)"
-      name: "string(rec.name)"
-      url: "string(rec.url)"
-      projectId: "string(rec.projectId)"
-      readyState: "string(rec.readyState)"
-      type: "string(rec.type)"
+      # `id` from `uid`, because the record is also the listed item and the
+      # item shape declares uid where this response declares id.
+      id: rec.uid
+      name: rec.name
+      url: rec.url
+      projectId: rec.projectId
+      readyState: rec.readyState
+      type: rec.type
       createdAt: rec.createdAt
 
   GetDeployments:
     list: { resource: deployment, member: deployments }
     output:
-      pagination: "{'count': double(size(items))}"
+      pagination: "{'count': size(items)}"
 
   GetDeployment:
     reads:
@@ -335,12 +474,12 @@ operations:
     require:
       - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
     output:
-      id: "string(dep.uid)"
-      name: "string(dep.name)"
-      url: "string(dep.url)"
-      projectId: "string(dep.projectId)"
-      readyState: "string(dep.readyState)"
-      type: "string(dep.type)"
+      id: dep.uid
+      name: dep.name
+      url: dep.url
+      projectId: dep.projectId
+      readyState: dep.readyState
+      type: dep.type
       createdAt: dep.createdAt
 
   DeleteDeployment:
@@ -351,60 +490,56 @@ operations:
     effects:
       - delete: { resource: deployment }
     output:
-      uid: "string(dep.uid)"
+      uid: dep.uid
       state: "'DELETED'"
 
 quirks:
-  - operation: GetAuthUser
-    note: >
-      The answer is wrapped in `user`, where the pack answered the four
-      members bare. The document declares the wrapper on both arms of the
-      response union, a v2 client reads response.user, and `declared`
-      outranks the pack's `authored` shape.
-  - operation: CreateProjectEnv
-    note: >
-      The answer is {created, failed}, where the pack answered the env record
-      bare. The document declares the envelope -- create can partially fail,
-      which is what `failed` is for -- so the record moved under `created`
-      and `failed` is answered empty.
-  - operation: CreateDeployment
-    note: >
-      The answer drops `uid`, `state` and `created`: the pack answered all
-      three, and neither arm of the document's response union declares them
-      (the list item shape does, which is why they survive on GetDeployments).
-      `readyState` is READY the moment the deployment exists, as the pack had
-      it; nothing here models BUILDING.
-  - operation: GetDeployment
-    note: >
-      Same dropped members as CreateDeployment, and for the same reason: the
-      document's single-deployment arms do not declare them.
-  - operation: DeleteProject
-    note: >
-      204, not 200: the document says a project delete has no body, and the
-      code is the model's now that the pack's is gone. A missing project is
-      still 404, checked before anything is deleted, as the pack had it.
-  - operation: CreateProjectEnv
-    note: >
-      201, not 200: the document says an env create is created. Same shape of
-      change as DeleteProject's 204.
   - operation: GetProjects
     note: >
-      Routing is the document's now, and the pack served four routes under
-      versions the document does not: listing projects was /v9/projects and
-      is /v10, env was /v9 and is /v10, domains was /v10 and is /v9, and
-      listing deployments was /v6 and is /v7. The old versions match no
-      operation -- a request to one is a 501 or an unknown path, where the
-      pack answered it. The document is the evidence for the new versions;
-      the pack's were the versions its author happened to type.
-  - operation: GetDeployments
+      Versioning is restored, and this is the visible break. The pack's route
+      table stripped the leading version segment before matching -- any `v`
+      followed by a digit -- so /v1/projects, /v9/projects and /v99/projects
+      all listed projects. Routing is the model's now, and each operation binds
+      to the one version its document declares.
+
+      Four of the pack's routes therefore move. Listing projects is /v10 where
+      the pack answered /v9; project env is /v10 where it answered /v9; project
+      domains is /v9 where it answered /v10; listing deployments is /v7 where
+      it answered /v6. A client written against the emulator's laxity breaks,
+      which is the same shape as Cloudflare's percent-encoded slash: the
+      document is `declared` and the pack's tolerance was `authored`.
+
+      The listing is also unpaginated. `limit`, `from` and the rest are
+      accepted and read by nothing, so every project is on the one page and
+      `pagination.count` is the total rather than the page size.
+  - operation: DeleteProject
     note: >
-      Unpaginated, whatever `limit`, `since` or `state` the request asked
-      for: the pack ignored those parameters and so does this. The listing
-      is in store order.
-  - operation: GetProjectDomains
+      Answers 204 with no body, where the pack answered 200 and an empty
+      object. The document declares 204 for it, and a status that forbids a
+      body gets none -- the rule is the protocol's, not this provider's.
+  - operation: CreateProjectEnv
     note: >
-      The answer carries `pagination` where the pack answered none: both arms
-      of the document's response union declare it required, and a client
-      paging on it gets a real count of a single unpaginated page. See the
-      FilterProjectEnvs comment for the opposite call -- there the document's
-      own arms disagree, so the pack's shape stayed.
+      Answers {created, failed} where the pack answered the variable itself at
+      the top level. The document declares those two members and the operation
+      is bulk-shaped: `created` carries what was made, `failed` what was not.
+      One variable at a time is what the pack did and what this transcribes, so
+      `failed` is always empty.
+
+      Answers 201, where the pack answered 200.
+  - operation: AddProjectDomain
+    note: >
+      A domain is answered verified: true the moment it is added. A real one is
+      not -- verification is a DNS round trip -- so a client that polls until
+      verified never polls here and waits forever against the real API. The
+      pack did this and the document declares `verified` without saying what it
+      starts as, so it is transcribed rather than corrected, and named here.
+  - operation: CreateDeployment
+    note: >
+      Creating a deployment for a project that does not exist creates the
+      project too, which is the pack's behaviour and not the real API's: Vercel
+      answers 404 for an unknown project. It is kept because the recording
+      gates it and because a client that relies on it would otherwise break
+      silently, but it is the clearest candidate for a probe run to overturn.
+
+      The deployment is READY immediately. There is no build, so a client that
+      waits for readyState to advance is already done.

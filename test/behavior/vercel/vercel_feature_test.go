@@ -9,22 +9,31 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
+	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
+	// Links the bundles' registration in. Without it the registry has no pack
+	// for either Vercel service and the edge answers from the mock tier --
+	// which looks like a working service returning synthesized data, not like
+	// a failure.
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
+// TestVercelProjectDeployKVBehavior drives both served services over their
+// real HTTP surfaces. It boots the runtime rather than constructing an edge
+// directly, because a bundle is served from the generated model and `edge.New`
+// falls back to the hand-authored catalog when none is supplied.
 func TestVercelProjectDeployKVBehavior(t *testing.T) {
-	deps := spitest.Deps(t)
 	cfg := config.Default()
+	// Two services, because the pack's one registration carried two products
+	// on two hosts: the REST API on api.vercel.com and the KV data plane on
+	// kv.vercel-storage.com, which is Upstash Redis.
 	cfg.Services = []string{"vercel.api", "vercel.kv"}
-	reg, err := registry.New(deps, cfg.Services, nil)
+	cfg.Seed = "vercel-bdd"
+	rt, err := rtpkg.Boot(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	call := func(method, path, body, host string) (int, map[string]any, http.Header) {
 		t.Helper()
@@ -58,9 +67,10 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		if code != 200 || created["name"] != "bdd-app" {
 			t.Fatalf("create %d %#v", code, created)
 		}
+		// /v10, which is the version the document declares. The pack answered
+		// /v9 because its route table stripped the version segment before
+		// matching, so every version of the path listed projects.
 		code, listed, _ := call(http.MethodGet, "/v10/projects", "", "")
-		// The document lists projects at /v10; the pack served /v9, a version
-		// the document does not.
 		if code != 200 || len(listed["projects"].([]any)) != 1 {
 			t.Fatalf("list %d %#v", code, listed)
 		}
@@ -81,6 +91,15 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("deploy %d %#v", code, dpl)
 		}
 	})
+	t.Run("Given an undeclared version When a path is fetched Then it is not served", func(t *testing.T) {
+		// The pack's version-stripping made this indistinguishable from
+		// /v10/projects. Routing from the model tells them apart, which breaks
+		// a client that relied on the laxity -- the same shape as Cloudflare's
+		// percent-encoded slash, and recorded as a quirk for the same reason.
+		if code, body, _ := call(http.MethodGet, "/v99/projects", "", ""); code == 200 {
+			t.Fatalf("an undeclared version answered %d %#v", code, body)
+		}
+	})
 	t.Run("Given KV SET When GET Then the value is returned", func(t *testing.T) {
 		code, set, _ := call(http.MethodPost, "/", `["SET","k","v"]`, "kv.vercel-storage.com")
 		if code != 200 || set["result"] != "OK" {
@@ -97,6 +116,20 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		code, gone, _ := call(http.MethodPost, "/", `["GET","k"]`, "kv.vercel-storage.com")
 		if code != 200 || gone["result"] != nil {
 			t.Fatalf("get after del %d %#v", code, gone)
+		}
+	})
+	t.Run("Given an unimplemented verb When sent Then 501 says so", func(t *testing.T) {
+		// Three commands of Redis, not Redis. INCR is a real command the real
+		// service answers, so the refusal says the emulator has not got to it
+		// -- not that the caller sent something malformed.
+		code, body, hdr := call(http.MethodPost, "/", `["INCR","k"]`, "kv.vercel-storage.com")
+		if code != 501 || hdr.Get("x-mirror-not-implemented") == "" {
+			t.Fatalf("incr %d %#v %#v", code, hdr, body)
+		}
+		// KV's errors are a plain string, which is what its document declares
+		// and what Upstash answers -- not the REST API's {error:{code,message}}.
+		if _, isString := body["error"].(string); !isString {
+			t.Fatalf("kv error envelope %#v", body)
 		}
 	})
 	t.Run("Given a missing project When fetched Then not_found is returned", func(t *testing.T) {

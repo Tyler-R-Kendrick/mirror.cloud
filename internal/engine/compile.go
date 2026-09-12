@@ -282,6 +282,13 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.String(asciiLower(fmt.Sprint(s.Value())))
 			}))),
 
+		// upper is the same fold the other way. See the declaration in
+		// internal/bir/celenv.go.
+		cel.Function("upper", cel.Overload("upper_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(s ref.Val) ref.Val {
+				return types.String(asciiUpper(fmt.Sprint(s.Value())))
+			}))),
+
 		// arn builds "arn:<partition>:<rest joined by :>" from parts. String
 		// assembly, not provider logic: the engine stays free of service names.
 		cel.Function("arn", cel.Overload("arn_2", []*cel.Type{str, dyn}, str,
@@ -450,6 +457,16 @@ func asInt(v ref.Val) int64 {
 
 // asciiLower folds A-Z and leaves every other byte alone, so a value that is
 // already a key stays the same length and the same bytes outside that range.
+func asciiUpper(s string) string {
+	out := []byte(s)
+	for i, c := range out {
+		if c >= 'a' && c <= 'z' {
+			out[i] = c - ('a' - 'A')
+		}
+	}
+	return string(out)
+}
+
 func asciiLower(s string) string {
 	out := []byte(s)
 	for i, c := range out {

@@ -260,6 +260,33 @@ func (s *Service) ScalarBody(shapeID string) bool {
 // protocol permits and no receiver should produce -- still decodes the same
 // way on every run rather than following map order.
 func (s *Service) PayloadMember(op *Operation) (string, bool) {
+	return s.payloadMember(op, s.ScalarBody)
+}
+
+// ListPayloadMember names the input member an operation binds to the whole
+// request body when that member is a list: the body is a bare JSON array.
+//
+// It is the third answer to "what is this payload", after a structure (serialize
+// it) and an opaque body (these bytes). A protocol that sends `["SET","k","v"]`
+// or Cloudflare's bulk key list has no object to splat into the input, and
+// unmarshalling an array into a map fails -- silently, where the error is
+// dropped -- leaving the operation with nothing.
+//
+// Four members across the generated models are shaped this way, and three of
+// them are Cloudflare's: the bulk key-value write and both bulk deletes.
+func (s *Service) ListPayloadMember(op *Operation) (string, bool) {
+	return s.payloadMember(op, func(id string) bool {
+		return s.Shapes[id].Kind == KindList
+	})
+}
+
+// payloadMember names the input member bound to the whole body whose shape the
+// predicate accepts.
+//
+// Ties are broken by name so a model with two payload members -- which no
+// protocol permits and no receiver should produce -- still decodes the same
+// way on every run rather than following map order.
+func (s *Service) payloadMember(op *Operation, want func(string) bool) (string, bool) {
 	if s == nil || op == nil {
 		return "", false
 	}
@@ -269,7 +296,7 @@ func (s *Service) PayloadMember(op *Operation) (string, bool) {
 	}
 	best := ""
 	for name, m := range shape.Members {
-		if m.Binding.Location != "payload" || !s.ScalarBody(m.Shape) {
+		if m.Binding.Location != "payload" || !want(m.Shape) {
 			continue
 		}
 		if best == "" || name < best {

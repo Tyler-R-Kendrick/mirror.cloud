@@ -1,0 +1,27 @@
+{
+  "comment": [
+    "Every test failure this repository currently expects, and why.",
+    "",
+    "It exists because a step that is already red absorbs the next failure without trace.",
+    "TestGenerateCatalogIdempotent was red on main for two merges, inside a step red for the",
+    "ratchet; TestFirehoseSnowflakeSecretAndPersistentBuffer failed once inside the same step",
+    "and was invisible for the same reason. Neither was hidden cleverly. Both were hidden by a",
+    "colour that already meant `failing`.",
+    "",
+    "scripts/known-red.sh reads a `go test` run and says which of its failures are on this list",
+    "and which are not. It does NOT make anything pass: every entry here is still a red test and",
+    "still fails its step. What changes is that the first line of the output says whether the red",
+    "is the one expected or a new one -- which is the whole difference between a gate and a colour.",
+    "",
+    "An entry may be added only with a reason a reader can check, and removed the moment the test",
+    "goes green. TestKnownRedIsDeclaredHonestly enforces both halves: every entry must name a test",
+    "that exists in the tree and carry a non-empty reason."
+  ],
+  "expected": [
+    {
+      "test": "TestEveryServedServiceIsDescribedByASpecification",
+      "package": "./internal/specboot",
+      "why": "Three AWS services are served with no generated model: their Smithy models are ones the receiver cannot yet ingest (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb). azure.blobs, azure.queue, azure.table and railway.graphql left this list on this branch, each with an authored document and a generated model. The count may only fall."
+    }
+  ]
+}

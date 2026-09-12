@@ -463,11 +463,20 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		in[name] = string(body)
 		body = nil
 	}
-	if len(body) > 0 && body[0] == '[' {
-		var cmd []any
-		_ = json.Unmarshal(body, &cmd)
-		in["_redis"] = cmd
-	} else if len(body) > 0 {
+	// The third answer to "what is this payload": a bare JSON array, which has
+	// no object to splat into the input. Unmarshalling one into a map fails, so
+	// without this the operation is handed nothing and the error is dropped --
+	// which is what `_redis` was for. That name was the provider's for a rule
+	// the model states: Cloudflare's bulk write and both bulk deletes are
+	// shaped this way too, and they decode to an empty input today.
+	if name, ok := svc.ListPayloadMember(op); ok {
+		var list []any
+		if err := json.Unmarshal(body, &list); err == nil {
+			in[name] = list
+		}
+		body = nil
+	}
+	if len(body) > 0 {
 		_ = json.Unmarshal(body, &in)
 	}
 	if svc.ID == "azure.table" {
@@ -694,12 +703,24 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"odata.error": map[string]any{"code": f.Code, "message": map[string]any{"lang": "en-US", "value": f.Message}}})
 	}
-	if svc.ID == "vercel.api" || svc.ID == "vercel.kv" {
+	if svc.ID == "vercel.api" {
 		// Vercel's fault envelope outlives the pack, as Hetzner's and
 		// DigitalOcean's did: it is the shape the vendor's own API answers
-		// faults in, and the KV data plane was served under the same branch.
+		// faults in.
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
+	}
+	// Vercel KV is a second product on a second host, and its errors are not
+	// shaped like the REST API's. The deleted pack served both through one
+	// registration and therefore through the envelope above, wrapping an
+	// Upstash error in Vercel's {error: {code, message}}. The KV document
+	// declares `error` as a plain string, which is what Upstash answers, so
+	// this follows the document rather than the pack -- a fault envelope is
+	// not compared by the equivalence recording, which gates the code, status
+	// and class, so the change is stated as a quirk instead of hidden by one.
+	if svc.ID == "vercel.kv" {
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"error": f.Message})
 	}
 	if svc.ID == "cloudflare.api" {
 		var code any = f.Code

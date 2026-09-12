@@ -7412,6 +7412,18 @@ func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Invalid uploadId marker" || fault.Fields["ArgumentName"] != "upload-id-marker" || fault.Fields["ArgumentValue"] != firstSame {
 		t.Fatalf("mismatched upload marker = %#v", fault)
 	}
+	// A negative limit is refused. The code has always done this and nothing
+	// asserted it, which is why s3-list-uploads-accept-zero-limit could widen
+	// the bound and survive: the range check had no test below zero at all.
+	// This is the existing behaviour written down, not a new decision -- what
+	// max-uploads=0 should mean is a separate question with no evidence yet,
+	// and zero still folds to the default.
+	for _, negative := range []any{-1, "-1"} {
+		_, err := invoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "MaxUploads": negative}, nil)
+		if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+			t.Fatalf("negative max uploads %#v = %#v", negative, fault)
+		}
+	}
 	for _, key := range []string{"folder/a/one", "folder/a/two", "folder/file1", "folder/file2"} {
 		create(key, "STANDARD")
 	}

@@ -4,7 +4,6 @@ package graphql
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -195,26 +194,4 @@ func mustJSON(v any) []byte {
 func str(v any) string {
 	s, _ := v.(string)
 	return s
-}
-
-// FieldName maps a GraphQL query document to one core field. Longest names first.
-func FieldName(q string) string {
-	switch {
-	case strings.Contains(q, "projectCreate"):
-		return "projectCreate"
-	case strings.Contains(q, "projectDelete"):
-		return "projectDelete"
-	case strings.Contains(q, "serviceCreate"):
-		return "serviceCreate"
-	case strings.Contains(q, "serviceDelete"):
-		return "serviceDelete"
-	case strings.Contains(q, "projects"):
-		return "projects"
-	case strings.Contains(q, "project"):
-		return "project"
-	case strings.Contains(q, "service"):
-		return "service"
-	default:
-		return "Unknown"
-	}
 }

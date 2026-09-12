@@ -1,0 +1,62 @@
+package restjson
+
+import "testing"
+
+// Railway's every request is one POST to one path, so the operation has to come
+// out of the query document. That made routing a substring switch over the seven
+// field names, longest first -- and a substring switch is wrong on documents
+// nobody would call adversarial.
+//
+// The schema declares both `project` and `projectId` on Service, so selecting a
+// service's project is the natural query and the old switch answered it with
+// the project handler. These cases are the ones that were broken, plus the ones
+// that were not, so a future rewrite has to keep both halves.
+func TestGraphQLRootField(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		doc  string
+		want string
+	}{
+		// The three the substring switch got wrong.
+		{"scalar naming the parent", `query { service(id:"s") { id projectId } }`, "service"},
+		{"selecting the parent object", `query { service(id:"s") { id project { name } } }`, "service"},
+		{"variable naming the parent", `query GetService($projectId: String!) { service(id: $projectId) { id } }`, "service"},
+
+		// The ones it got right, which must stay right.
+		{"shorthand", `{ projects { edges { node { id } } } }`, "projects"},
+		{"mutation", `mutation { serviceCreate(input:{projectId:"p", name:"api"}) { id } }`, "serviceCreate"},
+		{"delete", `mutation Kill { projectDelete(id:"p") }`, "projectDelete"},
+		{"parent selecting children", `query { project(id:"p") { services { edges { node { id } } } } }`, "project"},
+
+		// Places a field name can hide that are not the root field at all.
+		{"comment", "# projectCreate is not what this asks for\nquery { projects { edges { node { id } } } }", "projects"},
+		{"string literal", `mutation { serviceCreate(input:{name:"projectDelete"}) { id } }`, "serviceCreate"},
+		{"paren in a default", `query Q($n: String = "a)b") { projects { edges { node { id } } } }`, "projects"},
+		{"operation name", `query projectCreateAudit { projects { edges { node { id } } } }`, "projects"},
+
+		// Shapes the scanner has to understand to answer at all.
+		{"alias", `query { mine: projects { edges { node { id } } } }`, "projects"},
+		{"leading fragment", "fragment F on Project { id }\nquery { project(id:\"p\") { ...F } }", "project"},
+		{"directive", `query Q($d: Boolean!) @skip(if: $d) { projects { edges { node { id } } } }`, "projects"},
+
+		// Nothing to route to.
+		{"empty", ``, "Unknown"},
+		{"not a document", `{{{`, "Unknown"},
+		{"unterminated", `query {`, "Unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := gqlRootField(tc.doc); got != tc.want {
+				t.Fatalf("gqlRootField(%q) = %q, want %q", tc.doc, got, tc.want)
+			}
+		})
+	}
+}
+
+// An operation the service does not serve now routes to its own name rather
+// than to "Unknown", so the not-implemented fault and the x-mirror-not-
+// implemented header say which field was asked for.
+func TestGraphQLRootFieldNamesAnUnservedField(t *testing.T) {
+	if got := gqlRootField(`mutation { deploymentCreate(input:{}) { id } }`); got != "deploymentCreate" {
+		t.Fatalf("unserved field = %q, want deploymentCreate", got)
+	}
+}

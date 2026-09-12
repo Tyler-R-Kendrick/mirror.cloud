@@ -1,0 +1,640 @@
+{
+  "schema": "trace/1",
+  "service": "digitalocean.v2",
+  "source": "pack:internal/services/digitalocean/v2",
+  "steps": [
+    {
+      "operation": "DropletsCreate",
+      "input": {
+        "image": "ubuntu-24-04-x64",
+        "name": "web-1",
+        "region": "nyc3",
+        "size": "s-1vcpu-1gb"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "droplet",
+        "droplet": {
+          "id": 526682617,
+          "image": "ubuntu-24-04-x64",
+          "name": "web-1",
+          "region": "nyc3",
+          "size": "s-1vcpu-1gb",
+          "status": "active"
+        }
+      },
+      "recorded_as": "CreateDroplet",
+      "superseded_members": {
+        "_wrap": "The pack answered a bare body and let a branch of the REST/JSON codec read `_wrap` to decide what to wrap it in. The document declares the wrapper as the operation's own response shape, so the bundle projects `droplet`/`domain` directly and the codec branch is gone. Identical bytes on the wire; this member never reached one.",
+        "droplet.id": "A droplet id is an integer and the unifier substitutes token-shaped strings only, so the two sides cannot agree on a value each issued itself. The id is still gated structurally: every later step addresses this droplet by reference, and a bundle that answered a different one would fail the get that follows.",
+        "droplet.region": "The pack stored the caller's bare slug string where the document declares an object -- a region is a region, an image an image -- and a client reading `.slug` cannot parse a string. The document is `declared` and outranks the pack's `authored` shape.",
+        "droplet.image": "The pack stored the caller's bare slug string where the document declares an object -- a region is a region, an image an image -- and a client reading `.slug` cannot parse a string. The document is `declared` and outranks the pack's `authored` shape.",
+        "droplet.size": "The pack wrote the slug under `size`, which the document declares as a size object; the slug's declared member is `size_slug`. Same value, the name the document gives it.",
+        "droplet.size_slug": "The pack wrote the slug under `size`, which the document declares as a size object; the slug's declared member is `size_slug`. Same value, the name the document gives it.",
+        "links": "The pack answered no links at all. The document declares `links` required on both arms of the create response, and a client that follows the action link to wait for the droplet gets nothing to follow from an absent member."
+      }
+    },
+    {
+      "operation": "DropletsCreate",
+      "input": {
+        "region": "nyc3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "unprocessable_entity",
+        "http_status": 422,
+        "fault": "client"
+      },
+      "recorded_as": "CreateDroplet"
+    },
+    {
+      "operation": "DropletsCreate",
+      "input": {
+        "name": "",
+        "region": "nyc3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "unprocessable_entity",
+        "http_status": 422,
+        "fault": "client"
+      },
+      "recorded_as": "CreateDroplet"
+    },
+    {
+      "operation": "DropletsList",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "id": 526682617,
+            "image": "ubuntu-24-04-x64",
+            "name": "web-1",
+            "region": "nyc3",
+            "size": "s-1vcpu-1gb",
+            "status": "active"
+          }
+        ],
+        "_wrap": "droplets"
+      },
+      "recorded_as": "ListDroplets",
+      "superseded_members": {
+        "_wrap": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "_list": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "droplets": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "meta": "Synthesized in Go by the codec branch, from the length of `_list`, so it never appeared in the pack's own output. It is a declared member of the response shape and the bundle projects it."
+      }
+    },
+    {
+      "operation": "DropletsGet",
+      "input": {
+        "droplet_id": {
+          "$fromPath": "droplet.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "droplet",
+        "droplet": {
+          "id": 526682617,
+          "image": "ubuntu-24-04-x64",
+          "name": "web-1",
+          "region": "nyc3",
+          "size": "s-1vcpu-1gb",
+          "status": "active"
+        }
+      },
+      "recorded_as": "GetDroplet",
+      "superseded_members": {
+        "_wrap": "The pack answered a bare body and let a branch of the REST/JSON codec read `_wrap` to decide what to wrap it in. The document declares the wrapper as the operation's own response shape, so the bundle projects `droplet`/`domain` directly and the codec branch is gone. Identical bytes on the wire; this member never reached one.",
+        "droplet.id": "A droplet id is an integer and the unifier substitutes token-shaped strings only, so the two sides cannot agree on a value each issued itself. The id is still gated structurally: every later step addresses this droplet by reference, and a bundle that answered a different one would fail the get that follows.",
+        "droplet.region": "The pack stored the caller's bare slug string where the document declares an object -- a region is a region, an image an image -- and a client reading `.slug` cannot parse a string. The document is `declared` and outranks the pack's `authored` shape.",
+        "droplet.image": "The pack stored the caller's bare slug string where the document declares an object -- a region is a region, an image an image -- and a client reading `.slug` cannot parse a string. The document is `declared` and outranks the pack's `authored` shape.",
+        "droplet.size": "The pack wrote the slug under `size`, which the document declares as a size object; the slug's declared member is `size_slug`. Same value, the name the document gives it.",
+        "droplet.size_slug": "The pack wrote the slug under `size`, which the document declares as a size object; the slug's declared member is `size_slug`. Same value, the name the document gives it."
+      }
+    },
+    {
+      "operation": "DropletsGet",
+      "input": {
+        "droplet_id": "999999999"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recorded_as": "GetDroplet"
+    },
+    {
+      "operation": "DropletsCreate",
+      "input": {
+        "name": "web-1",
+        "region": "sfo3",
+        "size": "s-2vcpu-2gb"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "droplet",
+        "droplet": {
+          "id": 395791637,
+          "image": "",
+          "name": "web-1",
+          "region": "sfo3",
+          "size": "s-2vcpu-2gb",
+          "status": "active"
+        }
+      },
+      "recorded_as": "CreateDroplet",
+      "superseded_members": {
+        "_wrap": "The pack answered a bare body and let a branch of the REST/JSON codec read `_wrap` to decide what to wrap it in. The document declares the wrapper as the operation's own response shape, so the bundle projects `droplet`/`domain` directly and the codec branch is gone. Identical bytes on the wire; this member never reached one.",
+        "droplet.id": "A droplet id is an integer and the unifier substitutes token-shaped strings only, so the two sides cannot agree on a value each issued itself. The id is still gated structurally: every later step addresses this droplet by reference, and a bundle that answered a different one would fail the get that follows.",
+        "droplet.region": "The pack stored the caller's bare slug string where the document declares an object -- a region is a region, an image an image -- and a client reading `.slug` cannot parse a string. The document is `declared` and outranks the pack's `authored` shape.",
+        "droplet.image": "The pack stored the caller's bare slug string where the document declares an object -- a region is a region, an image an image -- and a client reading `.slug` cannot parse a string. The document is `declared` and outranks the pack's `authored` shape.",
+        "droplet.size": "The pack wrote the slug under `size`, which the document declares as a size object; the slug's declared member is `size_slug`. Same value, the name the document gives it.",
+        "droplet.size_slug": "The pack wrote the slug under `size`, which the document declares as a size object; the slug's declared member is `size_slug`. Same value, the name the document gives it.",
+        "links": "The pack answered no links at all. The document declares `links` required on both arms of the create response, and a client that follows the action link to wait for the droplet gets nothing to follow from an absent member."
+      }
+    },
+    {
+      "operation": "DropletsList",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "id": 395791637,
+            "image": "",
+            "name": "web-1",
+            "region": "sfo3",
+            "size": "s-2vcpu-2gb",
+            "status": "active"
+          },
+          {
+            "id": 526682617,
+            "image": "ubuntu-24-04-x64",
+            "name": "web-1",
+            "region": "nyc3",
+            "size": "s-1vcpu-1gb",
+            "status": "active"
+          }
+        ],
+        "_wrap": "droplets"
+      },
+      "recorded_as": "ListDroplets",
+      "superseded_members": {
+        "_wrap": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "_list": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "droplets": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "meta": "Synthesized in Go by the codec branch, from the length of `_list`, so it never appeared in the pack's own output. It is a declared member of the response shape and the bundle projects it."
+      }
+    },
+    {
+      "operation": "DropletsDestroy",
+      "input": {
+        "droplet_id": {
+          "$fromPath": "droplet.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "recorded_as": "DeleteDroplet"
+    },
+    {
+      "operation": "DropletsGet",
+      "input": {
+        "droplet_id": {
+          "$fromPath": "droplet.id",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recorded_as": "GetDroplet"
+    },
+    {
+      "operation": "DropletsDestroy",
+      "input": {
+        "droplet_id": "999999999"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recorded_as": "DeleteDroplet"
+    },
+    {
+      "operation": "DropletsList",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "id": 395791637,
+            "image": "",
+            "name": "web-1",
+            "region": "sfo3",
+            "size": "s-2vcpu-2gb",
+            "status": "active"
+          }
+        ],
+        "_wrap": "droplets"
+      },
+      "recorded_as": "ListDroplets",
+      "superseded_members": {
+        "_wrap": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "_list": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "droplets": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "meta": "Synthesized in Go by the codec branch, from the length of `_list`, so it never appeared in the pack's own output. It is a declared member of the response shape and the bundle projects it."
+      }
+    },
+    {
+      "operation": "DomainsCreate",
+      "input": {
+        "ip_address": "203.0.113.10",
+        "name": "EX.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "domain",
+        "domain": {
+          "name": "ex.test",
+          "ttl": 1800
+        }
+      },
+      "recorded_as": "CreateDomain",
+      "superseded_members": {
+        "_wrap": "The pack answered a bare body and let a branch of the REST/JSON codec read `_wrap` to decide what to wrap it in. The document declares the wrapper as the operation's own response shape, so the bundle projects `droplet`/`domain` directly and the codec branch is gone. Identical bytes on the wire; this member never reached one."
+      }
+    },
+    {
+      "operation": "DomainsCreate",
+      "input": {
+        "ip_address": "203.0.113.10"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "unprocessable_entity",
+        "http_status": 422,
+        "fault": "client"
+      },
+      "recorded_as": "CreateDomain"
+    },
+    {
+      "operation": "DomainsCreate",
+      "input": {
+        "name": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "unprocessable_entity",
+        "http_status": 422,
+        "fault": "client"
+      },
+      "recorded_as": "CreateDomain"
+    },
+    {
+      "operation": "DomainsCreate",
+      "input": {
+        "name": "ex.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "conflict",
+        "http_status": 409,
+        "fault": "client"
+      },
+      "recorded_as": "CreateDomain"
+    },
+    {
+      "operation": "DomainsCreate",
+      "input": {
+        "name": "EX.TEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "conflict",
+        "http_status": 409,
+        "fault": "client"
+      },
+      "recorded_as": "CreateDomain"
+    },
+    {
+      "operation": "DomainsGet",
+      "input": {
+        "domain_name": "EX.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "domain",
+        "domain": {
+          "name": "ex.test",
+          "ttl": 1800
+        }
+      },
+      "recorded_as": "GetDomain",
+      "superseded_members": {
+        "_wrap": "The pack answered a bare body and let a branch of the REST/JSON codec read `_wrap` to decide what to wrap it in. The document declares the wrapper as the operation's own response shape, so the bundle projects `droplet`/`domain` directly and the codec branch is gone. Identical bytes on the wire; this member never reached one."
+      }
+    },
+    {
+      "operation": "DomainsGet",
+      "input": {
+        "domain_name": "absent.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recorded_as": "GetDomain"
+    },
+    {
+      "operation": "DomainsCreate",
+      "input": {
+        "name": "two.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "domain",
+        "domain": {
+          "name": "two.test",
+          "ttl": 1800
+        }
+      },
+      "recorded_as": "CreateDomain",
+      "superseded_members": {
+        "_wrap": "The pack answered a bare body and let a branch of the REST/JSON codec read `_wrap` to decide what to wrap it in. The document declares the wrapper as the operation's own response shape, so the bundle projects `droplet`/`domain` directly and the codec branch is gone. Identical bytes on the wire; this member never reached one."
+      }
+    },
+    {
+      "operation": "DomainsList",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "name": "ex.test",
+            "ttl": 1800
+          },
+          {
+            "name": "two.test",
+            "ttl": 1800
+          }
+        ],
+        "_wrap": "domains"
+      },
+      "recorded_as": "ListDomains",
+      "superseded_members": {
+        "_wrap": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "_list": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "domains": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "meta": "Synthesized in Go by the codec branch, from the length of `_list`, so it never appeared in the pack's own output. It is a declared member of the response shape and the bundle projects it."
+      }
+    },
+    {
+      "operation": "DomainsDelete",
+      "input": {
+        "domain_name": "EX.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "recorded_as": "DeleteDomain"
+    },
+    {
+      "operation": "DomainsGet",
+      "input": {
+        "domain_name": "ex.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recorded_as": "GetDomain"
+    },
+    {
+      "operation": "DomainsDelete",
+      "input": {
+        "domain_name": "ex.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recorded_as": "DeleteDomain"
+    },
+    {
+      "operation": "DomainsCreate",
+      "input": {
+        "name": "ex.test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_wrap": "domain",
+        "domain": {
+          "name": "ex.test",
+          "ttl": 1800
+        }
+      },
+      "recorded_as": "CreateDomain",
+      "superseded_members": {
+        "_wrap": "The pack answered a bare body and let a branch of the REST/JSON codec read `_wrap` to decide what to wrap it in. The document declares the wrapper as the operation's own response shape, so the bundle projects `droplet`/`domain` directly and the codec branch is gone. Identical bytes on the wire; this member never reached one."
+      }
+    },
+    {
+      "operation": "DomainsList",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "name": "ex.test",
+            "ttl": 1800
+          },
+          {
+            "name": "two.test",
+            "ttl": 1800
+          }
+        ],
+        "_wrap": "domains"
+      },
+      "recorded_as": "ListDomains",
+      "superseded_members": {
+        "_wrap": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "_list": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "domains": "The pack answered `_list` and let the same codec branch name the collection and count it. The document declares `droplets`/`domains` and `meta` as the response's own members, so the bundle projects them by name.",
+        "meta": "Synthesized in Go by the codec branch, from the length of `_list`, so it never appeared in the pack's own output. It is a declared member of the response shape and the bundle projects it."
+      }
+    }
+  ],
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real DigitalOcean API; a probe run replaces cells with observed evidence and cites the cassette.\n\nEvery step carries recorded_as: the pack spelled its operations CreateDroplet and GetDomain and bound them to the URIs the document gives DropletsCreate and DomainsGet, so a recording under the pack's names could not be replayed against the bundle at all.\n\nThe recorded input uses the model's member names -- droplet_id, domain_name -- because that is what the bundle is replayed with; the pack read `id` and `name`, and the invocation that produced this file translated. An addressed id is a reference rather than a literal, because the service issues it, and it was stringified before reaching the pack: a path label arrives as text, which is all a URL can carry, and the pack asserts it to a string.\n\nNo step is superseded whole. What every excused member has in common is that it was synthesized in Go -- `_wrap` and `_list` were instructions to a branch of the REST/JSON codec, not members the pack answered -- or that the document declares a shape the pack did not have. Both are `declared` evidence outranking `authored`.\n\nWhat is still gated: the name the caller gave round-trips, the status the service invents is `active`, a domain's name is lower-cased on the way in and again on the way out, its ttl is 1800, and across the whole run the thirteen faults and their precedence -- a missing name is unprocessable_entity before anything else is looked at, a duplicate domain is a conflict whatever case it is written in, an unknown or deleted id is not_found, and a name freed by a delete can be taken again."
+}

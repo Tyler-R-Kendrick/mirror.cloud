@@ -899,14 +899,14 @@
     "ID": "digitalocean.v2",
     "Protocol": "restJson1",
     "Ops": [
-      "CreateDroplet",
-      "ListDroplets",
-      "GetDroplet",
-      "DeleteDroplet",
-      "CreateDomain",
-      "ListDomains",
-      "GetDomain",
-      "DeleteDomain"
+      "DropletsCreate",
+      "DropletsList",
+      "DropletsGet",
+      "DropletsDestroy",
+      "DomainsCreate",
+      "DomainsList",
+      "DomainsGet",
+      "DomainsDelete"
     ]
   },
   {

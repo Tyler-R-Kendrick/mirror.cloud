@@ -167,7 +167,14 @@ for entry in ${want_urls+"${want_urls[@]}"}; do
   IFS=$'\t' read -r uid upath uurl <<< "$entry"
   dest="$ROOT/specs/$upath"
   mkdir -p "$(dirname "$dest")"
-  if [[ -z "$REFRESH" && -s "$dest" ]]; then
+  if [[ "$uurl" == "authored" ]]; then
+    # A document with no upstream. There is nothing to fetch and nothing a
+    # refresh could move, so SPECS_REFRESH does not apply to it -- but it must
+    # be present, because the alternative is a service the set asks for and
+    # nothing supplies, which is the case this script makes fatal below.
+    [[ -s "$dest" ]] || die "$uid is declared authored but specs/$upath is missing or empty"
+    echo "specs-sync: $uid is authored, not vendored (no upstream to fetch)" >&2
+  elif [[ -z "$REFRESH" && -s "$dest" ]]; then
     echo "specs-sync: using the committed $uid document (SPECS_REFRESH=1 to refetch)" >&2
   else
     echo "specs-sync: fetching $uid from $uurl…" >&2

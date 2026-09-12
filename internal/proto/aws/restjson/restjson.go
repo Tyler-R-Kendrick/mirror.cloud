@@ -40,9 +40,6 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "vercel.api" {
 		return vercelOp(svc, r), nil
 	}
-	if svc.ID == "digitalocean.v2" {
-		return digitaloceanOp(svc, r), nil
-	}
 	if svc.ID == "railway.graphql" {
 		return railwayOp(svc, r), nil
 	}
@@ -387,49 +384,6 @@ func railwayRoute(r *http.Request) string {
 		return "Unknown"
 	}
 }
-
-func digitaloceanOp(svc *model.Service, r *http.Request) *model.Operation {
-	name := digitaloceanRoute(r)
-	if op := svc.OperationByName(name); op != nil {
-		return op
-	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
-}
-
-func digitaloceanRoute(r *http.Request) string {
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	m := r.Method
-	if len(parts) >= 2 && parts[0] == "v2" && parts[1] == "droplets" {
-		if len(parts) == 2 && m == http.MethodPost {
-			return "CreateDroplet"
-		}
-		if len(parts) == 2 && m == http.MethodGet {
-			return "ListDroplets"
-		}
-		if len(parts) >= 3 && m == http.MethodGet {
-			return "GetDroplet"
-		}
-		if len(parts) >= 3 && m == http.MethodDelete {
-			return "DeleteDroplet"
-		}
-	}
-	if len(parts) >= 2 && parts[0] == "v2" && parts[1] == "domains" {
-		if len(parts) == 2 && m == http.MethodPost {
-			return "CreateDomain"
-		}
-		if len(parts) == 2 && m == http.MethodGet {
-			return "ListDomains"
-		}
-		if len(parts) >= 3 && m == http.MethodGet {
-			return "GetDomain"
-		}
-		if len(parts) >= 3 && m == http.MethodDelete {
-			return "DeleteDomain"
-		}
-	}
-	return "Unknown"
-}
-
 // azureTableETagList splits an If-Match header into dequoted tokens, like
 // Azurite's etag adapter.
 func azureTableETagList(v string) []any {
@@ -675,9 +629,6 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if svc.ID == "azure.table" {
 		return encodeAzureTable(w, status, op, resp)
 	}
-	if svc.ID == "digitalocean.v2" {
-		return encodeDigitalOcean(w, status, resp)
-	}
 	if svc.ID == "railway.graphql" {
 		return encodeRailway(w, status, resp)
 	}
@@ -824,38 +775,6 @@ func encodeRailway(w http.ResponseWriter, status int, resp *spi.Response) error 
 	}
 	return json.NewEncoder(w).Encode(map[string]any{"data": resp.Output})
 }
-
-func encodeDigitalOcean(w http.ResponseWriter, status int, resp *spi.Response) error {
-	if status == 204 {
-		w.WriteHeader(status)
-		return nil
-	}
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-	}
-	w.WriteHeader(status)
-	if resp.Output == nil {
-		return nil
-	}
-	wrap, _ := resp.Output["_wrap"].(string)
-	if lst, ok := resp.Output["_list"]; ok {
-		items, _ := lst.([]any)
-		if items == nil {
-			items = []any{}
-		}
-		if wrap == "" {
-			wrap = "droplets"
-		}
-		return json.NewEncoder(w).Encode(map[string]any{wrap: items, "meta": map[string]any{"total": len(items)}})
-	}
-	if wrap != "" {
-		if rec, ok := resp.Output[wrap]; ok {
-			return json.NewEncoder(w).Encode(map[string]any{wrap: rec})
-		}
-	}
-	return json.NewEncoder(w).Encode(resp.Output)
-}
-
 func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.ResponseWriter, f *spi.Fault, requestID string) error {
 	status := f.HTTPStatus
 	if status == 0 {

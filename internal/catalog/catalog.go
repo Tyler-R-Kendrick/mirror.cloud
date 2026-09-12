@@ -550,7 +550,27 @@ func Bundle() *model.Bundle {
 			"prefer": {Shape: "String"},
 		}},
 	}
-	digitalocean := []string{"CreateDroplet", "ListDroplets", "GetDroplet", "DeleteDroplet", "CreateDomain", "ListDomains", "GetDomain", "DeleteDomain"}
+	// DigitalOcean is served from behavior/digitalocean/v2 now, under the names
+	// its document declares rather than the eight the deleted pack invented.
+	// adoptGenerated replaces this list with the generated model's forty; what
+	// it cannot do is invent the entry, so the ID has to be the one the bundle
+	// registers under.
+	//
+	// Real bindings rather than mk(), which binds everything to POST /: the
+	// REST/JSON codec's DigitalOcean envelope went away with the pack, and
+	// internal/conformance reads this catalog directly, without
+	// adoptGenerated. The codes are the document's -- a droplet create is
+	// accepted, a domain create is created, and a delete has no body.
+	digitalocean := []model.Operation{
+		op("DropletsCreate", "POST", "/v2/droplets", 202, false),
+		op("DropletsList", "GET", "/v2/droplets", 200, true),
+		op("DropletsGet", "GET", "/v2/droplets/{droplet_id}", 200, true),
+		op("DropletsDestroy", "DELETE", "/v2/droplets/{droplet_id}", 204, false),
+		op("DomainsCreate", "POST", "/v2/domains", 201, false),
+		op("DomainsList", "GET", "/v2/domains", 200, true),
+		op("DomainsGet", "GET", "/v2/domains/{domain_name}", 200, true),
+		op("DomainsDelete", "DELETE", "/v2/domains/{domain_name}", 204, false),
+	}
 	// Real bindings, not mk(): mk() binds every operation to POST /, and
 	// internal/conformance builds its request from this catalog rather than
 	// from the generated model. The names are the document's -- create_ssh_key
@@ -1642,7 +1662,7 @@ func Bundle() *model.Bundle {
 			azureSvc,
 			queueSvc,
 			tableSvc,
-			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", mk(digitalocean)),
+			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", digitalocean),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", hetzner),
 			svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", mk(railway)),
 			svc("fly.machines", "fly", model.ProtoRESTJSON1, "", "", "", fly),

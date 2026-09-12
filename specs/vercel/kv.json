@@ -1,0 +1,92 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Vercel KV",
+    "version": "authored-1",
+    "description": "The Vercel KV data plane, which is Upstash Redis behind a Vercel host.\n\nTHIS DOCUMENT IS AUTHORED, NOT VENDORED. Every other document under specs/ is the vendor's own bytes, pinned by the sha256 in specs/mirror.lock so that an unannounced upstream change lands as a reviewable diff. There is nothing to pin here: neither Vercel nor Upstash publishes a machine-readable description of this surface. Upstash publishes three OpenAPI documents -- QStash, Workflow, and a Developer API that is the management plane at api.upstash.com/v2 (create a database, change a plan) -- and none of them describes the command endpoint. Vercel's own document describes blob-store management and no KV commands at all. Both vendors document the data plane in prose.\n\nSo the lock records this file with source `authored`, and its hash still pins the bytes: an edit to this document is a visible diff like any other. What is absent is the refetch, because there is no upstream to refetch from -- which means this document cannot tell you the vendor changed something. Treat every statement in it as `authored` provenance, the same grade the behavior bundle carries, and downgrade it the moment a probe or a published description contradicts it.\n\nThe surface transcribed here is the one the deleted Go pack served, which is the Upstash REST convention: POST / with the command as a JSON array, answering {result}. It is deliberately the narrow subset that pack implemented rather than the whole Redis command set, because the subset is what there is evidence for."
+  },
+  "servers": [
+    {
+      "url": "https://kv.vercel-storage.com",
+      "description": "Vercel KV data plane. Deployments address a per-store subdomain of this host."
+    }
+  ],
+  "paths": {
+    "/": {
+      "post": {
+        "operationId": "Command",
+        "summary": "Run one Redis command",
+        "description": "The request body is the command and its arguments as a JSON array: [\"SET\", \"key\", \"value\"]. The response carries the reply under `result`, whose type follows the command -- a status string for SET, the stored value or null for GET, a count for DEL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedisCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command ran.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The command was absent, unknown, or missing arguments.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RedisCommand": {
+        "type": "array",
+        "description": "The command name followed by its arguments. Upstash upper-cases the name on the way in, so [\"get\",\"k\"] and [\"GET\",\"k\"] are the same command.",
+        "items": {
+          "type": "string"
+        }
+      },
+      "CommandResult": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "description": "The reply. A status string for SET, the stored value or null for a GET that missed, the number of keys removed for DEL.",
+            "nullable": true,
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          }
+        }
+      },
+      "CommandError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Why the command was refused."
+          }
+        }
+      }
+    }
+  }
+}

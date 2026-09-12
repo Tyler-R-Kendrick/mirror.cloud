@@ -71,18 +71,10 @@ func main() {
 		return
 	}
 
-	svcs := ingested.Services
-	if len(want) > 0 {
-		svcs = filterSet(svcs, want)
-		// After the set decides which services are generated, and before they
-		// are emitted: a service may also declare which of its operations it
-		// wants, for the vendor that publishes one document per platform.
-		narrowed, err := narrowAll(svcs, want)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		svcs = narrowed
+	svcs, err := applySet(ingested.Services, want, *forceCatalog)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 	if err := emitAll(*outDir, svcs); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -297,6 +289,30 @@ func loadSet(path string) ([]setEntry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// applySet reduces the ingested services to what specs/mirror.set asked for:
+// first the set of services, then -- for the vendor that publishes one
+// document per platform -- the operations a service selected by path.
+//
+// fromCatalog suppresses the second step, and that is the whole reason this is
+// a function rather than four lines in main. A `paths=` selector describes the
+// vendor's document. The bootstrap catalog is a hand-written stand-in whose
+// bindings are approximations, and most of its services bind every operation
+// to POST / because nothing in the catalog needed a URI. Narrowing one by the
+// other's paths is a category error, and because narrow deliberately treats a
+// selector that matches nothing as fatal, it is a fatal one: it took
+// `mirrorgen --catalog` down entirely for vercel.api, whose catalog operations
+// all sit at /.
+func applySet(svcs []model.Service, want []setEntry, fromCatalog bool) ([]model.Service, error) {
+	if len(want) == 0 {
+		return svcs, nil
+	}
+	svcs = filterSet(svcs, want)
+	if fromCatalog {
+		return svcs, nil
+	}
+	return narrowAll(svcs, want)
 }
 
 func filterSet(svcs []model.Service, want []setEntry) []model.Service {

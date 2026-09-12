@@ -21803,45 +21803,40 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restxml",
 		run:  "TestRESTXML",
 	},
+	// The five mutants that guarded the DigitalOcean pack's empty-name,
+	// duplicate-name, missing-domain and missing-droplet branches are gone with
+	// the Go they rewrote, the same way Cloudflare's and Hetzner's were. The
+	// behaviour is `require` rules in behavior/digitalocean/v2/service.yaml,
+	// and the equivalence recording replays every one of them on its own step:
+	// an empty or absent name answers unprocessable_entity/422, a duplicate
+	// domain answers conflict/409 whatever case it is written in, and an
+	// unknown or deleted id answers not_found/404.
+	//
+	// The response encoder branch they shared went too. Its `_wrap`/`_list`
+	// envelope was synthesizing a shape the document declares as each
+	// operation's own response, so the bundle projects `droplets` and `meta` by
+	// name and the generic encoder serializes them; there is nothing left to
+	// wrap. What replaced it here is the generic rule that made the projection
+	// possible -- reading a union output's arms -- which is Go, is not about
+	// DigitalOcean, and would be silent if it broke: a bundle projecting a
+	// member no arm declares would simply fail to load.
 	{
-		name: "digitalocean-accept-empty-domain",
-		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
-		old:  "if name == \"\" {\n\t\treturn nil, doFault(\"unprocessable_entity\", \"domain name is required\", 422)",
-		new:  "if false {\n\t\treturn nil, doFault(\"unprocessable_entity\", \"domain name is required\", 422)",
-		pkg:  "./internal/services/digitalocean/v2",
-		run:  "TestCreateDomainRejectsEmptyAndDuplicate",
+		name: "model-union-output-hides-its-arms",
+		file: filepath.Join("internal", "model", "model.go"),
+		old:  "\tif shape.Kind != KindUnion {",
+		new:  "\tif true {",
+		pkg:  "./internal/model",
+		run:  "TestBodyMembersLooksThroughAUnion",
 	},
 	{
-		name: "digitalocean-accept-duplicate-domain",
-		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
-		old:  `if _, exists, _ := p.col(req, "dodom").Get(ctx, name); exists {`,
-		new:  `if _, exists, _ := p.col(req, "dodom").Get(ctx, name); false {`,
-		pkg:  "./internal/services/digitalocean/v2",
-		run:  "TestCreateDomainRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "digitalocean-get-missing-domain-as-empty",
-		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
-		old:  "b, ok, _ := p.col(req, \"dodom\").Get(ctx, name)\n\tif !ok {\n\t\treturn nil, doFault(\"not_found\", \"The resource you were accessing could not be found.\", 404)",
-		new:  "b, ok, _ := p.col(req, \"dodom\").Get(ctx, name)\n\tif false {\n\t\treturn nil, doFault(\"not_found\", \"The resource you were accessing could not be found.\", 404)",
-		pkg:  "./internal/services/digitalocean/v2",
-		run:  "TestDropletAndDomainLifecycle",
-	},
-	{
-		name: "digitalocean-delete-missing-droplet-as-success",
-		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
-		old:  "if _, err := p.getDroplet(ctx, req); err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "if _, err := p.getDroplet(ctx, req); false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/digitalocean/v2",
-		run:  "TestDeleteMissingDropletAndDomain",
-	},
-	{
-		name: "digitalocean-delete-missing-domain-as-success",
-		file: filepath.Join("internal", "services", "digitalocean", "v2", "api.go"),
-		old:  "if _, err := p.getDomain(ctx, req); err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "if _, err := p.getDomain(ctx, req); false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/digitalocean/v2",
-		run:  "TestDeleteMissingDropletAndDomain",
+		// The other end of the same rule. Without the bound, a document that
+		// references itself in a circle hangs the loader instead of failing it.
+		name: "model-union-walk-is-unbounded",
+		file: filepath.Join("internal", "model", "model.go"),
+		old:  "\tif depth > 8 {",
+		new:  "\tif false {",
+		pkg:  "./internal/model",
+		run:  "TestBodyMembersLooksThroughAUnion",
 	},
 	{
 		name: "digitalocean-encode-aws-fault",

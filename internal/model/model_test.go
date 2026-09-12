@@ -54,3 +54,55 @@ func stripComments(s string) string {
 	}
 	return out.String()
 }
+
+// TestBodyMembersLooksThroughAUnion covers the rule that makes a union output
+// projectable at all. DigitalOcean's droplet create is the only operation in
+// the tree whose response is one -- `oneOf` of {droplet, links} and
+// {droplets, links}, with no discriminator anywhere on the wire -- so what a
+// reader may find in the body is what either arm declares. Asking the union
+// shape itself yields option0 and option1, which appear in no response, and a
+// bundle projecting `droplet` would be rejected as naming an unknown member.
+//
+// The scalar union is the case that must NOT gain members: Cloudflare's KV
+// value is `oneOf` a string and a blob, which is an opaque body with nothing
+// to project, and ScalarBody answers it instead.
+func TestBodyMembersLooksThroughAUnion(t *testing.T) {
+	svc := &Service{Shapes: map[string]Shape{
+		"Structure": {Kind: KindStructure, Members: map[string]Member{"plain": {Shape: "S"}}},
+		"Either": {Kind: KindUnion, Members: map[string]Member{
+			"option0": {Shape: "One"},
+			"option1": {Shape: "Many"},
+		}},
+		"One":  {Kind: KindStructure, Members: map[string]Member{"droplet": {Shape: "S"}, "links": {Shape: "S"}}},
+		"Many": {Kind: KindStructure, Members: map[string]Member{"droplets": {Shape: "S"}, "links": {Shape: "S"}}},
+		"Bytes": {Kind: KindUnion, Members: map[string]Member{
+			"option0": {Shape: "S"},
+			"option1": {Shape: "B"},
+		}},
+		"S": {Kind: KindString},
+		"B": {Kind: KindBlob},
+		// A document may reference itself in a circle, and a receiver is not
+		// obliged to have noticed; the walk must end rather than recurse.
+		"Loop": {Kind: KindUnion, Members: map[string]Member{"option0": {Shape: "Loop"}}},
+	}}
+	for _, test := range []struct {
+		shape string
+		want  []string
+	}{
+		{"Structure", []string{"plain"}},
+		{"Either", []string{"droplet", "droplets", "links"}},
+		{"Bytes", nil},
+		{"Loop", nil},
+		{"Absent", nil},
+	} {
+		got := svc.BodyMembers(test.shape)
+		if len(got) != len(test.want) {
+			t.Fatalf("%s: %v, want %v", test.shape, got, test.want)
+		}
+		for _, name := range test.want {
+			if _, ok := got[name]; !ok {
+				t.Fatalf("%s: %v is missing %q", test.shape, got, name)
+			}
+		}
+	}
+}

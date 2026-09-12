@@ -34,7 +34,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
-	doapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
@@ -7918,7 +7917,13 @@ func TestAzureConcurrentBlobPutGet(t *testing.T) {
 }
 
 func TestDigitalOceanConcurrentDuplicateDomains(t *testing.T) {
-	p := doapi.New(spitest.Deps(t))
+	// The pack these exercised is gone; the property is not. Exactly one
+	// concurrent create may win a domain name, and the engine has to hold that
+	// the same way the hand-written mutex did.
+	p, err := bundled.New("digitalocean.v2", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7927,7 +7932,7 @@ func TestDigitalOceanConcurrentDuplicateDomains(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDomain", Input: map[string]any{"name": "race.test"}})
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DomainsCreate", Input: map[string]any{"name": "race.test"}})
 			errCh <- err
 		}()
 	}
@@ -7950,7 +7955,10 @@ func TestDigitalOceanConcurrentDuplicateDomains(t *testing.T) {
 }
 
 func TestDigitalOceanConcurrentDropletCreateGet(t *testing.T) {
-	p := doapi.New(spitest.Deps(t))
+	p, err := bundled.New("digitalocean.v2", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	var wg sync.WaitGroup
@@ -7959,7 +7967,7 @@ func TestDigitalOceanConcurrentDropletCreateGet(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDroplet", Input: map[string]any{"name": "web", "region": "nyc3"}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DropletsCreate", Input: map[string]any{"name": "web", "region": "nyc3"}}); err != nil {
 				errCh <- err
 			}
 		}(i)
@@ -7969,8 +7977,16 @@ func TestDigitalOceanConcurrentDropletCreateGet(t *testing.T) {
 	for err := range errCh {
 		t.Fatal(err)
 	}
-	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDroplets", Input: map[string]any{}})
-	if err != nil || got.Output["_list"] == nil {
+	// `droplets`, not `_list`: the listing envelope moved out of the codec and
+	// into the response shape the document declares. Sixteen creates that all
+	// name the same droplet are sixteen droplets -- a name is not a key here,
+	// unlike a domain -- so the count is asserted too, which the pack's version
+	// never did.
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DropletsList", Input: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := got.Output["droplets"].([]any); len(items) != 16 {
 		t.Fatalf("list after concurrent create %#v %v", got, err)
 	}
 }

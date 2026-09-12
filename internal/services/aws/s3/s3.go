@@ -600,6 +600,19 @@ func (p *Pack) route(req *spi.Request) string {
 	if has("version-id-marker") {
 		req.Input["VersionIdMarker"] = q.Get("version-id-marker")
 	}
+	// upload-id-marker and max-uploads were the two members this block did not
+	// cover, and ListMultipartUploads read them from the query itself as a
+	// result. That split was not a rule about types -- it was whatever this
+	// list happened to name -- and it cost three permanently surviving
+	// mutants: rewriting the query name a per-operation fallback passes cannot
+	// change anything for a member already hydrated here, so no test could
+	// kill them. Recorded as C36; measured both ways before this changed.
+	if has("upload-id-marker") {
+		req.Input["UploadIdMarker"] = q.Get("upload-id-marker")
+	}
+	if has("max-uploads") {
+		req.Input["MaxUploads"] = q.Get("max-uploads")
+	}
 	if v := q.Get("versionId"); v != "" {
 		req.Input["VersionId"] = v
 	}
@@ -2782,35 +2795,48 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 	if err := validateListEncodingType(req); err != nil {
 		return nil, err
 	}
-	parameter := func(input, query string) string {
-		if value := str(req.Input[input]); value != "" {
-			return value
-		}
-		if req.HTTP != nil {
-			return req.HTTP.URL.Query().Get(query)
-		}
-		return ""
-	}
-	prefix := parameter("Prefix", "prefix")
-	delimiter := parameter("Delimiter", "delimiter")
-	keyMarker := parameter("KeyMarker", "key-marker")
-	uploadMarker := parameter("UploadIdMarker", "upload-id-marker")
-	encoding := parameter("EncodingType", "encoding-type")
+	// Every member is read from req.Input, which the router has already
+	// hydrated from the query. There is no second read behind this one: the
+	// fallback that used to sit here was reachable only for the members the
+	// hydration block did not list, and unreachable -- so untestable -- for
+	// the ones it did.
+	prefix := str(req.Input["Prefix"])
+	delimiter := str(req.Input["Delimiter"])
+	keyMarker := str(req.Input["KeyMarker"])
+	uploadMarker := str(req.Input["UploadIdMarker"])
+	encoding := str(req.Input["EncodingType"])
 	maxUploads := 1000
-	if _, provided := req.Input["MaxUploads"]; provided {
-		maxUploads = asInt(req.Input["MaxUploads"])
-	}
-	if raw := parameter("", "max-uploads"); raw != "" {
-		var err error
-		maxUploads, err = strconv.Atoi(raw)
-		if err != nil {
-			return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	if raw, provided := req.Input["MaxUploads"]; provided {
+		// Two shapes reach this member and they are not interchangeable. A
+		// request routed from HTTP carries the query's text, where a
+		// non-numeric value is an InvalidArgument the caller must see, so it
+		// is parsed strictly -- and an empty `max-uploads=` means the member
+		// was written without a value, which is the default rather than an
+		// error. A request invoked directly carries a number, which asInt
+		// reads. Collapsing the two into one strict parse is what broke
+		// TestMultipartZeroLimitsUseDefaults: `str` here is a type assertion,
+		// so str(0) is "" and not "0".
+		if text, isText := raw.(string); isText {
+			if text != "" {
+				parsed, err := strconv.Atoi(text)
+				if err != nil {
+					return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				maxUploads = parsed
+			}
+		} else {
+			maxUploads = asInt(raw)
 		}
 	}
+	// Zero is deliberately still folded to the default rather than refused or
+	// honoured as "return nothing". What the real service does with
+	// max-uploads=0 is an open question this has no evidence for -- see the
+	// known-red entry for s3-list-uploads-accept-zero-limit -- and guessing
+	// would replace a documented unknown with an undocumented one.
 	if maxUploads == 0 {
 		maxUploads = 1000
 	}
-	if maxUploads < 1 || maxUploads > 1000 {
+	if maxUploads < 0 || maxUploads > 1000 {
 		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 

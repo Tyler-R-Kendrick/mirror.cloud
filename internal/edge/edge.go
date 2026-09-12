@@ -533,6 +533,12 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			return s.bundle.ServiceByID("hostinger.api")
 		}
 		if vercelRequest(r) {
+			// KV is Upstash Redis behind a per-store host, and its commands
+			// are their own service now: the pack served them inside
+			// vercel.api because there was nowhere else to put them.
+			if kvRequest(r) {
+				return s.bundle.ServiceByID("vercel.kv")
+			}
 			return s.bundle.ServiceByID("vercel.api")
 		}
 	}
@@ -699,6 +705,13 @@ func vercelRequest(r *http.Request) bool {
 		return false
 	}
 	return strings.Contains(path, "/projects") || strings.Contains(path, "/deployments") || strings.Contains(path, "/user") || strings.Contains(path, "/teams")
+}
+
+// kvRequest reports whether a Vercel request addresses the KV data plane:
+// every store's host is a subdomain of kv.vercel-storage.com, which the
+// authored document (specs/vercel/kv.json) records as the service's server.
+func kvRequest(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Host), "kv.vercel-storage")
 }
 
 func sqsQueuePath(path string) bool {

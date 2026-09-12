@@ -15,10 +15,13 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.ssm` | `awsJson1_1` | 152 | 0 |
 | `aws.secretsmanager` | `awsJson1_1` | 23 | 0 |
 | `gcp.storage` | `gcpRestJson` | 87 | 0 |
-| `vercel.api` | `restJson1` | 15 | 0 |
+| `vercel.api` | `restJson1` | 14 | 0 |
+| `vercel.kv` | `restJson1` | 1 | 0 |
 | `cloudflare.api` | `restJson1` | 9 | 0 |
 | `hostinger.api` | `restJson1` | 6 | 0 |
-| `azure.blobs` | `restXml` | 8 | 0 |
+| `azure.blobs` | `restXml` | 54 | 1 |
+| `azure.queue` | `restXml` | 16 | 0 |
+| `azure.table` | `restJson1` | 9 | 1 |
 | `digitalocean.v2` | `restJson1` | 8 | 0 |
 | `hetzner.v1` | `restJson1` | 8 | 0 |
 | `railway.graphql` | `restJson1` | 7 | 0 |

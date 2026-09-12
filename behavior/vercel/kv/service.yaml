@@ -1,0 +1,88 @@
+schema: bir/1
+service: vercel.kv
+
+# Extracted from the KV half of internal/services/vercel/api, which served
+# Upstash Redis commands as KvCommand inside the REST pack. It is its own
+# service now, described by specs/vercel/kv.json -- the document nobody
+# publishes, written down and marked `authored` rather than left in Go. The
+# edge routes the kv.vercel-storage.com hosts here; everything else Vercel is
+# vercel.api.
+#
+# Every cell is `authored`: transcribed from that pack, not established
+# against the real Vercel KV data plane.
+provenance: authored
+
+resources:
+  entry:
+    collection: vkv
+    # No id spec: every access names the key explicitly, because the key is
+    # the command's first argument -- a member of the request body the
+    # document binds to a payload member, not a declared input member.
+
+errors:
+  BadRequest:
+    code: bad_request
+    http: 400
+    fault: client
+  NotImplemented:
+    # The pack answered an unknown command the way it answered an unknown
+    # operation, so the code is the engine's own rather than a Redis error.
+    code: MirrorNotImplemented
+    http: 501
+    fault: client
+
+operations:
+  Command:
+    reads:
+      # The key is the command's first argument. Total: a command short on
+      # arguments must yield an empty key rather than an evaluation error --
+      # the require rules below are what rejects it, in the pack's order.
+      entry: { resource: entry, key: "('_redis' in input && input._redis != null && size(input._redis) > 1) ? string(input._redis[1]) : ''" }
+    let:
+      # `_redis` is the codec's name for a body that is a JSON array: POST /
+      # with ["SET", "k", "v"], which is the Upstash REST convention the
+      # authored document transcribes. Command names are case-insensitive,
+      # as the pack had them.
+      cmd: "('_redis' in input && input._redis != null && size(input._redis) > 0) ? lower(string(input._redis[0])) : ''"
+      argc: "('_redis' in input && input._redis != null) ? size(input._redis) : 0"
+    require:
+      # `cond` is a precondition: the error fires when it does NOT hold. The
+      # order is the pack's: an empty or absent command is 400, a known
+      # command short on arguments is 400, and anything else is 501 --
+      # a SET with too few arguments is a bad request, not an unknown
+      # command.
+      # Presence, not non-emptiness: an empty string is a command the pack
+      # did not implement (501), not a missing one, so the 400 is for the
+      # empty or absent array alone.
+      - { cond: "argc > 0", error: BadRequest, message: "redis command required" }
+      - { cond: "cmd != 'set' || argc >= 3", error: BadRequest, message: "SET needs key and value" }
+      - { cond: "cmd != 'get' || argc >= 2", error: BadRequest, message: "GET needs key" }
+      - { cond: "cmd != 'del' || argc >= 2", error: BadRequest, message: "DEL needs key" }
+      - { cond: "cmd in ['set', 'get', 'del']", error: NotImplemented, message: "command not implemented" }
+    effects:
+      - put:
+          resource: entry
+          key: "string(input._redis[1])"
+          when: "cmd == 'set'"
+          record:
+            # The pack stored the value stringified, so SET n 3 reads back
+            # as "3".
+            value: "string(input._redis[2])"
+      - delete:
+          resource: entry
+          key: "string(input._redis[1])"
+          when: "cmd == 'del'"
+    output:
+      # The reply under `result`, typed by command as the document says: a
+      # status string for SET, the stored value or null for GET, the count of
+      # keys removed for DEL -- 1 only if the key was there.
+      result: "cmd == 'set' ? 'OK' : (cmd == 'get' ? (entry_found ? entry.value : null) : (entry_found ? 1 : 0))"
+
+quirks:
+  - operation: Command
+    note: >
+      Three commands of the whole Redis set, which is what the pack served
+      and what the authored document declares: SET, GET and DEL. Anything
+      else -- PING, INCR, EXPIRE -- is 501, not a Redis error, because the
+      pack answered it through its own not-implemented path and no evidence
+      says what the real data plane would answer.

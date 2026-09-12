@@ -21592,69 +21592,29 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSConfirmSubscriptionTokenValidation",
 	},
+	// The eight mutants that guarded the Vercel pack's empty-name,
+	// duplicate-name, missing-resource, root-route and KV-delete branches are
+	// gone with the Go they rewrote, the same way DigitalOcean's were. The
+	// behaviour is `require` rules and effects in behavior/vercel/api and
+	// behavior/vercel/kv, and the equivalence recordings replay every one of
+	// them on their own steps: an empty or absent name answers
+	// bad_request/400, a duplicate answers conflict/409, an unknown id answers
+	// not_found/404, and a KV DEL of a missing key answers 0.
+	//
+	// What replaced them here is the generic rule this service is the first
+	// to need. Vercel's env create and KV command are the first operations
+	// whose document marks a structured payload member -- the request body --
+	// required: the codec decodes that body's members into the input, so the
+	// member itself is never present, and requiring it would fail every one
+	// of those calls. That rule is Go, is not about Vercel, and would be
+	// silent if it broke: both operations would answer 400 to every request.
 	{
-		name: "vercel-accept-empty-project-name",
-		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
-		old:  "name := str(req.Input[\"name\"])\n\tif name == \"\" {\n\t\treturn nil, &spi.Fault{Code: \"bad_request\", Message: \"Project name is required\", HTTPStatus: 400, Fault: \"client\"}",
-		new:  "name := str(req.Input[\"name\"])\n\tif false {\n\t\treturn nil, &spi.Fault{Code: \"bad_request\", Message: \"Project name is required\", HTTPStatus: 400, Fault: \"client\"}",
-		pkg:  "./internal/services/vercel/api",
-		run:  "TestCreateProjectRejectsEmptyAndDuplicateNames",
-	},
-	{
-		name: "vercel-accept-duplicate-project-name",
-		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
-		old:  `if _, exists, _ := p.col(req, "vproj").Get(ctx, "name:"+name); exists {`,
-		new:  `if _, exists, _ := p.col(req, "vproj").Get(ctx, "name:"+name); false {`,
-		pkg:  "./internal/services/vercel/api",
-		run:  "TestCreateProjectRejectsEmptyAndDuplicateNames",
-	},
-	{
-		name: "vercel-accept-empty-env-key",
-		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
-		old:  `if str(req.Input["key"]) == "" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/vercel/api",
-		run:  "TestEnvDomainAndKVRejectBadInput",
-	},
-	{
-		name: "vercel-delete-missing-deployment",
-		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
-		old:  `if _, err := p.getJSON(ctx, req, "vdeploy", id); err != nil {`,
-		new:  `if _, err := p.getJSON(ctx, req, "vdeploy", id); false && err != nil {`,
-		pkg:  "./internal/services/vercel/api",
-		run:  "TestDeleteDeploymentMissingIsNotFound",
-	},
-	{
-		name: "vercel-delete-missing-project-as-success",
-		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
-		old:  "got, err := p.getJSON(ctx, req, \"vproj\", str(req.Input[\"id\"]))\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tid, name := str(got.Output[\"id\"]), str(got.Output[\"name\"])",
-		new:  "got, err := p.getJSON(ctx, req, \"vproj\", str(req.Input[\"id\"]))\n\tif false && err != nil {\n\t\treturn nil, err\n\t}\n\tid, name := str(got.Output[\"id\"]), str(got.Output[\"name\"])",
-		pkg:  "./internal/services/vercel/api",
-		run:  "TestDeleteMissingProjectAndEnv",
-	},
-	{
-		name: "vercel-delete-missing-env-as-success",
-		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
-		old:  "if _, err := p.getJSON(ctx, req, col, key); err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "if _, err := p.getJSON(ctx, req, col, key); false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/vercel/api",
-		run:  "TestDeleteMissingProjectAndEnv",
-	},
-	{
-		name: "vercel-route-root-as-unknown",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "if path == \"\" {\n\t\treturn \"KvCommand\"",
-		new:  "if path == \"\" {\n\t\treturn \"Unknown\"",
-		pkg:  "./internal/proto/aws/restjson",
-		run:  "TestRESTJSONServiceRoutes",
-	},
-	{
-		name: "vercel-skip-kv-del",
-		file: filepath.Join("internal", "services", "vercel", "api", "api.go"),
-		old:  "_, ok, _ := col.Get(ctx, str(cmd[1]))\n\t\t_ = col.Delete(ctx, str(cmd[1]))",
-		new:  "_, ok, _ := col.Get(ctx, str(cmd[1]))\n\t\t_ = col.Get(ctx, str(cmd[1]))",
-		pkg:  "./internal/services/vercel/api",
-		run:  "TestProjectDeploymentEnvAndKV",
+		name: "engine-structured-payload-member-required",
+		file: filepath.Join("internal", "engine", "engine.go"),
+		old:  `if m.Required && !present && m.Binding.Location == "payload" && !e.model.ScalarBody(m.Shape) {`,
+		new:  `if m.Required && !present && false && m.Binding.Location == "payload" {`,
+		pkg:  "./internal/engine",
+		run:  "TestAStructuredPayloadMemberIsTheBodyNotAnInput",
 	},
 	// The three mutants that guarded the Cloudflare pack's empty-title,
 	// duplicate-title and missing-key branches are gone with the Go they

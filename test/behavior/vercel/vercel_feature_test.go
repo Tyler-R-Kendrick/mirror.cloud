@@ -13,13 +13,13 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestVercelProjectDeployKVBehavior(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
-	cfg.Services = []string{"vercel.api"}
+	cfg.Services = []string{"vercel.api", "vercel.kv"}
 	reg, err := registry.New(deps, cfg.Services, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +58,9 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		if code != 200 || created["name"] != "bdd-app" {
 			t.Fatalf("create %d %#v", code, created)
 		}
-		code, listed, _ := call(http.MethodGet, "/v9/projects", "", "")
+		code, listed, _ := call(http.MethodGet, "/v10/projects", "", "")
+		// The document lists projects at /v10; the pack served /v9, a version
+		// the document does not.
 		if code != 200 || len(listed["projects"].([]any)) != 1 {
 			t.Fatalf("list %d %#v", code, listed)
 		}

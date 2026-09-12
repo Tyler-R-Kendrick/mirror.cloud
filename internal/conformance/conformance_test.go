@@ -123,12 +123,17 @@ func requestFor(svc *model.Service, op *model.Operation) *http.Request {
 		// with a synthetic operation. Hostinger's table went away with its
 		// pack, and the fixed path then matched nothing -- correctly, which is
 		// what made this worth fixing rather than special-casing.
-		if uri := op.HTTP.URI; uri != "" && uri != "/" {
+		if uri := op.HTTP.URI; uri != "" {
 			method := op.HTTP.Method
 			if method == "" {
 				method = http.MethodGet
 			}
-			return httptest.NewRequest(method, fillLabels(uri), nil)
+			// A GET / binding is the catalog's way of saying "unrouted", so
+			// the fixed path still stands in for it; a POST / binding is a
+			// real endpoint -- Vercel KV's one operation lives at the root.
+			if uri != "/" || method != http.MethodGet {
+				return httptest.NewRequest(method, fillLabels(uri), nil)
+			}
 		}
 		return httptest.NewRequest(http.MethodGet, "/bucket", nil)
 	}

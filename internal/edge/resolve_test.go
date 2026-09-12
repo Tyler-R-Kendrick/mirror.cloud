@@ -85,6 +85,11 @@ func TestSharedEndpointPrefixesAreNamed(t *testing.T) {
 		"es":               {"aws.elasticsearch", "aws.es"},
 		"kinesisanalytics": {"aws.kinesisanalytics", "aws.kinesisanalyticsv2"},
 		"rds":              {"aws.docdb", "aws.neptune", "aws.rds"},
+		// Not a service and its successor like the rest: Vercel's REST API and
+		// its KV data plane are one vendor's two products, addressed apart by
+		// host (api.vercel.com against *.kv.vercel-storage.com) before the
+		// model is ever asked.
+		"vercel": {"vercel.api", "vercel.kv"},
 	}
 	got := map[string][]string{}
 	seen := map[string]bool{}

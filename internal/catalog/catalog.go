@@ -227,12 +227,37 @@ func Bundle() *model.Bundle {
 		"BatchGetSecretValue", "CancelRotateSecret", "DeleteResourcePolicy", "GetResourcePolicy",
 		"PutResourcePolicy", "RemoveRegionsFromReplication", "ReplicateSecretToRegions", "RotateSecret",
 		"StopReplicationToReplica", "UpdateSecretVersionStage", "ValidateResourcePolicy"}
-	vercel := []string{
-		"GetUser", "CreateProject", "ListProjects", "GetProject", "DeleteProject",
-		"ListProjectEnv", "CreateProjectEnv", "DeleteProjectEnv",
-		"ListProjectDomains", "AddProjectDomain",
-		"CreateDeployment", "ListDeployments", "GetDeployment", "DeleteDeployment",
-		"KvCommand",
+	// Vercel is served from behavior/vercel/api now, under the names its
+	// document declares rather than the fifteen the deleted pack invented --
+	// and the KV half of the pack is vercel.kv, served from
+	// behavior/vercel/kv against the authored document specs/vercel/kv.json.
+	// adoptGenerated replaces these lists with the generated models'
+	// operations; what it cannot do is invent the entries, so the IDs have to
+	// be the ones the bundles register under.
+	//
+	// Real bindings rather than mk(), which binds everything to POST /: the
+	// REST/JSON codec's hand-written Vercel route table went away with the
+	// pack, and internal/conformance reads this catalog directly, without
+	// adoptGenerated. The codes are the document's -- an env create is 201
+	// and a project delete 204, where the pack answered 200 for both.
+	vercel := []model.Operation{
+		op("GetAuthUser", "GET", "/v2/user", 200, true),
+		op("CreateProject", "POST", "/v11/projects", 200, false),
+		op("GetProjects", "GET", "/v10/projects", 200, true),
+		op("GetProject", "GET", "/v9/projects/{idOrName}", 200, true),
+		op("DeleteProject", "DELETE", "/v9/projects/{idOrName}", 204, false),
+		op("FilterProjectEnvs", "GET", "/v10/projects/{idOrName}/env", 200, true),
+		op("CreateProjectEnv", "POST", "/v10/projects/{idOrName}/env", 201, false),
+		op("RemoveProjectEnv", "DELETE", "/v9/projects/{idOrName}/env/{id}", 200, false),
+		op("GetProjectDomains", "GET", "/v9/projects/{idOrName}/domains", 200, true),
+		op("AddProjectDomain", "POST", "/v10/projects/{idOrName}/domains", 200, false),
+		op("CreateDeployment", "POST", "/v13/deployments", 200, false),
+		op("GetDeployments", "GET", "/v7/deployments", 200, true),
+		op("GetDeployment", "GET", "/v13/deployments/{idOrUrl}", 200, true),
+		op("DeleteDeployment", "DELETE", "/v13/deployments/{id}", 200, false),
+	}
+	vercelkv := []model.Operation{
+		op("Command", "POST", "/", 200, false),
 	}
 	// Cloudflare is served from behavior/cloudflare/api now, under the id its
 	// document produces -- cloudflare.api -- and the names that document
@@ -399,34 +424,34 @@ func Bundle() *model.Bundle {
 
 		"ContainerList": {ID: "ContainerList", Kind: model.KindList, Member: "Container"},
 		"Blob": {ID: "Blob", Kind: model.KindStructure, Members: map[string]model.Member{
-			"name":                {Shape: "String"},
-			"container":           {Shape: "String"},
-			"value":               {Shape: "String"},
-			"metadata":            {Shape: "Map"},
-			"content_type":        {Shape: "String"},
-			"cache_control":       {Shape: "String"},
-			"content_encoding":    {Shape: "String"},
-			"content_language":    {Shape: "String"},
-			"content_disposition": {Shape: "String"},
-			"content_md5":         {Shape: "String"},
-			"sequence_number":     {Shape: "String"},
-			"append_offset":       {Shape: "String"},
+			"name":                  {Shape: "String"},
+			"container":             {Shape: "String"},
+			"value":                 {Shape: "String"},
+			"metadata":              {Shape: "Map"},
+			"content_type":          {Shape: "String"},
+			"cache_control":         {Shape: "String"},
+			"content_encoding":      {Shape: "String"},
+			"content_language":      {Shape: "String"},
+			"content_disposition":   {Shape: "String"},
+			"content_md5":           {Shape: "String"},
+			"sequence_number":       {Shape: "String"},
+			"append_offset":         {Shape: "String"},
 			"committed_block_count": {Shape: "String"},
-			"snapshot":            {Shape: "String"},
-			"copy_id":             {Shape: "String"},
-			"copy_status":         {Shape: "String"},
-			"blob_type":           {Shape: "String"},
-			"content_length":      {Shape: "String"},
-			"etag":                {Shape: "String"},
-			"last_modified":       {Shape: "String"},
-			"tags":                {Shape: "Map"},
-			"tag_count":           {Shape: "String"},
-			"access_tier":         {Shape: "String"},
-			"access_tier_inferred": {Shape: "String"},
-			"lease_id":            {Shape: "String"},
-			"lease_status":        {Shape: "String"},
-			"lease_state":         {Shape: "String"},
-			"lease_duration":      {Shape: "String"},
+			"snapshot":              {Shape: "String"},
+			"copy_id":               {Shape: "String"},
+			"copy_status":           {Shape: "String"},
+			"blob_type":             {Shape: "String"},
+			"content_length":        {Shape: "String"},
+			"etag":                  {Shape: "String"},
+			"last_modified":         {Shape: "String"},
+			"tags":                  {Shape: "Map"},
+			"tag_count":             {Shape: "String"},
+			"access_tier":           {Shape: "String"},
+			"access_tier_inferred":  {Shape: "String"},
+			"lease_id":              {Shape: "String"},
+			"lease_status":          {Shape: "String"},
+			"lease_state":           {Shape: "String"},
+			"lease_duration":        {Shape: "String"},
 		}},
 		"FilterBlob": {ID: "FilterBlob", Kind: model.KindStructure, Members: map[string]model.Member{
 			"name":      {Shape: "String"},
@@ -494,8 +519,8 @@ func Bundle() *model.Bundle {
 	queueSvc.OperationByName("SetServiceProperties").Output = "QueueAccount"
 	queueSvc.OperationByName("GetServiceStats").Output = "QueueAccount"
 	queueSvc.Shapes = map[string]model.Shape{
-		"String":     {ID: "String", Kind: model.KindString},
-		"Map":        {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
+		"String": {ID: "String", Kind: model.KindString},
+		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
 		"Queue": {ID: "Queue", Kind: model.KindStructure, Members: map[string]model.Member{
 			"name":         {Shape: "String"},
 			"metadata":     {Shape: "Map"},
@@ -1656,7 +1681,8 @@ func Bundle() *model.Bundle {
 			svc("aws.ssm", "ssm", model.ProtoAWSJSON11, "AmazonSSM", "", "", mk(ssm)),
 			svc("aws.secretsmanager", "secretsmanager", model.ProtoAWSJSON11, "secretsmanager", "", "", mk(sm)),
 			svc("gcp.storage", "storage", model.ProtoGCPRESTSON, "", "", "", mk(gcs)),
-			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", mk(vercel)),
+			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", vercel),
+			svc("vercel.kv", "vercelkv", model.ProtoRESTJSON1, "", "", "", vercelkv),
 			svc("cloudflare.api", "cloudflare", model.ProtoRESTJSON1, "", "", "", cloudflare),
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
 			azureSvc,

@@ -265,6 +265,18 @@ func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault 
 	for _, name := range names {
 		m := shape.Members[name]
 		v, present := req.Input[name]
+		// A payload member whose shape is a structure or a union IS the
+		// request body: the codec decodes that body's members into the input,
+		// so the member itself is never present. Vercel's env create and KV
+		// command are the first operations whose document marks such a member
+		// required, and requiring it here would fail every one of those calls
+		// before a rule ran -- the member cannot be absent without the whole
+		// body being absent, which the operation's own rules check. Opaque
+		// payload members are bound from the body by the codec
+		// (model.PayloadMember), so the check still stands for them.
+		if m.Required && !present && m.Binding.Location == "payload" && !e.model.ScalarBody(m.Shape) {
+			continue
+		}
 		// Required means present, not non-empty. Whether an empty value is
 		// acceptable is a length constraint, which the model already carries
 		// -- and conflating the two took the decision away from the service:

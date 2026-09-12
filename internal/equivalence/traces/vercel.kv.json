@@ -1,0 +1,332 @@
+{
+  "schema": "trace/1",
+  "service": "vercel.kv",
+  "source": "pack:internal/services/vercel/api",
+  "note": "Recorded from the KvCommand half of the hand-written vercel.api pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel KV data plane; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "SET",
+          "k",
+          "v"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": "OK"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "GET",
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": "v"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "get",
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": "v"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "GET",
+          "nope"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": null
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "DEL",
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": 1
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "DEL",
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": 0
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "GET",
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": null
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "SET",
+          "n",
+          3
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": "OK"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "GET",
+          "n"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": "3"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "SET",
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "GET"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "DEL"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          "PING"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "MirrorNotImplemented",
+        "http_status": 501,
+        "fault": "client"
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "_redis": [
+          ""
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "MirrorNotImplemented",
+        "http_status": 501,
+        "fault": "client"
+      },
+      "recorded_as": "KvCommand"
+    }
+  ]
+}

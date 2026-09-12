@@ -37,9 +37,6 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "azure.table" {
 		return azureTableOp(svc, r), nil
 	}
-	if svc.ID == "vercel.api" {
-		return vercelOp(svc, r), nil
-	}
 	if svc.ID == "railway.graphql" {
 		return railwayOp(svc, r), nil
 	}
@@ -384,6 +381,7 @@ func railwayRoute(r *http.Request) string {
 		return "Unknown"
 	}
 }
+
 // azureTableETagList splits an If-Match header into dequoted tokens, like
 // Azurite's etag adapter.
 func azureTableETagList(v string) []any {
@@ -443,63 +441,6 @@ func azureTableRoute(r *http.Request) string {
 	}
 	if m == http.MethodGet {
 		return "QueryEntities"
-	}
-	return "Unknown"
-}
-
-func vercelOp(svc *model.Service, r *http.Request) *model.Operation {
-	name := vercelRoute(r)
-	if op := svc.OperationByName(name); op != nil {
-		return op
-	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
-}
-
-func vercelRoute(r *http.Request) string {
-	path := strings.Trim(r.URL.Path, "/")
-	if path == "" {
-		return "KvCommand"
-	}
-	parts := strings.Split(path, "/")
-	if len(parts) > 0 && len(parts[0]) >= 2 && parts[0][0] == 'v' && parts[0][1] >= '0' && parts[0][1] <= '9' {
-		parts = parts[1:]
-	}
-	if len(parts) == 0 || parts[0] == "" {
-		return "KvCommand"
-	}
-	m := r.Method
-	join := strings.Join(parts, "/")
-	switch {
-	case len(parts) == 0:
-		return "KvCommand"
-	case parts[0] == "user":
-		return "GetUser"
-	case join == "projects" && m == http.MethodPost:
-		return "CreateProject"
-	case join == "projects" && m == http.MethodGet:
-		return "ListProjects"
-	case len(parts) == 2 && parts[0] == "projects" && m == http.MethodGet:
-		return "GetProject"
-	case len(parts) == 2 && parts[0] == "projects" && m == http.MethodDelete:
-		return "DeleteProject"
-	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodGet:
-		return "ListProjectEnv"
-	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodPost:
-		return "CreateProjectEnv"
-	case len(parts) >= 4 && parts[0] == "projects" && parts[2] == "env" && m == http.MethodDelete:
-		return "DeleteProjectEnv"
-	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "domains" && m == http.MethodGet:
-		return "ListProjectDomains"
-	case len(parts) >= 3 && parts[0] == "projects" && parts[2] == "domains" && m == http.MethodPost:
-		return "AddProjectDomain"
-	case join == "deployments" && m == http.MethodPost:
-		return "CreateDeployment"
-	case join == "deployments" && m == http.MethodGet:
-		return "ListDeployments"
-	case len(parts) == 2 && parts[0] == "deployments" && m == http.MethodGet:
-		return "GetDeployment"
-	case len(parts) == 2 && parts[0] == "deployments" && m == http.MethodDelete:
-		return "DeleteDeployment"
 	}
 	return "Unknown"
 }
@@ -789,7 +730,10 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"odata.error": map[string]any{"code": f.Code, "message": map[string]any{"lang": "en-US", "value": f.Message}}})
 	}
-	if svc.ID == "vercel.api" {
+	if svc.ID == "vercel.api" || svc.ID == "vercel.kv" {
+		// Vercel's fault envelope outlives the pack, as Hetzner's and
+		// DigitalOcean's did: it is the shape the vendor's own API answers
+		// faults in, and the KV data plane was served under the same branch.
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
 	}

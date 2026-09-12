@@ -303,7 +303,7 @@ func loadSet(path string) ([]setEntry, error) {
 // other's paths is a category error, and because narrow deliberately treats a
 // selector that matches nothing as fatal, it is a fatal one: it took
 // `mirrorgen --catalog` down entirely for vercel.api, whose catalog operations
-// all sit at /.
+// then all sat at /.
 func applySet(svcs []model.Service, want []setEntry, fromCatalog bool) ([]model.Service, error) {
 	if len(want) == 0 {
 		return svcs, nil

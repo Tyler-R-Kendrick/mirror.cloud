@@ -376,9 +376,81 @@ func railwayRoute(r *http.Request) string {
 // This is deliberately a router, not a GraphQL implementation: it answers which
 // field, and nothing about the selection set, because nothing in this tree
 // projects one yet.
+// seekFragment finds `fragment NAME on Type {` anywhere in a document and
+// leaves *pos just inside that brace, so a root selection which is a spread can
+// be followed to the field it actually selects. It is a separate scan rather
+// than a reuse of gqlRootField's closures because it must not disturb their
+// position until it succeeds.
+func seekFragment(q, want string, pos *int, n int) bool {
+	isName := func(c byte, first bool) bool {
+		return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (!first && c >= '0' && c <= '9')
+	}
+	for i := 0; i+8 <= n; i++ {
+		if q[i] != 'f' || q[i:i+8] != "fragment" {
+			continue
+		}
+		if i > 0 && isName(q[i-1], false) { // part of a longer word
+			continue
+		}
+		j := i + 8
+		if j < n && isName(q[j], false) {
+			continue
+		}
+		// the fragment's name
+		for j < n && (q[j] == ' ' || q[j] == '\t' || q[j] == '\n' || q[j] == '\r' || q[j] == ',') {
+			j++
+		}
+		start := j
+		for j < n && isName(q[j], j == start) {
+			j++
+		}
+		if q[start:j] != want {
+			continue
+		}
+		// its body opens at the next brace outside a string, comment or group
+		depth := 0
+		for ; j < n; j++ {
+			switch q[j] {
+			case '"':
+				for j++; j < n && q[j] != '"'; j++ {
+					if q[j] == '\\' {
+						j++
+					}
+				}
+			case '#':
+				for ; j < n && q[j] != '\n'; j++ {
+				}
+			case '(':
+				depth++
+			case ')':
+				if depth > 0 {
+					depth--
+				}
+			case '{':
+				if depth == 0 {
+					*pos = j + 1
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
+
 func gqlRootField(q string) string {
 	i, n := 0, len(q)
 
+	// A comment runs to the end of its line. Every scan below has to know this,
+	// not just the one that skips ignored tokens: a comment is the one place a
+	// brace can appear that does not open anything, and a scan that reads it
+	// raw lets a comment's TEXT decide which operation ran -- the exact defect
+	// this function replaced a substring switch to avoid.
+	skipComment := func() {
+		for i < n && q[i] != '\n' {
+			i++
+		}
+	}
 	// GraphQL's ignored tokens: whitespace, commas, and # comments.
 	skip := func() {
 		for i < n {
@@ -386,9 +458,7 @@ func gqlRootField(q string) string {
 			case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',':
 				i++
 			case c == '#':
-				for i < n && q[i] != '\n' {
-					i++
-				}
+				skipComment()
 			default:
 				return
 			}
@@ -426,6 +496,8 @@ func gqlRootField(q string) string {
 			switch q[i] {
 			case '"':
 				skipString()
+			case '#':
+				skipComment()
 			case '(':
 				depth++
 			case ')':
@@ -449,6 +521,8 @@ func gqlRootField(q string) string {
 			switch q[i] {
 			case '"':
 				skipString()
+			case '#':
+				skipComment()
 			case '{':
 				depth++
 			case '}':
@@ -461,9 +535,39 @@ func gqlRootField(q string) string {
 		}
 		return false
 	}
-	// The first field of a selection set, seeing past an alias.
-	field := func() string {
+	// The first field of a selection set, seeing past an alias, an inline
+	// fragment and a named spread. Depth-bounded: a document may define
+	// fragments that refer to each other in a cycle, and this runs on input
+	// nobody vouched for.
+	var selection func(depth int) string
+	selection = func(depth int) string {
+		if depth > 8 {
+			return "Unknown"
+		}
 		skip()
+		if i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {
+			i += 3
+			skip()
+			switch word := name(); word {
+			case "on": // inline fragment with a type condition
+				skip()
+				name()
+				if !toSelectionSet() {
+					return "Unknown"
+				}
+				return selection(depth + 1)
+			case "": // inline fragment with no type condition
+				if !toSelectionSet() {
+					return "Unknown"
+				}
+				return selection(depth + 1)
+			default: // a named spread: the field lives in its definition
+				if !seekFragment(q, word, &i, n) {
+					return "Unknown"
+				}
+				return selection(depth + 1)
+			}
+		}
 		first := name()
 		if first == "" {
 			return "Unknown"
@@ -479,6 +583,7 @@ func gqlRootField(q string) string {
 		}
 		return first
 	}
+	field := func() string { return selection(0) }
 
 	for {
 		skip()

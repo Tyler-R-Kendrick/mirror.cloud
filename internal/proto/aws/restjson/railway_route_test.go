@@ -39,7 +39,25 @@ func TestGraphQLRootField(t *testing.T) {
 		{"leading fragment", "fragment F on Project { id }\nquery { project(id:\"p\") { ...F } }", "project"},
 		{"directive", `query Q($d: Boolean!) @skip(if: $d) { projects { edges { node { id } } } }`, "projects"},
 
+		// A comment is the one place a brace can appear that opens nothing, so
+		// every scan has to know it -- not just the one skipping ignored tokens.
+		// Both of these routed on a comment's TEXT before the scans shared it.
+		{"comment before the selection set", "query Q # a { brace in a comment\n { projects { id } }", "projects"},
+		{"comment closing a fragment body", "fragment F on Project { # }\n id }\nquery { projects { id } }", "projects"},
+
+		// A root selection may be a spread or an inline fragment rather than a
+		// field. The substring switch followed these by accident, because the
+		// field name was somewhere in the document; the scan has to mean it.
+		{"named spread", "fragment F on Query { projects { id } }\nquery { ...F }", "projects"},
+		{"spread defined after its use", "query { ...F }\nfragment F on Query { service(id:\"s\") { id } }", "service"},
+		{"spread past a same-prefix fragment", "fragment FF on Q { service { id } }\nfragment F on Q { projects { id } }\nquery { ...F }", "projects"},
+		{"inline fragment with a type", `query { ... on Query { projects { id } } }`, "projects"},
+		{"inline fragment with no type", `query { ... { projects { id } } }`, "projects"},
+
 		// Nothing to route to.
+		{"mutually cyclic fragments", "fragment A on Q { ...B }\nfragment B on Q { ...A }\nquery { ...A }", "Unknown"},
+		{"self-cyclic fragment", "fragment A on Q { ...A }\nquery { ...A }", "Unknown"},
+		{"spread naming no fragment", `query { ...Nope }`, "Unknown"},
 		{"empty", ``, "Unknown"},
 		{"not a document", `{{{`, "Unknown"},
 		{"unterminated", `query {`, "Unknown"},

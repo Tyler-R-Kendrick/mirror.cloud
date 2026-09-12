@@ -17,5 +17,21 @@
     "goes green. TestKnownRedIsDeclaredHonestly enforces both halves: every entry must name a test",
     "that exists in the tree and carry a non-empty reason."
   ],
-  "expected": []
+  "expected": [
+    {
+      "test": "TestRatchetNotExceeded",
+      "package": "./internal/check",
+      "why": "Deliberate, and the point of the ratchet. The baseline is the PRE-DRIFT target, not a floor to raise: two packs -- azure/blobs and railway/graphql -- were added after it was cut, so the tree exceeds it until both are extracted. Goes green by deleting those packs, never by running `ratchet -write`."
+    },
+    {
+      "test": "TestRatchetBaselineMatchesTree",
+      "package": "./internal/check",
+      "why": "The other half of the same statement: ratchet.json is deliberately stale relative to the tree, for exactly as long as TestRatchetNotExceeded is red, and for the same two packs."
+    },
+    {
+      "test": "TestEveryServedServiceIsDescribedByASpecification",
+      "package": "./internal/specboot",
+      "why": "Five services are served with no generated model. Three are AWS services whose Smithy model the receiver cannot yet ingest (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb); two are the hand-written packs still to be extracted (azure.blobs, railway.graphql). The count may only fall."
+    }
+  ]
 }

@@ -17,10 +17,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/fusion"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/aws/smithy"
@@ -371,7 +371,7 @@ func emitAll(outDir string, svcs []model.Service) error {
 }
 
 func emitService(outDir string, svc model.Service) error {
-	provider, pkg := splitID(svc.ID)
+	provider, pkg := generated.ServicePath(svc.ID)
 	dir := filepath.Join(outDir, provider, pkg)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -401,32 +401,6 @@ func emitService(outDir string, svc model.Service) error {
 		}
 	}
 	return nil
-}
-
-func splitID(id string) (provider, pkg string) {
-	provider, rest, ok := strings.Cut(id, ".")
-	if !ok {
-		provider, rest = "unknown", id
-	}
-	pkg = sanitizePkg(rest)
-	if pkg == "" {
-		pkg = "service"
-	}
-	return provider, pkg
-}
-
-func sanitizePkg(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-		}
-	}
-	out := b.String()
-	if out != "" && unicode.IsDigit(rune(out[0])) {
-		out = "s" + out
-	}
-	return out
 }
 
 func marshalService(svc model.Service) ([]byte, error) {
@@ -540,7 +514,6 @@ import (
 	"io/fs"
 	"path"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -573,17 +546,8 @@ func Model(serviceID string) (*model.Service, error) {
 	if svc, ok := cached[serviceID]; ok {
 		return svc, nil
 	}
-	provider, rest, ok := strings.Cut(serviceID, ".")
-	if !ok {
-		return nil, fmt.Errorf("generated: %q has no provider prefix", serviceID)
-	}
-	var pkg strings.Builder
-	for _, r := range strings.ToLower(rest) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			pkg.WriteRune(r)
-		}
-	}
-	raw, err := files.ReadFile(path.Join(provider, pkg.String(), "model.json.gz"))
+	provider, pkg := ServicePath(serviceID)
+	raw, err := files.ReadFile(path.Join(provider, pkg, "model.json.gz"))
 	if err != nil {
 		return nil, fmt.Errorf("generated: no model for %s: %w", serviceID, err)
 	}

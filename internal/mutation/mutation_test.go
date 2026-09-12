@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -171,22 +172,6 @@ var mutants = []mutant{
 		new:  `headers.Set("x-amz-delete-marker", "false")`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCopyObjectSourceVersions",
-	},
-	{
-		name: "s3-hide-delete-marker-version",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old: `	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
-	h.Set("Last-Modified", str(meta["mtime"]))
-	if version := str(meta["versionId"]); version != "" {
-		h.Set("x-amz-version-id", version)
-	}`,
-		new: `	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
-	h.Set("Last-Modified", str(meta["mtime"]))
-	if version := str(meta["versionId"]); false {
-		h.Set("x-amz-version-id", version)
-	}`,
-		pkg: "./internal/services/aws/s3",
-		run: "TestCopyObjectSourceVersions",
 	},
 	{
 		name: "s3-hide-delete-marker-time",
@@ -1119,8 +1104,8 @@ var mutants = []mutant{
 	{
 		name: "s3-list-uploads-accept-zero-limit",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `maxUploads < 1 || maxUploads > 1000`,
-		new:  `maxUploads < 0 || maxUploads > 1000`,
+		old:  `maxUploads < 0 || maxUploads > 1000`,
+		new:  `maxUploads < -1 || maxUploads > 1000`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestListMultipartUploadsPaginationAndDelimiter",
 	},
@@ -1143,40 +1128,32 @@ var mutants = []mutant{
 	{
 		name: "s3-list-uploads-ignore-http-limit",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `parameter("", "max-uploads")`,
-		new:  `parameter("", "mutated-max-uploads")`,
+		old:  `req.Input["MaxUploads"] = q.Get("max-uploads")`,
+		new:  `req.Input["MaxUploads"] = q.Get("mutated-max-uploads")`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
 	{
 		name: "s3-list-uploads-ignore-http-key-marker",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `parameter("KeyMarker", "key-marker")`,
-		new:  `parameter("KeyMarker", "mutated-key-marker")`,
+		old:  `req.Input["KeyMarker"] = q.Get("key-marker")`,
+		new:  `req.Input["KeyMarker"] = q.Get("mutated-key-marker")`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
 	{
 		name: "s3-list-uploads-ignore-http-upload-marker",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `parameter("UploadIdMarker", "upload-id-marker")`,
-		new:  `parameter("UploadIdMarker", "mutated-upload-id-marker")`,
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerS3QuerySemantics",
-	},
-	{
-		name: "s3-list-uploads-ignore-prefix",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `prefix := parameter("Prefix", "prefix")`,
-		new:  `prefix := ""`,
+		old:  `req.Input["UploadIdMarker"] = q.Get("upload-id-marker")`,
+		new:  `req.Input["UploadIdMarker"] = q.Get("mutated-upload-id-marker")`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
 	{
 		name: "s3-list-uploads-ignore-http-delimiter",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `parameter("Delimiter", "delimiter")`,
-		new:  `parameter("Delimiter", "mutated-delimiter")`,
+		old:  `req.Input["Delimiter"] = q.Get("delimiter")`,
+		new:  `req.Input["Delimiter"] = q.Get("mutated-delimiter")`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
@@ -2951,14 +2928,6 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `_ = p.col(req, "versioning").Put(ctx, b, []byte(st))`,
 		new:  `_ = p.col(req, "versioning").Put(ctx, b, []byte("Suspended"))`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestBucketVersioningState",
-	},
-	{
-		name: "s3-versioning-return-put-status",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "_ = p.col(req, \"versioning\").Put(ctx, b, []byte(st))",
-		new:  "_ = p.col(req, \"versioning\").Put(ctx, b, []byte(\"Suspended\"))",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketVersioningState",
 	},
@@ -6998,7 +6967,7 @@ var mutants = []mutant{
 		run:  "TestStatesMapValidation",
 	},
 	{
-		name: "states-accept-oversized-map-batch",
+		name: "states-widen-max-input-bytes-bound",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 		old:  `validateInteger(batcher, path, "MaxInputBytesPerBatch", 1, 262144)`,
 		new:  `validateInteger(batcher, path, "MaxInputBytesPerBatch", 1, 262145)`,
@@ -13817,14 +13786,6 @@ var mutants = []mutant{
 		run:  "TestObjectSSECustomerKey",
 	},
 	{
-		name: "s3-skip-multipart-customer-encryption-validation",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "sseCustomerKeyMD5, err := requestSSECustomerKey(req)\n\tif err != nil {",
-		new:  "sseCustomerKeyMD5, err := requestSSECustomerKey(req)\n\tif false && err != nil {",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestMultipartSSECustomerKey",
-	},
-	{
 		name: "s3-drop-multipart-customer-encryption-state",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled`,
@@ -16544,8 +16505,8 @@ var mutants = []mutant{
 	{
 		name: "s3-list-multipart-reject-zero-limit",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if maxUploads == 0 {\n\t\tmaxUploads = 1000\n\t}\n\tif maxUploads < 1 || maxUploads > 1000 {",
-		new:  "if maxUploads < 0 {\n\t\tmaxUploads = 1000\n\t}\n\tif maxUploads < 1 || maxUploads > 1000 {",
+		old:  "if maxUploads == 0 {\n\t\tmaxUploads = 1000\n\t}",
+		new:  "if false {\n\t\tmaxUploads = 1000\n\t}",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestMultipartZeroLimitsUseDefaults",
 	},
@@ -16680,7 +16641,7 @@ var mutants = []mutant{
 	{
 		name: "s3-list-uploads-ignore-http-prefix",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `prefix := parameter("Prefix", "prefix")`,
+		old:  `prefix := str(req.Input["Prefix"])`,
 		new:  `prefix := ""`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
@@ -17334,14 +17295,6 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `Fields: map[string]any{"ETag": etag, "PartNumber": strconv.Itoa(number), "MinSizeAllowed": 5 << 20, "ProposedSize": len(part.body)}`,
 		new:  `Fields: map[string]any{}`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCompleteMultipartUploadManifest",
-	},
-	{
-		name: "s3-complete-drop-checksum-part-message",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `Message: "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag."`,
-		new:  `Message: ""`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCompleteMultipartUploadManifest",
 	},
@@ -22190,6 +22143,55 @@ func TestMutantsAreKilled(t *testing.T) {
 	// A shard that matched nothing is a misconfiguration, not a fast pass.
 	if ran == 0 {
 		t.Fatalf("shard %d of %d selected none of the %d mutants", index, count, len(mutants))
+	}
+}
+
+// TestMutantNamesAreUniqueAndDistinct catches two ways this table can overstate
+// how much it proves. It was doing both when this was written.
+//
+// A NAME is an identity: what a shard selects, what the harness reports, and --
+// since known-red.json exists -- what an expected failure is declared by. Two
+// mutants sharing one make all three ambiguous, because Go runs the second
+// subtest as `name#01`, so anything naming it speaks for only one of them.
+//
+// A REWRITE plus what is asserted to catch it is the experiment. Two mutants
+// making the same rewrite to the same line AND naming the same package and
+// test are one experiment run twice: the suite pays a full build and test round
+// for the second and learns nothing. Two mutants making the same rewrite but
+// naming DIFFERENT tests are two claims, not one -- the SQS receive/redrive
+// pair says a line must be caught by a pack characterization and by a booted
+// server, which is more than either says alone -- so the key includes both.
+//
+// Getting that distinction wrong is why this is worth stating: keyed on the
+// rewrite alone it reports ten pairs, of which six are legitimate.
+//
+// Both checks run in milliseconds, in the fast suite, for the same reason
+// TestMutantNeedlesExist does.
+func TestMutantNamesAreUniqueAndDistinct(t *testing.T) {
+	byName := map[string]int{}
+	byExperiment := map[string][]string{}
+	for _, m := range mutants {
+		byName[m.name]++
+		key := strings.Join([]string{m.file, m.old, m.new, m.pkg, m.run}, "\x00")
+		byExperiment[key] = append(byExperiment[key], m.name)
+	}
+	for _, m := range mutants {
+		if byName[m.name] > 1 {
+			t.Errorf("%s is declared %d times. A name is what a shard selects, what the "+
+				"harness reports, and what known-red.json declares an expected failure by; "+
+				"two mutants sharing one become `name` and `name#01`, and anything naming it "+
+				"speaks for only one of them.", m.name, byName[m.name])
+			byName[m.name] = 1 // report each name once
+		}
+	}
+	for _, names := range byExperiment {
+		if len(names) > 1 {
+			sort.Strings(names)
+			t.Errorf("%v are the same rewrite asserted by the same test, so they are one "+
+				"experiment run %d times: the suite pays a build and a test round per copy "+
+				"and learns nothing from the extras. Delete all but one, or point the others "+
+				"at the distinct behaviour they were meant to defend.", names, len(names))
+		}
 	}
 }
 

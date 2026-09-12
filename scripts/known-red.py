@@ -40,7 +40,12 @@ RULE = "known-red: " + "=" * 62
 
 def main(argv):
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(root, "known-red.json")
+    # KNOWN_RED_LIST exists so this can be driven against a fixture. Its own
+    # test used to assert the parent/subtest rule using whichever subtest the
+    # repository happened to declare, which made the test fail the moment that
+    # entry was retired -- coupling a test of the SCRIPT to the state of the
+    # tree it reports on.
+    path = os.environ.get("KNOWN_RED_LIST") or os.path.join(root, "known-red.json")
     try:
         with open(path) as f:
             declared = {e["test"]: e for e in json.load(f)["expected"]}

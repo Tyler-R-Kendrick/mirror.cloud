@@ -111,9 +111,21 @@ func TestKnownRedScriptNamesANewFailure(t *testing.T) {
 	if _, err := os.Stat(script); err != nil {
 		t.Fatalf("scripts/known-red.py: %v", err)
 	}
+	// Driven against a fixture, not against the repository's own list: a test
+	// of the script must not fail because an entry was legitimately retired,
+	// which is exactly what happened when the S3 mutants were fixed and their
+	// entries deleted.
+	fixture := filepath.Join(t.TempDir(), "known-red.json")
+	if err := os.WriteFile(fixture, []byte(`{"expected":[
+	  {"test":"TestRatchetNotExceeded","package":"./internal/check","why":"fixture"},
+	  {"test":"TestMutantsAreKilled/some-declared-mutant","package":"./internal/mutation","why":"fixture"}
+	]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	run := func(output string) (string, bool) {
 		t.Helper()
 		cmd := exec.Command("python3", script)
+		cmd.Env = append(os.Environ(), "KNOWN_RED_LIST="+fixture)
 		cmd.Stdin = strings.NewReader(output)
 		out, err := cmd.CombinedOutput()
 		return string(out), err == nil
@@ -138,7 +150,7 @@ func TestKnownRedScriptNamesANewFailure(t *testing.T) {
 	}
 
 	// A parent that fails only because a declared subtest did is not new.
-	got, ok = run("--- FAIL: TestMutantsAreKilled (0.01s)\n    --- FAIL: TestMutantsAreKilled/s3-list-uploads-accept-zero-limit (3.00s)\n")
+	got, ok = run("--- FAIL: TestMutantsAreKilled (0.01s)\n    --- FAIL: TestMutantsAreKilled/some-declared-mutant (3.00s)\n")
 	if !ok || strings.Contains(got, "NEW FAILURES") {
 		t.Errorf("a parent of a declared subtest was reported as new:\n%s", got)
 	}

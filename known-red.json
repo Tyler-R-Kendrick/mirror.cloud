@@ -32,21 +32,6 @@
       "test": "TestEveryServedServiceIsDescribedByASpecification",
       "package": "./internal/specboot",
       "why": "Five services are served with no generated model. Three are AWS services whose Smithy model the receiver cannot yet ingest (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb); two are the hand-written packs still to be extracted (azure.blobs, railway.graphql). The count may only fall."
-    },
-    {
-      "test": "TestMutantsAreKilled/s3-list-uploads-ignore-http-delimiter",
-      "package": "./internal/mutation",
-      "why": "An EQUIVALENT mutant: no test can kill it, because the code it rewrites has no observable effect. The S3 pack reads the query string in two places, and `delimiter` is hydrated by the first, so the per-operation fallback the mutant rewrites is unreachable. Recorded in full as C36. Goes away with the second read, not with a new test."
-    },
-    {
-      "test": "TestMutantsAreKilled/s3-list-uploads-ignore-http-key-marker",
-      "package": "./internal/mutation",
-      "why": "Equivalent for the same reason as -ignore-http-delimiter: `key-marker` is in the hydration block, so the fallback that names it is dead code. C36."
-    },
-    {
-      "test": "TestMutantsAreKilled/s3-list-uploads-accept-zero-limit",
-      "package": "./internal/mutation",
-      "why": "Equivalent for an unrelated reason. It flips `maxUploads < 1` to `< 0`, and those differ only at zero -- three lines below a `maxUploads == 0` that has already rewritten zero to 1000. C36."
     }
   ]
 }

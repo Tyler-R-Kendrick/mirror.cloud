@@ -1,10 +1,10 @@
 {
-  "packs": 50,
-  "case_labels": 1800,
-  "services_files": 88,
-  "services_loc": 51612,
-  "fault_sites": 955,
-  "register_sites": 50,
+  "packs": 47,
+  "case_labels": 1734,
+  "services_files": 82,
+  "services_loc": 45537,
+  "fault_sites": 754,
+  "register_sites": 47,
   "pack_dirs": [
     "aws/acm",
     "aws/apigateway",
@@ -52,10 +52,7 @@
     "aws/tagging",
     "aws/timestream",
     "aws/xray",
-    "azure/blobs",
-    "gcp/gcs",
-    "railway/graphql",
-    "vercel/api"
+    "gcp/gcs"
   ],
   "routing_mismatches": 0,
   "routing_mismatch_services": null

@@ -2830,9 +2830,14 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 	}
 	// Zero is deliberately still folded to the default rather than refused or
 	// honoured as "return nothing". What the real service does with
-	// max-uploads=0 is an open question this has no evidence for -- see the
-	// known-red entry for s3-list-uploads-accept-zero-limit -- and guessing
+	// max-uploads=0 is an open question this has no evidence for, and guessing
 	// would replace a documented unknown with an undocumented one.
+	//
+	// The bound below is what the s3-list-uploads-accept-zero-limit mutant
+	// rewrites, and it is killed by the assertion that a NEGATIVE max-uploads
+	// is refused -- which is evidence-free in the right way, because it writes
+	// down what the code already does. Zero itself is asserted nowhere on
+	// purpose: an assertion either way would be the guess this avoids.
 	if maxUploads == 0 {
 		maxUploads = 1000
 	}

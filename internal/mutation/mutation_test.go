@@ -21877,6 +21877,22 @@ var mutants = []mutant{
 		run:  "TestGraphQLRootField",
 	},
 	{
+		name: "railway-route-comment-opens-a-selection-set",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "\t\t\tcase '#':\n\t\t\t\tskipComment()\n\t\t\tcase '(':",
+		new:  "\t\t\tcase '\\v':\n\t\t\t\tskipComment()\n\t\t\tcase '(':",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestGraphQLRootField",
+	},
+	{
+		name: "railway-route-ignore-fragment-spread",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "\t\tif i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {",
+		new:  "\t\tif false && i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestGraphQLRootField",
+	},
+	{
 		name: "railway-route-read-comments-as-selection",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
 		old:  "\t\t\tcase c == '#':",

@@ -1,9 +1,9 @@
 {
   "packs": 47,
-  "case_labels": 1767,
-  "services_files": 85,
-  "services_loc": 50835,
-  "fault_sites": 942,
+  "case_labels": 1734,
+  "services_files": 82,
+  "services_loc": 45537,
+  "fault_sites": 754,
   "register_sites": 47,
   "pack_dirs": [
     "aws/acm",

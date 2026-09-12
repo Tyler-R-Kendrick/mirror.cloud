@@ -1,0 +1,52 @@
+{
+  "comment": [
+    "Every test failure this repository currently expects, and why.",
+    "",
+    "It exists because a step that is already red absorbs the next failure without trace.",
+    "TestGenerateCatalogIdempotent was red on main for two merges, inside a step red for the",
+    "ratchet; TestFirehoseSnowflakeSecretAndPersistentBuffer failed once inside the same step",
+    "and was invisible for the same reason. Neither was hidden cleverly. Both were hidden by a",
+    "colour that already meant `failing`.",
+    "",
+    "scripts/known-red.sh reads a `go test` run and says which of its failures are on this list",
+    "and which are not. It does NOT make anything pass: every entry here is still a red test and",
+    "still fails its step. What changes is that the first line of the output says whether the red",
+    "is the one expected or a new one -- which is the whole difference between a gate and a colour.",
+    "",
+    "An entry may be added only with a reason a reader can check, and removed the moment the test",
+    "goes green. TestKnownRedIsDeclaredHonestly enforces both halves: every entry must name a test",
+    "that exists in the tree and carry a non-empty reason."
+  ],
+  "expected": [
+    {
+      "test": "TestRatchetNotExceeded",
+      "package": "./internal/check",
+      "why": "Deliberate, and the point of the ratchet. The baseline is the PRE-DRIFT target, not a floor to raise: three packs -- azure/blobs, railway/graphql and vercel/api -- were added after it was cut, so the tree exceeds it until all three are extracted. Goes green by deleting those packs, never by running `ratchet -write`."
+    },
+    {
+      "test": "TestRatchetBaselineMatchesTree",
+      "package": "./internal/check",
+      "why": "The other half of the same statement: ratchet.json is deliberately stale relative to the tree, for exactly as long as TestRatchetNotExceeded is red, and for the same three packs."
+    },
+    {
+      "test": "TestEveryServedServiceIsDescribedByASpecification",
+      "package": "./internal/specboot",
+      "why": "Five services are served with no generated model. Three are AWS services whose Smithy model the receiver cannot yet ingest (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb); two are the hand-written packs still to be extracted (azure.blobs, railway.graphql). The count may only fall."
+    },
+    {
+      "test": "TestMutantsAreKilled/s3-list-uploads-ignore-http-delimiter",
+      "package": "./internal/mutation",
+      "why": "An EQUIVALENT mutant: no test can kill it, because the code it rewrites has no observable effect. The S3 pack reads the query string in two places, and `delimiter` is hydrated by the first, so the per-operation fallback the mutant rewrites is unreachable. Recorded in full as C36. Goes away with the second read, not with a new test."
+    },
+    {
+      "test": "TestMutantsAreKilled/s3-list-uploads-ignore-http-key-marker",
+      "package": "./internal/mutation",
+      "why": "Equivalent for the same reason as -ignore-http-delimiter: `key-marker` is in the hydration block, so the fallback that names it is dead code. C36."
+    },
+    {
+      "test": "TestMutantsAreKilled/s3-list-uploads-accept-zero-limit",
+      "package": "./internal/mutation",
+      "why": "Equivalent for an unrelated reason. It flips `maxUploads < 1` to `< 0`, and those differ only at zero -- three lines below a `maxUploads == 0` that has already rewritten zero to 1000. C36."
+    }
+  ]
+}

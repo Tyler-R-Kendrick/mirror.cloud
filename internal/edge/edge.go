@@ -87,7 +87,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	awsChunkedDecoded := false
 	awsChunkedInvalid := false
 	if r.Method == http.MethodOptions {
-		if svc := s.demux(r); svc == nil || svc.ID != "aws.s3" {
+		demuxed := s.demux(r)
+		if demuxed != nil && isAzureStorage(demuxed.ID) {
+			id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
+			s.azureCorsPreflight(w, r, id, demuxed, idgen.Next(s.deps.Rand))
+			return
+		}
+		if demuxed == nil || demuxed.ID != "aws.s3" {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Headers", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "*")
@@ -169,6 +175,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "Request has expired", http.StatusForbidden)
 		return
+	}
+	if svc != nil && isAzureStorage(svc.ID) {
+		if fault := azureAuthFault(r, s.deps.Clock.Now()); fault != nil {
+			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
+			return
+		}
+		if h := s.azureCorsResponseHeaders(r, id, svc.ID); h != nil {
+			w = &azureCorsResponseWriter{ResponseWriter: w, headers: h}
+		}
 	}
 	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures {
 		secret := "test"
@@ -261,6 +276,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	op, err := codec.Route(svc, r)
 	if err != nil {
 		s.fault(w, codec, svc, &model.Operation{Name: "unknown"}, err, rid)
+		return
+	}
+	if (svc.ID == "azure.blobs" || svc.ID == "azure.table") && op.Name == "SubmitBatch" {
+		s.serveAzureBatch(w, r, rid)
 		return
 	}
 	req, err := codec.Decode(svc, op, r)
@@ -504,8 +523,8 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		if digitaloceanRequest(r) {
 			return s.bundle.ServiceByID("digitalocean.v2")
 		}
-		if azureRequest(r) {
-			return s.bundle.ServiceByID("azure.blobs")
+		if id := azureService(r); id != "" {
+			return s.bundle.ServiceByID(id)
 		}
 		if cloudflareRequest(r) {
 			return s.bundle.ServiceByID("cloudflare.api")
@@ -615,6 +634,23 @@ func digitaloceanRequest(r *http.Request) bool {
 	return strings.HasPrefix(path, "/v2/droplets") || strings.HasPrefix(path, "/v2/domains")
 }
 
+func azureService(r *http.Request) string {
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Contains(host, "queue.core.windows.net") {
+		return "azure.queue"
+	}
+	if strings.Contains(host, "table.core.windows.net") {
+		return "azure.table"
+	}
+	if azureRequest(r) {
+		return "azure.blobs"
+	}
+	return ""
+}
+
 func azureRequest(r *http.Request) bool {
 	host := strings.ToLower(r.Host)
 	if i := strings.IndexByte(host, ':'); i >= 0 {
@@ -682,6 +718,13 @@ func vercelService(r *http.Request) string {
 		return "vercel.api"
 	}
 	return ""
+}
+
+// kvRequest reports whether a Vercel request addresses the KV data plane:
+// every store's host is a subdomain of kv.vercel-storage.com, which the
+// authored document (specs/vercel/kv.json) records as the service's server.
+func kvRequest(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Host), "kv.vercel-storage")
 }
 
 func sqsQueuePath(path string) bool {

@@ -34,6 +34,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "aws.es" {
 		return opensearchOp(svc, r), nil
 	}
+	if svc.ID == "azure.table" {
+		return azureTableOp(svc, r), nil
+	}
 	if svc.ID == "railway.graphql" {
 		return railwayOp(svc, r), nil
 	}
@@ -376,9 +379,81 @@ func railwayRoute(r *http.Request) string {
 // This is deliberately a router, not a GraphQL implementation: it answers which
 // field, and nothing about the selection set, because nothing in this tree
 // projects one yet.
+// seekFragment finds `fragment NAME on Type {` anywhere in a document and
+// leaves *pos just inside that brace, so a root selection which is a spread can
+// be followed to the field it actually selects. It is a separate scan rather
+// than a reuse of gqlRootField's closures because it must not disturb their
+// position until it succeeds.
+func seekFragment(q, want string, pos *int, n int) bool {
+	isName := func(c byte, first bool) bool {
+		return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (!first && c >= '0' && c <= '9')
+	}
+	for i := 0; i+8 <= n; i++ {
+		if q[i] != 'f' || q[i:i+8] != "fragment" {
+			continue
+		}
+		if i > 0 && isName(q[i-1], false) { // part of a longer word
+			continue
+		}
+		j := i + 8
+		if j < n && isName(q[j], false) {
+			continue
+		}
+		// the fragment's name
+		for j < n && (q[j] == ' ' || q[j] == '\t' || q[j] == '\n' || q[j] == '\r' || q[j] == ',') {
+			j++
+		}
+		start := j
+		for j < n && isName(q[j], j == start) {
+			j++
+		}
+		if q[start:j] != want {
+			continue
+		}
+		// its body opens at the next brace outside a string, comment or group
+		depth := 0
+		for ; j < n; j++ {
+			switch q[j] {
+			case '"':
+				for j++; j < n && q[j] != '"'; j++ {
+					if q[j] == '\\' {
+						j++
+					}
+				}
+			case '#':
+				for ; j < n && q[j] != '\n'; j++ {
+				}
+			case '(':
+				depth++
+			case ')':
+				if depth > 0 {
+					depth--
+				}
+			case '{':
+				if depth == 0 {
+					*pos = j + 1
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
+
 func gqlRootField(q string) string {
 	i, n := 0, len(q)
 
+	// A comment runs to the end of its line. Every scan below has to know this,
+	// not just the one that skips ignored tokens: a comment is the one place a
+	// brace can appear that does not open anything, and a scan that reads it
+	// raw lets a comment's TEXT decide which operation ran -- the exact defect
+	// this function replaced a substring switch to avoid.
+	skipComment := func() {
+		for i < n && q[i] != '\n' {
+			i++
+		}
+	}
 	// GraphQL's ignored tokens: whitespace, commas, and # comments.
 	skip := func() {
 		for i < n {
@@ -386,9 +461,7 @@ func gqlRootField(q string) string {
 			case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',':
 				i++
 			case c == '#':
-				for i < n && q[i] != '\n' {
-					i++
-				}
+				skipComment()
 			default:
 				return
 			}
@@ -426,6 +499,8 @@ func gqlRootField(q string) string {
 			switch q[i] {
 			case '"':
 				skipString()
+			case '#':
+				skipComment()
 			case '(':
 				depth++
 			case ')':
@@ -449,6 +524,8 @@ func gqlRootField(q string) string {
 			switch q[i] {
 			case '"':
 				skipString()
+			case '#':
+				skipComment()
 			case '{':
 				depth++
 			case '}':
@@ -461,9 +538,39 @@ func gqlRootField(q string) string {
 		}
 		return false
 	}
-	// The first field of a selection set, seeing past an alias.
-	field := func() string {
+	// The first field of a selection set, seeing past an alias, an inline
+	// fragment and a named spread. Depth-bounded: a document may define
+	// fragments that refer to each other in a cycle, and this runs on input
+	// nobody vouched for.
+	var selection func(depth int) string
+	selection = func(depth int) string {
+		if depth > 8 {
+			return "Unknown"
+		}
 		skip()
+		if i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {
+			i += 3
+			skip()
+			switch word := name(); word {
+			case "on": // inline fragment with a type condition
+				skip()
+				name()
+				if !toSelectionSet() {
+					return "Unknown"
+				}
+				return selection(depth + 1)
+			case "": // inline fragment with no type condition
+				if !toSelectionSet() {
+					return "Unknown"
+				}
+				return selection(depth + 1)
+			default: // a named spread: the field lives in its definition
+				if !seekFragment(q, word, &i, n) {
+					return "Unknown"
+				}
+				return selection(depth + 1)
+			}
+		}
 		first := name()
 		if first == "" {
 			return "Unknown"
@@ -479,6 +586,7 @@ func gqlRootField(q string) string {
 		}
 		return first
 	}
+	field := func() string { return selection(0) }
 
 	for {
 		skip()
@@ -505,6 +613,70 @@ func gqlRootField(q string) string {
 		}
 	}
 }
+
+// azureTableETagList splits an If-Match header into dequoted tokens, like
+// Azurite's etag adapter.
+func azureTableETagList(v string) []any {
+	parts := strings.Split(v, ",")
+	out := make([]any, 0, len(parts))
+	for _, p := range parts {
+		p = strings.Trim(strings.TrimSpace(p), `"`)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func azureTableOp(svc *model.Service, r *http.Request) *model.Operation {
+	name := azureTableRoute(r)
+	if op := svc.OperationByName(name); op != nil {
+		return op
+	}
+	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+}
+
+func azureTableRoute(r *http.Request) string {
+	path := strings.Trim(r.URL.Path, "/")
+	m := r.Method
+	if path == "$batch" && m == http.MethodPost {
+		return "SubmitBatch"
+	}
+	if path == "Tables" || path == "Tables()" {
+		if m == http.MethodPost {
+			return "CreateTable"
+		}
+		return "ListTables"
+	}
+	if strings.HasPrefix(path, "Tables('") && strings.HasSuffix(path, "')") && m == http.MethodDelete {
+		return "DeleteTable"
+	}
+	if strings.Contains(path, "PartitionKey=") {
+		switch m {
+		case http.MethodGet:
+			return "GetEntity"
+		case http.MethodPut:
+			return "UpdateEntity"
+		case http.MethodPatch:
+			return "MergeEntity"
+		case http.MethodDelete:
+			return "DeleteEntity"
+		}
+		return "Unknown"
+	}
+	if strings.HasSuffix(path, "()") && m == http.MethodGet {
+		return "QueryEntities"
+	}
+	if m == http.MethodPost {
+		return "InsertEntity"
+	}
+	if m == http.MethodGet {
+		return "QueryEntities"
+	}
+	return "Unknown"
+}
+
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
 	body, _ := io.ReadAll(r.Body)
 	in := map[string]any{}
@@ -538,6 +710,56 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	}
 	if len(body) > 0 {
 		_ = json.Unmarshal(body, &in)
+	}
+	if svc.ID == "azure.table" {
+		// The entity body spreads into the record at write time, so it must
+		// not also pollute the control members: it moves under __entity.
+		var ent map[string]any
+		if len(body) > 0 && json.Unmarshal(body, &ent) == nil {
+			in["__entity"] = ent
+			for k := range ent {
+				delete(in, k)
+			}
+		}
+		if tn, ok := ent["TableName"]; ok {
+			in["table"] = tn
+		}
+		if v := r.Header.Get("If-Match"); v != "" {
+			in["if_match_list"] = azureTableETagList(v)
+		}
+		if v := r.Header.Get("Prefer"); v != "" {
+			in["prefer"] = v
+		}
+		path := strings.Trim(r.URL.Path, "/")
+		if strings.HasPrefix(path, "Tables('") && strings.HasSuffix(path, "')") {
+			in["table"] = strings.TrimSuffix(strings.TrimPrefix(path, "Tables('"), "')")
+		} else if path != "Tables" && path != "Tables()" && path != "" && !strings.HasPrefix(path, "Tables") && path != "$batch" {
+			tbl := path
+			if i := strings.IndexByte(tbl, '('); i >= 0 {
+				tbl = tbl[:i]
+			}
+			if in["table"] == nil {
+				in["table"] = tbl
+			}
+			if i := strings.Index(path, "PartitionKey='"); i >= 0 {
+				rest := path[i+len("PartitionKey='"):]
+				if j := strings.IndexByte(rest, '\''); j >= 0 {
+					in["PartitionKey"] = rest[:j]
+				}
+			}
+			if i := strings.Index(path, "RowKey='"); i >= 0 {
+				rest := path[i+len("RowKey='"):]
+				if j := strings.IndexByte(rest, '\''); j >= 0 {
+					in["RowKey"] = rest[:j]
+				}
+			}
+		}
+		if in["PartitionKey"] == nil && ent != nil {
+			in["PartitionKey"] = ent["PartitionKey"]
+		}
+		if in["RowKey"] == nil && ent != nil {
+			in["RowKey"] = ent["RowKey"]
+		}
 	}
 	for k, vs := range r.URL.Query() {
 		if _, ok := in[k]; !ok {
@@ -586,8 +808,8 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		_, err := io.WriteString(w, raw)
 		return err
 	}
-	if svc.ID == "railway.graphql" {
-		return encodeRailway(w, status, resp)
+	if svc.ID == "azure.table" {
+		return encodeAzureTable(w, status, op, resp)
 	}
 	// A status that forbids a body gets none. An engine-served operation
 	// always projects an output map -- empty when its response shape declares
@@ -623,39 +845,82 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	return json.NewEncoder(w).Encode(resp.Output)
 }
 
-func encodeRailway(w http.ResponseWriter, status int, resp *spi.Response) error {
+// encodeAzureTable answers the OData JSON shapes: single-entity bodies are
+// the record (etag renamed to odata.etag and echoed as the ETag header),
+// collections are {"value": [...]}, and update/merge/delete are header-only.
+func encodeAzureTable(w http.ResponseWriter, status int, op *model.Operation, resp *spi.Response) error {
+	entity := func() map[string]any {
+		m, _ := resp.Output["entity"].(map[string]any)
+		return m
+	}
+	switch op.Name {
+	case "UpdateEntity", "MergeEntity":
+		w.Header().Set("ETag", azureTableEntityETag(entity()))
+		w.WriteHeader(status)
+		return nil
+	case "DeleteEntity":
+		w.WriteHeader(status)
+		return nil
+	case "InsertEntity":
+		m := entity()
+		w.Header().Set("ETag", azureTableEntityETag(m))
+		if prefer, _ := resp.Output["prefer"].(string); strings.Contains(prefer, "return-no-content") {
+			w.Header().Set("Preference-Applied", "return-no-content")
+			w.WriteHeader(http.StatusNoContent)
+			return nil
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(azureTableEntityJSON(m))
+	case "GetEntity":
+		m := entity()
+		w.Header().Set("ETag", azureTableEntityETag(m))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(azureTableEntityJSON(m))
+	}
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", "application/json")
 	}
 	w.WriteHeader(status)
 	if resp.Output == nil {
-		return json.NewEncoder(w).Encode(map[string]any{"data": nil})
+		return nil
 	}
-	wrap, _ := resp.Output["_wrap"].(string)
 	if lst, ok := resp.Output["_list"]; ok {
 		items, _ := lst.([]any)
-		if items == nil {
-			items = []any{}
-		}
-		var edges []any
+		out := make([]any, 0, len(items))
 		for _, item := range items {
-			edges = append(edges, map[string]any{"node": item})
+			m, _ := item.(map[string]any)
+			out = append(out, azureTableEntityJSON(m))
 		}
-		if edges == nil {
-			edges = []any{}
-		}
-		if wrap == "" {
-			wrap = "projects"
-		}
-		return json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{wrap: map[string]any{"edges": edges}}})
+		return json.NewEncoder(w).Encode(map[string]any{"value": out})
 	}
-	if wrap != "" {
-		if rec, ok := resp.Output[wrap]; ok {
-			return json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{wrap: rec}})
-		}
-	}
-	return json.NewEncoder(w).Encode(map[string]any{"data": resp.Output})
+	return json.NewEncoder(w).Encode(resp.Output)
 }
+
+// azureTableEntityETag reads the record's etag member.
+func azureTableEntityETag(m map[string]any) string {
+	s, _ := m["etag"].(string)
+	return s
+}
+
+// azureTableEntityJSON copies an entity record for the wire: the etag member
+// becomes odata.etag.
+func azureTableEntityJSON(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if k == "etag" {
+			out["odata.etag"] = v
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.ResponseWriter, f *spi.Fault, requestID string) error {
 	status := f.HTTPStatus
 	if status == 0 {
@@ -666,7 +931,14 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.Header().Set("x-mirror-not-implemented", svc.ID+"."+op.Name)
 		status = 501
 	}
+	if svc.ID == "azure.table" {
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"odata.error": map[string]any{"code": f.Code, "message": map[string]any{"lang": "en-US", "value": f.Message}}})
+	}
 	if svc.ID == "vercel.api" {
+		// Vercel's fault envelope outlives the pack, as Hetzner's and
+		// DigitalOcean's did: it is the shape the vendor's own API answers
+		// faults in.
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
 	}

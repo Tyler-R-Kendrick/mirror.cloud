@@ -243,7 +243,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	} else if !bytes.Contains(body, []byte("<UploadId>"+secondM+"</UploadId>")) || !bytes.Contains(body, []byte("<Key>photos/2026/x</Key>")) || !bytes.Contains(body, []byte("<Key>z</Key>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
 		t.Fatalf("list uploads page 2 %s", body)
 	}
-	if code, body, _ := do(http.MethodGet, "/bucket-q?uploads&prefix=photos/&delimiter=/", "", nil); code != 200 || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>")) {
+	if code, body, _ := do(http.MethodGet, "/bucket-q?uploads&prefix=photos/&delimiter=/", "", nil); code != 200 || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>")) || bytes.Count(body, []byte("<Upload>")) != 0 {
 		t.Fatalf("list grouped uploads %d %s", code, body)
 	}
 	for _, number := range []string{"0", "10001", "invalid"} {

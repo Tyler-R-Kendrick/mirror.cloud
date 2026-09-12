@@ -119,6 +119,27 @@ func celFuncs() []cel.EnvOption {
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.
 		binaryDyn("arn", str, dyn, str),
+		// join concatenates a list of values with a separator. PutBlockList
+		// folds staged blocks in request order; CEL has no list join.
+		binaryDyn("join", dyn, str, str),
+		// tagmatch evaluates an Azure tag-condition expression (x-ms-if-tags,
+		// FilterBlobs where) against a tag map and container name; tagkeys
+		// lists the keys an expression references.
+		ternaryDyn("tagmatch", str, dyn, str, cel.BoolType),
+		unaryDyn("tagkeys", str, dyn),
+		// hierList folds blob names into flat-or-BlobPrefix entries for
+		// List Blobs hierarchy; CEL has no indexOf to do it inline.
+		ternaryDyn("hier", dyn, str, str, dyn),
+		// zeros answers a string of n NUL bytes. Sparse fixed-size blobs (an
+		// Azure page blob is born as N zero bytes) need to materialize the
+		// zero fill somewhere, and CEL cannot repeat a character.
+		unaryDyn("zeros", num, str),
+		// substr is byte-based slicing, s[start:end] clamped to the string.
+		// CEL's own string functions count code points, which makes offset
+		// arithmetic wrong the moment a body is not UTF-8.
+		ternaryDyn("substr", str, num, num, str),
+		// blen is the byte length of a string, for the same reason.
+		unaryDyn("blen", str, num),
 		unaryDyn("queueFromArn", str, str),
 		binaryDyn("filterAttrs", dyn, dyn, dyn),
 

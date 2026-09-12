@@ -130,6 +130,25 @@ func (s *shaper) object(sch schema) (model.Shape, bool) {
 	return shape, shape.Kind == model.KindStructure
 }
 
+// synthesize adds the members `x-mirror-input` declares to an operation's
+// request shape. They arrive with no binding and no required marker, because
+// they have none: the codec or the router places them in the input, and
+// whether an absent one is an error is the bundle's call, not the engine's.
+// Each is modelled as a string; membership is what validation reads.
+func (s *shaper) synthesize(id string, names []string) {
+	shape, ok := s.shapes[id]
+	if !ok {
+		return
+	}
+	for _, name := range names {
+		if _, taken := shape.Members[name]; taken {
+			continue
+		}
+		shape.Members[name] = model.Member{Shape: s.stringShape()}
+	}
+	s.shapes[id] = shape
+}
+
 // response is the shape of the operation's success body. An operation that
 // answers with no body gets an empty structure rather than nothing, so a bundle
 // projecting an empty answer still has a shape to be checked against -- the

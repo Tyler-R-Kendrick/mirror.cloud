@@ -19,7 +19,9 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `vercel.kv` | `restJson1` | 1 | 0 |
 | `cloudflare.api` | `restJson1` | 9 | 0 |
 | `hostinger.api` | `restJson1` | 6 | 0 |
-| `azure.blobs` | `restXml` | 8 | 0 |
+| `azure.blobs` | `restXml` | 54 | 1 |
+| `azure.queue` | `restXml` | 16 | 0 |
+| `azure.table` | `restJson1` | 9 | 1 |
 | `digitalocean.v2` | `restJson1` | 8 | 0 |
 | `hetzner.v1` | `restJson1` | 8 | 0 |
 | `railway.graphql` | `restJson1` | 7 | 0 |

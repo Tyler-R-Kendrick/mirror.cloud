@@ -303,7 +303,280 @@ func Bundle() *model.Bundle {
 		op("DNSUpdateDNSRecordsV1", "PUT", "/api/dns/v1/zones/{domain}", 200, false),
 		op("DNSDeleteDNSRecordsV1", "DELETE", "/api/dns/v1/zones/{domain}", 200, false),
 	}
-	azure := []string{"CreateContainer", "GetContainer", "ListContainers", "DeleteContainer", "PutBlob", "GetBlob", "ListBlobs", "DeleteBlob"}
+	azureOps := []model.Operation{
+		op("CreateContainer", "PUT", "/{container}?restype=container", 201, false),
+		op("GetContainer", "GET", "/{container}?restype=container", 200, true),
+		op("ListContainers", "GET", "/?comp=list", 200, true),
+		op("DeleteContainer", "DELETE", "/{container}?restype=container", 202, false),
+		op("PutBlob", "PUT", "/{container}/{blob}", 201, false),
+		op("GetBlob", "GET", "/{container}/{blob}", 200, true),
+		op("ListBlobs", "GET", "/{container}?restype=container&comp=list", 200, true),
+		op("DeleteBlob", "DELETE", "/{container}/{blob}", 202, false),
+		op("PutBlock", "PUT", "/{container}/{blob}?comp=block", 201, false),
+		op("PutBlockList", "PUT", "/{container}/{blob}?comp=blocklist", 201, false),
+		op("GetBlockList", "GET", "/{container}/{blob}?comp=blocklist", 200, true),
+		op("AppendBlock", "PUT", "/{container}/{blob}?comp=appendblock", 201, false),
+		op("UnsupportedQuery", "PUT", "/{container}/{blob}?comp=unsupported", 400, false),
+		op("SetContainerMetadata", "PUT", "/{container}?restype=container&comp=metadata", 200, false),
+		op("GetContainerMetadata", "GET", "/{container}?restype=container&comp=metadata", 200, true),
+		op("SetContainerAcl", "PUT", "/{container}?restype=container&comp=acl", 200, false),
+		op("GetContainerAcl", "GET", "/{container}?restype=container&comp=acl", 200, true),
+		op("AcquireContainerLease", "PUT", "/{container}?comp=lease&restype=container&acquire", 201, false),
+		op("ReleaseContainerLease", "PUT", "/{container}?comp=lease&restype=container&release", 200, false),
+		op("RenewContainerLease", "PUT", "/{container}?comp=lease&restype=container&renew", 200, false),
+		op("BreakContainerLease", "PUT", "/{container}?comp=lease&restype=container&break", 202, false),
+		op("ChangeContainerLease", "PUT", "/{container}?comp=lease&restype=container&change", 200, false),
+		op("GetServiceProperties", "GET", "/?restype=service&comp=properties", 200, true),
+		op("SetServiceProperties", "PUT", "/?restype=service&comp=properties", 202, false),
+		op("GetServiceStats", "GET", "/?restype=service&comp=stats", 200, true),
+		op("GetAccountInfo", "GET", "/?restype=account&comp=properties", 200, true),
+		op("GetBlobProperties", "HEAD", "/{container}/{blob}", 200, true),
+		op("SetBlobMetadata", "PUT", "/{container}/{blob}?comp=metadata", 200, false),
+		op("GetBlobMetadata", "GET", "/{container}/{blob}?comp=metadata", 200, true),
+		op("SetBlobProperties", "PUT", "/{container}/{blob}?comp=properties", 200, false),
+		op("CreatePageBlob", "PUT", "/{container}/{blob}", 201, false),
+		op("PutPage", "PUT", "/{container}/{blob}?comp=page", 201, false),
+		op("ClearPages", "PUT", "/{container}/{blob}?comp=page", 201, false),
+		op("GetPageRanges", "GET", "/{container}/{blob}?comp=pagelist", 200, true),
+		op("ResizePageBlob", "PUT", "/{container}/{blob}?comp=properties", 200, false),
+		op("SetBlobSequenceNumber", "PUT", "/{container}/{blob}?comp=properties", 200, false),
+		op("CreateAppendBlob", "PUT", "/{container}/{blob}", 201, false),
+		op("CreateSnapshot", "PUT", "/{container}/{blob}?comp=snapshot", 201, false),
+		op("StartCopyFromURL", "PUT", "/{container}/{blob}", 202, false),
+		op("CopyBlobFromURL", "PUT", "/{container}/{blob}", 202, false),
+		op("AbortCopy", "PUT", "/{container}/{blob}?comp=copy", 204, false),
+		op("StageBlockFromURL", "PUT", "/{container}/{blob}?comp=block", 201, false),
+		op("SetTags", "PUT", "/{container}/{blob}?comp=tags", 204, false),
+		op("GetTags", "GET", "/{container}/{blob}?comp=tags", 200, true),
+		op("FilterBlobs", "GET", "/?comp=blobs", 200, true),
+		op("SubmitBatch", "POST", "/?comp=batch", 202, false),
+		op("SetBlobTier", "PUT", "/{container}/{blob}?comp=tier", 200, false),
+		op("AcquireBlobLease", "PUT", "/{container}/{blob}?comp=lease&acquire", 201, false),
+		op("ReleaseBlobLease", "PUT", "/{container}/{blob}?comp=lease&release", 200, false),
+		op("RenewBlobLease", "PUT", "/{container}/{blob}?comp=lease&renew", 200, false),
+		op("BreakBlobLease", "PUT", "/{container}/{blob}?comp=lease&break", 202, false),
+		op("ChangeBlobLease", "PUT", "/{container}/{blob}?comp=lease&change", 200, false),
+		op("PutPageFromURL", "PUT", "/{container}/{blob}?comp=page", 201, false),
+		op("AppendBlockFromURL", "PUT", "/{container}/{blob}?comp=appendblock", 201, false),
+		op("GetPageRangesDiff", "GET", "/{container}/{blob}?comp=pagelist", 200, true),
+	}
+	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
+	azureSvc.OperationByName("CreateContainer").Output = "Container"
+	azureSvc.OperationByName("GetContainer").Output = "Container"
+	azureSvc.OperationByName("ListContainers").Output = "ContainerList"
+	azureSvc.OperationByName("PutBlob").Output = "Blob"
+	azureSvc.OperationByName("GetBlob").Output = "BlobBody"
+	azureSvc.OperationByName("ListBlobs").Output = "BlobList"
+	azureSvc.OperationByName("PutBlockList").Output = "Blob"
+	azureSvc.OperationByName("GetBlockList").Output = "BlockList"
+	azureSvc.OperationByName("AppendBlock").Output = "Blob"
+	azureSvc.OperationByName("SetContainerMetadata").Output = "Container"
+	azureSvc.OperationByName("GetContainerMetadata").Output = "Container"
+	azureSvc.OperationByName("SetContainerAcl").Output = "Container"
+	azureSvc.OperationByName("GetContainerAcl").Output = "Container"
+	azureSvc.OperationByName("AcquireContainerLease").Output = "Container"
+	azureSvc.OperationByName("ReleaseContainerLease").Output = "Container"
+	azureSvc.OperationByName("RenewContainerLease").Output = "Container"
+	azureSvc.OperationByName("BreakContainerLease").Output = "Container"
+	azureSvc.OperationByName("ChangeContainerLease").Output = "Container"
+	azureSvc.OperationByName("GetServiceProperties").Output = "Account"
+	azureSvc.OperationByName("SetServiceProperties").Output = "Account"
+	azureSvc.OperationByName("GetServiceStats").Output = "Account"
+	azureSvc.OperationByName("GetAccountInfo").Output = "Account"
+	azureSvc.OperationByName("GetBlobProperties").Output = "Blob"
+	azureSvc.OperationByName("SetBlobMetadata").Output = "Blob"
+	azureSvc.OperationByName("GetBlobMetadata").Output = "Blob"
+	azureSvc.OperationByName("SetBlobProperties").Output = "Blob"
+	azureSvc.OperationByName("CreatePageBlob").Output = "Blob"
+	azureSvc.OperationByName("PutPage").Output = "Blob"
+	azureSvc.OperationByName("ClearPages").Output = "Blob"
+	azureSvc.OperationByName("ResizePageBlob").Output = "Blob"
+	azureSvc.OperationByName("SetBlobSequenceNumber").Output = "Blob"
+	azureSvc.OperationByName("CreateAppendBlob").Output = "Blob"
+	azureSvc.OperationByName("CreateSnapshot").Output = "Blob"
+	azureSvc.OperationByName("StartCopyFromURL").Output = "Blob"
+	azureSvc.OperationByName("CopyBlobFromURL").Output = "Blob"
+	azureSvc.OperationByName("StageBlockFromURL").Output = "Blob"
+	azureSvc.OperationByName("GetPageRanges").Output = "PageRangeList"
+	azureSvc.OperationByName("SetTags").Output = "Blob"
+	azureSvc.OperationByName("GetTags").Output = "Blob"
+	azureSvc.OperationByName("FilterBlobs").Output = "FilterBlobResult"
+	azureSvc.OperationByName("SetBlobTier").Output = "Blob"
+	azureSvc.OperationByName("AcquireBlobLease").Output = "Blob"
+	azureSvc.OperationByName("ReleaseBlobLease").Output = "Blob"
+	azureSvc.OperationByName("RenewBlobLease").Output = "Blob"
+	azureSvc.OperationByName("BreakBlobLease").Output = "Blob"
+	azureSvc.OperationByName("ChangeBlobLease").Output = "Blob"
+	azureSvc.OperationByName("PutPageFromURL").Output = "Blob"
+	azureSvc.OperationByName("AppendBlockFromURL").Output = "Blob"
+	azureSvc.OperationByName("GetPageRangesDiff").Output = "PageRangeList"
+	azureSvc.Shapes = map[string]model.Shape{
+		"String": {ID: "String", Kind: model.KindString},
+		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
+		"Container": {ID: "Container", Kind: model.KindStructure, Members: map[string]model.Member{
+			"name":           {Shape: "String"},
+			"metadata":       {Shape: "Map"},
+			"acl":            {Shape: "String"},
+			"public_access":  {Shape: "String"},
+			"lease_id":       {Shape: "String"},
+			"lease_status":   {Shape: "String"},
+			"lease_state":    {Shape: "String"},
+			"lease_duration": {Shape: "String"},
+		}},
+
+		"ContainerList": {ID: "ContainerList", Kind: model.KindList, Member: "Container"},
+		"Blob": {ID: "Blob", Kind: model.KindStructure, Members: map[string]model.Member{
+			"name":                  {Shape: "String"},
+			"container":             {Shape: "String"},
+			"value":                 {Shape: "String"},
+			"metadata":              {Shape: "Map"},
+			"content_type":          {Shape: "String"},
+			"cache_control":         {Shape: "String"},
+			"content_encoding":      {Shape: "String"},
+			"content_language":      {Shape: "String"},
+			"content_disposition":   {Shape: "String"},
+			"content_md5":           {Shape: "String"},
+			"sequence_number":       {Shape: "String"},
+			"append_offset":         {Shape: "String"},
+			"committed_block_count": {Shape: "String"},
+			"snapshot":              {Shape: "String"},
+			"copy_id":               {Shape: "String"},
+			"copy_status":           {Shape: "String"},
+			"blob_type":             {Shape: "String"},
+			"content_length":        {Shape: "String"},
+			"etag":                  {Shape: "String"},
+			"last_modified":         {Shape: "String"},
+			"tags":                  {Shape: "Map"},
+			"tag_count":             {Shape: "String"},
+			"access_tier":           {Shape: "String"},
+			"access_tier_inferred":  {Shape: "String"},
+			"lease_id":              {Shape: "String"},
+			"lease_status":          {Shape: "String"},
+			"lease_state":           {Shape: "String"},
+			"lease_duration":        {Shape: "String"},
+		}},
+		"FilterBlob": {ID: "FilterBlob", Kind: model.KindStructure, Members: map[string]model.Member{
+			"name":      {Shape: "String"},
+			"container": {Shape: "String"},
+			"tags":      {Shape: "Map"},
+		}},
+		"FilterBlobList": {ID: "FilterBlobList", Kind: model.KindList, Member: "FilterBlob"},
+		"FilterBlobResult": {ID: "FilterBlobResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"where": {Shape: "String"},
+			"blobs": {Shape: "FilterBlobList"},
+		}},
+		"BlobList": {ID: "BlobList", Kind: model.KindList, Member: "Blob"},
+		"BlobBody": {ID: "BlobBody", Kind: model.KindString},
+		"Block": {ID: "Block", Kind: model.KindStructure, Members: map[string]model.Member{
+			"id":    {Shape: "String"},
+			"value": {Shape: "String"},
+		}},
+		"BlockList": {ID: "BlockList", Kind: model.KindList, Member: "Block"},
+		"PageRange": {ID: "PageRange", Kind: model.KindStructure, Members: map[string]model.Member{
+			"start": {Shape: "String"},
+			"end":   {Shape: "String"},
+		}},
+		"PageRanges": {ID: "PageRanges", Kind: model.KindList, Member: "PageRange"},
+		"PageRangeList": {ID: "PageRangeList", Kind: model.KindStructure, Members: map[string]model.Member{
+			"ranges": {Shape: "PageRanges"},
+		}},
+		"Account": {ID: "Account", Kind: model.KindStructure, Members: map[string]model.Member{
+			"properties":   {Shape: "String"},
+			"geo_status":   {Shape: "String"},
+			"account_kind": {Shape: "String"},
+			"sku_name":     {Shape: "String"},
+			"hns":          {Shape: "String"},
+		}},
+	}
+	queueOps := []model.Operation{
+		op("CreateQueue", "PUT", "/{queue}", 201, false),
+		op("ListQueues", "GET", "/?comp=list", 200, true),
+		op("DeleteQueue", "DELETE", "/{queue}", 204, false),
+		op("PutMessage", "POST", "/{queue}/messages", 201, false),
+		op("GetMessages", "GET", "/{queue}/messages", 200, true),
+		op("PeekMessages", "GET", "/{queue}/messages?peekonly=true", 200, true),
+		op("ClearMessages", "DELETE", "/{queue}/messages", 204, false),
+		op("UpdateMessage", "PUT", "/{queue}/messages/{messageid}", 204, false),
+		op("DeleteMessage", "DELETE", "/{queue}/messages/{messageid}", 204, false),
+		op("SetQueueMetadata", "PUT", "/{queue}?comp=metadata", 204, false),
+		op("GetQueueProperties", "GET", "/{queue}?comp=metadata", 200, true),
+		op("SetQueueAcl", "PUT", "/{queue}?comp=acl", 204, false),
+		op("GetQueueAcl", "GET", "/{queue}?comp=acl", 200, true),
+		op("GetServiceProperties", "GET", "/?restype=service&comp=properties", 200, true),
+		op("SetServiceProperties", "PUT", "/?restype=service&comp=properties", 202, false),
+		op("GetServiceStats", "GET", "/?restype=service&comp=stats", 200, true),
+	}
+	queueSvc := svc("azure.queue", "queue", model.ProtoRESTXML, "", "", "", queueOps)
+	queueSvc.OperationByName("CreateQueue").Output = "Queue"
+	queueSvc.OperationByName("ListQueues").Output = "QueueList"
+	queueSvc.OperationByName("PutMessage").Output = "Message"
+	queueSvc.OperationByName("GetMessages").Output = "MessageList"
+	queueSvc.OperationByName("PeekMessages").Output = "MessageList"
+	queueSvc.OperationByName("SetQueueMetadata").Output = "Queue"
+	queueSvc.OperationByName("GetQueueProperties").Output = "Queue"
+	queueSvc.OperationByName("SetQueueAcl").Output = "Queue"
+	queueSvc.OperationByName("GetQueueAcl").Output = "Queue"
+	queueSvc.OperationByName("UpdateMessage").Output = "Message"
+	queueSvc.OperationByName("GetServiceProperties").Output = "QueueAccount"
+	queueSvc.OperationByName("SetServiceProperties").Output = "QueueAccount"
+	queueSvc.OperationByName("GetServiceStats").Output = "QueueAccount"
+	queueSvc.Shapes = map[string]model.Shape{
+		"String": {ID: "String", Kind: model.KindString},
+		"Map":    {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
+		"Queue": {ID: "Queue", Kind: model.KindStructure, Members: map[string]model.Member{
+			"name":         {Shape: "String"},
+			"metadata":     {Shape: "Map"},
+			"acl":          {Shape: "String"},
+			"approx_count": {Shape: "String"},
+		}},
+		"QueueList": {ID: "QueueList", Kind: model.KindList, Member: "Queue"},
+		"Message": {ID: "Message", Kind: model.KindStructure, Members: map[string]model.Member{
+			"id":            {Shape: "String"},
+			"message":       {Shape: "String"},
+			"pop_receipt":   {Shape: "String"},
+			"dequeue_count": {Shape: "String"},
+			"inserted_at":   {Shape: "String"},
+			"expires_at":    {Shape: "String"},
+			"visible_at":    {Shape: "String"},
+		}},
+		"MessageList": {ID: "MessageList", Kind: model.KindList, Member: "Message"},
+		"QueueAccount": {ID: "QueueAccount", Kind: model.KindStructure, Members: map[string]model.Member{
+			"properties": {Shape: "String"},
+			"geo_status": {Shape: "String"},
+		}},
+	}
+	tableOps := []model.Operation{
+		op("CreateTable", "POST", "/Tables", 201, false),
+		op("ListTables", "GET", "/Tables", 200, true),
+		op("DeleteTable", "DELETE", "/Tables('{table}')", 204, false),
+		op("InsertEntity", "POST", "/{table}", 201, false),
+		op("QueryEntities", "GET", "/{table}()", 200, true),
+		op("GetEntity", "GET", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 200, true),
+		op("UpdateEntity", "PUT", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 204, false),
+		op("MergeEntity", "PATCH", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 204, false),
+		op("DeleteEntity", "DELETE", "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')", 204, false),
+		op("SubmitBatch", "POST", "/$batch", 202, false),
+	}
+	tableSvc := svc("azure.table", "table", model.ProtoRESTJSON1, "", "", "", tableOps)
+	tableSvc.OperationByName("CreateTable").Output = "Table"
+	tableSvc.OperationByName("ListTables").Output = "TableList"
+	tableSvc.OperationByName("InsertEntity").Output = "EntityResult"
+	tableSvc.OperationByName("QueryEntities").Output = "EntityList"
+	tableSvc.OperationByName("GetEntity").Output = "EntityResult"
+	tableSvc.OperationByName("UpdateEntity").Output = "EntityResult"
+	tableSvc.OperationByName("MergeEntity").Output = "EntityResult"
+	tableSvc.Shapes = map[string]model.Shape{
+		"String":     {ID: "String", Kind: model.KindString},
+		"Map":        {ID: "Map", Kind: model.KindMap, Key: "String", Member: "String"},
+		"Table":      {ID: "Table", Kind: model.KindStructure, Members: map[string]model.Member{"TableName": {Shape: "String"}}},
+		"TableList":  {ID: "TableList", Kind: model.KindList, Member: "Table"},
+		"Entity":     {ID: "Entity", Kind: model.KindStructure, Members: map[string]model.Member{"PartitionKey": {Shape: "String"}, "RowKey": {Shape: "String"}}},
+		"EntityList": {ID: "EntityList", Kind: model.KindList, Member: "Entity"},
+		"EntityResult": {ID: "EntityResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"entity": {Shape: "Map"},
+			"prefer": {Shape: "String"},
+		}},
+	}
 	// DigitalOcean is served from behavior/digitalocean/v2 now, under the names
 	// its document declares rather than the eight the deleted pack invented.
 	// adoptGenerated replaces this list with the generated model's forty; what
@@ -340,7 +613,90 @@ func Bundle() *model.Bundle {
 		op("GetSshKey", "GET", "/v1/ssh_keys/{id}", 200, true),
 		op("DeleteSshKey", "DELETE", "/v1/ssh_keys/{id}", 204, false),
 	}
-	railway := []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"}
+	// Real bindings, not mk(): mk() binds every operation to POST /, and
+	// internal/conformance builds its request from this catalog. All seven
+	// operations share the one GraphQL endpoint; the codec routes by the query
+	// document. The output shapes declare the {"data": ...} envelope the pack's
+	// encoder used to synthesize, so the bundle projects it by name.
+	railwayOps := []model.Operation{
+		op("projectCreate", "POST", "/graphql/v2", 200, false),
+		op("projects", "POST", "/graphql/v2", 200, true),
+		op("project", "POST", "/graphql/v2", 200, true),
+		op("projectDelete", "POST", "/graphql/v2", 200, false),
+		op("serviceCreate", "POST", "/graphql/v2", 200, false),
+		op("service", "POST", "/graphql/v2", 200, true),
+		op("serviceDelete", "POST", "/graphql/v2", 200, false),
+	}
+	railwaySvc := svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", railwayOps)
+	railwaySvc.OperationByName("projectCreate").Output = "ProjectCreateResult"
+	railwaySvc.OperationByName("projects").Output = "ProjectsResult"
+	railwaySvc.OperationByName("project").Output = "ProjectResult"
+	railwaySvc.OperationByName("projectDelete").Output = "ProjectDeleteResult"
+	railwaySvc.OperationByName("serviceCreate").Output = "ServiceCreateResult"
+	railwaySvc.OperationByName("service").Output = "ServiceResult"
+	railwaySvc.OperationByName("serviceDelete").Output = "ServiceDeleteResult"
+	railwaySvc.Shapes = map[string]model.Shape{
+		"String":  {ID: "String", Kind: model.KindString},
+		"Boolean": {ID: "Boolean", Kind: model.KindBoolean},
+		"RailwayProject": {ID: "RailwayProject", Kind: model.KindStructure, Members: map[string]model.Member{
+			"id":   {Shape: "String"},
+			"name": {Shape: "String"},
+		}},
+		"RailwayService": {ID: "RailwayService", Kind: model.KindStructure, Members: map[string]model.Member{
+			"id":        {Shape: "String"},
+			"name":      {Shape: "String"},
+			"projectId": {Shape: "String"},
+		}},
+		"RailwayProjectEdge": {ID: "RailwayProjectEdge", Kind: model.KindStructure, Members: map[string]model.Member{
+			"node": {Shape: "RailwayProject"},
+		}},
+		"RailwayProjectEdgeList": {ID: "RailwayProjectEdgeList", Kind: model.KindList, Member: "RailwayProjectEdge"},
+		"RailwayProjectConnection": {ID: "RailwayProjectConnection", Kind: model.KindStructure, Members: map[string]model.Member{
+			"edges": {Shape: "RailwayProjectEdgeList"},
+		}},
+		"ProjectCreateResult": {ID: "ProjectCreateResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ProjectCreateData"},
+		}},
+		"ProjectCreateData": {ID: "ProjectCreateData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"projectCreate": {Shape: "RailwayProject"},
+		}},
+		"ProjectsResult": {ID: "ProjectsResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ProjectsData"},
+		}},
+		"ProjectsData": {ID: "ProjectsData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"projects": {Shape: "RailwayProjectConnection"},
+		}},
+		"ProjectResult": {ID: "ProjectResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ProjectData"},
+		}},
+		"ProjectData": {ID: "ProjectData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"project": {Shape: "RailwayProject"},
+		}},
+		"ProjectDeleteResult": {ID: "ProjectDeleteResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ProjectDeleteData"},
+		}},
+		"ProjectDeleteData": {ID: "ProjectDeleteData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"projectDelete": {Shape: "Boolean"},
+		}},
+		"ServiceCreateResult": {ID: "ServiceCreateResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ServiceCreateData"},
+		}},
+		"ServiceCreateData": {ID: "ServiceCreateData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"serviceCreate": {Shape: "RailwayService"},
+		}},
+		"ServiceResult": {ID: "ServiceResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ServiceData"},
+		}},
+		"ServiceData": {ID: "ServiceData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"service": {Shape: "RailwayService"},
+		}},
+		"ServiceDeleteResult": {ID: "ServiceDeleteResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ServiceDeleteData"},
+		}},
+		"ServiceDeleteData": {ID: "ServiceDeleteData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"serviceDelete": {Shape: "Boolean"},
+		}},
+	}
 	// Real bindings, not mk(): mk() binds every operation to POST /, and
 	// internal/conformance builds its request from this catalog rather than
 	// from the generated model. The names are the document's.
@@ -1414,10 +1770,12 @@ func Bundle() *model.Bundle {
 			svc("vercel.kv", "vercel", model.ProtoRESTJSON1, "", "", "", vercelkv),
 			svc("cloudflare.api", "cloudflare", model.ProtoRESTJSON1, "", "", "", cloudflare),
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
-			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),
+			azureSvc,
+			queueSvc,
+			tableSvc,
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", digitalocean),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", hetzner),
-			svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", mk(railway)),
+			railwaySvc,
 			svc("fly.machines", "fly", model.ProtoRESTJSON1, "", "", "", fly),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),

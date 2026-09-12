@@ -16873,7 +16873,7 @@ var mutants = []mutant{
 	{
 		name: "s3-cors-http-use-generic-preflight",
 		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  `if svc := s.demux(r); svc == nil || svc.ID != "aws.s3" {`,
+		old:  `if demuxed == nil || demuxed.ID != "aws.s3" {`,
 		new:  `if true {`,
 		pkg:  "./internal/edge",
 		run:  "TestS3BucketCORSHTTP",
@@ -21762,51 +21762,15 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/gcp/gcprest",
 		run:  "TestGCPRESTDecodeEncodeAndFault",
 	},
-	{
-		name: "azure-accept-empty-container",
-		file: filepath.Join("internal", "services", "azure", "blobs", "blobs.go"),
-		old:  "if name == \"\" {\n\t\treturn nil, azFault(\"InvalidResourceName\", \"The specified resource name contains invalid characters.\", 400)",
-		new:  "if false {\n\t\treturn nil, azFault(\"InvalidResourceName\", \"The specified resource name contains invalid characters.\", 400)",
-		pkg:  "./internal/services/azure/blobs",
-		run:  "TestCreateContainerRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "azure-accept-duplicate-container",
-		file: filepath.Join("internal", "services", "azure", "blobs", "blobs.go"),
-		old:  `if _, exists, _ := p.col(req, "azctr").Get(ctx, name); exists {`,
-		new:  `if _, exists, _ := p.col(req, "azctr").Get(ctx, name); false {`,
-		pkg:  "./internal/services/azure/blobs",
-		run:  "TestCreateContainerRejectsEmptyAndDuplicate",
-	},
-	{
-		name: "azure-get-missing-blob-as-empty",
-		file: filepath.Join("internal", "services", "azure", "blobs", "blobs.go"),
-		old:  "if !ok {\n\t\treturn nil, azFault(\"BlobNotFound\", \"The specified blob does not exist.\", 404)\n\t}\n\tvar data []byte",
-		new:  "if false {\n\t\treturn nil, azFault(\"BlobNotFound\", \"The specified blob does not exist.\", 404)\n\t}\n\tvar data []byte",
-		pkg:  "./internal/services/azure/blobs",
-		run:  "TestContainerAndBlobLifecycle",
-	},
-	{
-		name: "azure-delete-missing-blob-as-success",
-		file: filepath.Join("internal", "services", "azure", "blobs", "blobs.go"),
-		old:  "if !ok {\n\t\treturn nil, azFault(\"BlobNotFound\", \"The specified blob does not exist.\", 404)\n\t}\n\t_ = p.col(req, \"azblob\").Delete(ctx, container+\"/\"+name)",
-		new:  "if false {\n\t\treturn nil, azFault(\"BlobNotFound\", \"The specified blob does not exist.\", 404)\n\t}\n\t_ = p.col(req, \"azblob\").Delete(ctx, container+\"/\"+name)",
-		pkg:  "./internal/services/azure/blobs",
-		run:  "TestDeleteMissingContainerAndBlob",
-	},
-	{
-		name: "azure-delete-missing-container-as-success",
-		file: filepath.Join("internal", "services", "azure", "blobs", "blobs.go"),
-		old:  "func (p *Pack) deleteContainer(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif _, err := p.getContainer(ctx, req); err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "func (p *Pack) deleteContainer(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif _, err := p.getContainer(ctx, req); false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/azure/blobs",
-		run:  "TestDeleteMissingContainerAndBlob",
-	},
+	// The five mutants that rewrote the Azure pack's empty-name, duplicate,
+	// missing-blob and missing-container branches are gone with the Go they
+	// rewrote. The behaviour is `require` rules in behavior/azure/blobs/service.yaml;
+	// internal/bundled/azure_test.go asserts the same by invocation.
 	{
 		name: "azure-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  "if svc.ID == \"azure.blobs\" {\n\t\tw.Header().Set(\"Content-Type\", \"application/xml\")\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
-		new:  "if false && svc.ID == \"azure.blobs\" {\n\t\tw.Header().Set(\"Content-Type\", \"application/xml\")\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
+		old:  "if svc.ID == \"azure.blobs\" || svc.ID == \"azure.queue\" {\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
+		new:  "if false && (svc.ID == \"azure.blobs\" || svc.ID == \"azure.queue\") {\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
 		pkg:  "./internal/proto/aws/restxml",
 		run:  "TestRESTXML",
 	},
@@ -21878,54 +21842,20 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
-	{
-		name: "railway-accept-empty-project-name",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "if name == \"\" {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"project name is required\", 200)",
-		new:  "if false {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"project name is required\", 200)",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestProjectCreateRejectsEmptyName",
-	},
-	{
-		name: "railway-accept-empty-service-name",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "if name == \"\" {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"service name is required\", 200)",
-		new:  "if false {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"service name is required\", 200)",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestServiceCreateRejectsEmptyName",
-	},
-	{
-		name: "railway-get-missing-project-as-data",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "b, ok, _ := p.col(req, \"rwproj\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Project not found\", 200)",
-		new:  "b, ok, _ := p.col(req, \"rwproj\").Get(ctx, id)\n\tif false {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Project not found\", 200)",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestProjectAndServiceLifecycle",
-	},
-	{
-		name: "railway-get-missing-service-as-data",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "b, ok, _ := p.col(req, \"rwsvc\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Service not found\", 200)",
-		new:  "b, ok, _ := p.col(req, \"rwsvc\").Get(ctx, id)\n\tif false {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Service not found\", 200)",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestProjectAndServiceLifecycle",
-	},
-	{
-		name: "railway-delete-missing-project-as-success",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "got, err := p.project(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "got, err := p.project(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestDeleteMissingProject",
-	},
-	{
-		name: "railway-delete-missing-service-as-success",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "got, err := p.service(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "got, err := p.service(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestDeleteMissingService",
-	},
+	// The six mutants that rewrote the Railway pack's empty-name,
+	// missing-project and missing-service branches are gone with the Go they
+	// rewrote, as Azure's and DigitalOcean's were. The behaviour is `require`
+	// rules in behavior/railway/graphql/service.yaml, and
+	// internal/bundled/railway_test.go asserts the same by invocation: an
+	// empty or absent name answers BAD_USER_INPUT/200, an unknown or deleted
+	// id answers NOT_FOUND/200, and a service create against a missing project
+	// answers NOT_FOUND/200.
+	//
+	// The response encoder branch they shared went too: its `_wrap`/`_list`
+	// envelope synthesized the {"data": ...} shape each operation's output now
+	// declares in the catalog, so the bundle projects `data` by name and the
+	// generic encoder serializes it. Only the fault envelope is still Go, and
+	// it is still mutated below.
 	{
 		name: "railway-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
@@ -21943,6 +21873,22 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
 		old:  "\t\tif i < n && q[i] == ':' {",
 		new:  "\t\tif false && i < n && q[i] == ':' {",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestGraphQLRootField",
+	},
+	{
+		name: "railway-route-comment-opens-a-selection-set",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "\t\t\tcase '#':\n\t\t\t\tskipComment()\n\t\t\tcase '(':",
+		new:  "\t\t\tcase '\\v':\n\t\t\t\tskipComment()\n\t\t\tcase '(':",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestGraphQLRootField",
+	},
+	{
+		name: "railway-route-ignore-fragment-spread",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "\t\tif i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {",
+		new:  "\t\tif false && i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {",
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestGraphQLRootField",
 	},

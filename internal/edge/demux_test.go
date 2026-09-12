@@ -77,6 +77,7 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		{http.MethodGet, "", "localhost", "/storage/v1/b", "gcp.storage"},
 		{http.MethodGet, "", "localhost", "/v9/projects", "vercel.api"},
 		{http.MethodGet, "", "api.vercel.com", "/v13/deployments", "vercel.api"},
+		{http.MethodPost, "", "id.kv.vercel-storage.com", "/", "vercel.kv"},
 		{http.MethodGet, "", "localhost", "/client/v4/accounts/a/storage/kv/namespaces", "cloudflare.api"},
 		{http.MethodGet, "", "api.cloudflare.com", "/client/v4/accounts/a/storage/kv/namespaces", "cloudflare.api"},
 		{http.MethodGet, "", "localhost", "/api/dns/v1/zones/ex.test", "hostinger.api"},

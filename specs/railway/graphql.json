@@ -1,0 +1,236 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Railway GraphQL",
+    "version": "authored-1",
+    "description": "The Railway public GraphQL API, as mirror serves it.\n\nTHIS DOCUMENT IS AUTHORED, NOT VENDORED. Railway publishes no machine-readable description of this endpoint; the API is a GraphQL schema introspectable at runtime, documented in prose. What is transcribed here is the surface the deleted Go pack (internal/services/railway/graphql) served and the current behavior bundle (behavior/railway/graphql) declares: seven operations over the one endpoint. The lock records this file with source `authored`: its sha256 still pins the bytes, but nothing refetches it, so it cannot tell you the vendor changed something. Treat every statement in it as `authored` provenance, the same grade the behavior bundle carries.\n\nA GraphQL endpoint is one POST that dispatches on the query document, and OpenAPI admits one operation per path and method. The seven operations are therefore one operation plus six x-mirror-operations siblings, which is the truth of the binding: every one of them is POST /graphql/v2, and the codec routes by the query body, not the path. The names are the GraphQL field names, lowercase included -- x-mirror-name keeps the spelling the exported form cannot carry. The response shapes are the {\"data\": ...} envelope the codec writes, one per operation."
+  },
+  "servers": [
+    {
+      "url": "https://backboard.railway.com",
+      "description": "The Railway public API endpoint. Every operation is POST /graphql/v2 on this host."
+    }
+  ],
+  "paths": {
+    "/graphql/v2": {
+      "post": {
+        "operationId": "projectCreate",
+        "x-mirror-name": "projectCreate",
+        "summary": "Create a project",
+        "description": "The GraphQL mutation `projectCreate`. Like every operation here it is POST /graphql/v2 with the query and variables in the body; the six siblings below share that binding.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphQLRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The mutation ran. GraphQL faults also answer 200, with an errors array.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCreateResult"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-operations": [
+          {
+            "name": "projects",
+            "summary": "List projects",
+            "response": "#/components/schemas/ProjectsResult",
+            "readonly": true
+          },
+          {
+            "name": "project",
+            "summary": "Get one project",
+            "response": "#/components/schemas/ProjectResult",
+            "readonly": true
+          },
+          {
+            "name": "projectDelete",
+            "summary": "Delete a project",
+            "response": "#/components/schemas/ProjectDeleteResult"
+          },
+          {
+            "name": "serviceCreate",
+            "summary": "Create a service in a project",
+            "response": "#/components/schemas/ServiceCreateResult"
+          },
+          {
+            "name": "service",
+            "summary": "Get one service",
+            "response": "#/components/schemas/ServiceResult",
+            "readonly": true
+          },
+          {
+            "name": "serviceDelete",
+            "summary": "Delete a service",
+            "response": "#/components/schemas/ServiceDeleteResult"
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "GraphQLRequest": {
+        "type": "object",
+        "description": "A GraphQL request: the query document plus its variables. Arguments may also arrive flattened at the top level or inside an `input` object; the behavior engine reads all four spellings, as the deleted pack's hydrate() did.",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The GraphQL document. The codec routes on what it contains."
+          },
+          "operationName": {
+            "type": "string"
+          },
+          "variables": {
+            "type": "object",
+            "description": "The query's variables, possibly nested one more level under `input`.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "input": {
+            "type": "object",
+            "description": "A top-level input object, the third spelling of the variables.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "projectId": { "type": "string" },
+          "projectID": {
+            "type": "string",
+            "description": "The pack fell back to projectID when projectId was empty; both spellings are read."
+          }
+        }
+      },
+      "String": { "type": "string" },
+      "Boolean": { "type": "boolean" },
+      "RailwayProject": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "#/components/schemas/String" },
+          "name": { "$ref": "#/components/schemas/String" }
+        }
+      },
+      "RailwayService": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "#/components/schemas/String" },
+          "name": { "$ref": "#/components/schemas/String" },
+          "projectId": { "$ref": "#/components/schemas/String" }
+        }
+      },
+      "RailwayProjectEdge": {
+        "type": "object",
+        "properties": {
+          "node": { "$ref": "#/components/schemas/RailwayProject" }
+        }
+      },
+      "RailwayProjectEdgeList": {
+        "type": "array",
+        "items": { "$ref": "#/components/schemas/RailwayProjectEdge" }
+      },
+      "RailwayProjectConnection": {
+        "type": "object",
+        "properties": {
+          "edges": { "$ref": "#/components/schemas/RailwayProjectEdgeList" }
+        }
+      },
+      "ProjectCreateResult": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/ProjectCreateData" }
+        }
+      },
+      "ProjectCreateData": {
+        "type": "object",
+        "properties": {
+          "projectCreate": { "$ref": "#/components/schemas/RailwayProject" }
+        }
+      },
+      "ProjectsResult": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/ProjectsData" }
+        }
+      },
+      "ProjectsData": {
+        "type": "object",
+        "properties": {
+          "projects": { "$ref": "#/components/schemas/RailwayProjectConnection" }
+        }
+      },
+      "ProjectResult": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/ProjectData" }
+        }
+      },
+      "ProjectData": {
+        "type": "object",
+        "properties": {
+          "project": { "$ref": "#/components/schemas/RailwayProject" }
+        }
+      },
+      "ProjectDeleteResult": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/ProjectDeleteData" }
+        }
+      },
+      "ProjectDeleteData": {
+        "type": "object",
+        "properties": {
+          "projectDelete": { "$ref": "#/components/schemas/Boolean" }
+        }
+      },
+      "ServiceCreateResult": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/ServiceCreateData" }
+        }
+      },
+      "ServiceCreateData": {
+        "type": "object",
+        "properties": {
+          "serviceCreate": { "$ref": "#/components/schemas/RailwayService" }
+        }
+      },
+      "ServiceResult": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/ServiceData" }
+        }
+      },
+      "ServiceData": {
+        "type": "object",
+        "properties": {
+          "service": { "$ref": "#/components/schemas/RailwayService" }
+        }
+      },
+      "ServiceDeleteResult": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/ServiceDeleteData" }
+        }
+      },
+      "ServiceDeleteData": {
+        "type": "object",
+        "properties": {
+          "serviceDelete": { "$ref": "#/components/schemas/Boolean" }
+        }
+      }
+    }
+  }
+}

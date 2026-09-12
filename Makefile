@@ -33,8 +33,8 @@ test-snapshot:
 	$(GO) test ./internal/services/aws/sqs -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/aws/states -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/gcp/gcs -run 'Characterization$$' -count=1
-	$(GO) test ./internal/services/azure/blobs -run 'Characterization$$' -count=1
-	$(GO) test ./internal/services/railway/graphql -run 'Characterization$$' -count=1
+	$(GO) test ./internal/bundled -run 'TestAzureBlobCharacterization$$' -count=1
+	$(GO) test ./internal/bundled -run 'TestRailwayGraphQLCharacterization$$' -count=1
 
 test-chaos:
 	$(GO) test ./internal/chaos -count=1
@@ -43,7 +43,7 @@ test-bdd:
 	$(GO) test ./test/behavior/... ./test/terraform -count=1
 
 test-fuzz-seeds:
-	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/sqs ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/services/azure/blobs ./internal/services/railway/graphql ./internal/proto/aws/restjson ./internal/proto/aws/restxml -count=1
+	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/sqs ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml -count=1
 
 test-fuzz:
 	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzDeframeAWSChunked$$' -fuzztime=10000x -parallel=4
@@ -170,10 +170,10 @@ test-fuzz:
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzVercelRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzCloudflareRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restxml -run '^$$' -fuzz '^FuzzAzureRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/azure/blobs -run '^$$' -fuzz '^FuzzBlobBytes$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./internal/bundled -run '^$$' -fuzz '^FuzzBlobBytes$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzDigitalOceanRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzRailwayRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/railway/graphql -run '^$$' -fuzz '^FuzzCreateBody$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./internal/bundled -run '^$$' -fuzz '^FuzzRailwayCreateBody$$' -fuzztime=10000x -parallel=4
 
 # The timeout is set from measurement, not from hope. The suite runs every
 # mutant against the full pack surface, so its cost tracks the emulator's

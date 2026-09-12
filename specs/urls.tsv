@@ -39,3 +39,7 @@ hetzner.v1	hetzner/v1.json	https://docs.hetzner.cloud/cloud.spec.json
 hostinger.api	hostinger/api.json	https://raw.githubusercontent.com/hostinger/api/main/openapi.json
 vercel.api	vercel/api.json	https://openapi.vercel.sh/
 vercel.kv	vercel/kv.json	authored
+azure.blobs	azure/blobs.json	authored
+azure.queue	azure/queue.json	authored
+azure.table	azure/table.json	authored
+railway.graphql	railway/graphql.json	authored

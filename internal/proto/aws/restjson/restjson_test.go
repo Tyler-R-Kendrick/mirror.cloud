@@ -43,6 +43,16 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"aws.lambda", http.MethodDelete, "/2015-03-31/functions/f/aliases/a", "", "DeleteAlias"},
 		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/aliases", "", "ListAliases"},
 		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/aliases/a", "", "GetAlias"},
+		{"azure.table", http.MethodPost, "/Tables", "", "CreateTable"},
+		{"azure.table", http.MethodGet, "/Tables", "", "ListTables"},
+		{"azure.table", http.MethodDelete, "/Tables('t')", "", "DeleteTable"},
+		{"azure.table", http.MethodPost, "/t", "", "InsertEntity"},
+		{"azure.table", http.MethodGet, "/t()", "", "QueryEntities"},
+		{"azure.table", http.MethodGet, "/t(PartitionKey='p',RowKey='r')", "", "GetEntity"},
+		{"azure.table", http.MethodPut, "/t(PartitionKey='p',RowKey='r')", "", "UpdateEntity"},
+		{"azure.table", http.MethodPatch, "/t(PartitionKey='p',RowKey='r')", "", "MergeEntity"},
+		{"azure.table", http.MethodDelete, "/t(PartitionKey='p',RowKey='r')", "", "DeleteEntity"},
+		{"azure.table", http.MethodPost, "/$batch", "", "SubmitBatch"},
 		{"aws.lambda", http.MethodPost, "/2015-03-31/functions/f/policy", "", "AddPermission"},
 		{"aws.lambda", http.MethodDelete, "/2015-03-31/functions/f/policy/sid", "", "RemovePermission"},
 		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/policy", "", "GetPolicy"},
@@ -261,7 +271,14 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	// the bare string Upstash answers.
 	vercel := &model.Service{ID: "vercel.api"}
 	w = httptest.NewRecorder()
-	if err := codec.EncodeFault(vercel, &model.Operation{Name: "GetProject"}, w, &spi.Fault{Code: "not_found", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+	if err := codec.EncodeFault(vercel, &model.Operation{Name: "Command"}, w, &spi.Fault{Code: "bad_request", Message: "GET needs key", HTTPStatus: 400, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 400 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"bad_request"`) {
+		t.Fatalf("vercel kv fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(&model.Service{ID: "vercel.api"}, &model.Operation{Name: "GetProject"}, w, &spi.Fault{Code: "not_found", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"not_found"`) {
@@ -418,8 +435,13 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 			t.Errorf("railway %q: %#v %v, want %s", test.query, op, err, test.want)
 		}
 	}
+	// Railway keeps its router and its fault envelope. The response encoder
+	// went with the pack: the bundle projects the {"data": ...} envelope each
+	// operation declares, so the generic encoder serializes it unchanged --
+	// the connection edges included.
 	w = httptest.NewRecorder()
-	if err := codec.Encode(rw, &model.Operation{Name: "projects"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"id": "1", "name": "web"}}, "_wrap": "projects"}}); err != nil {
+	rwOut := map[string]any{"data": map[string]any{"projects": map[string]any{"edges": []any{map[string]any{"node": map[string]any{"id": "1", "name": "web"}}}}}}
+	if err := codec.Encode(rw, &model.Operation{Name: "projects"}, w, &spi.Response{Output: rwOut}); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"data"`) || !strings.Contains(w.Body.String(), `"edges"`) || !strings.Contains(w.Body.String(), `"node"`) {
@@ -485,6 +507,17 @@ func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
 		t.Fatal("an unencoded slash in a key should not route to the read")
 	}
 }
+
+// TestVercelRoutesFromItsGeneratedModel replaces the fifteen route-table
+// rows that went with the pack. What answers them now is httpuri.Match over
+// the document's own patterns, which is how every modelled service routes.
+// The KV row's answer is a different service: vercel.kv's model binds the
+// command endpoint to POST /.
+//
+// Four of the pack's URIs named versions the document does not serve, and
+// the last case pins one: GET /v9/projects matched ListProjects in the table
+// and matches nothing in the document, which lists projects at /v10. The
+// table could not say so; the model can.
 
 // TestDigitalOceanRoutesFromItsGeneratedModel replaces the eight route-table
 // rows that went with the pack. The URIs are the same; what answers them is

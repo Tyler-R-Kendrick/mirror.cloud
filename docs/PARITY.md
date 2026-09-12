@@ -113,20 +113,34 @@ Routing is the model's now, which widens the surface rather than narrowing it: t
 
 ## Azure Storage baseline
 
-Authority: Azurite commit `b1f480ed345d032eced096d475f40c76466fd954` (`https://github.com/Azure/Azurite`, audited 2026-09-11), API version 2026-06-06. This is the LocalStack analogue for Azure Storage: Blob + Queue + Table. The vendor swagger Azurite generates from is pinned under `specs/azure/` (`blob-storage.json`, `queue-storage.json`, `table/table.json`). Census: `specs/azure/azurite-inventory.json`, reproduced by `python3 scripts/count-azurite-tests.py --azurite <clone> --check`.
+Authority: Azurite commit `b1f480ed345d032eced096d475f40c76466fd954` (`https://github.com/Azure/Azurite`, audited 2026-09-11), API version 2026-06-06. This is the LocalStack analogue for Azure Storage: Blob + Queue + Table. The vendor swagger Azurite generates from is pinned under `specs/azure/` (`blob-storage.json`, `queue-storage.json`, `table/table.json`). Census: `specs/azure/azurite-inventory.json`, reproduced by `python3 scripts/count-azurite-tests.py --azurite <clone> --check`. Denominators are guarded by `TestAzureCensusDenominators`.
 
-This is a source-level inventory map, not a live `*.core.windows.net` differential. Completeness is row count against the pinned Azurite tests, the same way S3 is 463/463 LocalStack functions — not “the eight Blob CRUD ops we already had are well tested.”
+This is a source-level inventory map, not a live `*.core.windows.net` differential. Completeness is swagger-path accounting plus row count against the pinned Azurite tests, the same way S3 is 115/115 routed ops and 463/463 LocalStack functions — not “the YAML names we already had are well tested.”
 
-**Not in this denominator** (unclaimed, like LocalStack-skipped S3 rows): Azure Files (`file.core.windows.net`), Data Lake Gen2 (`dfs.core.windows.net`), ARM `management.azure.com`, and REST APIs Azurite itself marks unsupported at this pin (soft delete/undelete, blob versions, query blob, encryption scope, object replication, Put Blob From URL, static website, incremental copy, SharedKey Lite). Each such API gets an explicit unclaimed row when traced; they do not shrink the census.
+Three numerators, never collapsed:
+
+- **Routed** — a Blob/Queue `x-ms-paths` key (or Table `paths` method+path) whose every non-HEAD method is answered Azurite-shaped on the official host (`x-ms-error-code`, no `x-amzn-errortype`). Partial keys do not count.
+- **Accounted** — routed, or an explicit unclaim row naming the Azurite-unsupported reason. Target 59/59, 11/11, 12/12.
+- **Traced** — one row per inventory `it()`/`test()`. Target 806/806, including n/a and unclaimed (S3 skipped rows still counted).
+
+YAML operation names are not a numerator. HEAD `*WithHead` aliases ride GET and are not extra keys.
+
+**Not in this denominator** (unclaimed, like LocalStack-skipped S3 rows): Azure Files (`file.core.windows.net`), Data Lake Gen2 (`dfs.core.windows.net`), ARM `management.azure.com`. Azurite-unsupported REST APIs stay in the 59/11/12 tables as `unclaim` rows; they do not shrink the census. SharedKey is parsed, never HMAC-verified.
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the **currently implemented** 8 Blob CRUD ops | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
-| Blob REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 8 / 59 |
-| Queue REST ops in pinned swagger (`x-ms-paths`) routed to emulation | 0 / 11 |
-| Table REST ops in pinned swagger (`paths`) routed to emulation | 0 / 12 |
-| Azurite test functions explicitly traced | 0 / 806 (0%) |
-| Azurite test functions not yet traced | 806 / 806 (100%) |
+| Blob swagger `x-ms-paths` keys | 59 |
+| Queue swagger `x-ms-paths` keys | 11 |
+| Table swagger `paths` method+path | 12 |
+| Azurite test functions | 806 |
+| Blob keys fully routed | 49 / 59 |
+| Queue keys fully routed | 11 / 11 |
+| Table method+paths routed | 10 / 12 |
+| Blob keys accounted (routed + unclaim) | 59 / 59 |
+| Queue keys accounted | 11 / 11 |
+| Table method+paths accounted (routed + unclaim) | 12 / 12 |
+| Azurite test functions traced | 806 / 806 (100%) |
+| Seven-form evidence for shipped YAML (not the inventory) | 7 / 7 on Create/Get/List/Delete Container and Put/Get/List/Delete Blob |
 | Live Azure probe | none (not required; S3 LocalStack parity also did not use a live cloud oracle) |
 
 ### Pinned inventory
@@ -190,41 +204,1115 @@ Direct `it()`/`test()` calls, params unexpanded. Harness-only files (Azurite uni
 
 ### Pinned swagger vs Mirror
 
-Declared surface is `x-ms-paths` (Blob 59, Queue 11) and Table `paths` (12), counted from the vendored documents. Azurite implements a subset (its README support matrix); unimplemented-by-Azurite APIs stay unclaimed rows, they do not shrink these denominators. Implemented today: Create/Get/List/Delete Container, Put/Get/List/Delete Blob (8).
+Declared surface is unique `x-ms-paths` keys (Blob 59, Queue 11) and Table `paths` method+path (12), counted from the vendored documents. Status is per key, not per YAML name: `routed` = every non-HEAD method Azurite-shaped; `partial` = some method answered but not the key; `missing` = must-route, not yet answered; `unclaim` = Azurite unsupported at this pin (still in the denominator).
 
-| Azurite Blob REST | Mirror |
-|---|---|
-| List Containers | implemented (8-op slice) |
-| Create Container | implemented |
-| Get Container Properties | implemented as GetContainer |
-| Delete Container | implemented |
-| List Blobs | implemented |
-| Put Blob | implemented (block blob bytes only; `x-ms-blob-type` not read) |
-| Get Blob | implemented |
-| Delete Blob | implemented |
-| Set/Get Service Properties | not implemented |
-| Get Stats | not implemented |
-| Get Account Information | not implemented |
-| Get/Set Container Metadata | not implemented |
-| Get/Set Container ACL | not implemented |
-| Lease Container | not implemented |
-| Put Block / Put Block From URL / Put Block List / Get Block List | not implemented |
-| Get/Set Blob Properties | not implemented |
-| Get/Set Blob Metadata | not implemented |
-| Create Append Blob / Append Block | not implemented |
-| Put Page / Get Page Ranges | not implemented |
-| Lease Blob | not implemented |
-| Snapshot Blob | not implemented |
-| Copy Blob / Abort Copy Blob / Copy Blob From URL | not implemented |
-| CORS / Preflight | not implemented |
+#### Blob `x-ms-paths` (59)
 
-Queue (16): List/Create/Delete Queue, Get/Set Service Properties, Get Stats, Preflight, Get/Set Metadata, Get/Set ACL, Put/Get/Peek/Update/Delete/Clear Messages — **none implemented**.
+| Path key | Status | Mirror |
+|---|---|---|
+| `/?restype=service&comp=properties` | routed | `GetServiceProperties` / `SetServiceProperties`; default XML then stored body |
+| `/?restype=service&comp=stats` | routed | `GetServiceStats`; primary 400 `InvalidQueryParameterValue`; `{account}-secondary` returns `<Status>live</Status>` |
+| `/?comp=list` | routed | `ListContainers` |
+| `/?restype=service&comp=userdelegationkey` | unclaim | not in Azurite REST matrix; oauth tests parse-only |
+| `/?restype=account&comp=properties` | routed | `GetAccountInfo` headers `StorageV2` / `Standard_RAGRS` / HNS false |
+| `/?comp=batch` | routed | `SubmitBatch` — edge fan-out: each multipart part is parsed as a raw HTTP request and dispatched through the normal pipeline, per-part statuses replayed; malformed envelope is one failed sub-response (missing Content-Type alone is the outer 400); 256 cap; set-tier parts stay tier-unclaimed |
+| `/?comp=blobs` | routed | `FilterBlobs`; `where` tag expressions (incl. `@container`), where-less is empty; items carry only expression-referenced tags; pagination unclaimed |
+| `/{containerName}?restype=container` | routed | `CreateContainer` / `GetContainer` / `DeleteContainer` (HEAD rides GET) |
+| `/{containerName}?restype=container&comp=metadata` | routed | `SetContainerMetadata` / `GetContainerMetadata`; missing container 404 |
+| `/{containerName}?restype=container&comp=acl` | routed | `SetContainerAcl` / `GetContainerAcl`; stores signed-identifier XML and `x-ms-blob-public-access` |
+| `/{containerName}?restype=container&comp=undelete` | unclaim | Azurite: soft delete unsupported |
+| `/{containerName}?restype=container&comp=batch` | routed | `SubmitBatch` container scope; out-of-scope sub-request is a per-part 400 `InvalidInput` |
+| `/{containerName}?restype=container&comp=blobs` | routed | `FilterBlobs` scoped by path container; missing container 404 |
+| `/{containerName}?comp=lease&restype=container&acquire` | routed | `AcquireContainerLease` via `x-ms-lease-action=acquire`; 201 + `x-ms-lease-id` |
+| `/{containerName}?comp=lease&restype=container&release` | routed | `ReleaseContainerLease`; mismatch is 409 `LeaseIdMismatchWithLeaseOperation` |
+| `/{containerName}?comp=lease&restype=container&renew` | routed | `RenewContainerLease`; duration expiry unclaimed |
+| `/{containerName}?comp=lease&restype=container&break` | routed | `BreakContainerLease` immediate broken; remaining-time unclaimed |
+| `/{containerName}?comp=lease&restype=container&change` | routed | `ChangeContainerLease` |
+| `/{containerName}?restype=container&comp=list&flat` | routed | `ListBlobs` flat with `prefix`, sorted; `include=tags,snapshots` projections; marker/maxresults unclaimed (same ceiling as ListContainers) |
+| `/{containerName}?restype=container&comp=list&hierarchy` | routed | `ListBlobs` with `delimiter` folds leading segments into `BlobPrefix` entries, sorted; marker/maxresults unclaimed |
+| `/{containerName}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
+| `/{containerName}/{blob}` | routed | `PutBlob` / `GetBlob` / `DeleteBlob`; HEAD is `GetBlobProperties` (stored metadata + `x-ms-blob-*` headers, no body; missing is 404 `BlobNotFound` with no XML body). If-Match/If-None-Match/If-Modified-Since/If-Unmodified-Since honored in Azurite validator order (read conditions before the 404); HEAD emits `ETag`/`Last-Modified`; download response omits them (BlobBody shape ceiling) |
+| `/{containerName}/{blob}?PageBlob` | routed | `CreatePageBlob` — born as `zeros(N)`, N must be 512-aligned; stores `x-ms-blob-sequence-number`; duplicate is 409 `BlobAlreadyExists`; size above the engine `zerosMax` (16 MiB) is a known ceiling |
+| `/{containerName}/{blob}?AppendBlob` | routed | `CreateAppendBlob` — born empty; overwrites an existing blob of any type (Azurite `override existing pageblob`) |
+| `/{containerName}/{blob}?BlockBlob` | routed | `PutBlob` reads `x-ms-blob-type` and stores it; `GetBlobProperties` returns it |
+| `/{containerName}/{blob}?BlockBlob&fromUrl` | unclaim | Azurite: Put Blob From URL unsupported |
+| `/{containerName}/{blob}?comp=undelete` | unclaim | Azurite: soft delete unsupported |
+| `/{containerName}/{blob}?comp=expiry` | unclaim | Azurite: blob expiry unsupported |
+| `/{containerName}/{blob}?comp=properties&SetHTTPHeaders` | routed | `SetBlobProperties` stores `x-ms-blob-content-type/cache-control/content-md5/content-encoding/content-language/content-disposition`; missing blob 404 |
+| `/{containerName}/{blob}?comp=immutabilityPolicies` | unclaim | Azurite: immutability unsupported |
+| `/{containerName}/{blob}?comp=legalhold` | unclaim | Azurite: legal hold unsupported |
+| `/{containerName}/{blob}?comp=metadata` | routed | `SetBlobMetadata` / `GetBlobMetadata` round-trip `x-ms-meta-*`; missing blob 404 `BlobNotFound`; C# identifier validation unclaimed |
+| `/{containerName}/{blob}?comp=lease&acquire` | routed | `AcquireBlobLease`; duplicate 409 `LeaseAlreadyPresent`; writes to a leased blob need the id (412 `LeaseIdMissing` / 409 `LeaseIdMismatchWithBlobOperation`) |
+| `/{containerName}/{blob}?comp=lease&release` | routed | `ReleaseBlobLease`; mismatch 409 |
+| `/{containerName}/{blob}?comp=lease&renew` | routed | `RenewBlobLease`; clock expiry unclaimed |
+| `/{containerName}/{blob}?comp=lease&change` | routed | `ChangeBlobLease` to `x-ms-proposed-lease-id` |
+| `/{containerName}/{blob}?comp=lease&break` | routed | `BreakBlobLease` immediate broken; remaining-time unclaimed |
+| `/{containerName}/{blob}?comp=snapshot` | routed | `CreateSnapshot` — snapshot lives on the base record, inherits properties, metadata overridable; base delete without `x-ms-delete-snapshots` is 409 `SnapshotsPresent`; one snapshot per clock tick per blob is a known ceiling |
+| `/{containerName}/{blob}?comp=copy` | routed | `StartCopyFromURL` — completes synchronously with `x-ms-copy-status: success`; non-URL source 400 `InvalidHeaderValue`; missing source 404; cross-container source reads as missing (same-instance ceiling) |
+| `/{containerName}/{blob}?comp=copy&sync` | routed | `CopyBlobFromURL` via `x-ms-requires-sync: true`; echoes source `Content-MD5` when the source has one |
+| `/{containerName}/{blob}?comp=copy&copyid` | routed | `AbortCopy` — copies complete synchronously, so abort is always 409 `NoPendingCopyOperation` (Azurite's answer when nothing is pending) |
+| `/{containerName}/{blob}?comp=tier` | routed | `SetBlobTier` — Hot/Cool/Cold/Archive stored, explicit tier clears `x-ms-access-tier-inferred`, Archive download is 409 `BlobArchived`, append/page tier is 400 `AccessTierNotSupportedForBlobType` |
+| `/{containerName}/{blob}?restype=account&comp=properties` | routed | same `GetAccountInfo` |
+| `/{containerName}/{blob}?comp=block` | routed | `PutBlock` |
+| `/{containerName}/{blob}?comp=block&fromURL` | routed | `StageBlockFromURL` — stages a block from a local source blob, `x-ms-source-range` spliced via `substr`; commits through `PutBlockList` |
+| `/{containerName}/{blob}?comp=blocklist` | routed | `PutBlockList` folds staged blocks in request order (`TestAzurePutBlockListFoldsInRequestOrder`, booted XML commit); missing id is 400 `InvalidBlockList`; `GetBlockList` lists staged ids |
+| `/{containerName}/{blob}?comp=page&update` | routed | `PutPage` byte splice via `substr`; unaligned range 400, beyond size 416 `RequestedRangeNotSatisfiable`, wrong type 409 `InvalidBlobType`, body-length mismatch 400 |
+| `/{containerName}/{blob}?comp=page&clear` | routed | `ClearPages` zero-fill splice; same 400/409/416 guards |
+| `/{containerName}/{blob}?comp=page&update&fromUrl` | routed | `PutPageFromURL` splices source bytes at the 512-aligned range (same-account source) |
+| `/{containerName}/{blob}?comp=pagelist` | routed | `GetPageRanges` — merged non-zero 512-runs as `<PageRange><Start/><End/></PageRange>` XML, clipped to `x-ms-range`; start beyond size 416 |
+| `/{containerName}/{blob}?comp=pagelist&diff` | routed | `GetPageRangesDiff` — pages whose bytes differ from `prevsnapshot` |
+| `/{containerName}/{blob}?comp=properties&Resize` | routed | `ResizePageBlob` — grow zero-extends, shrink truncates; 512-aligned or 400 |
+| `/{containerName}/{blob}?comp=properties&UpdateSequenceNumber` | routed | `SetBlobSequenceNumber` — `update` / `max` / `increment`, echoed on HEAD as `x-ms-blob-sequence-number` |
+| `/{containerName}/{blob}?comp=incrementalcopy` | unclaim | Azurite: incremental copy unsupported |
+| `/{containerName}/{blob}?comp=appendblock` | routed | `AppendBlock` — missing blob 404, wrong type 409 `InvalidBlobType`, empty body 400, >4 MiB 413, 50k block cap 409; echoes `x-ms-blob-append-offset` / `x-ms-blob-committed-block-count` |
+| `/{containerName}/{blob}?comp=appendblock&fromUrl` | routed | `AppendBlockFromURL` appends source bytes (optional source range) |
+| `/{containerName}/{blob}?comp=seal` | unclaim | Azurite: concurrent append / seal not in REST matrix |
+| `/{containerName}/{blob}?comp=query` | unclaim | Azurite: blob query unsupported |
+| `/{containerName}/{blob}?comp=tags` | routed | `GetTags` / `SetTags` (TagSet XML, replace semantics); `x-ms-tags` on PutBlob/PutBlockList/creates/copies; validation 400s `TagsTooLarge`/`EmptyTagName`/`DuplicateTagNames`; `x-ms-if-tags` conditions on read/write/delete/copy |
 
-Table (9): List/Create/Delete Table, Insert/Update/Merge/Query/Delete Entity, Batch — **none implemented**.
+#### Queue `x-ms-paths` (11)
 
-### Currently implemented 8-op slice (not the inventory)
+All eleven are must-route (Azurite Queue README). Host `{account}.queue.core.windows.net`.
 
-The seven-form evidence below covers only the eight ops already in `internal/services/azure/blobs`. It is not Azurite-inventory completeness.
+| Path key | Status | Mirror |
+|---|---|---|
+| `/?restype=service&comp=properties` | routed | `GetServiceProperties` / `SetServiceProperties`; default XML then stored body (same shape as blob service) |
+| `/?restype=service&comp=stats` | routed | `GetServiceStats`; primary 400 `InvalidQueryParameterValue`, `{account}-secondary.queue.core.windows.net` live |
+| `/?comp=list` | routed | `ListQueues` |
+| `/{queueName}` | routed | `CreateQueue` / `DeleteQueue` |
+| `/{queueName}?comp=metadata` | routed | `GetQueueProperties` (`x-ms-meta-*` + `x-ms-approximate-messages-count` of unexpired) / `SetQueueMetadata` |
+| `/{queueName}?comp=acl` | routed | `SetQueueAcl` / `GetQueueAcl`; signed-identifier XML stored verbatim |
+| `/{queueName}/messages` | routed | `GetMessages` dequeue (visibility statechart, rotated pop receipts, dequeue count, numofmessages) + `ClearMessages` |
+| `/{queueName}/messages?visibilitytimeout={visibilityTimeout}&messagettl={messageTimeToLive}` | routed | `PutMessage` |
+| `/{queueName}/messages?peekonly=true` | routed | `PeekMessages`; visible unexpired only, no receipt, no visibility change |
+| `/{queueName}/messages/{messageid}?popreceipt={popReceipt}&visibilitytimeout={visibilityTimeout}` | routed | `UpdateMessage`; wrong receipt 400 `PopReceiptMismatch`, expired 404, new receipt + `x-ms-time-next-visible` |
+| `/{queueName}/messages/{messageid}?popreceipt={popReceipt}` | routed | `DeleteMessage`; wrong/missing receipt 400 `PopReceiptMismatch`, expired 404 |
+
+#### Table `paths` method+path (12)
+
+Host `{account}.table.core.windows.net`. Table `x-ms-paths` service properties/stats are outside this 12 and stay unclaimed (Azurite Table README: not supported).
+
+| Method+path | Status | Mirror |
+|---|---|---|
+| `GET /Tables` | routed | `ListTables` |
+| `POST /Tables` | routed | `CreateTable` |
+| `POST /$batch` | routed | `SubmitBatch` — edge fan-out recursing into changesets, per-operation replay; changeset atomicity/rollback and the 100-transaction cap unclaimed (named ceiling, same class as list pagination) |
+| `DELETE /Tables('{table}')` | routed | `DeleteTable` |
+| `GET /{table}()` | routed | `QueryEntities` |
+| `GET /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `GetEntity`; full property set + `odata.etag` and ETag header; missing 404 |
+| `PUT /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `UpdateEntity` — replace (delete-then-put), no-If-Match upsert, wildcard/match honored, mismatch 412 `UpdateConditionNotSatisfied` |
+| `PATCH /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `MergeEntity` — spread patch keeps unstated properties, no-If-Match upsert, mismatch 412 |
+| `DELETE /{table}(PartitionKey='{partitionKey}',RowKey='{rowKey}')` | routed | `DeleteEntity`; If-Match wildcard/match honored, mismatch 412 |
+| `POST /{table}` | routed | `InsertEntity` — full property spread, duplicate 409 `EntityAlreadyExists`, 201 body or 204 on `Prefer: return-no-content` |
+| `GET /{table}` | unclaim | Azurite: Get Table ACL unsupported |
+| `PUT /{table}` | unclaim | Azurite: Set Table ACL unsupported |
+
+### Traced tests
+
+Direct `it()` names from `blob/apis/container.test.ts` (48), `blob/apis/service.test.ts` (25), `blob/apis/blob.test.ts` (98), `blob/apis/pageblob.test.ts` (58), and `blob/apis/appendblob.test.ts` (38). Rows marked later-slice still count, as S3 skipped rows do.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/container.test.ts::setMetadata` | Booted PUT/GET `comp=metadata` round-trips `x-ms-meta-keya`; atomic `TestAzureContainerMetadataAclLease` | Mapped and green |
+| `blob/apis/container.test.ts::setMetadata should work with conditional headers` | Metadata PUT exists; If-Modified-Since not applied until conditions slice | Metadata mapped; condition unclaimed |
+| `blob/apis/container.test.ts::setMetadata should not work with invalid conditional headers` | Same | Metadata mapped; 412 condition unclaimed |
+| `blob/apis/container.test.ts::getProperties` | Booted GET `?restype=container` returns `x-ms-lease-status` / `x-ms-lease-state` | Mapped and green |
+| `blob/apis/container.test.ts::getProperties should return 404 for non existed container` | Missing GetContainer / GetContainerMetadata are 404 `ContainerNotFound` without `x-amzn-errortype` | Mapped and green |
+| `blob/apis/container.test.ts::getProperties should return 404 for non existed system container` | Same 404 path (`$logs` is just a name) | Mapped and green |
+| `blob/apis/container.test.ts::create with default parameters` | Booted create 201; atomic create | Mapped and green |
+| `blob/apis/container.test.ts::create with all parameters configured` | Metadata and public access stored via Set after create; create-time `x-ms-meta` / access headers not yet copied onto CreateContainer | Partial; SetMetadata/SetAcl cover the fields |
+| `blob/apis/container.test.ts::create with invalid container name` | Empty name is 400 `InvalidResourceName`; Azurite format/length table unclaimed | Partial |
+| `blob/apis/container.test.ts::delete` | Booted delete 202 then 404 | Mapped and green |
+| `blob/apis/container.test.ts::create should fail when metadata names are invalid C# identifiers` | Metadata store is a map; C# identifier 400 `InvalidMetadata` unclaimed | Not Azurite-strict |
+| `blob/apis/container.test.ts::listBlobHierarchySegment with default parameters` | List hierarchy is a later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::listBlobHierarchySegment with all parameters configured` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::acquireLease_available_proposedLeaseId_fixed` | Booted acquire with proposed id; atomic acquire | Mapped and green |
+| `blob/apis/container.test.ts::acquireLease_available_NoproposedLeaseId_infinite` | Acquire generates hex id when none proposed; `lease_duration=-1` is infinite | Mapped and green |
+| `blob/apis/container.test.ts::releaseLease` | Booted release; mismatch 409 | Mapped and green |
+| `blob/apis/container.test.ts::renewLease` | `RenewContainerLease` keeps locked; clock expiry unclaimed | Renew mapped; timeout unclaimed |
+| `blob/apis/container.test.ts::changeLease` | Atomic change to proposed id | Mapped and green |
+| `blob/apis/container.test.ts::breakLease` | Break sets `broken`/`unlocked` immediately; remaining-time loop unclaimed | Break mapped; period unclaimed |
+| `blob/apis/container.test.ts::should correctly list all blobs in the container using listBlobFlatSegment with default parameters` | ListBlobs exists without metadata/etag/snapshot | Partial; extra list fields later |
+| `blob/apis/container.test.ts::should list append blobs in container with sealed property` | Append seal unclaimed | Not mapped this slice |
+| `blob/apis/container.test.ts::should only show uncommitted blobs in listBlobFlatSegment with uncommittedblobs option` | `it.skip` at pin | Upstream skipped |
+| `blob/apis/container.test.ts::should only show uncommitted blobs in listBlobHierarchySegment with uncommittedblobs option` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::should correctly order all blobs in the container` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::returns no continuationToken when squashed by delimiter` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::returns a valid, correct continuationToken` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::list blobs whose name are all number, continuationToken works` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::getAccessPolicy` | Booted GET `comp=acl` empty `SignedIdentifiers` | Mapped and green |
+| `blob/apis/container.test.ts::setAccessPolicy_publicAccess` | Booted PUT ACL + `x-ms-blob-public-access=blob` | Mapped and green |
+| `blob/apis/container.test.ts::setAccessPolicy_signedIdentifiers` | ACL body stored and echoed | Mapped and green |
+| `blob/apis/container.test.ts::list container should success with include as empty string or deleted` | ListContainers exists; include=deleted is soft-delete unclaimed | Partial |
+| `blob/apis/container.test.ts::list container should success with different include string` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags should work on container` | Tags/filter later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with greater or less should work on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with more than limited conditions on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with conditions number equal to limitation on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with invalid key chars on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with valid special key chars on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with long key on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with invalid value chars on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with valid special value chars on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with long value on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with invalid query string` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::filter blob by tags with continuationToken on container` | Later | Not mapped this slice |
+| `blob/apis/container.test.ts::List blob should success with '+' in query` | `it.skip` at pin | Upstream skipped |
+| `blob/apis/container.test.ts::Delete a container with block blob, then create container/blob with same name, and delete container should success.` | DeleteContainer then recreate; PutBlock/PutBlockList fold | Mapped and green |
+| `blob/apis/container.test.ts::listBlobsFlat with startFrom should begin at that blob name` | Later slice | Not mapped this slice |
+| `blob/apis/container.test.ts::listBlobsByHierarchy with startFrom should begin at that blob name` | Later slice | Not mapped this slice |
+| `blob/apis/service.test.ts::getUserDelegationKey with Key credential should fail` | User-delegation key unclaimed; parse-only later | Unclaim (key 4) |
+| `blob/apis/service.test.ts::getUserDelegationKey with SAS token credential should fail` | Same | Unclaim (key 4) |
+| `blob/apis/service.test.ts::GetServiceProperties` | Booted GET default `StorageServiceProperties` | Mapped and green |
+| `blob/apis/service.test.ts::Set CORS with empty AllowedHeaders, ExposedHeaders` | PUT stores body, GET echoes; CORS XML not interpreted | Stored XML mapped; CORS eval later |
+| `blob/apis/service.test.ts::SetServiceProperties` | Booted PUT 202 then GET contains stored CORS origin | Mapped and green |
+| `blob/apis/service.test.ts::List containers in sorted order` | ListContainers exists; sort/prefix unclaimed | Partial |
+| `blob/apis/service.test.ts::List containers with marker` | Later | Partial |
+| `blob/apis/service.test.ts::List containers with marker and max result length less than result size` | Later | Partial |
+| `blob/apis/service.test.ts::ListContainers with default parameters` | Booted list `EnumerationResults` | Partial; etag/lastModified later |
+| `blob/apis/service.test.ts::ListContainers with all parameters configured` | Metadata on list later | Partial |
+| `blob/apis/service.test.ts::ListContainers without include metadata should not return container metadata.` | Later | Partial |
+| `blob/apis/service.test.ts::get Account info` | Booted `x-ms-account-kind=StorageV2` `Standard_RAGRS` HNS false | Mapped and green |
+| `blob/apis/service.test.ts::Get Account/Service Properties with URI has suffix '/' after account name` | Path trim already treats trailing slash as service root | Mapped and green |
+| `blob/apis/service.test.ts::Get Blob service stats negative` | Primary host GET stats is 400 `InvalidQueryParameterValue` | Mapped and green |
+| `blob/apis/service.test.ts::Find blob by tags should work` | Booted `?comp=blobs&where=` filters across containers, `@container` scoping, where-less empty; matched items carry only expression-referenced tags; atomic `TestAzureTags` | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with more than limited conditions on service` | Long `and` chains evaluate (no term cap in the Go parser) | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with conditions number equal to limitation on service` | Same | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with invalid key chars on service` | Unknown `@parameter` is a parse error -> 400 `InvalidQueryParameterValue`; parser unit + atomic | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with valid special key chars on service` | Double-quoted keys with space/`+-.:=_/` | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with long key` | Key length is not capped in expressions (set-time 128 limit is separate) | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with invalid value chars on service` | Expression literal charset is not validated beyond quoting (Azurite rejects some control chars) | Partial |
+| `blob/apis/service.test.ts::filter blob by tags with valid special value chars on service` | Values with space/`+`/`.` compare lexicographically | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with long value` | Literal length is not capped | Mapped and green |
+| `blob/apis/service.test.ts::filter blob by tags with continuationToken on service` | marker/maxresults pagination unclaimed (same ceiling as every list key) | Partial |
+| `blob/apis/service.test.ts::Get Blob service stats` | `{account}-secondary.blob.core.windows.net` GET stats returns live | Mapped and green |
+
+Direct `it()` names from `blob/apis/blob.test.ts` (98). Most rows are lease/conditions/tags/snapshot/copy functions whose swagger keys are still `missing` in the path table; they are named here so the slice that routes them owns the row.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/blob.test.ts::download with default parameters` | Booted GET `/ctr/o` returns stored bytes | Mapped and green |
+| `blob/apis/blob.test.ts::download should work with conditional headers` | Booted GET passes with matching ifMatch, non-matching ifNoneMatch, past ifModifiedSince, future ifUnmodifiedSince; atomic `TestAzureConditions` | Mapped and green |
+| `blob/apis/blob.test.ts::download with ifTags condition` | GET with failing `x-ms-if-tags` is 412 `ConditionNotMet`; atomic `TestAzureTags` + booted | Mapped and green |
+| `blob/apis/blob.test.ts::getProperties with ifTags condition` | HEAD honors `x-ms-if-tags`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::setProperties with ifTags condition` | SetBlobProperties honors `x-ms-if-tags`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::setMetadata with ifTags condition` | SetBlobMetadata honors `x-ms-if-tags` incl. `and`/`not`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should work with ifMatch value *` | GET If-Match `*` (and `*,abc` list) is 200; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with invalid conditional header ifMatch` | Booted HEAD/GET with bogus If-Match is 412 `ConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch` | If-None-Match with the stored ETag is 304 header-only; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifNoneMatch *` | Booted GET If-None-Match `*` is 400 `UnsatisfiableCondition`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifModifiedSince` | Booted future If-Modified-Since is 304 header-only; same-instant is 304 atomically | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work when blob in Archive tier` | Archive download is 409 `BlobArchived`; booted + atomic `TestAzureTierLeaseFromURL` | Mapped and green |
+| `blob/apis/blob.test.ts::download should not work with conditional header ifUnmodifiedSince` | Booted past If-Unmodified-Since is 412 `ConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::download all parameters set` | `Range` header not honored; full body always returned | Partial; range GET unclaimed |
+| `blob/apis/blob.test.ts::download entire with range` | Same | Range unclaimed |
+| `blob/apis/blob.test.ts::download out of range` | Same | Range unclaimed |
+| `blob/apis/blob.test.ts::download invalid range` | Same | Range unclaimed |
+| `blob/apis/blob.test.ts::download partial range (via custom policy)` | Same | Range unclaimed |
+| `blob/apis/blob.test.ts::get properties response should not set content-type` | HEAD writes `Content-Type` only when one was stored | Mapped and green |
+| `blob/apis/blob.test.ts::delete` | Booted DELETE 202 then GET 404 | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for valid ifMatch` | DELETE with the stored ETag succeeds; atomic `TestAzureConditions` | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for * ifMatch` | DELETE If-Match `*` succeeds; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifMatch` | DELETE with bogus If-Match is 412 `ConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for valid ifNoneMatch` | DELETE with non-matching If-None-Match succeeds; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifNoneMatch` | DELETE If-None-Match with the stored ETag is 412; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for ifNoneMatch *` | DELETE If-None-Match `*` succeeds (Azurite write validator skips `*`); atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for valid ifModifiedSince *` | DELETE with past If-Modified-Since succeeds; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifModifiedSince` | DELETE with future If-Modified-Since is 412; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should work for valid ifUnmodifiedSince *` | DELETE with future If-Unmodified-Since succeeds; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::delete should not work for invalid ifUnmodifiedSince` | DELETE with past If-Unmodified-Since is 412; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::Delete with ifTags should work` | DeleteBlob honors `x-ms-if-tags`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::should create a snapshot from a blob` | Booted PUT `comp=snapshot` 201 with `x-ms-snapshot`; snapshot survives base overwrite; atomic `TestAzureSnapshotCopy` | Mapped and green |
+| `blob/apis/blob.test.ts::Create a snapshot from a blob with ifTags` | CreateSnapshot honors `x-ms-if-tags`; snapshot records carry copied tags | Mapped and green |
+| `blob/apis/blob.test.ts::should create a snapshot with metadata from a blob` | Snapshot metadata overrides base metadata; inherited otherwise | Mapped and green |
+| `blob/apis/blob.test.ts::should not delete base blob without include snapshot header` | Booted DELETE of snapshotted base is 409 `SnapshotsPresent`; `x-ms-delete-snapshots: only/include` both routed | Mapped and green |
+| `blob/apis/blob.test.ts::should delete snapshot` | Booted DELETE `?snapshot=` 202; snapshot GET then 404s | Mapped and green |
+| `blob/apis/blob.test.ts::should also list snapshots` | ListBlobs `include=snapshots` emits `<Snapshot>` entries; booted + atomic | Mapped and green |
+| `blob/apis/blob.test.ts::should setMetadata with new metadata set` | Booted PUT/GET `comp=metadata` round-trips `x-ms-meta-a`; atomic `TestAzureBlobMetadataPropertiesHead` | Mapped and green |
+| `blob/apis/blob.test.ts::should fail when setMetadata with invalid metadata name with hyphen` | Metadata keys stored verbatim; C# identifier rule unclaimed (same ceiling as container metadata) | Partial |
+| `blob/apis/blob.test.ts::should fail when upload has metadata names that are invalid C# identifiers` | Same | Partial |
+| `blob/apis/blob.test.ts::acquireLease_available_proposedLeaseId_fixed` | `AcquireBlobLease` honors `x-ms-proposed-lease-id`, fixed duration; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::acquireLease_available_NoproposedLeaseId_infinite` | Generated id, infinite duration; atomic + booted | Mapped and green |
+| `blob/apis/blob.test.ts::lease blob with ifTags` | Lease ops do not evaluate `x-ms-if-tags` | Partial |
+| `blob/apis/blob.test.ts::releaseLease` | Release with the id frees writes; mismatch 409; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::renewLease` | Renew re-locks; clock expiry unclaimed | Mapped and green |
+| `blob/apis/blob.test.ts::changeLease` | Change to a proposed id; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::breakLease` | Break frees writes immediately; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::should get the correct headers back when setting metadata` | GET `comp=metadata` returns `x-ms-meta-*` headers | Mapped and green |
+| `blob/apis/blob.test.ts::should get the correct properties set based on set HTTP headers` | Booted PUT `comp=properties` then HEAD returns `Content-Type` / `Cache-Control` | Mapped and green |
+| `blob/apis/blob.test.ts::Settier with ifTags should work` | SetBlobTier does not evaluate `x-ms-if-tags` | Partial |
+| `blob/apis/blob.test.ts::setTier set default to cool` | Cool stored; HEAD `x-ms-access-tier` + inferred false; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::setTier set default to cold` | Same | Mapped and green |
+| `blob/apis/blob.test.ts::setTier set archive to hot` | Rehydrate restores download; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::setTier on leased blob` | SetBlobTier enforces the lease id like other writes; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::Upload blob with accesstier should get accessTierInferred as false` | `x-ms-access-tier` on upload stores the tier with inferred=false; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::setHTTPHeaders with default parameters` | Booted `SetBlobProperties`; atomic `TestAzureBlobMetadataPropertiesHead` | Mapped and green |
+| `blob/apis/blob.test.ts::setHTTPHeaders with all parameters set` | All six `x-ms-blob-*` headers decoded, stored, and re-emitted on HEAD | Mapped and green |
+| `blob/apis/blob.test.ts::Copy blob should work` | Booted PUT `x-ms-copy-source` 202 `x-ms-copy-status: success`, content round-trips | Mapped and green |
+| `blob/apis/blob.test.ts::Copy blob with ifTags should work` | Copy ops honor `x-ms-source-if-tags` against the source record; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::Copy blob should work to override metadata` | Copy inherits source metadata; request `x-ms-meta-*` overrides | Mapped and green |
+| `blob/apis/blob.test.ts::Copy blob should work with source archive blob and accesstier header` | Copy does not read the archive state or a tier header on the request | Partial |
+| `blob/apis/blob.test.ts::Copy blob should not override destination Lease status` | Copy preserves the destination lease fields; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::Copy blob should work for page blob` | Page copy preserves `PageBlob` type, content length, and sequence number | Mapped and green |
+| `blob/apis/blob.test.ts::Copy blob should not work for page blob and set tier` | SetBlobTier on a page blob is 400 `AccessTierNotSupportedForBlobType`; copy-with-tier-header not decoded | Partial |
+| `blob/apis/blob.test.ts::Copy blob should fail with 400 when copy source is invalid` | Booted path-only source is 400 `InvalidHeaderValue` | Mapped and green |
+| `blob/apis/blob.test.ts::Copy blob should not work with  ifNoneMatch * when dest exist` | Both copy ops with If-None-Match `*` and an existing destination are 409 `BlobAlreadyExists`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work` | `x-ms-requires-sync: true` routes `CopyBlobFromURL`; 202 success | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob echoes source Content-MD5 in response when supplied` | Sync copy echoes source `Content-MD5` header when set | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob omits Content-MD5 in response when not supplied` | No `Content-MD5` header when the source has none | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work to override metadata` | Same metadata override path as async copy | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob should not override destination Lease status` | Same | Mapped and green |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work to override tag` | Same | Later |
+| `blob/apis/blob.test.ts::Synchronized copy blob should work for page blob` | Page copy preserves type and sequence number | Mapped and green |
+| `blob/apis/blob.test.ts::set/get blob tag should work, with base blob or snapshot` | SetTags/GetTags round-trip TagSet XML; snapshot GET returns the snapshot's copied tags; atomic + booted | Mapped and green |
+| `blob/apis/blob.test.ts::set blob tag should work in put block blob, pubBlockList, and startCopyFromURL on block blob, and getBlobProperties, Download Blob, list blob can get blob tags.` | `x-ms-tags` stored by PutBlob/PutBlockList/StartCopyFromURL; HEAD emits `x-ms-tag-count`; `include=tags` on List Blobs; download omits tag headers (BlobBody ceiling) | Partial |
+| `blob/apis/blob.test.ts::set blob tag should work in create page/append blob, copyFromURL.` | `x-ms-tags` stored by CreatePageBlob/CreateAppendBlob/CopyBlobFromURL; copy defaults to source tags, request tags override; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::set blob tag fail with invalid tag.` | >10 tags or long key/value is 400 `TagsTooLarge`, empty key is 400 `EmptyTagName`, bad chars are 400 `DuplicateTagNames` (Azurite's real codes); atomic + booted | Mapped and green |
+| `blob/apis/blob.test.ts::Set and get blob tags should work with lease condition` | SetTags/GetTags enforce the lease: missing id 412 `LeaseIdMissing`, wrong id 409 `LeaseIdMismatchWithBlobOperation`; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition` | GetTags honors `x-ms-if-tags` equality; 412 on miss; atomic | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition - special char comparing` | Lexicographic `>` comparisons over values with spaces/`+`/`.`; parser unit `TestTagExpr` | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with ifTags condition - key with special chars` | Double-quoted keys in expressions; parser unit + atomic | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with long ifTags condition` | 700-term `and` chain parses and evaluates; parser is linear Go | Mapped and green |
+| `blob/apis/blob.test.ts::get blob tag with invalid ifTags condition string` | `==` operator or unquoted special-char key is 400 `InvalidHeaderValue`; booted + atomic | Mapped and green |
+| `blob/apis/blob.test.ts::upload invalid x-ms-blob-content-md5` | Content-MD5 stored verbatim; base64/format validation unclaimed | Partial |
+| `blob/apis/blob.test.ts::Acquire Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Blob lease keys still `missing` | Later |
+| `blob/apis/blob.test.ts::Renew Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Change Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Renew: Lease on Breaking Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Acquire Lease on Broken Lease status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Break Lease on Infinite Lease, if give valid breakPeriod, should be broken after breakperiod` | Same; break-period clock unclaimed even for container lease | Later |
+| `blob/apis/blob.test.ts::Break Lease on Infinite Lease, if not give breakPeriod, should be broken immediately` | Blob lease keys still `missing` | Later |
+| `blob/apis/blob.test.ts::Renew: Lease on Leased status, if LeaseId not match, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Change Lease on Leased status, if input LeaseId not match anyone of leaseID or proposedLeaseId, throw LeaseIdMismatchWithLease error` | Same | Later |
+| `blob/apis/blob.test.ts::Change Lease on Leased status, if input LeaseId matches proposedLeaseId, will change success` | Same | Later |
+| `blob/apis/blob.test.ts::UploadPage on a Leased page blob, if input LeaseId matches, will success` | Page slice then blob lease | Later |
+| `blob/apis/blob.test.ts::ClearPage on a Leased page blob, if input LeaseId matches, will success` | Same | Later |
+| `blob/apis/blob.test.ts::Resize a Leased page blob, if input LeaseId matches, will success` | Same | Later |
+| `blob/apis/blob.test.ts::UpdateSequenceNumber a Leased page blob, if input LeaseId matches, will success` | Same | Later |
+
+Direct `it()` names from `blob/apis/pageblob.test.ts` (58). Page blobs are a fixed-size string of bytes in the store: create materializes `zeros(N)`, Put/Clear Page splice with `substr`, Get Page Ranges scans for non-zero 512-byte runs. Sequence-number *conditions* (`ifSequenceNumber*`) are the conditions slice, not this one.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/pageblob.test.ts::create with default parameters` | Booted PUT `x-ms-blob-type: PageBlob` + `x-ms-blob-content-length: 1024` → 201; HEAD `PageBlob`/`1024`/`x-ms-blob-sequence-number: 0`; atomic `TestAzurePageBlob` | Mapped and green |
+| `blob/apis/pageblob.test.ts::create with all parameters set` | Metadata and content-type stored at create; cache-control/encoding/language/disposition create-time headers not copied (Set Blob Properties covers them) | Partial |
+| `blob/apis/pageblob.test.ts::create should fail when metadata names are invalid C# identifiers` | Metadata keys stored verbatim; C# identifier rule unclaimed (same ceiling as container metadata) | Partial |
+| `blob/apis/pageblob.test.ts::Create page blob with ifTags should work` | Tags slice | Later |
+| `blob/apis/pageblob.test.ts::download page blob with partial ranges` | Booted GET returns the full 1024 bytes with written pages in place | Mapped and green |
+| `blob/apis/pageblob.test.ts::download page blob with no ranges uploaded` | Fresh page blob downloads as `zeros(N)` | Mapped and green |
+| `blob/apis/pageblob.test.ts::download page blob with no ranges uploaded after resize to bigger size` | Resize grow zero-extends; atomic resize assertions | Mapped and green |
+| `blob/apis/pageblob.test.ts::download page blob with no ranges uploaded after resize to smaller size` | Resize shrink truncates | Mapped and green |
+| `blob/apis/pageblob.test.ts::download a 0 size page blob with range > 0 will get error` | Range GET unclaimed (same ceiling as blob.test.ts range rows) | Range unclaimed |
+| `blob/apis/pageblob.test.ts::Download a blob range should only return ContentMD5 when has request header x-ms-range-get-content-md5 ` | Range GET and range Content-MD5 unclaimed | Range unclaimed |
+| `blob/apis/pageblob.test.ts::uploadPages` | Booted PUT `comp=page` 201 twice; atomic splice | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages should work with sequence number conditions` | PutPage honors `x-ms-if-sequence-number-eq/lt/le` against the stored sequence number; atomic `TestAzureConditions` | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages with ifTags should work` | Tags slice | Later |
+| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberEqualTo doesn't match` | Mismatched eq is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberLessThan doesn't match` | lt <= sequence number is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages should not work if ifSequenceNumberLessThanOrEqualTo doesn't match` | le < sequence number is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages with correct crc64 should succeed and echo crc64` | CRC64 not computed or echoed | Checksum unclaimed |
+| `blob/apis/pageblob.test.ts::uploadPages with wrong crc64 should throw mismatch` | Same | Checksum unclaimed |
+| `blob/apis/pageblob.test.ts::uploadPages with wrong md5 should throw mismatch` | Content-MD5 stored verbatim, never validated | Checksum unclaimed |
+| `blob/apis/pageblob.test.ts::uploadPages with both md5 and crc64 supplied should be rejected` | Same | Checksum unclaimed |
+| `blob/apis/pageblob.test.ts::uploadPages without any checksum header should still echo computed crc64` | CRC64 echo unclaimed | Checksum unclaimed |
+| `blob/apis/pageblob.test.ts::uploadPages with sequential pages` | Adjacent pages merge into one `<PageRange>` | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages with one big page range` | Multi-page body splices at `range_start` | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages with non-sequential pages` | Sparse pages produce separate ranges | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to internally override a sequential range` | Splice overwrites bytes in place | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to internally right align override a sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to internally left align override a sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to totally override a sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to left override a sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to right override a sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::getPageRanges with ifTags should work` | Tags slice | Later |
+| `blob/apis/pageblob.test.ts::resize override a sequential range` | Ranges are computed from the stored value, so a shrink drops the truncated tail | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to internally override a non-sequential range` | Splice | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to internally insert into a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to totally override a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to left override a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to insert into a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::uploadPages to right override a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages` | Booted `x-ms-page-write: clear` 201; zero-fill splice | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages should work with sequence number conditions` | ClearPages honors the same three headers; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberEqualTo` | Mismatched eq is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberLessThan` | Failing lt is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages should not work with invalid ifSequenceNumberLessThanOrEqualTo` | Failing le is 412 `SequenceNumberConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to internally override a sequential range` | Zero-fill splice | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to totally override a sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to left override a sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to right override a sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to internally override a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to internally insert into a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages will fail when start range longer than blob length` | Booted 416 `RequestedRangeNotSatisfiable` | Mapped and green |
+| `blob/apis/pageblob.test.ts::GetPageRanges will fail when start range longer than blob length` | Same 416 guard | Mapped and green |
+| `blob/apis/pageblob.test.ts::UploadPages will fail when start range longer than blob length` | Same 416 guard | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to totally override a non-sequential range` | Zero-fill splice | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to left override a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::clearPages to right override a non-sequential range` | Same | Mapped and green |
+| `blob/apis/pageblob.test.ts::getPageRanges` | Merged ranges clipped to `x-ms-range`: booted `bytes=0-511` returns `<Start>0</Start><End>511</End>` only | Mapped and green |
+| `blob/apis/pageblob.test.ts::updateSequenceNumber` | `increment` → 1, `update` 10 → 10, `max` with lower current keeps 10; echoed on HEAD | Mapped and green |
+| `blob/apis/pageblob.test.ts::setAccessTier for Page blob` | Tier is `unclaim` in the path table | Unclaim |
+
+Direct `it()` names from `blob/apis/appendblob.test.ts` (38). Append blobs are born empty via `?AppendBlob`; Append Block concatenates and echoes the pre-append offset. Seal stays `unclaim` (Azurite concurrent-append/seal is not in its REST matrix).
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/appendblob.test.ts::Create append blob should work` | Booted PUT `x-ms-blob-type: AppendBlob` → 201, HEAD `AppendBlob`/`0`; atomic `TestAzureAppendBlob` | Mapped and green |
+| `blob/apis/appendblob.test.ts::Create append blob with ifTags should work` | CreateAppendBlob evaluates `x-ms-if-tags` against the blob it overwrites; 412 on miss; atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Create append blob override existing pageblob` | Create-append overwrites any existing blob; atomic override assertion | Mapped and green |
+| `blob/apis/appendblob.test.ts::Create append blob should fail when metadata names are invalid C# identifiers` | Metadata keys stored verbatim; C# identifier rule unclaimed | Partial |
+| `blob/apis/appendblob.test.ts::Delete append blob should work` | DeleteBlob is type-agnostic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Create append blob snapshot should work` | CreateSnapshot is type-agnostic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Create append blob snapshot and seal should work and copy seal` | Seal is `unclaim`; snapshot slice | Later |
+| `blob/apis/appendblob.test.ts::Copy append blob snapshot should work` | Copy with `?snapshot=` source reads the snapshot record | Mapped and green |
+| `blob/apis/appendblob.test.ts::Synchronized copy append blob snapshot should work` | Same snapshot-source path via sync copy | Mapped and green |
+| `blob/apis/appendblob.test.ts::Set append blob metadata should work` | SetBlobMetadata is type-agnostic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Set append blob HTTP headers should work` | SetBlobProperties is type-agnostic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Set tier should not work for append blob` | 400 `AccessTierNotSupportedForBlobType`; booted + atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block should work` | Booted append 201 with `x-ms-blob-append-offset` 0/3 and `x-ms-blob-committed-block-count` 1/2; download `onetwo` | Mapped and green |
+| `blob/apis/appendblob.test.ts::AppendBlock with correct crc64 should succeed and echo crc64` | CRC64 not computed or echoed (same ceiling as page checksums) | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock with wrong crc64 should throw mismatch` | Same | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock with wrong md5 should throw mismatch` | Same | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock without any checksum header should still echo computed crc64` | Same | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock with both md5 and crc64 supplied should be rejected` | Same | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::AppendBlock with ifTags should work` | AppendBlock honors `x-ms-if-tags`; atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Download append blob should work` | Booted GET `onetwo` | Mapped and green |
+| `blob/apis/appendblob.test.ts::Download append blob should work for snapshot` | GetBlob `?snapshot=` returns the snapshot bytes | Mapped and green |
+| `blob/apis/appendblob.test.ts::Download append blob should work for copied blob` | Copy destination downloads the source bytes | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block with invalid blob type should not work` | Booted append to block blob 409 `InvalidBlobType` | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block with content length 0 should not work` | Empty body 400 `InvalidHeaderValue`; atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block append position access condition should work` | `x-ms-blob-condition-maxsize` over the post-append length is 412 `MaxBlobSizeConditionNotMet`; `x-ms-blob-condition-appendpos` mismatch is 412 `AppendPositionConditionNotMet` (max size checked first); booted + atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block md5 validation should work` | Content-MD5 validation unclaimed | Checksum unclaimed |
+| `blob/apis/appendblob.test.ts::Append block access condition should work` | AppendBlock honors If-Match/If-None-Match/If-Modified-Since/If-Unmodified-Since; wrong If-Match is 412 `ConditionNotMet`; atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block lease condition should work` | AppendBlock enforces the lease id; atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Append block should refresh lease state ` | Append with the id succeeds and the lease survives the patch; atomic | Mapped and green |
+| `blob/apis/appendblob.test.ts::Seal append blob should work` | Seal is `unclaim` in the path table | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal already sealed append blob fails` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob not found` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal blob wrong type` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob get blob` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob get blob properties` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob can set blob properties` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob can set blob meta data` | Same | Unclaim |
+| `blob/apis/appendblob.test.ts::Seal append blob cannot append` | Same | Unclaim |
+
+Direct `it()` names from `blob/conditions.test.ts` (37). This file unit-tests Azurite-internal validator classes (`ReadConditionalHeadersValidator`, `WriteConditionalHeadersValidator`, and the header adapters) rather than HTTP; each row names where the same semantics are answered at HTTP in Mirror. The HTTP mapping lives in the GetBlob/GetBlobProperties read requires, the DeleteBlob/AppendBlock write requires, and `azureETagList` header decode, proven by atomic `TestAzureConditions`, booted condition blocks, and `TestAzureConditionalHeadersDecode`.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/conditions.test.ts::Should work with undefined values` | Absent conditional headers skip every require (adapter unit) | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with single etags` | `azureETagList` keeps one token; `TestAzureConditionalHeadersDecode` | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with multi etags` | Comma list splits to a multi-token list; read path allows it | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with etags with quotes` | Tokens are dequoted before comparison, like Azurite's adapter | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with undefined or null resource` | Missing blob: If-Match is 412 and If-None-Match `*` is 400 before the 404, matching the validator order in `downloadBlob` | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with blob model` | Blob record carries etag/last_modified inputs to the same checks | Mapped at HTTP |
+| `blob/conditions.test.ts::Should work with container model` | Container ops do not evaluate If-* headers | Partial |
+| `blob/conditions.test.ts::Should work with etag with quotes` | Write-path comparisons use the dequoted token | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 precondition failed for failed if-match results` | GET/HEAD with non-matching If-Match is 412 `ConditionNotMet` | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 412 precondition failed for successful if-match results` | Matching If-Match passes | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 304 Not Modified for failed if-none-match results` | If-None-Match hit is 304 header-only | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 304 Not Modified for successful if-none-match results` | Non-matching If-None-Match passes | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 304 Not Modified for failed if-modified-since results` | Not-modified-since is 304 header-only | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 304 Not Modified when if-modified-since same with lastModified` | Equal instant fails strictly-less, so 304; atomic epoch row | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 304 Not Modified for successful if-modified-since results` | Past If-Modified-Since passes (booted) | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 precondition failed for failed if-unmodified-since results` | Past If-Unmodified-Since is 412 (booted) | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 412 precondition failed when if-unmodified-since same with lastModified` | Equal instant passes; atomic epoch row and booted equal header | Mapped at HTTP |
+| `blob/conditions.test.ts::Should not return 412 precondition failed for successful if-unmodified-since results` | Future If-Unmodified-Since passes | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 OK when all conditions match` | Combined passing headers return content | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 Precondition Failed when if-none-match and if-unmodified-since fail among all conditions` | If-Unmodified-Since failure is checked before the 304 pair, so 412 | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 OK when if-none-match fails all conditions` | A passing If-Modified-Since overrides an If-None-Match hit (no 304); atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 Precondition Failed when if-match and if-modified-since fail among all conditions` | If-Match failure is checked first, so 412 | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 OK when if-modified-since fails all conditions` | A passing If-None-Match overrides an If-Modified-Since miss (no 304); atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 304 Not Modified when if-none-match and if-modified-since fail` | Both fail together, so 304 | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 Precondition Failed for any ifMatch` | Validator unit for a missing resource; Mirror answers the missing blob 404 before write conditions | Partial |
+| `blob/conditions.test.ts::Should return 400 getUnsatisfiableCondition for if none-match value *` | Missing blob with If-None-Match `*` is 400 `UnsatisfiableCondition` before the 404; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should throw 400 Bad Request for invalid combinations conditional headers` | >2 condition types, or any pair other than if-none-match + if-modified-since, is 400 `MultipleConditionHeadersNotSupported`; atomic and booted | Mapped at HTTP |
+| `blob/conditions.test.ts::Should throw 400 Bad Request for multi etags in ifMatch` | Multi-token If-Match on a write is 400; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should throw 400 Bad Request for multi etags in if-none-match` | Multi-token If-None-Match on a write is 400; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should throw 412 Precondition Failed for any values in if-match` | Validator unit for a missing resource; Mirror 404s first | Partial |
+| `blob/conditions.test.ts::Should throw 412 Precondition Failed for * if-match` | Same | Partial |
+| `blob/conditions.test.ts::Should return 200 for successful if-none-match and failed if-modified-since` | Write precedence: present If-None-Match decides, later types ignored; atomic pair row | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 for successful if-match and failed if-unmodified-since` | Write precedence: present If-Match decides; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 200 for if-unmodified-since equal with lastModified` | Equal instant passes (`date >= lastModified`); atomic epoch row | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 for if-modified-since equal with lastModifiedSince` | Equal instant fails (`lastModified <= date`); atomic epoch row | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 for failed if-modified-since results` | Future If-Modified-Since on a write is 412; atomic | Mapped at HTTP |
+| `blob/conditions.test.ts::Should return 412 for failed if-unmodified-since results` | Past If-Unmodified-Since on a write is 412; atomic | Mapped at HTTP |
+
+Direct `it()` names from `blob/apis/blobbatch.test.ts` (13). Batch is fanned out at the edge: each `application/http` part runs through the normal dispatch, so any routed op works as a sub-request and per-part statuses (202/404 with `x-ms-error-code`) replay into the 202 multipart body.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/blobbatch.test.ts::SubmitBatch batch deleting` | Booted batch of DELETEs: 202 outer, per-part 202, blobs gone | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch accepts a boundary containing equals signs` | Boundary parser keeps quoted `=` values | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch accepts a case-insensitive boundary parameter` | `BOUNDARY=` accepted; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch accepts whitespace before the boundary value` | Value is trimmed | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch rejects missing Content-Type` | Outer 400 `InvalidHeaderValue`; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch rejects ${testCase.name}` | No/empty boundary is a 202 with one failed sub-response `InvalidHeaderValue`; duplicate boundary params map to `InvalidInput`; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch within container scope - batch set tier` | Set tier parts return 200 through the fan-out | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch batch set tier` | Same | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch within container scope - batch deleting blob in different container` | Out-of-scope sub-request is a per-part 400 `InvalidInput`; the blob survives; booted | Mapped and green |
+| `blob/apis/blobbatch.test.ts::SubmitBatch with SAS token - batch deleting` | SAS is the auth slice | Later |
+| `blob/apis/blobbatch.test.ts::SubmitBatch batch with SAS token set tier` | SAS slice + tier unclaim | Later |
+| `blob/apis/blobbatch.test.ts::SubmitBatch within containerScope - with SAS token - batch deleting` | SAS slice | Later |
+| `blob/apis/blobbatch.test.ts::SubmitBatch batch with different operations` | Mixed parts dispatch independently (delete covered; tier partial) | Mapped and green |
+
+Direct `it()` names from `queue/apis/queue.test.ts` (9), `queue/apis/queueService.test.ts` (7), `queue/apis/messages.test.ts` (9), and `queue/apis/messageid.test.ts` (5). Queue runs the same visibility machinery as SQS (statechart settle): dequeue rotates the pop receipt and hides the message for the visibility timeout, TTL hides and lazily drops expired messages.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/apis/queue.test.ts::setMetadata` | Booted PUT then GET `comp=metadata` round-trips `x-ms-meta-*`; atomic `TestAzureQueueMessages` | Mapped and green |
+| `queue/apis/queue.test.ts::getProperties with default/all parameters` | Booted GET `comp=metadata`: metadata + `x-ms-approximate-messages-count` of unexpired messages | Mapped and green |
+| `queue/apis/queue.test.ts::getProperties negative` | Missing queue is 404 `QueueNotFound`; atomic | Mapped and green |
+| `queue/apis/queue.test.ts::create with default parameters` | Booted PUT 201; duplicate 409 `QueueAlreadyExists` | Mapped and green |
+| `queue/apis/queue.test.ts::create with all parameters` | `x-ms-meta-*` stored at create | Mapped and green |
+| `queue/apis/queue.test.ts::create negative` | Only the empty name is rejected (400); case/length rules unclaimed | Partial |
+| `queue/apis/queue.test.ts::delete` | Booted DELETE 204; missing is 404 with no `x-amzn-errortype` | Mapped and green |
+| `queue/apis/queue.test.ts::SetAccessPolicy should work` | SignedIdentifiers XML round-trips; booted + atomic | Mapped and green |
+| `queue/apis/queue.test.ts::setAccessPolicy negative` | ACL XML stored verbatim; malformed-ACL 400 unclaimed | Partial |
+| `queue/apis/queueService.test.ts::Get Queue service properties` | Default `StorageServiceProperties` XML; booted | Mapped and green |
+| `queue/apis/queueService.test.ts::Set CORS with empty AllowedHeaders, ExposedHeaders` | PUT 202 stores the body, GET echoes it; atomic | Mapped and green |
+| `queue/apis/queueService.test.ts::Set Queue service properties` | Same | Mapped and green |
+| `queue/apis/queueService.test.ts::listQueuesSegment with default parameters` | Booted `?comp=list` EnumerationResults | Mapped and green |
+| `queue/apis/queueService.test.ts::listQueuesSegment with all parameters` | prefix/marker/maxresults unclaimed (same ceiling as every list) | Partial |
+| `queue/apis/queueService.test.ts::Get Queue service stats negative` | Primary stats is 400 `InvalidQueryParameterValue`; booted | Mapped and green |
+| `queue/apis/queueService.test.ts::Get Queue service stats` | Secondary host returns live geo-replication; atomic | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue and clear message with default parameters` | Full lifecycle booted: 201 with receipt, peek first-only without receipt, dequeue with receipt, clear 204, empty peek | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue and clear message with all parameters` | visibilitytimeout/messagettl stored; times in the dequeue XML | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue empty message, and peek, dequeue with numberOfMessages > count(messages)` | Empty MessageText enqueues; oversized numofmessages returns what exists | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue special characters` | MessageText stored verbatim (whatever the client encoded) | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek, dequeue with 64KB characters size which is computed after encoding` | 64KB limit on the encoded form; atomic | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue, peek and dequeue negative` | Missing queue is 404 `QueueNotFound` | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue negative with 65537B(64KB+1B) characters size which is computed after encoding` | 400 `RequestBodyTooLarge`; atomic | Mapped and green |
+| `queue/apis/messages.test.ts::peek,dequeue,update,delete expired message` | Booted real-clock: TTL expires the message from peek/dequeue and single-message ops 404 | Mapped and green |
+| `queue/apis/messages.test.ts::enqueue,dequeue,update message with invalid visibilityTimeout` | vt outside 0..604800 is 400 `OutOfRangeQueryParameterValue`; booted + atomic | Mapped and green |
+| `queue/apis/messageid.test.ts::update and delete empty message with default parameters` | Update sets text + new receipt + next-visible; delete with the fresh receipt | Mapped and green |
+| `queue/apis/messageid.test.ts::update and delete message with all parameters` | Same, with visibilitytimeout honored | Mapped and green |
+| `queue/apis/messageid.test.ts::update message with 64KB characters size which is computed after encoding` | 64KB limit on update; atomic | Mapped and green |
+| `queue/apis/messageid.test.ts::update message negative with 65537B (64KB+1B) characters size which is computed after encoding` | 400 `RequestBodyTooLarge`; atomic | Mapped and green |
+| `queue/apis/messageid.test.ts::delete message negative` | Wrong receipt is 400 `PopReceiptMismatch`; booted + atomic | Mapped and green |
+
+Direct `it()` names from `table/apis/table.entity.test.ts` (38) and `table/apis/table.batch.errorhandling.test.ts` (9). Entities spread the whole JSON body (control members ride `__entity` so they never leak into records); etags are content-derived and move on every write; table batch reuses the blob fan-out, recursing into changesets, and does not pretend to changeset atomicity.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.entity.test.ts::01. Should insert new Entity` | Booted POST 201 with `odata.etag`; atomic `TestAzureTableEntities` | Mapped and green |
+| `table/apis/table.entity.test.ts::02. Insert new Entity property with type Edm.DateTime will convert to UTC` | Values stored verbatim; Edm type coercion unclaimed | Partial |
+| `table/apis/table.entity.test.ts::03. Insert invalid Date should fail` | No date validation | Partial |
+| `table/apis/table.entity.test.ts::04. Should insert new Entity with empty RowKey` | Empty RowKey inserts and addresses; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::05. Should retrieve entity with empty RowKey` | Same | Mapped and green |
+| `table/apis/table.entity.test.ts::06. Should delete an Entity using etag wildcard` | If-Match `*` deletes; booted + atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::07. Should not delete an Entity not matching Etag` | 412 `UpdateConditionNotSatisfied`; booted + atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::08. Should delete a matching Etag` | Matching etag deletes; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::09. Update an Entity that exists` | PUT replace drops unstated properties (delete-then-put); atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::10. Should fail replacing when an Entity does not exist` | If-Match on a missing entity is 404; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::11. Should not update an Entity not matching Etag` | 412; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::12. Should update, if Etag matches` | Matching etag updates; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::13. Insert or Replace (upsert) on an Entity that does not exist` | No-If-Match PUT creates; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::14. Insert or Replace (upsert) on an Entity that exists` | Same, replaces | Mapped and green |
+| `table/apis/table.entity.test.ts::15. Insert or Merge on an Entity that exists` | PATCH keeps unstated properties; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::16. Insert or Merge on an Entity that does not exist` | No-If-Match PATCH creates; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::17. Simple Insert Or Replace of a SINGLE entity as a BATCH` | Changeset fan-out; booted | Mapped and green |
+| `table/apis/table.entity.test.ts::18. operation entity with label in a BATCH` | Insert/update/delete parts dispatch independently | Mapped and green |
+| `table/apis/table.entity.test.ts::19. operation of entity with label in a BATCH` | Same | Mapped and green |
+| `table/apis/table.entity.test.ts::20. DELETE of entity with label in a BATCH` | Delete parts replay 204/404 | Mapped and green |
+| `table/apis/table.entity.test.ts::21. Simple batch test: Inserts multiple entities as a batch` | Booted changeset of two inserts, per-part 201 | Mapped and green |
+| `table/apis/table.entity.test.ts::22. Simple batch test: Delete multiple entities as a batch` | Delete parts | Mapped and green |
+| `table/apis/table.entity.test.ts::23. Insert Or Replace multiple entities as a batch` | Upsert parts | Mapped and green |
+| `table/apis/table.entity.test.ts::24. Insert Or Merge multiple entities as a batch` | Merge parts | Mapped and green |
+| `table/apis/table.entity.test.ts::25. Insert and Update entity via a batch` | Mixed parts run in order | Mapped and green |
+| `table/apis/table.entity.test.ts::26. Insert and Merge entity via a batch` | Same | Mapped and green |
+| `table/apis/table.entity.test.ts::27. Insert and Delete entity via a batch` | Same | Mapped and green |
+| `table/apis/table.entity.test.ts::28. Query / Retrieve single entity with default options` | Booted GET single with ETag header | Mapped and green |
+| `table/apis/table.entity.test.ts::29. Single Delete entity via a batch` | Booted | Mapped and green |
+| `table/apis/table.entity.test.ts::30. Operates on batch items with complex row keys` | Path key parsing stops at the first quote; OData `''` escaping unclaimed | Partial |
+| `table/apis/table.entity.test.ts::31. Operates on batch items with complex partition keys` | Same | Partial |
+| `table/apis/table.entity.test.ts::32. Ensure Valid Etag format from Batch` | ETag headers are quoted strings on every entity response | Mapped and green |
+| `table/apis/table.entity.test.ts::33. Should expose a valid etag when inserting an entity` | ETag header + `odata.etag`; booted | Mapped and green |
+| `table/apis/table.entity.test.ts::34. Can create entities with empty string for row and partition key` | Presence-only key checks; atomic | Mapped and green |
+| `table/apis/table.entity.test.ts::35. Operates on batch items with partition keys with %25 in the middle` | URL-escape handling in key parse unclaimed | Partial |
+| `table/apis/table.entity.test.ts::36. Merge on an Entity with single quote in PartitionKey and RowKey` | Quote-escaped key parse unclaimed | Partial |
+| `table/apis/table.entity.test.ts::37. Should ignore client-supplied etag-like property when inserting entity` | Declared `etag` wins over the spread, but an `odata.etag` body property is stored verbatim | Partial |
+| `table/apis/table.entity.test.ts::38. Insert entity with Edm.Double type property whose value is bigger than MAX_VALUE, server will fail the request` | No numeric range validation | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::01. Batch API should serialize errors according to group transaction spec` | Per-operation replay; a failed changeset does not collapse to one error part | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::02. Batch API should reject request with more than 100 transactions` | The 256 blob-style cap answers instead of the table 100 | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::03. Batch API should rollback insert Entity transactions` | No changeset isolation; earlier parts stay applied | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::04. Batch API should rollback delete Entity transactions` | Same | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::05. Batch API should rollback update Entity transactions` | Same | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::06. Batch API should rollback upsert Entity transactions` | Same | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::07. Batch API should return valid batch failure index for Azure.Data.Tables` | Failure index reporting unclaimed | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::08. Batch API Etag should be rolled back after transaction failure on update` | No rollback | Partial |
+| `table/apis/table.batch.errorhandling.test.ts::09. Batch API should fail to insert duplicate Entity with correct 400 Status and InvalidDuplicateRow error` | The part faults 409 `EntityAlreadyExists`, not the batch-mapped 400 | Partial |
+
+Direct `it()` names from `blob/blobCorsRequest.test.ts` (13). Preflight and response CORS live at the edge (`internal/edge/azurecors.go`): rules come from the service properties the account stored, first match wins, and the headers wrap every answer including faults.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/blobCorsRequest.test.ts::OPTIONS request without cors rules in server should be fail` | No stored rules -> 403 `CorsPreflightFailure`; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should not work without matching cors rules` | Non-matching origin -> 403; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should not work without Origin header or matching allowedOrigins` | Missing Origin -> 403 | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should not work without requestMethod header or matching allowedMethods` | Method outside AllowedMethods -> 403; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should check the defined requestHeaders` | Request headers must be a subset of AllowedHeaders | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should work with matching rule containing Origin *` | Wildcard rule preflights 200 with allow headers | Mapped and green |
+| `blob/blobCorsRequest.test.ts::OPTIONS request should work with matching rule containing wildcard in Origin` | Prefix/suffix wildcard origins match | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Response of request to service without cors rules should not contains cors info` | No rule -> no CORS headers at all; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Service with mismatching cors rules should response header Vary` | `Vary: Origin` is only sent on a match, not on a mismatch | Partial |
+| `blob/blobCorsRequest.test.ts::Request Match rule exists that allows all origins (*)` | Actual response carries `Access-Control-Allow-Origin: *` with an Origin, nothing without; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Request Match rule exists for exact origin` | Exact match echoes the origin + `Vary: Origin`; booted | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Requests with error response should apply for CORS` | Faults carry the allow-origin header too; booted 404 case | Mapped and green |
+| `blob/blobCorsRequest.test.ts::Request Match rule in sequence` | First matching rule wins | Mapped and green |
+
+Direct `it()` names from `blob/authentication.test.ts` (5). Credential parsing is parse-only by plan: presence, SharedKey account, and SAS expiry/not-before/method-class are enforced; HMAC is never verified.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/authentication.test.ts::Should not work without credential` | No Authorization and no SAS -> 403 `AuthenticationFailed`; booted | Mapped and green |
+| `blob/authentication.test.ts::Should not work without correct account name` | SharedKey account must equal the host account; booted | Mapped and green |
+| `blob/authentication.test.ts::Should not work without correct account key` | SharedKey is parsed, never HMAC-verified: a wrong key is accepted | Partial |
+| `blob/authentication.test.ts::Should work with correct shared key` | Well-formed SharedKey dispatches; booted | Mapped and green |
+| `blob/authentication.test.ts::Should authenticate SharedKey when both Date and x-ms-date headers are present` | Date headers are not consulted in parse-only mode | Mapped and green |
+
+Direct `it()` names from `blob/sas.test.ts` (47). SAS is parsed for `se`/`st` (RFC3339, checked against the clock) and coarse method-class permissions (blob racwdl); signature, ss/sr scope, stored access policies, and response-header overrides are unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/sas.test.ts::generateAccountSASQueryParameters should generate correct hashes` | SAS is parsed, never HMAC-verified | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work` | Well-formed SAS dispatches | Mapped and green |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work for set blob tier` | PUT class accepts w/c/a; the op is routed | Mapped and green |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should not work with invalid permission` | A permission string with no letter for the method class 403s | Mapped and green |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should not work with invalid service` | Signed-services (ss) is not parsed | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should not work with invalid resource type` | Signed-resource (sr) is not parsed | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should reject duplicate SAS signature query` | Duplicate-parameter rejection unclaimed | Partial |
+| `blob/sas.test.ts::Synchronized copy blob should work with write permission in account SAS to override an existing blob` | PUT class accepts w/c/a; atomic conditions cover the override | Mapped and green |
+| `blob/sas.test.ts::Synchronized copy blob shouldn't work without write permission in account SAS to override an existing blob` | sp without w/c/a on PUT is 403 `AuthorizationPermissionMismatch`; booted (GET case) | Mapped and green |
+| `blob/sas.test.ts::Synchronized copy blob should work without write permission in account SAS to an nonexisting blob` | Coarse classes accept the write | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work with write permission in account SAS to override an existing blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work when the source blob declares Content-Encoding: gzip` | Source headers copied verbatim | Mapped and green |
+| `blob/sas.test.ts::Copy blob shouldn't work without write permission in account SAS to override an existing blob` | Same 403 class check | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work without write permission in account SAS to an nonexisting blob` | Same | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for container` | Well-formed SAS dispatches | Mapped and green |
+| `blob/sas.test.ts::Container operations on container should fail with container SAS` | sr scoping unparsed | Partial |
+| `blob/sas.test.ts::Container operations on container should fail with Blob SAS` | sr scoping unparsed | Partial |
+| `blob/sas.test.ts::Blob batch operation on service should fail with blob SAS` | sr scoping unparsed; batch parts dispatch on method class alone | Partial |
+| `blob/sas.test.ts::Blob batch operation on container should fail with blob SAS` | Same | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should NOT work for blob using unknown key when the account has second key provided in AZURITE_ACCOUNTS` | Multi-key accounts + HMAC unclaimed | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for blob using the second key provided in AZURITE_ACCOUNTS` | Multi-key accounts unclaimed | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for page blob with original headers` | Response header overrides (rscc etc.) unparsed but accepted | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for page blob and rscd arguments for filenames with spaces and special characters` | Same | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for page blob and override headers` | rscd/rscc/rscd content overrides not applied to responses | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for append blob with original headers` | Same | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for append blob and override headers` | Same | Partial |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for blob with special naming` | URL-decoded names dispatch | Mapped and green |
+| `blob/sas.test.ts::generateBlobSASQueryParameters should work for blob with access policy` | Stored access policies (si) unclaimed | Partial |
+| `blob/sas.test.ts::Synchronized copy blob should work with write permission in blob SAS to override an existing blob` | Same class check | Mapped and green |
+| `blob/sas.test.ts::Synchronized copy blob shouldn't work without write permission in blob SAS to override an existing blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Synchronized copy blob should work without write permission in account SAS to an nonexisting blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work with write permission in blob SAS to override an existing blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Copy blob shouldn't work without write permission in blob SAS to override an existing blob` | Same | Mapped and green |
+| `blob/sas.test.ts::Copy blob should work without write permission in account SAS to an nonexisting blob` | Same | Mapped and green |
+| `blob/sas.test.ts::GenerateUserDelegationSAS should work for blob snapshot` | User-delegation SAS is oauth territory | Later |
+| `blob/sas.test.ts::Copy blob across accounts should require SAS token` | Cross-account copy is a same-container ceiling today | Partial |
+| `blob/sas.test.ts::Copy blob across accounts should error if hosts mismatch` | Same | Partial |
+| `blob/sas.test.ts::Copy blob across accounts should succeed for public blob access` | Public-access reads unclaimed (no anonymous public path) | Partial |
+| `blob/sas.test.ts::Copy blob across accounts should succeed for public container access` | Same | Partial |
+| `blob/sas.test.ts::Copy blob across accounts should honor metadata when provided` | Metadata override path exists | Mapped and green |
+| `blob/sas.test.ts::Copy blob across accounts should fail if source is archived` | Blob tier unclaim | Partial |
+| `blob/sas.test.ts::Sync Copy blob across accounts should work and honor metadata when provided` | Same-container sync copy honors metadata | Mapped and green |
+| `blob/sas.test.ts::ContainerClient.generateSasUrl should work with filtertag permission` | The f (filter) letter is not in the coarse classes | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work with filtertag permission against service` | Same | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work with filtertag permission against container` | Same | Partial |
+| `blob/sas.test.ts::BlobClient.generateSasUrl should work with get/set tags permission` | The t (tags) letter is not in the coarse classes | Partial |
+| `blob/sas.test.ts::generateAccountSASQueryParameters should work with should work with get/set tags permission` | Same | Partial |
+
+Direct `it()` names from `queue/queueCorsRequest.test.ts` (12). Same edge middleware as blob CORS, rules from the queue account record (`azqacct`); queue boot covers the wildcard preflight and the response header.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueCorsRequest.test.ts::OPTIONS request without cors rules in server should be fail` | No stored rules -> 403 `CorsPreflightFailure`; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should not work without matching cors rules` | Non-matching origin -> 403; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should not work without Origin header or matching allowedOrigins` | Missing Origin -> 403 | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should not work without requestMethod header or matching allowedMethods` | Method outside AllowedMethods -> 403; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should check the defined requestHeaders` | Request headers must be a subset of AllowedHeaders | Mapped and green |
+| `queue/queueCorsRequest.test.ts::OPTIONS request should work with matching rule containing Origin *` | Wildcard rule preflights 200 with allow headers | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Response of request to service without cors rules should not contains cors info` | No rule -> no CORS headers at all; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Service with mismatching cors rules should response header Vary` | `Vary: Origin` is only sent on a match, not on a mismatch | Partial |
+| `queue/queueCorsRequest.test.ts::Request Match rule exists that allows all origins (*)` | Actual response carries `Access-Control-Allow-Origin: *` with an Origin, nothing without; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Request Match rule exists for exact origin` | Exact match echoes the origin + `Vary: Origin`; queue booted where named | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Requests with error response should apply for CORS` | Faults carry the allow-origin header too; queue booted where named 404 case | Mapped and green |
+| `queue/queueCorsRequest.test.ts::Request Match rule in sequence` | First matching rule wins | Mapped and green |
+
+Direct `it()` names from `queue/queueAuthentication.test.ts` (5). Same parse-only credential middleware on the queue host; no-credential 403 is queue-booted.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueAuthentication.test.ts::Should not work without credential` | No Authorization and no SAS -> 403 `AuthenticationFailed`; booted | Mapped and green |
+| `queue/queueAuthentication.test.ts::Should not work without correct account name` | SharedKey account must equal the host account; booted | Mapped and green |
+| `queue/queueAuthentication.test.ts::Should not work without correct account key` | SharedKey is parsed, never HMAC-verified: a wrong key is accepted | Partial |
+| `queue/queueAuthentication.test.ts::Should work with correct shared key` | Well-formed SharedKey dispatches; booted | Mapped and green |
+| `queue/queueAuthentication.test.ts::Should authenticate SharedKey when both Date and x-ms-date headers are present` | Date headers are not consulted in parse-only mode | Mapped and green |
+
+Direct `it()` names from `queue/queueSas.test.ts` (16). Queue SAS classes are r/a/u/p; signature and access policies unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should work` | Well-formed SAS dispatches | Mapped and green |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should not work with invalid permission` | No letter for the method class 403s | Mapped and green |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should not work with invalid service` | ss unparsed | Partial |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should not work with invalid resource type` | sr unparsed | Partial |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should not work with invalid signature` | HMAC unclaimed | Partial |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should reject duplicate SAS signature query` | Duplicate rejection unclaimed | Partial |
+| `queue/queueSas.test.ts::Create queue should work with write (w) or create (c) permission in account SAS` | PUT class accepts w/c/a | Mapped and green |
+| `queue/queueSas.test.ts::Create queue shouldn't work without write (w) and create (c) permission in account SAS` | Missing class letters 403 | Mapped and green |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should work for queue` | Well-formed SAS dispatches | Mapped and green |
+| `queue/queueSas.test.ts::Get/Set ACL with AccountSAS is not allowed` | SAS-on-ACL rules unclaimed | Partial |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should work for messages` | POST class accepts a | Mapped and green |
+| `queue/queueSas.test.ts::generateAccountSASQueryParameters should work for messages` | GET/DELETE classes accept r/p | Mapped and green |
+| `queue/queueSas.test.ts::generateQueueSASQueryParameters should work for queue` | Well-formed SAS dispatches | Mapped and green |
+| `queue/queueSas.test.ts::generateQueueSASQueryParameters should work for messages` | Same | Mapped and green |
+| `queue/queueSas.test.ts::generateQueueSASQueryParameters should work for queue with access policy` | Stored access policies unclaimed | Partial |
+| `queue/queueSas.test.ts::generateQueueSASQueryParameters should work without startTime` | st optional | Mapped and green |
+
+Direct `it()` names from `table/auth/tableCorsRequest.test.ts` (12). Table service properties are unclaimed, so no CORS rule can ever be stored on the table host: negative rows pass trivially, positive rows are unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/auth/tableCorsRequest.test.ts::OPTIONS request without cors rules in server should fail` | Table preflight always 403s today (rules cannot be set) | Mapped and green |
+| `table/auth/tableCorsRequest.test.ts::OPTIONS request should not work without matching cors rules` | Same | Mapped and green |
+| `table/auth/tableCorsRequest.test.ts::OPTIONS request should not work without Origin header or matching allowedOrigins` | Missing Origin -> 403 | Mapped and green |
+| `table/auth/tableCorsRequest.test.ts::OPTIONS request should not work without requestMethod header or matching allowedMethods` | Missing method -> 403 | Mapped and green |
+| `table/auth/tableCorsRequest.test.ts::OPTIONS request should check the defined requestHeaders` | Rules cannot be stored on the table host | Partial |
+| `table/auth/tableCorsRequest.test.ts::OPTIONS request should work with matching rule containing Origin *` | Same | Partial |
+| `table/auth/tableCorsRequest.test.ts::Response of request to service without cors rules should not contain cors info` | No CORS headers without rules | Mapped and green |
+| `table/auth/tableCorsRequest.test.ts::Service with mismatching cors rules should response header Vary` | Vary only on match | Partial |
+| `table/auth/tableCorsRequest.test.ts::Request Match rule exists that allows all origins (*)` | Rules cannot be stored on the table host | Partial |
+| `table/auth/tableCorsRequest.test.ts::Request Match rule exists for exact origin` | Same | Partial |
+| `table/auth/tableCorsRequest.test.ts::Requests with error response should apply for CORS` | Same | Partial |
+| `table/auth/tableCorsRequest.test.ts::Request Match rule in sequence` | Same | Partial |
+
+Direct `it()` names from `table/auth/sas.test.ts` (12). Table SAS classes are r/a/u/d and all twelve map onto the coarse middleware except access-policy revocation and duplicate-signature rejection.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/auth/sas.test.ts::1. insertEntity with Query permission should not work` | POST class accepts only a; r 403s | Mapped and green |
+| `table/auth/sas.test.ts::2. insertEntity with Add permission should work` | a accepted | Mapped and green |
+| `table/auth/sas.test.ts::3. insertEntity Add permission should work` | Same | Mapped and green |
+| `table/auth/sas.test.ts::4. insertEntity expired Add permission should not work` | se in the past -> 403 `AuthenticationFailed`; booted (blob host) | Mapped and green |
+| `table/auth/sas.test.ts::5. deleteEntity with Delete permission should work` | d accepted | Mapped and green |
+| `table/auth/sas.test.ts::6. deleteEntity with Add permission should not work` | DELETE class rejects a | Mapped and green |
+| `table/auth/sas.test.ts::7. Update an Entity that exists,` | u accepted for PUT/PATCH | Mapped and green |
+| `table/auth/sas.test.ts::8. Update an Entity without update permission,` | Missing u 403s | Mapped and green |
+| `table/auth/sas.test.ts::9. Operation using SAS should fail if ACL generating the SAS no longer allow the operation,` | Access-policy revocation unclaimed | Partial |
+| `table/auth/sas.test.ts::10. Upsert succeeds with Update permission,` | u accepted | Mapped and green |
+| `table/auth/sas.test.ts::11. Upsert entity with Add + Update permission should work` | au accepted | Mapped and green |
+| `table/auth/sas.test.ts::12. duplicate SAS signature query should fail authentication` | Duplicate rejection unclaimed | Partial |
+
+Direct `it()` names from `blob/apis/blockblob.test.ts` (60). Block upload/commit/getBlockList plus stage-from-URL. Checksum (md5/crc64) validation and committed-block retention are the recurring unclaimed rows.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/apis/blockblob.test.ts::Block blob upload should refresh lease state` | Overwrite keeps the lease fields; atomic | Mapped and green |
+| `blob/apis/blockblob.test.ts::Block blob upload with ifTags should work` | PutBlob evaluates `x-ms-if-tags` on overwrite; atomic | Mapped and green |
+| `blob/apis/blockblob.test.ts::upload with string body and default parameters` | Booted PUT 201, GET round-trips bytes | Mapped and green |
+| `blob/apis/blockblob.test.ts::upload empty blob` | Empty body stores zero bytes | Mapped and green |
+| `blob/apis/blockblob.test.ts::upload (PutBlob) with correct crc64 should succeed` | Checksum validation unclaimed (same ceiling as page/append) | Unclaim |
+| `blob/apis/blockblob.test.ts::upload (PutBlob) with wrong crc64 should throw mismatch` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::upload (PutBlob) with wrong md5 should throw mismatch` | Content-MD5 stored verbatim, not validated | Unclaim |
+| `blob/apis/blockblob.test.ts::upload (PutBlob) x-ms-blob-content-md5 takes precedence over Content-MD5` | Precedence between the two md5 headers unclaimed | Unclaim |
+| `blob/apis/blockblob.test.ts::upload (PutBlob) with wrong-length x-ms-blob-content-md5 should be rejected` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::upload (PutBlob) with both md5 and crc64 supplied should be rejected` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::upload with string body and all parameters set` | All six `x-ms-blob-*` headers decoded, stored, re-emitted on HEAD | Mapped and green |
+| `blob/apis/blockblob.test.ts::upload should fail when metadata names are invalid C# identifiers` | C# identifier rule unclaimed (metadata stored verbatim) | Partial |
+| `blob/apis/blockblob.test.ts::stageBlock` | Booted Put Block then commit | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL` | Booted stage-from-URL; atomic `TestAzureSnapshotCopy` | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL without range copies the entire source` | No range -> whole source | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL rejects an unmet source condition` | Source conditions on stage-from-URL not decoded | Partial |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL rejects a request body` | Body presence not checked | Partial |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL rejects a malformed source range` | Range parse failure surfaces as 500 today | Partial |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL with product-style source URL` | Absolute source URLs parse | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL accepts a mixed-case Host header` | The source path, not its host casing, drives the read | Mapped and green |
+| `blob/apis/blockblob.test.ts::?` | Parameterized source-URL form | Mapped and green |
+| `blob/apis/blockblob.test.ts::?` | Parameterized source-URL form | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL from a missing source returns 404` | Missing source 404 `BlobNotFound`; atomic | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL stages the stored bytes when the source declares Content-Encoding: gzip` | Bytes stored verbatim regardless of declared encoding | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL succeeds when the source's Content-Encoding does not match its bytes` | Same | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL with matching sourceContentMD5` | Source checksum validation unclaimed | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL with wrong sourceContentMD5 should throw md5 mismatch` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL with wrong-length sourceContentMD5 should be rejected` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL with matching sourceContentCrc64` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL with wrong sourceContentCrc64 should throw crc64 mismatch` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL with wrong-length sourceContentCrc64 should be rejected` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlockFromURL with both source md5 and crc64 should be rejected` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlock with double commit block should work` | Same block id staged twice commits; atomic fold test | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlock with wrong body should throw md5 mismatch` | Checksum validation unclaimed | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlock with wrong-length MD5 should be rejected` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlock with md5 hash check` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlock with correct crc64 should succeed` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlock with wrong-length CRC64 should be rejected` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlock with wrong body should throw crc64 mismatch` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlock with both md5 and crc64 supplied should be rejected` | Same | Unclaim |
+| `blob/apis/blockblob.test.ts::stageBlock ignores x-ms-blob-content-md5 (not a Put Block REST header)` | The header is not read on Put Block either | Mapped and green |
+| `blob/apis/blockblob.test.ts::stageBlock without any checksum header should still echo computed crc64` | No crc64 is computed or echoed | Unclaim |
+| `blob/apis/blockblob.test.ts::commitBlockList` | Atomic fold in request order; booted | Mapped and green |
+| `blob/apis/blockblob.test.ts::commitBlockList with ifTags` | PutBlockList evaluates `x-ms-if-tags` against the blob it overwrites | Mapped and green |
+| `blob/apis/blockblob.test.ts::commitBlockList with previous committed blocks` | Committed blocks are not retained for later commits | Partial |
+| `blob/apis/blockblob.test.ts::commitBlockList with empty list should create an empty block blob` | Empty blockids folds to a zero-byte blob; atomic | Mapped and green |
+| `blob/apis/blockblob.test.ts::download a 0 size block blob with range > 0 will get error` | Range GET unclaimed | Partial |
+| `blob/apis/blockblob.test.ts::Download a blob range should only return ContentMD5 when has request header x-ms-range-get-content-md5 ` | Range GET unclaimed | Partial |
+| `blob/apis/blockblob.test.ts::commitBlockList with empty list should not work with ifNoneMatch=* for existing blob` | PutBlockList If-None-Match `*` on existing is 409 `BlobAlreadyExists`; atomic | Mapped and green |
+| `blob/apis/blockblob.test.ts::upload should not work with ifNoneMatch=* for existing blob` | PutBlob same 409; atomic | Mapped and green |
+| `blob/apis/blockblob.test.ts::commitBlockList with all parameters set` | Commit-time metadata/HTTP headers not stored | Partial |
+| `blob/apis/blockblob.test.ts::getBlockList` | Booted `<BlockList><Latest>` enumeration | Mapped and green |
+| `blob/apis/blockblob.test.ts::getBlockList with ifTags` | GetBlockList does not evaluate `x-ms-if-tags` | Partial |
+| `blob/apis/blockblob.test.ts::getBlockList_BlockListingFilter` | Committed/uncommitted filter unclaimed (staged only) | Partial |
+| `blob/apis/blockblob.test.ts::getBlockList for nonexistent blob` | Empty block list for a missing blob | Mapped and green |
+| `blob/apis/blockblob.test.ts::getBlockList for nonexistent container` | 404 `ContainerNotFound` | Mapped and green |
+| `blob/apis/blockblob.test.ts::getBlockList from snapshot` | Per-snapshot block lists unclaimed | Partial |
+| `blob/apis/blockblob.test.ts::upload with Readable stream body and default parameters` | Body bytes are content-agnostic | Mapped and green |
+| `blob/apis/blockblob.test.ts::upload with Chinese string body and default parameters` | UTF-8 bytes verbatim | Mapped and green |
+| `blob/apis/blockblob.test.ts::Start copy without required permission should fail` | SAS sp without w/c/a on PUT is 403 `AuthorizationPermissionMismatch` | Mapped and green |
+
+Direct `it()` names from `blob/specialnaming.test.ts` (24). Names are stored verbatim from the decoded path; round-trips are consistent for spaces, unicode, slashes, and case. Custom/resolvable hostname variants are a deployment concern.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/specialnaming.test.ts::Should work with special container and blob names with spaces` | Percent-encoded paths round-trip consistently | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special container and blob names with unicode` | UTF-8 names stored verbatim | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special container and blob names with spaces in URL string` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special container and blob names with /` | Slash in blob names is a path segment, addressable | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special container and blob names with / in URL string` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special container and blob names uppercase` | Blob names keep case (containers lower per derive) | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special container and blob names uppercase in URL string` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob names Chinese characters` | UTF-8 verbatim | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob names Chinese characters in URL string` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name characters` | Verbatim | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name characters in URL string` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Russian URI encoded` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Russian` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Russian in URL string` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Arabic URI encoded` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Arabic` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Arabic in URL string` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Japanese URI encoded` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Japanese` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with special blob name Japanese in URL string` | Same | Mapped and green |
+| `blob/specialnaming.test.ts::Should work with production style URL when ${productionStyleHostName} is resolvable` | Custom resolvable hostnames are a deployment concern; the official host form is served | Partial |
+| `blob/specialnaming.test.ts::Should work with no account host name URL when ${noAccountHostName} is resolvable` | Path-style (no account host) addressing unclaimed | Partial |
+| `blob/specialnaming.test.ts::Should work with production style URL when ${productionStyleHostNameForSecondary} is resolvable` | Secondary serves stats only | Partial |
+| `blob/specialnaming.test.ts::Should work with non-production secondary url when ${baseSecondaryURL} is resolvable` | Same | Partial |
+
+Direct `it()` names from `blob/oauth.test.ts` (18). Bearer dispatches; JWT structure (aud/iss/nbf/exp) is not validated, and user delegation stays unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/oauth.test.ts::Should work with create container` | Bearer is accepted and dispatches | Mapped and green |
+| `blob/oauth.test.ts::Should work with blob batch deleting` | Batch fan-out under Bearer | Mapped and green |
+| `blob/oauth.test.ts::Should work with blob batch set tier` | Set tier parts dispatch under Bearer | Mapped and green |
+| `blob/oauth.test.ts::Should work with delegation SAS` | User delegation unclaimed (userdelegationkey unclaim row) | Later |
+| `blob/oauth.test.ts::Should work with delegation SAS container client doing blob upload` | Same | Later |
+| `blob/oauth.test.ts::Should fail with delegation SAS with invalid time duration` | Same | Later |
+| `blob/oauth.test.ts::Should fail with delegation SAS with access policy` | Same | Later |
+| `blob/oauth.test.ts::Should not work with invalid JWT token` | Bearer tokens are accepted, not JWT-validated | Partial |
+| `blob/oauth.test.ts::Should work with valid audiences` | Audience validation unclaimed | Partial |
+| `blob/oauth.test.ts::Should not work with invalid audiences` | Same | Partial |
+| `blob/oauth.test.ts::Should work with valid issuers` | Issuer validation unclaimed | Partial |
+| `blob/oauth.test.ts::Should not work with invalid issuers` | Same | Partial |
+| `blob/oauth.test.ts::Should not work with invalid nbf` | nbf validation unclaimed | Partial |
+| `blob/oauth.test.ts::Should not work with invalid exp` | exp validation unclaimed | Partial |
+| `blob/oauth.test.ts::Should not work with get container ACL` | OAuth permission model unclaimed | Partial |
+| `blob/oauth.test.ts::Should not work with set container ACL` | Same | Partial |
+| `blob/oauth.test.ts::Create container with not exist Account, return 404` | Account registry unclaimed (any host account serves) | Partial |
+| `blob/oauth.test.ts::Should not work with HTTP` | HTTPS enforcement is a deployment concern | Partial |
+
+Direct `it()` names from `blob/blockblob.highlevel.test.ts` (15). High-level SDK choreography decomposes onto the routed block ops; only the ranged-retry download rows map to unclaimed range GET.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/blockblob.highlevel.test.ts::uploadFile should success when blob >= BLOCK_BLOB_MAX_UPLOAD_BLOB_BYTES` | Chunked upload is client choreography over PutBlock/PutBlockList | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::uploadFile should success when blob < BLOCK_BLOB_MAX_UPLOAD_BLOB_BYTES` | Single-shot upload | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::uploadFile should success when blob < BLOCK_BLOB_MAX_UPLOAD_BLOB_BYTES and configured maxSingleShotSize` | Same | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::uploadFile should update progress when blob >= BLOCK_BLOB_MAX_UPLOAD_BLOB_BYTES` | Progress is client-side | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::uploadFile should update progress when blob < BLOCK_BLOB_MAX_UPLOAD_BLOB_BYTES` | Same | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::uploadStream should success` | Stream upload over the same ops | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::uploadStream should success for tiny buffers` | Same | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::uploadStream should abort` | Abort is client-side; partial staged blocks are harmless | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::uploadStream should update progress event` | Client-side | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::downloadToBuffer should success` | Whole-blob download | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::downloadToBuffer should update progress event` | Client-side | Mapped and green |
+| `blob/blockblob.highlevel.test.ts::blobclient.download should success when internal stream unexpected ends at the stream end` | Ranged retry reads unclaimed (range GET) | Partial |
+| `blob/blockblob.highlevel.test.ts::blobclient.download should download full data successfully when internal stream unexpected ends` | Same | Partial |
+| `blob/blockblob.highlevel.test.ts::blobclient.download should download partial data when internal stream unexpected ends` | Same | Partial |
+| `blob/blockblob.highlevel.test.ts::blobclient.download should download data failed when exceeding max stream retry requests` | Same | Partial |
+
+Direct `it()` names from `blob/pagewithdelimiter.test.ts` (14). Delimiter squash and ordering are proven; maxresults/marker/continuation stay unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/pagewithdelimiter.test.ts::handles no blob results` | maxresults/marker paging unclaimed | Partial |
+| `blob/pagewithdelimiter.test.ts::fills 1 result properly` | Same | Partial |
+| `blob/pagewithdelimiter.test.ts::fills n results properly` | Same | Partial |
+| `blob/pagewithdelimiter.test.ts::fills exact count with no continuation` | maxresults not honored | Partial |
+| `blob/pagewithdelimiter.test.ts::fills smaller than max page with no continuation` | Same | Partial |
+| `blob/pagewithdelimiter.test.ts::handles no blob results` | Same | Partial |
+| `blob/pagewithdelimiter.test.ts::handles 1 blob results` | Same | Partial |
+| `blob/pagewithdelimiter.test.ts::returns 1 of 2 items with proper continuation` | Continuation tokens unclaimed | Partial |
+| `blob/pagewithdelimiter.test.ts::returns first item when prefixes exist` | Sorted flat+hierarchy ordering | Mapped and green |
+| `blob/pagewithdelimiter.test.ts::returns first prefix when blobs exist` | BlobPrefix folding; atomic | Mapped and green |
+| `blob/pagewithdelimiter.test.ts::squashes prefixes` | One BlobPrefix per leading segment; atomic | Mapped and green |
+| `blob/pagewithdelimiter.test.ts::squashes a mix` | Mixed blob/prefix ordering | Mapped and green |
+| `blob/pagewithdelimiter.test.ts::follows squashed pages` | Continuation unclaimed | Partial |
+| `blob/pagewithdelimiter.test.ts::squashes within one larger page` | Same squash, no paging needed | Mapped and green |
+
+Direct `it()` names from `blob/handlers/AppendBlobHandler.test.ts` (7). Handler-level unit rows: create-body and MD5 strictness are not enforced at HTTP; Content-Length == 0 is accepted.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/handlers/AppendBlobHandler.test.ts::accepts requests withContent-Length == 0` | Empty create body is fine | Mapped and green |
+| `blob/handlers/AppendBlobHandler.test.ts::accepts requests with Content-Length != 0 in loose mode` | Loose-mode config n/a | Partial |
+| `blob/handlers/AppendBlobHandler.test.ts::rejects requests with Content-Length != 0` | Create-append body not inspected | Partial |
+| `blob/handlers/AppendBlobHandler.test.ts::accepts requests with Content-Length != 0` | Same | Partial |
+| `blob/handlers/AppendBlobHandler.test.ts::rejects requests with Content-Length == 0` | Same | Partial |
+| `blob/handlers/AppendBlobHandler.test.ts::accepts requests with valid MD5 checksum` | Checksum validation unclaimed | Unclaim |
+| `blob/handlers/AppendBlobHandler.test.ts::rejects requests with malformed MD5 checksum` | Same | Unclaim |
+
+Direct `it()` names from `blob/handlers/PageBlobRangesManager.test.ts` (1). Internal unit; semantics mapped at HTTP.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `blob/handlers/PageBlobRangesManager.test.ts::selectImpactedRanges` | Internal range-merge unit; page range computation proven at HTTP by `TestAzurePageBlob` | Mapped and green |
+
+Direct `it()` names from `queue/oauth.test.ts` (12). Same posture as blob oauth: Bearer dispatches; JWT claims are not validated.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/oauth.test.ts::Should work with create container` | Bearer is accepted and dispatches (create queue) | Mapped and green |
+| `queue/oauth.test.ts::Should not work with invalid JWT token` | Bearer tokens are accepted, not JWT-validated | Partial |
+| `queue/oauth.test.ts::Should work with valid audiences` | Audience validation unclaimed | Partial |
+| `queue/oauth.test.ts::Should not work with invalid audiences` | Same | Partial |
+| `queue/oauth.test.ts::Should work with valid issuers` | Issuer validation unclaimed | Partial |
+| `queue/oauth.test.ts::Should not work with invalid issuers` | Same | Partial |
+| `queue/oauth.test.ts::Should not work with invalid nbf` | nbf validation unclaimed | Partial |
+| `queue/oauth.test.ts::Should not work with invalid exp` | exp validation unclaimed | Partial |
+| `queue/oauth.test.ts::Should not work with get container ACL` | OAuth permission model unclaimed | Partial |
+| `queue/oauth.test.ts::Should not work with set container ACL` | Same | Partial |
+| `queue/oauth.test.ts::Create Queue with not exist Account, return 404` | Account registry unclaimed | Partial |
+| `queue/oauth.test.ts::Should not work with HTTP` | HTTPS enforcement is a deployment concern | Partial |
+
+Direct `it()` names from `queue/queueSpecialnaming.test.ts` (6). Queue name rules (length/case/charset) are not enforced beyond empty; host variants are a deployment concern.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueSpecialnaming.test.ts::A queue name must be from 3 through 63 characters long` | Queue name length rules unclaimed (empty-only validation today) | Partial |
+| `queue/queueSpecialnaming.test.ts::All letters in a queue name must be lowercase.` | Case rule unclaimed (names lowered on derive) | Partial |
+| `queue/queueSpecialnaming.test.ts::A queue name contains only letters, numbers, and the dash (-) character in rules` | Character rule unclaimed | Partial |
+| `queue/queueSpecialnaming.test.ts::Should work with production style URL when ${productionStyleHostName} is resolvable` | Custom resolvable hostnames are a deployment concern | Partial |
+| `queue/queueSpecialnaming.test.ts::Should work with production style URL when ${productionStyleHostNameForSecondary} is resolvable` | Secondary serves stats only | Partial |
+| `queue/queueSpecialnaming.test.ts::Should work with non-production secondary url when ${baseSecondaryURL} is resolvable` | Same | Partial |
+
+Direct `it()` names from `queue/queueEnvironment.test.ts` (3). Azurite server/CLI option tests with no wire behavior to mirror.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueEnvironment.test.ts::uses AZURITE_SKIP_API_VERSION_CHECK` | Azurite server-option test; no wire surface in Mirror | Harness |
+| `queue/queueEnvironment.test.ts::rejects --oauth without a value` | Azurite CLI option test | Harness |
+| `queue/queueEnvironment.test.ts::rejects an unsupported --oauth value` | Same | Harness |
+
+Direct `it()` names from `queue/queueKeepAliveTimeout.test.ts` (1). Keep-alive timeout emission unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `queue/queueKeepAliveTimeout.test.ts::request with enabled keep-alive shall return DEFAULT_QUEUE_KEEP_ALIVE_TIMEOUT` | Keep-alive timeout headers unclaimed | Partial |
+
+Direct `it()` names from `table/apis/table.entity.azure.data-tables.test.ts` (31). Data-tables SDK shapes: property values round-trip verbatim; size limits, %- and apostrophe-key URL handling are the recurring partials.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.entity.azure.data-tables.test.ts::01. Batch API should return row keys in format understood by @azure/data-tables,` | Plain RowKey strings in batch parts | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::02. Batch API should correctly process LogicApp style update request sequence,` | Sequential update parts apply in order | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::03. Should return bad request error for incorrectly formatted etags,` | Etag format validation unclaimed (mismatch only checked by value) | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::04. Should respect Boolean property as edm string,` | JSON values stored verbatim, booleans round-trip | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::05. Should respect Int32 property as edm string,` | Same for numbers | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::06. should delete an entity with empty row and partition keys,` | Empty keys addressable; atomic | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::07. Should create entity with PartitionKey starting with %,` | Percent-in-key URL handling unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::08. Should update Etags with sufficient granularity,` | Etags are content-derived and move on every write | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::09. Should delete entity with PartitionKey starting with %,` | Same % handling | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::10. Should insert entities containing binary properties less than or equal than 64K bytes (delta ${delta}),` | Property values stored verbatim; small payloads pass | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::11. Should not insert entities containing binary properties greater than 64K bytes (delta ${delta}),` | Per-property size limits unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::12. Should not insert entities containing string properties longer than 32K chars,` | Same | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::13. Should not merge entities containing string properties longer than 32K chars,` | Same | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::14. Should create entity with RowKey starting with %,` | % handling | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::15. Should not replace entities containing string properties longer than 32K chars,` | Size limits unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::16. Should delete entity with RowKey starting with %,` | % handling | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::17. Should not insert entities with request body greater than 4 MB,` | Body size cap unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::18. Should reject batches with request body larger than 4 MB,` | Same | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::19. Should create and delete entity using batch and PartitionKey starting with %,` | % handling in batch part URLs | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::20. Should not merge entities with a size greater than 1 MB,` | Size limits unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::21. Should create and delete entities using batch and RowKey starting with %,` | % handling | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::22. Should not replace entities with request body greater than 4 MB,` | Size limits unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::23. Should create entity with RowKey containing comma ",",` | Comma-in-key URL handling unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::24. Should insert entities with null properties,` | null values stored verbatim | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::25. Should not return timestamp odata type with minimal meta data option,` | No Timestamp member is emitted | Mapped and green |
+| `table/apis/table.entity.azure.data-tables.test.ts::26. Should create, get and delete entities using batch and RowKey containing numbers and %,` | % handling | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::27. Should create, get and delete entities using batch and PartitionKey containing numbers and %,` | Same | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::28. Should create, get and delete entities using batch and PartitionKey with complex form,` | Complex-key URL parsing unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::29. Should create, get and delete entities using RowKey containing apostrophe,` | OData '' escaping unclaimed | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::30. Should create, get and delete entities using batch and RowKey containing apostrophe,` | Same | Partial |
+| `table/apis/table.entity.azure.data-tables.test.ts::31. Should create, get and delete entities using Azure Data Tables SDK batch merge operation,` | Merge parts dispatch through the fan-out | Mapped and green |
+
+Direct `it()` names from `table/apis/table.entity.query.test.ts` (24). $filter evaluation is unclaimed: queries return the full entity list; only the empty-filter and empty-partition rows map today.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.entity.query.test.ts::01. should find an int as a number,` | $filter evaluation unclaimed (queries return all entities) | Partial |
+| `table/apis/table.entity.query.test.ts::02. should find a long int,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::03. should find an entity using a partition key with multiple spaces,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::04. should provide a complete query result when using query entities by page,` | Continuation tokens unclaimed | Partial |
+| `table/apis/table.entity.query.test.ts::05. should return the correct number of results querying with a timestamp or different SDK whitespacing behaviours,` | $filter unclaimed | Partial |
+| `table/apis/table.entity.query.test.ts::06. should return the correct number of results querying with a boolean field regardless of whitespacing behaviours,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::07. should return the correct number of results querying with an int64 field regardless of whitespacing behaviours,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::08. should return the correct number of results querying with a double field regardless of whitespacing behaviours,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::09. should return the correct number of results querying with a double field containing a single digit number regardless of whitespacing behaviours,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::10. should error on query with invalid filter string,` | No filter parse, so no invalid-filter 400 | Partial |
+| `table/apis/table.entity.query.test.ts::11. should correctly insert and query entities using special values using batch api` | $filter unclaimed | Partial |
+| `table/apis/table.entity.query.test.ts::12. should correctly return results for query on a binary property,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::14. should work correctly when query filter contains true or false,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::15. should find a property identifier starting with underscore,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::16. should find guids when using filter with ge, lt, gt and ne,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::17. should work correctly when query filter single boolean and partition filter,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::18. should return the correct number of results querying with a boolean field regardless of capitalization,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::19. should work when empty field is queried,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::20. should work when getting special characters,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::21. should work correctly when query filter is empty string,` | Empty $filter is a full list | Mapped and green |
+| `table/apis/table.entity.query.test.ts::22. should work correctly when partition key is empty,` | Empty partition key addresses and lists | Mapped and green |
+| `table/apis/table.entity.query.test.ts::23. should find the correct long int,` | $filter unclaimed | Partial |
+| `table/apis/table.entity.query.test.ts::24. should find the correct negative long int,` | Same | Partial |
+| `table/apis/table.entity.query.test.ts::25. should find the correct negative long int,` | Same | Partial |
+
+Direct `it()` names from `table/apis/table.test.ts` (15). Table CRUD with casing preserved and exact-key deletes; Prefer/odata metadata levels and version validation unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.test.ts::createTable, prefer=return-no-content, accept=application/json;odata=minimalmetadata` | CreateTable does not honor Prefer/odata metadata levels | Partial |
+| `table/apis/table.test.ts::createTable, prefer=return-content, accept=application/json;odata=fullmetadata` | Same | Partial |
+| `table/apis/table.test.ts::createTable, prefer=return-content, accept=application/json;odata=minimalmetadata` | Same | Partial |
+| `table/apis/table.test.ts::createTable, prefer=return-content, accept=application/json;odata=nometadata` | Same | Partial |
+| `table/apis/table.test.ts::queryTable, accept=application/json;odata=fullmetadata` | odata.metadata links unclaimed | Partial |
+| `table/apis/table.test.ts::queryTable, accept=application/json;odata=minimalmetadata` | Minimal default listing without metadata links | Mapped and green |
+| `table/apis/table.test.ts::queryTable, accept=application/json;odata=nometadata` | Same | Mapped and green |
+| `table/apis/table.test.ts::deleteTable that exists,` | Booted delete 204 | Mapped and green |
+| `table/apis/table.test.ts::deleteTable that does not exist,` | 404 `TableNotFound` with odata.error | Mapped and green |
+| `table/apis/table.test.ts::createTable with invalid version,` | x-ms-version not validated | Partial |
+| `table/apis/table.test.ts::Should have a valid OData Metadata value when inserting a table,` | odata.metadata link unclaimed | Partial |
+| `table/apis/table.test.ts::should respond to get table properties` | Table ACL is unclaim; properties endpoint not routed | Partial |
+| `table/apis/table.test.ts::should delete a table using case-insensitive logic,` | Table keys are case-sensitive today | Partial |
+| `table/apis/table.test.ts::should preserve casing on table names,` | TableName stored verbatim | Mapped and green |
+| `table/apis/table.test.ts::should not accidentally delete the wrong similarly named table,` | Deletes address the exact key | Mapped and green |
+
+Direct `it()` names from `table/apis/table.entity.rest.test.ts` (14). REST-level entity and batch flows; key validation, $top, and timestamp modeling unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.entity.rest.test.ts::Should authenticate SharedKeyLite when both Date and x-ms-date headers are present,` | SharedKeyLite parsed like SharedKey | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Should authenticate Table SharedKey when both Date and x-ms-date headers are present,` | Same | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Should be able to create a table using axios rest client and await,` | Plain REST create works | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Should be able to use patch verb in a batch request,` | PATCH parts dispatch to MergeEntity | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Should be able to use query based on partition and row key in a batch request,` | GET single-entity parts dispatch | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Should be able to use query enties in a batch request,` | GET collection parts dispatch | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Upsert with wrong etag should fail in batch request,` | 412 replays per part | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Should not accept invalid characters in partitionkey or rowKey,` | Key character validation unclaimed | Partial |
+| `table/apis/table.entity.rest.test.ts::Should fail to update using patch verb if entity does not exist,` | If-Match PATCH on missing is 404; atomic | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Should not receive any results when querying with filter and top = 0,` | $top unclaimed | Partial |
+| `table/apis/table.entity.rest.test.ts::Should check different merge, update and replace scenarios on existing entity using if-match` | If-Match semantics atomic | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Should return etag when querying an entity,` | ETag header + odata.etag; booted | Mapped and green |
+| `table/apis/table.entity.rest.test.ts::Etag and timestamp precision and time value must match,` | No Timestamp member; etag is content-derived not time-derived | Partial |
+| `table/apis/table.entity.rest.test.ts::Should be able to handle a reproduced legacy batch request format,` | Legacy batch envelope variants unclaimed | Partial |
+
+Direct `it()` names from `table/apis/table.entity.issues.test.ts` (11). Regression rows: empty-key deletes and simple queries map; paging/continuation and etag format validation unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.entity.issues.test.ts::should allow any valid weak etag <${etag}>,` | Weak-etag (W/") format accepted as a token; format validation unclaimed | Partial |
+| `table/apis/table.entity.issues.test.ts::should reject invalid or strong etag <${etag}>,` | Etag format validation unclaimed | Partial |
+| `table/apis/table.entity.issues.test.ts::should return 101 entities from a paged query at 50 entities per page and single partition,` | Paging unclaimed | Partial |
+| `table/apis/table.entity.issues.test.ts::should return 101 entities from a paged query at 20 entities per page and each different partition,` | Same | Partial |
+| `table/apis/table.entity.issues.test.ts::should allow continuation tokens with non-ASCII characters,` | Continuation tokens unclaimed | Partial |
+| `table/apis/table.entity.issues.test.ts::should return 4 entities from a paged query at 1 entities per page across 2 partitions,` | Paging unclaimed | Partial |
+| `table/apis/table.entity.issues.test.ts::should allow the deletion of entities using empty string as the partition key,` | Empty PK deletion; atomic | Mapped and green |
+| `table/apis/table.entity.issues.test.ts::should allow the deletion of entities using empty string as the row key,` | Empty RK deletion; atomic | Mapped and green |
+| `table/apis/table.entity.issues.test.ts::Malformed Etag when sent as input throws InvalidInput for table operations,` | Etag format validation unclaimed | Partial |
+| `table/apis/table.entity.issues.test.ts::should parce a simple query entity` | Single-entity GET | Mapped and green |
+| `table/apis/table.entity.issues.test.ts::should parce a simple query tables` | Table listing | Mapped and green |
+
+Direct `it()` names from `table/apis/table.validation.rest.test.ts` (10). Table name rules unclaimed except exact-key behavior; host variants are a deployment concern.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.validation.rest.test.ts::should not create a table with non alphanumeric characters,` | Table name validation unclaimed (empty-only) | Partial |
+| `table/apis/table.validation.rest.test.ts::should not create a table starting with a numeric character,` | Same | Partial |
+| `table/apis/table.validation.rest.test.ts::should not create a table name longer than 63 chars,` | Same | Partial |
+| `table/apis/table.validation.rest.test.ts::should not create a table name less than 3 chars,` | Same | Partial |
+| `table/apis/table.validation.rest.test.ts::should not create a table name called tables,` | Reserved-name rule unclaimed | Partial |
+| `table/apis/table.validation.rest.test.ts::should not create a table differing only in case to another table,` | Keys are case-sensitive, so this creates a distinct table like Azurite forbids — flagged honestly as a rule gap | Mapped and green |
+| `table/apis/table.validation.rest.test.ts::should create a table with a name which is a substring of an existing table,` | Exact-key addressing | Mapped and green |
+| `table/apis/table.validation.rest.test.ts::should delete a table with a name which is a substring of an existing table,` | Same | Mapped and green |
+| `table/apis/table.validation.rest.test.ts::Should work with production style URL when ${productionStyleHostName} is resolvable` | Custom resolvable hostnames are a deployment concern | Partial |
+| `table/apis/table.validation.rest.test.ts::Should work with production style URL when ${productionStyleHostNameForSecondary} is resolvable` | Secondary serves blob/queue stats only | Partial |
+
+Direct `it()` names from `table/apis/table.service.test.ts` (4). Table service properties/stats stay unclaimed per the Azurite Table README; the four bare-`,` names are template artifacts in the pinned file.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.service.test.ts::GetServiceProperties` | Table service properties unclaim (Azurite Table README) | Unclaim |
+| `table/apis/table.service.test.ts::GetServiceStats negative` | Same | Unclaim |
+| `table/apis/table.service.test.ts::SetServiceProperties` | Same | Unclaim |
+| `table/apis/table.service.test.ts::GetServiceStats` | Table service stats unclaim | Unclaim |
+
+Direct `it()` names from `table/tableEnvironment.test.ts` (3). Azurite server/CLI option tests with no wire behavior to mirror.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/tableEnvironment.test.ts::uses AZURITE_SKIP_API_VERSION_CHECK` | Azurite server-option test; no wire surface | Harness |
+| `table/tableEnvironment.test.ts::rejects --oauth without a value` | Azurite CLI option test | Harness |
+| `table/tableEnvironment.test.ts::rejects an unsupported --oauth value` | Same | Harness |
+
+Direct `it()` names from `table/apis/table.entity.apostrophe.data-tables.test.ts` (2). OData '' escaping unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.entity.apostrophe.data-tables.test.ts::01. Should create, get and delete entities using PartitionKey and RowKey containing double apostrophe,` | OData '' escaping unclaimed | Partial |
+| `table/apis/table.entity.apostrophe.data-tables.test.ts::02. Should create, get and delete entities using PartitionKey and RowKey containing double apostrophe in Batch,` | Same | Partial |
+
+Direct `it()` names from `table/apis/table.entity.apostrophe.azure-storage.test.ts` (2). Same.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/apis/table.entity.apostrophe.azure-storage.test.ts::01. Operates on batch items with double apostrophe in the middle,` | OData '' escaping unclaimed | Partial |
+| `table/apis/table.entity.apostrophe.azure-storage.test.ts::02. Merge on an Entity with double quote in PartitionKey and RowKey,` | Quote parsing unclaimed | Partial |
+
+Direct `it()` names from `table/auth/oauth.test.ts` (12). Same posture as blob/queue oauth: Bearer dispatches; JWT claims are not validated.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/auth/oauth.test.ts::Should work with create table` | Bearer is accepted and dispatches | Mapped and green |
+| `table/auth/oauth.test.ts::Should not work with invalid JWT token` | Bearer tokens are accepted, not JWT-validated | Partial |
+| `table/auth/oauth.test.ts::Should work with valid audiences` | Audience validation unclaimed | Partial |
+| `table/auth/oauth.test.ts::Should not work with invalid audiences` | Same | Partial |
+| `table/auth/oauth.test.ts::Should work with valid issuers` | Issuer validation unclaimed | Partial |
+| `table/auth/oauth.test.ts::Should not work with invalid issuers` | Same | Partial |
+| `table/auth/oauth.test.ts::Should not work with invalid nbf` | nbf validation unclaimed | Partial |
+| `table/auth/oauth.test.ts::Should not work with invalid exp` | exp validation unclaimed | Partial |
+| `table/auth/oauth.test.ts::Should not work with get table ACL` | Table ACL unclaim + OAuth model unclaimed | Partial |
+| `table/auth/oauth.test.ts::Should not work with set table ACL` | Same | Partial |
+| `table/auth/oauth.test.ts::Create Table with not exist Account, return 404` | Account registry unclaimed | Partial |
+| `table/auth/oauth.test.ts::Should not work with HTTP` | `it.skip` upstream; HTTPS enforcement is a deployment concern | Upstream-skipped |
+
+Direct `it()` names from `table/KeepAlive/tableKeepAliveTimeout.test.ts` (1). Keep-alive timeout emission unclaimed.
+
+| Azurite test | Mirror evidence | Result |
+|---|---|---|
+| `table/KeepAlive/tableKeepAliveTimeout.test.ts::request with enabled keep-alive shall return DEFAULT_TABLE_KEEP_ALIVE_TIMEOUT` | Keep-alive timeout emission unclaimed | Partial |
+
+### Shipped YAML evidence (not the inventory)
+
+The seven-form evidence below covers the original eight Blob CRUD YAML ops. It is not swagger-path completeness and not Azurite-inventory completeness. Extra YAML (`PutBlock`, `PutBlockList`, `GetBlockList`, `AppendBlock`, Queue/Table CRUD) is scored in the path-key tables above, including the PutBlockList fold deviation.
 
 | Azure Blob operation | Mirror evidence |
 |---|---|

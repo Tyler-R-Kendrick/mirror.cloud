@@ -9,15 +9,18 @@ import "testing"
 //
 // The schema declares both `project` and `projectId` on Service, so selecting a
 // service's project is the natural query and the old switch answered it with
-// the project handler. These cases are the ones that were broken, plus the ones
-// that were not, so a future rewrite has to keep both halves.
+// the project handler. These cases are the ones that were broken, plus the
+// ones that were not and the shapes the scan has to understand at all, so a
+// future rewrite -- a real parser, per C53 -- has to keep every half.
 func TestGraphQLRootField(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		doc  string
 		want string
 	}{
-		// The three the substring switch got wrong.
+		// Reinstating the substring switch fails six of the cases below. Three
+		// are this group: a document that names the parent of the thing it asks
+		// for, which Railway's schema makes the natural query.
 		{"scalar naming the parent", `query { service(id:"s") { id projectId } }`, "service"},
 		{"selecting the parent object", `query { service(id:"s") { id project { name } } }`, "service"},
 		{"variable naming the parent", `query GetService($projectId: String!) { service(id: $projectId) { id } }`, "service"},
@@ -28,7 +31,9 @@ func TestGraphQLRootField(t *testing.T) {
 		{"delete", `mutation Kill { projectDelete(id:"p") }`, "projectDelete"},
 		{"parent selecting children", `query { project(id:"p") { services { edges { node { id } } } } }`, "project"},
 
-		// Places a field name can hide that are not the root field at all.
+		// The other three. Each is a place a field name can sit that is not the
+		// root field, and the string-literal one is the sharpest: a service whose
+		// NAME contains a field name sent a create to the delete handler.
 		{"comment", "# projectCreate is not what this asks for\nquery { projects { edges { node { id } } } }", "projects"},
 		{"string literal", `mutation { serviceCreate(input:{name:"projectDelete"}) { id } }`, "serviceCreate"},
 		{"paren in a default", `query Q($n: String = "a)b") { projects { edges { node { id } } } }`, "projects"},
@@ -39,7 +44,25 @@ func TestGraphQLRootField(t *testing.T) {
 		{"leading fragment", "fragment F on Project { id }\nquery { project(id:\"p\") { ...F } }", "project"},
 		{"directive", `query Q($d: Boolean!) @skip(if: $d) { projects { edges { node { id } } } }`, "projects"},
 
+		// A comment is the one place a brace can appear that opens nothing, so
+		// every scan has to know it -- not just the one skipping ignored tokens.
+		// Both of these routed on a comment's TEXT before the scans shared it.
+		{"comment before the selection set", "query Q # a { brace in a comment\n { projects { id } }", "projects"},
+		{"comment closing a fragment body", "fragment F on Project { # }\n id }\nquery { projects { id } }", "projects"},
+
+		// A root selection may be a spread or an inline fragment rather than a
+		// field. The substring switch followed these by accident, because the
+		// field name was somewhere in the document; the scan has to mean it.
+		{"named spread", "fragment F on Query { projects { id } }\nquery { ...F }", "projects"},
+		{"spread defined after its use", "query { ...F }\nfragment F on Query { service(id:\"s\") { id } }", "service"},
+		{"spread past a same-prefix fragment", "fragment FF on Q { service { id } }\nfragment F on Q { projects { id } }\nquery { ...F }", "projects"},
+		{"inline fragment with a type", `query { ... on Query { projects { id } } }`, "projects"},
+		{"inline fragment with no type", `query { ... { projects { id } } }`, "projects"},
+
 		// Nothing to route to.
+		{"mutually cyclic fragments", "fragment A on Q { ...B }\nfragment B on Q { ...A }\nquery { ...A }", "Unknown"},
+		{"self-cyclic fragment", "fragment A on Q { ...A }\nquery { ...A }", "Unknown"},
+		{"spread naming no fragment", `query { ...Nope }`, "Unknown"},
 		{"empty", ``, "Unknown"},
 		{"not a document", `{{{`, "Unknown"},
 		{"unterminated", `query {`, "Unknown"},

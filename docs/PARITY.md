@@ -320,6 +320,15 @@ The document is 24 MB and 3,462 operations. `specs/mirror.set` narrows it to the
 
 Authority: the official Vercel REST document, vendored at `specs/vercel/api.json` and pinned in `specs/mirror.lock`, plus an AUTHORED document for Vercel KV at `specs/vercel/kv.json`. Rows are operation -> Mirror evidence, not a live `api.vercel.com` differential.
 
+The counting contract, frozen by `TestVercelCensusDenominators`: the vendored document is the denominator; the narrowing to six path prefixes is a declared property of `specs/mirror.set` (like `digitalocean.v2`'s), never a silent edit; operations outside the narrowing are mock-tier surface, the same tier one hundred and fifty AWS services live at.
+
+| Denominator | Count |
+|---|---:|
+| Vercel REST document operations (vendored) | 417 |
+| Vercel REST document paths (vendored) | 297 |
+| Narrowed `vercel.api` model operations | 26 |
+| `vercel.kv` authored-document operations | 1 (`Command`) |
+
 The pack's own characterization golden went with it; two equivalence recordings replace it -- 41 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer.
 
 **One pack became two services.** `internal/services/vercel/api` served two products under one registration: the REST API on `api.vercel.com`, and Vercel KV on `kv.vercel-storage.com`, which is Upstash Redis behind a Vercel name. They are `vercel.api` and `vercel.kv` now, and the demux tells them apart by host -- KV first, because its host contains the other's name.

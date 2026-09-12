@@ -21864,6 +21864,26 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
+	// Railway's routing had neither an assertion nor a mutant until the scanner
+	// replaced the substring switch: the document decided the operation, and
+	// nothing checked that it decided correctly. These two name the parts of
+	// the scan that a substring match does not have.
+	{
+		name: "railway-route-ignore-alias",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "\t\tif i < n && q[i] == ':' {",
+		new:  "\t\tif false && i < n && q[i] == ':' {",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestGraphQLRootField",
+	},
+	{
+		name: "railway-route-read-comments-as-selection",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "\t\t\tcase c == '#':",
+		new:  "\t\t\tcase false:",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestGraphQLRootField",
+	},
 	// The six mutants that rewrote the Fly pack's empty-image, empty-name,
 	// duplicate-app, missing-app and missing-machine branches are gone with
 	// the Go they rewrote, as Hostinger's and Hetzner's were. The behaviour is

@@ -419,7 +419,15 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		{`mutation { serviceCreate(input:{name:"api"}) { id } }`, "serviceCreate"},
 		{`mutation { serviceDelete(id:"x") }`, "serviceDelete"},
 		{`{ service(id:"x") { id } }`, "service"},
-		{`{ unknown }`, "Unknown"},
+		// Routing scans for the root field rather than substring-matching the
+		// document, which lets it tell two conditions apart that the old switch
+		// could only answer the same way. A field this service does not serve
+		// routes to its own name, so the not-implemented fault and the
+		// x-mirror-not-implemented header say WHICH field was asked for; only a
+		// document with no root field to find is "Unknown".
+		{`{ unknown }`, "unknown"},
+		{`not a graphql document`, "Unknown"},
+		{``, "Unknown"},
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/graphql/v2", strings.NewReader(`{"query":`+jsonQuote(test.query)+`}`))
 		op, err := codec.Route(rw, req)

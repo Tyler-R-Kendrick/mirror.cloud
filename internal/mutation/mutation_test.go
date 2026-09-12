@@ -16910,7 +16910,7 @@ var mutants = []mutant{
 	{
 		name: "s3-cors-http-use-generic-preflight",
 		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  `if svc := s.demux(r); svc == nil || svc.ID != "aws.s3" {`,
+		old:  `if demuxed == nil || demuxed.ID != "aws.s3" {`,
 		new:  `if true {`,
 		pkg:  "./internal/edge",
 		run:  "TestS3BucketCORSHTTP",
@@ -21798,8 +21798,8 @@ var mutants = []mutant{
 	{
 		name: "azure-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  "if svc.ID == \"azure.blobs\" || svc.ID == \"azure.queue\" {\n\t\tw.Header().Set(\"Content-Type\", \"application/xml\")\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
-		new:  "if false && (svc.ID == \"azure.blobs\" || svc.ID == \"azure.queue\") {\n\t\tw.Header().Set(\"Content-Type\", \"application/xml\")\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
+		old:  "if svc.ID == \"azure.blobs\" || svc.ID == \"azure.queue\" {\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
+		new:  "if false && (svc.ID == \"azure.blobs\" || svc.ID == \"azure.queue\") {\n\t\tw.Header().Set(\"x-ms-error-code\", f.Code)",
 		pkg:  "./internal/proto/aws/restxml",
 		run:  "TestRESTXML",
 	},

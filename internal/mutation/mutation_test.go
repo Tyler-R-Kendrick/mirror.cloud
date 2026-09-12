@@ -8682,9 +8682,9 @@ var mutants = []mutant{
 	},
 	{
 		name: "mirrorgen-ignore-unknown-provider",
-		file: filepath.Join("cmd", "mirrorgen", "main.go"),
-		old:  `provider, rest = "unknown", id`,
-		new:  `provider, rest = "aws", id`,
+		file: filepath.Join("internal", "generated", "path.go"),
+		old:  `provider, rest = "unknown", serviceID`,
+		new:  `provider, rest = "aws", serviceID`,
 		pkg:  "./cmd/mirrorgen",
 		run:  "TestDiffFilteringAndEmission",
 	},

@@ -68,8 +68,16 @@ func TestEveryServiceIsReachableTheWayAnSDKAddressesIt(t *testing.T) {
 
 // TestSharedEndpointPrefixesAreNamed pins the services a request cannot
 // distinguish from the credential scope alone, because they declare the same
-// endpoint prefix. All five are a service and its successor sharing one
-// endpoint, which is what AWS actually does.
+// endpoint prefix. Five of the six are an AWS service and its successor
+// sharing one endpoint, which is what AWS actually does.
+//
+// The sixth is Vercel, and it is a different shape: two products on two hosts
+// -- api.vercel.com and kv.vercel-storage.com -- whose documents both derive
+// the prefix `vercel`. Nothing routes them by prefix, because no Vercel client
+// sends a SigV4 credential scope; the demux tells them apart by host, KV
+// first, since its host contains the other's name. The entry is here so that
+// the collision is written down rather than discovered, which is what C32 cost
+// when `vercel.api` silently claimed `api.ecr`.
 //
 // It reads the bundle the runtime boots rather than the catalog. An earlier
 // version of this test read the catalog, which declared no shared prefix at
@@ -85,6 +93,7 @@ func TestSharedEndpointPrefixesAreNamed(t *testing.T) {
 		"es":               {"aws.elasticsearch", "aws.es"},
 		"kinesisanalytics": {"aws.kinesisanalytics", "aws.kinesisanalyticsv2"},
 		"rds":              {"aws.docdb", "aws.neptune", "aws.rds"},
+		"vercel":           {"vercel.api", "vercel.kv"},
 	}
 	got := map[string][]string{}
 	seen := map[string]bool{}

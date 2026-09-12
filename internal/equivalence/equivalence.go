@@ -176,18 +176,40 @@ func Replay(ctx context.Context, h spi.Handler, t *Trace) ([]Diff, error) {
 			diffs = append(diffs, Diff{Step: i, Path: "fault",
 				Want: "success", Got: got.Fault.Code, Note: "unexpected fault"})
 		case want.Fault != nil && got.Fault != nil:
+			// A fault's classification is superseded the same way an answer's
+			// members are, and for the same reason: the document can disagree
+			// with the pack about which refusal this is, and there was no way
+			// to say so. Vercel's GetProject is the case that found it -- the
+			// pack's own lookup fell through to 404 for a project addressed by
+			// the empty string, and the document marks the label required, so
+			// the engine's model check answers 400 first.
+			//
+			// What is NOT superseded, here or anywhere, is the outcome class:
+			// both sides still have to fault. Excusing that would let a
+			// recording say a refusal and accept an answer, which is the one
+			// thing a behavioural gate exists to catch.
+			var faults []Diff
 			if want.Fault.Code != got.Fault.Code {
-				diffs = append(diffs, Diff{Step: i, Path: "fault.code",
+				faults = append(faults, Diff{Step: i, Path: "fault.code",
 					Want: want.Fault.Code, Got: got.Fault.Code})
 			}
 			if want.Fault.HTTPStatus != got.Fault.HTTPStatus {
-				diffs = append(diffs, Diff{Step: i, Path: "fault.status",
+				faults = append(faults, Diff{Step: i, Path: "fault.status",
 					Want: want.Fault.HTTPStatus, Got: got.Fault.HTTPStatus})
 			}
 			if want.Fault.Fault != got.Fault.Fault {
-				diffs = append(diffs, Diff{Step: i, Path: "fault.class",
+				faults = append(faults, Diff{Step: i, Path: "fault.class",
 					Want: want.Fault.Fault, Got: got.Fault.Fault})
 			}
+			used := map[string]bool{}
+			for _, d := range faults {
+				if _, exempt := step.SupersededMembers[d.Path]; exempt {
+					used[d.Path] = true
+					continue
+				}
+				diffs = append(diffs, d)
+			}
+			diffs = append(diffs, unusedExemptions(i, step.SupersededMembers, used)...)
 		default:
 			if step.Superseded {
 				// Both succeeded, which is all this step still asserts. The
@@ -204,24 +226,36 @@ func Replay(ctx context.Context, h spi.Handler, t *Trace) ([]Diff, error) {
 				}
 				diffs = append(diffs, d)
 			}
-			// An exemption that excuses nothing is a hole in the reporting
-			// rather than in the gate: it reads as a documented divergence
-			// while the step is in fact clean, and it survives the member
-			// being renamed or the bundle being fixed. Either way the
-			// recording is now saying something untrue about itself, so it
-			// is reported like any other divergence.
-			for _, path := range sortedPaths(step.SupersededMembers) {
-				if used[path] {
-					continue
-				}
-				diffs = append(diffs, Diff{Step: i, Path: path,
-					Want: "a divergence to excuse", Got: "none",
-					Note: "superseded_members excuses this member and it does " +
-						"not diverge; drop the exemption"})
-			}
+			diffs = append(diffs, unusedExemptions(i, step.SupersededMembers, used)...)
 		}
 	}
 	return diffs, nil
+}
+
+// unusedExemptions reports every exemption on a step that excused nothing.
+//
+// An exemption that excuses nothing is a hole in the reporting rather than in
+// the gate: it reads as a documented divergence while the step is in fact
+// clean, and it survives the member being renamed or the bundle being fixed.
+// Either way the recording is now saying something untrue about itself, so it
+// is reported like any other divergence.
+//
+// A step answers either a fault or a body, never both, so an exemption naming
+// the wrong one of those is unused by construction and is reported here too --
+// which is what stops `fault.code` from being written on a step that succeeds,
+// where it would read as a documented refusal and gate nothing.
+func unusedExemptions(step int, exempt map[string]string, used map[string]bool) []Diff {
+	var out []Diff
+	for _, path := range sortedPaths(exempt) {
+		if used[path] {
+			continue
+		}
+		out = append(out, Diff{Step: step, Path: path,
+			Want: "a divergence to excuse", Got: "none",
+			Note: "superseded_members excuses this member and it does " +
+				"not diverge; drop the exemption"})
+	}
+	return out
 }
 
 func invoke(ctx context.Context, h spi.Handler, s Step) (Outcome, error) {

@@ -37,7 +37,6 @@ import (
 	azblobs "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -7544,7 +7543,13 @@ func TestConcurrentSQSMessageMoveTaskStartsAllowOneActiveTask(t *testing.T) {
 }
 
 func TestVercelConcurrentDuplicateProjectNames(t *testing.T) {
-	p := api.New(spitest.Deps(t))
+	// The pack these exercised is gone; the property is not. Exactly one
+	// concurrent create may win, and the engine has to hold that the same way
+	// the hand-written mutex did.
+	p, err := bundled.New("vercel.api", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7576,7 +7581,14 @@ func TestVercelConcurrentDuplicateProjectNames(t *testing.T) {
 }
 
 func TestVercelConcurrentKVSetGet(t *testing.T) {
-	p := api.New(spitest.Deps(t))
+	// Vercel KV is its own service now -- it always was a second product on a
+	// second host, and one registration was carrying both. The command moved
+	// from the pack's invented `_redis` input member to `body`, which is the
+	// operation's payload and a list of strings in the document.
+	p, err := bundled.New("vercel.kv", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	var wg sync.WaitGroup
@@ -7586,7 +7598,7 @@ func TestVercelConcurrentKVSetGet(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			key := "k"
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "KvCommand", Input: map[string]any{"_redis": []any{"SET", key, n}}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Command", Input: map[string]any{"body": []any{"SET", key, fmt.Sprint(n)}}}); err != nil {
 				errCh <- err
 			}
 		}(i)
@@ -7596,7 +7608,7 @@ func TestVercelConcurrentKVSetGet(t *testing.T) {
 	for err := range errCh {
 		t.Fatal(err)
 	}
-	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "KvCommand", Input: map[string]any{"_redis": []any{"GET", "k"}}})
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Command", Input: map[string]any{"body": []any{"GET", "k"}}})
 	if err != nil || got.Output["result"] == nil {
 		t.Fatalf("get after concurrent set %#v %v", got, err)
 	}

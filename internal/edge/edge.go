@@ -513,8 +513,8 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		if hostingerRequest(r) {
 			return s.bundle.ServiceByID("hostinger.api")
 		}
-		if vercelRequest(r) {
-			return s.bundle.ServiceByID("vercel.api")
+		if id := vercelService(r); id != "" {
+			return s.bundle.ServiceByID(id)
 		}
 	}
 	if svc := s.resolveByModel(r); svc != nil {
@@ -650,19 +650,38 @@ func cloudflareRequest(r *http.Request) bool {
 	return strings.Contains(r.URL.Path, "/client/v4/")
 }
 
-func vercelRequest(r *http.Request) bool {
+// vercelService names which Vercel service a request is for, or "" for none.
+//
+// It answers a service id rather than a bool because Vercel is two products on
+// two hosts. The REST API is api.vercel.com; Vercel KV is the data plane at
+// kv.vercel-storage.com, which is Upstash Redis behind a Vercel name and takes
+// POST / with the command as a JSON array. One hand-written pack used to carry
+// both under `vercel.api`, so one predicate was enough; they are separate
+// services now, and a host containing `vercel` is no longer an answer.
+//
+// The KV host is tested first because it contains `vercel` too, so the order
+// here is the whole distinction. The path fallback stays with the REST API:
+// nothing addresses KV by path -- its only path is `/`, which would claim the
+// root from every other service the demux has not yet placed.
+func vercelService(r *http.Request) string {
 	host := strings.ToLower(r.Host)
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
 	}
+	if strings.Contains(host, "vercel-storage") {
+		return "vercel.kv"
+	}
 	if strings.Contains(host, "vercel") {
-		return true
+		return "vercel.api"
 	}
 	path := r.URL.Path
 	if len(path) < 4 || path[0] != '/' || path[1] != 'v' || path[2] < '1' || path[2] > '9' {
-		return false
+		return ""
 	}
-	return strings.Contains(path, "/projects") || strings.Contains(path, "/deployments") || strings.Contains(path, "/user") || strings.Contains(path, "/teams")
+	if strings.Contains(path, "/projects") || strings.Contains(path, "/deployments") || strings.Contains(path, "/user") || strings.Contains(path, "/teams") {
+		return "vercel.api"
+	}
+	return ""
 }
 
 func sqsQueuePath(path string) bool {

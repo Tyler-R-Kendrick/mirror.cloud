@@ -765,7 +765,19 @@
       "CreateDeployment",
       "GetDeployments",
       "GetDeployment",
-      "DeleteDeployment"
+      "DeleteDeployment",
+      "UpdateProject",
+      "EditProjectEnv",
+      "GetProjectDomain",
+      "UpdateProjectDomain",
+      "RemoveProjectDomain",
+      "VerifyProjectDomain",
+      "CreateCustomEnvironment",
+      "GetProjectsByIdOrNameCustomEnvironments",
+      "GetCustomEnvironment",
+      "UpdateCustomEnvironment",
+      "RemoveCustomEnvironment",
+      "RequestPromote"
     ]
   },
   {

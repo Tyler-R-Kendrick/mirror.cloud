@@ -320,7 +320,16 @@ The document is 24 MB and 3,462 operations. `specs/mirror.set` narrows it to the
 
 Authority: the official Vercel REST document, vendored at `specs/vercel/api.json` and pinned in `specs/mirror.lock`, plus an AUTHORED document for Vercel KV at `specs/vercel/kv.json`. Rows are operation -> Mirror evidence, not a live `api.vercel.com` differential.
 
-The pack's own characterization golden went with it; two equivalence recordings replace it -- 41 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer.
+The counting contract, frozen by `TestVercelCensusDenominators`: the vendored document is the denominator; the narrowing to six path prefixes is a declared property of `specs/mirror.set` (like `digitalocean.v2`'s), never a silent edit; operations outside the narrowing are mock-tier surface, the same tier one hundred and fifty AWS services live at.
+
+| Denominator | Count |
+|---|---:|
+| Vercel REST document operations (vendored) | 417 |
+| Vercel REST document paths (vendored) | 297 |
+| Narrowed `vercel.api` model operations | 26 |
+| `vercel.kv` authored-document operations | 1 (`Command`) |
+
+The pack's own characterization golden went with it; two equivalence recordings replace it -- 74 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer. 41 of the 74 are recorded from the pack; the 33 covering the twelve operations the pack never served are authored against the bundle, which the recording itself says in its note.
 
 **One pack became two services.** `internal/services/vercel/api` served two products under one registration: the REST API on `api.vercel.com`, and Vercel KV on `kv.vercel-storage.com`, which is Upstash Redis behind a Vercel name. They are `vercel.api` and `vercel.kv` now, and the demux tells them apart by host -- KV first, because its host contains the other's name.
 
@@ -328,12 +337,12 @@ KV's document is authored rather than vendored, and is the first such entry in t
 
 **Versioning is restored, and it is a visible break.** `vercelRoute` stripped the leading version segment before matching -- any `v` followed by a digit -- so `/v1/projects`, `/v9/projects` and `/v99/projects` were one route. That is not four transcription slips in the table; it is the table erasing versioning, which made four of its rows name a version the document does not serve. Listing projects is `/v10` where the pack answered `/v9`; project env is `/v10` where it answered `/v9`; project domains is `/v9` where it answered `/v10`; listing deployments is `/v7` where it answered `/v6`. A client written against the emulator's laxity breaks, which is the same shape as Cloudflare's percent-encoded slash: the document is `declared` and the pack's tolerance was `authored`.
 
-Routing is the model's now, which widens the surface rather than narrowing it. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it to the six prefixes the pack served, giving 26 operations over 12,363 shapes -- the largest model in the tree. The bundle serves 14 of those 26; the other 12 answer 501 as unimplemented operations rather than as unknown paths, which the deleted table could not express.
+Routing is the model's now, which widens the surface rather than narrowing it. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it to the six prefixes the pack served, giving 26 operations over 12,363 shapes -- the largest model in the tree. The bundle serves all 26: the fourteen the pack served, transcribed, and the twelve it did not, written from the document alone.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the emulated Vercel slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the two fault envelopes and the three generic rules this extraction needed) |
-| Vercel REST operations served by the bundle | 14 / 26 (the twelve the pack never served answer 501, as they did under it) |
+| Vercel REST operations served by the bundle | 26 / 26 (the fourteen the pack served, replayed against its recording; the twelve it did not, written from the document and gated by authored recording steps, bundle behavior, booted HTTP and BDD) |
 | Vercel KV commands served | 3 / the Redis command set (SET, GET, DEL; every other verb answers 501 `MirrorNotImplemented`) |
 | Live Vercel probe | none (not required) |
 
@@ -353,9 +362,21 @@ Routing is the model's now, which widens the surface rather than narrowing it. T
 | `GET /v7/deployments` (`GetDeployments`) | Recording replays the two-entry listing and the listing after a delete. `deployments[i].id` is superseded -- the listed item shape declares `uid` and the pack answered both |
 | `GET /v13/deployments/{idOrUrl}` (`GetDeployment`) | Recording replays get by reference and an unknown id 404/`not_found` |
 | `DELETE /v13/deployments/{id}` (`DeleteDeployment`) | Recording replays delete answering `{uid, state: DELETED}` and a double delete 404/`not_found` |
+| `PATCH /v9/projects/{idOrName}` (`UpdateProject`) | Authored recording steps replay a framework update, a rename by name (the old name freed, the new one resolving), an unknown project 404, a name collision 409/`conflict` and an empty name 400; bundle behavior test renames by id and asserts the name index moves; booted and BDD PATCH over HTTP. Only `name` and `framework` are honored of the fifty-odd members the document declares on the update -- recorded as a quirk |
+| `PATCH /v9/projects/{idOrName}/env/{id}` (`EditProjectEnv`) | Authored recording steps replay a value edit that keeps the members it does not name, an unknown variable 404 and an unknown project 404; bundle behavior test asserts the edit does not move the row (the resolved key is not re-prefixed); booted PATCH round-trips the new value. `comment`, `gitBranch` and `customEnvironmentIds` are accepted and dropped -- recorded as a quirk |
+| `GET /v9/projects/{idOrName}/domains/{domain}` (`GetProjectDomain`) | Authored recording steps replay the get and an unknown domain 404; booted GET after an add. `gitBranch`, `redirect` and `redirectStatusCode` answer null until an update sets them |
+| `PATCH /v9/projects/{idOrName}/domains/{domain}` (`UpdateProjectDomain`) | Authored recording steps replay a redirect update that Verify then reads back; bundle behavior test asserts the stored redirect. The document's 409 declares no trigger and is never answered -- simplified, and recorded as a quirk |
+| `DELETE /v9/projects/{idOrName}/domains/{domain}` (`RemoveProjectDomain`) | Authored recording steps replay the remove and a double remove 404; booted DELETE then GET 404. `removeRedirects` is accepted and read by nothing |
+| `POST /v9/projects/{idOrName}/domains/{domain}/verify` (`VerifyProjectDomain`) | Authored recording step and booted POST assert verify answers the domain, `verified: true` -- already true from creation, which is the add's quirk, so verify moves no state |
+| `POST /v9/projects/{idOrName}/custom-environments` (`CreateCustomEnvironment`) | Authored recording steps replay the 201 create, a duplicate slug 409/`conflict`, a missing slug 400 and an unknown project 404; booted and BDD create. `type` answers "preview" for every custom environment, the document declaring the enum and nothing to set it from -- recorded as a quirk |
+| `GET /v9/projects/{idOrName}/custom-environments` (`GetProjectsByIdOrNameCustomEnvironments`) | Authored recording step replays the one-entry listing; booted list after create. `accountLimit.total` is a fixed 12, the document declaring the member and no value -- recorded as a quirk |
+| `GET /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`GetCustomEnvironment`) | Authored recording steps replay the get by slug AND by id -- the label's two spellings, through the slug index -- and an unknown one 404; BDD does both over HTTP |
+| `PATCH /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`UpdateCustomEnvironment`) | Authored recording step replays a description update; bundle behavior test asserts slug and id survive the patch (addressed by slug, the write must still merge against the id-keyed row) |
+| `DELETE /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`RemoveCustomEnvironment`) | Authored recording steps replay the remove answering the removed environment and a double remove 404; booted and BDD DELETE then GET 404. `deleteUnassignedEnvironmentVariables` is accepted and read by nothing |
+| `POST /v10/projects/{projectId}/promote/{deploymentId}` (`RequestPromote`) | Authored recording steps replay the empty 201 and a 404 for each side unknown; booted and BDD promote a real deployment. A promote moves no stored state a client can read back -- recorded as a quirk |
 | `POST /` on `*.kv.vercel-storage.com` (`Command`) | Its own recording: SET, GET, a GET that misses answering `{result: null}` rather than a fault, `get` folding to `GET`, DEL answering 1 then 0, and four malformed commands answering 400. Chaos `TestVercelConcurrentKVSetGet`. An unsupported verb answers 501 `MirrorNotImplemented` with the `x-mirror-not-implemented` header, which distinguishes "mirror has not got to this" from "you sent nonsense" |
 | Vercel faults vs AWS faults | Two envelopes, because they are two documents' answers. The REST API answers `{error: {code, message}}` and KV the bare `{error: "..."}` Upstash answers; neither carries `x-amzn-errortype`. Mutant `vercel-kv-encodes-the-rest-fault` |
-| Routing | `FuzzVercelRoute` drives `httpuri.Match` over the generated model, seeded with both the document's versions and the four the pack answered. `TestVercelRoutesFromItsGeneratedModel` asserts all fourteen, five operations beyond what the table knew, and that each of the four moved versions is now unserved. `vercel-kv-host-falls-through` covers the host split |
+| Routing | `FuzzVercelRoute` drives `httpuri.Match` over the generated model, seeded with both the document's versions and the four the pack answered. `TestVercelRoutesFromItsGeneratedModel` asserts nineteen routes, five operations beyond what the table knew, and that each of the four moved versions is now unserved. `vercel-kv-host-falls-through` covers the host split |
 
 ## SNS baseline
 

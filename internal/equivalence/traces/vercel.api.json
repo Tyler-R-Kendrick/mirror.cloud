@@ -2,7 +2,7 @@
   "schema": "trace/1",
   "service": "vercel.api",
   "source": "pack:internal/services/vercel/api",
-  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.\n\nMost steps carry recorded_as, because the pack invented names for operations the document already names: GetUser for GetAuthUser, ListProjects for GetProjects, ListProjectEnv for FilterProjectEnvs, DeleteProjectEnv for RemoveProjectEnv, ListProjectDomains for GetProjectDomains, ListDeployments for GetDeployments. `operation` is what the replay invokes; `recorded_as` is the pack operation the expectation came from.\n\nInput members were renamed the same way, and there is no field to say so, so it is said here. The pack read a project from `id` where the document calls that label `idOrName`; it read an environment variable from `envId` where the document calls it `id`; and it read a deployment from `id` where a get calls it `idOrUrl`. Everything else -- name, framework, key, value, type, target, project -- the pack and the document already agreed on. The recorder that drove the pack and applied both renames went with the pack, because it imported it.\n\nCreateProjectEnv's members arrive splatted rather than under `body`, which is how the REST/JSON codec delivers a structure payload: it unmarshals the body into the input map. That is why a required payload member absent from the input is not a validation failure.\n\nThe KV half of the same pack is recorded separately as vercel.kv, because it was always a different product on a different host.",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.\n\nMost steps carry recorded_as, because the pack invented names for operations the document already names: GetUser for GetAuthUser, ListProjects for GetProjects, ListProjectEnv for FilterProjectEnvs, DeleteProjectEnv for RemoveProjectEnv, ListProjectDomains for GetProjectDomains, ListDeployments for GetDeployments. `operation` is what the replay invokes; `recorded_as` is the pack operation the expectation came from.\n\nInput members were renamed the same way, and there is no field to say so, so it is said here. The pack read a project from `id` where the document calls that label `idOrName`; it read an environment variable from `envId` where the document calls it `id`; and it read a deployment from `id` where a get calls it `idOrUrl`. Everything else -- name, framework, key, value, type, target, project -- the pack and the document already agreed on. The recorder that drove the pack and applied both renames went with the pack, because it imported it.\n\nCreateProjectEnv's members arrive splatted rather than under `body`, which is how the REST/JSON codec delivers a structure payload: it unmarshals the body into the input map. That is why a required payload member absent from the input is not a validation failure.\n\nThe KV half of the same pack is recorded separately as vercel.kv, because it was always a different product on a different host.\n\nSteps 41 onward are authored, not recorded: the pack never served the twelve operations they cover (UpdateProject through RequestPromote), so there was nothing to record them from. Their expected outputs are the bundle's own answers, frozen in place -- including the identifiers its deterministic draw sequence produces after the 41 recorded steps -- so a regression in those operations fails here and not only in the behavior tests. The provenance is weaker by construction, and it is stated rather than smoothed over: the recorded steps gate the bundle against the pack, and these gate it against itself.",
   "steps": [
     {
       "operation": "GetAuthUser",
@@ -1021,6 +1021,725 @@
         ]
       },
       "recorded_as": "ListProjects"
+    },
+    {
+      "operation": "UpdateProject",
+      "input": {
+        "framework": "astro",
+        "idOrName": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": "astro",
+        "id": "prj_77df676fe2a7",
+        "name": "web",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "UpdateProject",
+      "input": {
+        "idOrName": "web",
+        "name": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": "astro",
+        "id": "prj_77df676fe2a7",
+        "name": "web2",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": "astro",
+        "id": "prj_77df676fe2a7",
+        "name": "web2",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "GetProject",
+      "input": {
+        "idOrName": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateProject",
+      "input": {
+        "idOrName": "prj_nope",
+        "name": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateProject",
+      "input": {
+        "idOrName": "web2",
+        "name": "api"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "conflict",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateProject",
+      "input": {
+        "idOrName": "web2",
+        "name": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "input": {
+        "idOrName": "web2",
+        "key": "A",
+        "value": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "created": {
+          "id": "env_9045051ba6",
+          "key": "A",
+          "target": [
+            "production",
+            "preview",
+            "development"
+          ],
+          "type": "encrypted",
+          "value": "1"
+        },
+        "failed": []
+      }
+    },
+    {
+      "operation": "EditProjectEnv",
+      "input": {
+        "id": {
+          "$fromPath": "created.id",
+          "$fromStep": 48
+        },
+        "idOrName": "web2",
+        "value": "2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "env_9045051ba6",
+        "key": "A",
+        "target": [
+          "production",
+          "preview",
+          "development"
+        ],
+        "type": "encrypted",
+        "value": "2"
+      }
+    },
+    {
+      "operation": "EditProjectEnv",
+      "input": {
+        "id": "env_nope",
+        "idOrName": "web2",
+        "value": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "EditProjectEnv",
+      "input": {
+        "id": "env_nope",
+        "idOrName": "prj_nope",
+        "value": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddProjectDomain",
+      "input": {
+        "idOrName": "web2",
+        "name": "web2.example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apexName": "web2.example.com",
+        "createdAt": 0,
+        "name": "web2.example.com",
+        "projectId": "prj_77df676fe2a7",
+        "updatedAt": 0,
+        "verified": true
+      }
+    },
+    {
+      "operation": "GetProjectDomain",
+      "input": {
+        "domain": "web2.example.com",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apexName": "web2.example.com",
+        "createdAt": 0,
+        "gitBranch": null,
+        "name": "web2.example.com",
+        "projectId": "prj_77df676fe2a7",
+        "redirect": null,
+        "redirectStatusCode": null,
+        "updatedAt": 0,
+        "verified": true
+      }
+    },
+    {
+      "operation": "GetProjectDomain",
+      "input": {
+        "domain": "nope.example.com",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateProjectDomain",
+      "input": {
+        "domain": "web2.example.com",
+        "idOrName": "web2",
+        "redirect": "example.com",
+        "redirectStatusCode": 307
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apexName": "web2.example.com",
+        "createdAt": 0,
+        "gitBranch": null,
+        "name": "web2.example.com",
+        "projectId": "prj_77df676fe2a7",
+        "redirect": "example.com",
+        "redirectStatusCode": 307,
+        "updatedAt": 0,
+        "verified": true
+      }
+    },
+    {
+      "operation": "VerifyProjectDomain",
+      "input": {
+        "domain": "web2.example.com",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apexName": "web2.example.com",
+        "createdAt": 0,
+        "gitBranch": null,
+        "name": "web2.example.com",
+        "projectId": "prj_77df676fe2a7",
+        "redirect": "example.com",
+        "redirectStatusCode": 307,
+        "updatedAt": 0,
+        "verified": true
+      }
+    },
+    {
+      "operation": "RemoveProjectDomain",
+      "input": {
+        "domain": "web2.example.com",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "RemoveProjectDomain",
+      "input": {
+        "domain": "web2.example.com",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCustomEnvironment",
+      "input": {
+        "description": "Staging",
+        "idOrName": "web2",
+        "slug": "staging"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branchMatcher": null,
+        "createdAt": 0,
+        "description": "Staging",
+        "id": "env_ac1d53d812",
+        "slug": "staging",
+        "type": "preview",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "CreateCustomEnvironment",
+      "input": {
+        "idOrName": "web2",
+        "slug": "staging"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "conflict",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCustomEnvironment",
+      "input": {
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCustomEnvironment",
+      "input": {
+        "idOrName": "prj_nope",
+        "slug": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetProjectsByIdOrNameCustomEnvironments",
+      "input": {
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountLimit": {
+          "total": 12
+        },
+        "environments": [
+          {
+            "branchMatcher": null,
+            "createdAt": 0,
+            "description": "Staging",
+            "id": "env_ac1d53d812",
+            "slug": "staging",
+            "type": "preview",
+            "updatedAt": 0
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetCustomEnvironment",
+      "input": {
+        "environmentSlugOrId": "staging",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branchMatcher": null,
+        "createdAt": 0,
+        "description": "Staging",
+        "id": "env_ac1d53d812",
+        "slug": "staging",
+        "type": "preview",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "GetCustomEnvironment",
+      "input": {
+        "environmentSlugOrId": {
+          "$fromPath": "id",
+          "$fromStep": 59
+        },
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branchMatcher": null,
+        "createdAt": 0,
+        "description": "Staging",
+        "id": "env_ac1d53d812",
+        "slug": "staging",
+        "type": "preview",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "GetCustomEnvironment",
+      "input": {
+        "environmentSlugOrId": "nope",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateCustomEnvironment",
+      "input": {
+        "description": "Staging v2",
+        "environmentSlugOrId": "staging",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branchMatcher": null,
+        "createdAt": 0,
+        "description": "Staging v2",
+        "id": "env_ac1d53d812",
+        "slug": "staging",
+        "type": "preview",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "RemoveCustomEnvironment",
+      "input": {
+        "environmentSlugOrId": "staging",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branchMatcher": null,
+        "createdAt": 0,
+        "description": "Staging v2",
+        "id": "env_ac1d53d812",
+        "slug": "staging",
+        "type": "preview",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "RemoveCustomEnvironment",
+      "input": {
+        "environmentSlugOrId": "staging",
+        "idOrName": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "name": "web2",
+        "project": "web2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "createdAt": 0,
+        "id": "dpl_71a868c4bfb93e84",
+        "name": "web2",
+        "projectId": "prj_77df676fe2a7",
+        "readyState": "READY",
+        "type": "LAMBDAS",
+        "url": "web2-34ee92.vercel.app"
+      }
+    },
+    {
+      "operation": "RequestPromote",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "id",
+          "$fromStep": 70
+        },
+        "projectId": {
+          "$fromPath": "projectId",
+          "$fromStep": 70
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "RequestPromote",
+      "input": {
+        "deploymentId": "dpl_nope",
+        "projectId": {
+          "$fromPath": "projectId",
+          "$fromStep": 70
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "RequestPromote",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "id",
+          "$fromStep": 70
+        },
+        "projectId": "prj_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
     }
   ]
 }

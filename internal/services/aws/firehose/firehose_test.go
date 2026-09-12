@@ -1777,10 +1777,18 @@ func TestFirehoseSnowflakeSecretAndPersistentBuffer(t *testing.T) {
 	if err := deps.Clock.Advance(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
+	// Poll for the cleanup as well as for the row, because the flush does them
+	// in that order: deliverEndpoint writes the row and deleteHTTPBuffer runs
+	// after it. Waiting only for the row leaves a window in which the row is
+	// there and the buffer has not been dropped yet -- a window wide enough to
+	// fail this on a loaded runner, which is where it did fail, in the race
+	// step, once. The assertion is unchanged; what it waits for is.
 	var rows []map[string]any
+	var remaining []spi.KV
 	for deadline := time.After(pollBudget); polling(deadline); {
 		rows, err = p.SnowflakeRows(ctx, id, first(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
-		if err == nil && len(rows) == 1 {
+		remaining, _, _ = buffers.List(ctx, "snowflake-buffer/", "", 0)
+		if err == nil && len(rows) == 1 && len(remaining) == 0 {
 			break
 		}
 		time.Sleep(time.Millisecond)
@@ -1788,7 +1796,7 @@ func TestFirehoseSnowflakeSecretAndPersistentBuffer(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(rows, []map[string]any{{"id": "buffered"}}) {
 		t.Fatalf("restarted Snowflake buffer rows %#v, %v", rows, err)
 	}
-	if remaining, _, _ := buffers.List(ctx, "snowflake-buffer/", "", 0); len(remaining) != 0 {
+	if len(remaining) != 0 {
 		t.Fatalf("successful Snowflake buffer remained %#v", remaining)
 	}
 	if _, _, err := deps.Blobs.Get(ctx, buffered.DataKey); err == nil {

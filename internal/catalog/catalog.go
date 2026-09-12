@@ -253,6 +253,18 @@ func Bundle() *model.Bundle {
 		op("GetDeployments", "GET", "/v7/deployments", 200, true),
 		op("GetDeployment", "GET", "/v13/deployments/{idOrUrl}", 200, true),
 		op("DeleteDeployment", "DELETE", "/v13/deployments/{id}", 200, false),
+		op("UpdateProject", "PATCH", "/v9/projects/{idOrName}", 200, false),
+		op("EditProjectEnv", "PATCH", "/v9/projects/{idOrName}/env/{id}", 200, false),
+		op("GetProjectDomain", "GET", "/v9/projects/{idOrName}/domains/{domain}", 200, true),
+		op("UpdateProjectDomain", "PATCH", "/v9/projects/{idOrName}/domains/{domain}", 200, false),
+		op("RemoveProjectDomain", "DELETE", "/v9/projects/{idOrName}/domains/{domain}", 200, false),
+		op("VerifyProjectDomain", "POST", "/v9/projects/{idOrName}/domains/{domain}/verify", 200, false),
+		op("CreateCustomEnvironment", "POST", "/v9/projects/{idOrName}/custom-environments", 201, false),
+		op("GetProjectsByIdOrNameCustomEnvironments", "GET", "/v9/projects/{idOrName}/custom-environments", 200, true),
+		op("GetCustomEnvironment", "GET", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, true),
+		op("UpdateCustomEnvironment", "PATCH", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, false),
+		op("RemoveCustomEnvironment", "DELETE", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, false),
+		op("RequestPromote", "POST", "/v10/projects/{projectId}/promote/{deploymentId}", 201, false),
 	}
 	// Vercel KV is the data plane -- Upstash Redis behind a Vercel host -- and
 	// its whole surface is one operation: POST / with the command as a JSON

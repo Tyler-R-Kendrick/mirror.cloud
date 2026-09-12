@@ -58,6 +58,21 @@ type document struct {
 	Info    struct {
 		Title string `json:"title"`
 	} `json:"info"`
+	// MirrorProtocol is mirror's own `x-mirror-protocol` extension: the
+	// protocol the runtime must serve this document's surface with when it is
+	// not restJson1. OpenAPI has no way to say "these bodies are XML", and an
+	// authored document that transcribes an XML service -- Azure Blob and
+	// Queue Storage -- would otherwise flip the service to JSON at boot, which
+	// is the one fact about it every client depends on.
+	MirrorProtocol string `json:"x-mirror-protocol"`
+	// MirrorEndpointPrefix is `x-mirror-endpoint-prefix`: the endpoint label
+	// the demux resolves this service on when it is not the provider's name.
+	// The receiver defaults to the provider so a service whose short name is a
+	// generic word cannot claim hosts it does not own -- but Azure Queue and
+	// Table Storage really are addressed at `queue.` and `table.` hosts, and
+	// collapsing all three Azure services onto `azure` would change which
+	// services the demux considers for those labels.
+	MirrorEndpointPrefix string `json:"x-mirror-endpoint-prefix"`
 	Servers []struct {
 		URL string `json:"url"`
 	} `json:"servers"`
@@ -93,6 +108,44 @@ type operation struct {
 		Content  map[string]mediaType `json:"content"`
 	} `json:"requestBody"`
 	Responses map[string]responseObject `json:"responses"`
+	// MirrorName is `x-mirror-name`: the operation's exact served name when
+	// the document's own spelling cannot carry it. GraphQL operation names
+	// start lowercase, and exported() would capitalize them into names the
+	// behavior bundle does not declare.
+	MirrorName string `json:"x-mirror-name"`
+	// MirrorInput is `x-mirror-input`: request members the document declares
+	// without giving them a parameter's required marker. Two kinds of member
+	// need that. The codec synthesizes some itself -- Azure Table Storage
+	// moves the entity body under `__entity` so it does not pollute the
+	// control members, and derives `table` from a CreateTable body's
+	// TableName. Others sit in the address, where the router binds them
+	// regardless of any declaration -- a container-less PUT still reaches
+	// CreateContainer, and the service's own answer is the behavior bundle's
+	// InvalidResourceName, not a generic validation fault. A parameter would
+	// make such a member engine-required and fault it first, so the document
+	// names the member here, where validation can see it and the engine does
+	// not demand it.
+	MirrorInput []string `json:"x-mirror-input"`
+	// MirrorOperations is `x-mirror-operations`: sibling operations that share
+	// this operation's HTTP binding. OpenAPI admits one operation per path and
+	// method, and a GraphQL endpoint is one POST that dispatches on the query
+	// document -- Railway's seven operations are all POST /graphql/v2. The
+	// binding stays truthful; each sibling only adds its own name and response
+	// shape to the model.
+	MirrorOperations []sibling `json:"x-mirror-operations"`
+}
+
+// sibling is one entry of `x-mirror-operations`: an operation reached through
+// the same request as the operation carrying it, named exactly as served,
+// answering with its own response schema. Code overrides the success status
+// when the siblings disagree on it -- Azure answers 201 for Put Blob and 202
+// for Start Copy From URL through the same PUT.
+type sibling struct {
+	Name     string `json:"name"`
+	Response string `json:"response"`
+	Summary  string `json:"summary"`
+	Readonly bool   `json:"readonly"`
+	Code     int    `json:"code"`
 }
 
 type mediaType struct {
@@ -182,6 +235,18 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		EndpointPrefix: provider(id),
 		Source:         src,
 	}
+	if doc.MirrorProtocol != "" {
+		switch model.Protocol(doc.MirrorProtocol) {
+		case model.ProtoRESTJSON1, model.ProtoRESTXML:
+			svc.Protocol = model.Protocol(doc.MirrorProtocol)
+		default:
+			return nil, fmt.Errorf("openapi: %s: x-mirror-protocol %q is not a protocol mirror serves",
+				src.Path, doc.MirrorProtocol)
+		}
+	}
+	if doc.MirrorEndpointPrefix != "" {
+		svc.EndpointPrefix = doc.MirrorEndpointPrefix
+	}
 	for _, uri := range sortedKeys(doc.Paths) {
 		item, shared, err := pathItem(doc.Paths[uri])
 		if err != nil {
@@ -197,21 +262,44 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 				return nil, fmt.Errorf("openapi: %s: %s %s: %w", src.Path, method, uri, err)
 			}
 			name := operationName(op, method, uri)
+			if op.MirrorName != "" {
+				name = op.MirrorName
+			}
 			params := resolveParams(append(append([]parameter{}, shared...), op.Parameters...), doc.Components.Parameters, sh)
+			binding := model.HTTPBinding{
+				Method: strings.ToUpper(method),
+				URI:    base + templated(uri),
+				Code:   successCode(op),
+			}
+			input := sh.request(name, params, op)
+			if len(op.MirrorInput) > 0 {
+				sh.synthesize(input, op.MirrorInput)
+			}
 			svc.Operations = append(svc.Operations, model.Operation{
-				Name: name,
-				HTTP: model.HTTPBinding{
-					Method: strings.ToUpper(method),
-					URI:    base + templated(uri),
-					Code:   successCode(op),
-				},
-				Input:      sh.request(name, params, op),
+				Name:       name,
+				HTTP:       binding,
+				Input:      input,
 				Output:     sh.response(name, op),
 				Readonly:   method == "get" || method == "head",
 				Idempotent: method == "put" || method == "delete",
 				Confidence: model.ConfDeclared,
 				Source:     src,
 			})
+			for _, sib := range op.MirrorOperations {
+				HTTP := binding
+				if sib.Code != 0 {
+					HTTP.Code = sib.Code
+				}
+				svc.Operations = append(svc.Operations, model.Operation{
+					Name:       sib.Name,
+					HTTP:       HTTP,
+					Input:      input,
+					Output:     strings.TrimPrefix(sib.Response, componentSchemas),
+					Readonly:   sib.Readonly,
+					Confidence: model.ConfDeclared,
+					Source:     src,
+				})
+			}
 		}
 	}
 	// Paths are walked in name order and methods in a fixed order, so the same

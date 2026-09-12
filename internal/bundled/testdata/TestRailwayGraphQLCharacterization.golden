@@ -1,10 +1,11 @@
 {
   "create": {
     "output": {
-      "_wrap": "projectCreate",
-      "projectCreate": {
-        "id": "7c589129",
-        "name": "web"
+      "data": {
+        "projectCreate": {
+          "id": "7c589129",
+          "name": "web"
+        }
       }
     },
     "status": 0
@@ -21,15 +22,17 @@
   },
   "del_svc": {
     "output": {
-      "_wrap": "serviceDelete",
-      "serviceDelete": true
+      "data": {
+        "serviceDelete": true
+      }
     },
     "status": 0
   },
   "delete": {
     "output": {
-      "_wrap": "projectDelete",
-      "projectDelete": true
+      "data": {
+        "projectDelete": true
+      }
     },
     "status": 0
   },
@@ -40,34 +43,41 @@
   },
   "get": {
     "output": {
-      "_wrap": "project",
-      "project": {
-        "id": "7c589129",
-        "name": "web"
+      "data": {
+        "project": {
+          "id": "7c589129",
+          "name": "web"
+        }
       }
     },
     "status": 0
   },
   "get_svc": {
     "output": {
-      "_wrap": "service",
-      "service": {
-        "id": "5f59f223",
-        "name": "api",
-        "projectId": "7c589129"
+      "data": {
+        "service": {
+          "id": "5f59f223",
+          "name": "api",
+          "projectId": "7c589129"
+        }
       }
     },
     "status": 0
   },
   "list": {
     "output": {
-      "_list": [
-        {
-          "id": "7c589129",
-          "name": "web"
+      "data": {
+        "projects": {
+          "edges": [
+            {
+              "node": {
+                "id": "7c589129",
+                "name": "web"
+              }
+            }
+          ]
         }
-      ],
-      "_wrap": "projects"
+      }
     },
     "status": 0
   },
@@ -88,13 +98,19 @@
   },
   "service": {
     "output": {
-      "_wrap": "serviceCreate",
-      "serviceCreate": {
-        "id": "5f59f223",
-        "name": "api",
-        "projectId": "7c589129"
+      "data": {
+        "serviceCreate": {
+          "id": "5f59f223",
+          "name": "api",
+          "projectId": "7c589129"
+        }
       }
     },
     "status": 0
+  },
+  "svc_no_proj": {
+    "error": "NOT_FOUND",
+    "message": "Project not found",
+    "status": 200
   }
 }

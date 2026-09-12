@@ -64,6 +64,5 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/timestream"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/xray"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 )

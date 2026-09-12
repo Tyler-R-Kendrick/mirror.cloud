@@ -21871,54 +21871,20 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
-	{
-		name: "railway-accept-empty-project-name",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "if name == \"\" {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"project name is required\", 200)",
-		new:  "if false {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"project name is required\", 200)",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestProjectCreateRejectsEmptyName",
-	},
-	{
-		name: "railway-accept-empty-service-name",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "if name == \"\" {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"service name is required\", 200)",
-		new:  "if false {\n\t\treturn nil, rwFault(\"BAD_USER_INPUT\", \"service name is required\", 200)",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestServiceCreateRejectsEmptyName",
-	},
-	{
-		name: "railway-get-missing-project-as-data",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "b, ok, _ := p.col(req, \"rwproj\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Project not found\", 200)",
-		new:  "b, ok, _ := p.col(req, \"rwproj\").Get(ctx, id)\n\tif false {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Project not found\", 200)",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestProjectAndServiceLifecycle",
-	},
-	{
-		name: "railway-get-missing-service-as-data",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "b, ok, _ := p.col(req, \"rwsvc\").Get(ctx, id)\n\tif !ok {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Service not found\", 200)",
-		new:  "b, ok, _ := p.col(req, \"rwsvc\").Get(ctx, id)\n\tif false {\n\t\treturn nil, rwFault(\"NOT_FOUND\", \"Service not found\", 200)",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestProjectAndServiceLifecycle",
-	},
-	{
-		name: "railway-delete-missing-project-as-success",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "got, err := p.project(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "got, err := p.project(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestDeleteMissingProject",
-	},
-	{
-		name: "railway-delete-missing-service-as-success",
-		file: filepath.Join("internal", "services", "railway", "graphql", "api.go"),
-		old:  "got, err := p.service(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}",
-		new:  "got, err := p.service(ctx, req)\n\tif false && err != nil {\n\t\treturn nil, err\n\t}",
-		pkg:  "./internal/services/railway/graphql",
-		run:  "TestDeleteMissingService",
-	},
+	// The six mutants that rewrote the Railway pack's empty-name,
+	// missing-project and missing-service branches are gone with the Go they
+	// rewrote, as Azure's and DigitalOcean's were. The behaviour is `require`
+	// rules in behavior/railway/graphql/service.yaml, and
+	// internal/bundled/railway_test.go asserts the same by invocation: an
+	// empty or absent name answers BAD_USER_INPUT/200, an unknown or deleted
+	// id answers NOT_FOUND/200, and a service create against a missing project
+	// answers NOT_FOUND/200.
+	//
+	// The response encoder branch they shared went too: its `_wrap`/`_list`
+	// envelope synthesized the {"data": ...} shape each operation's output now
+	// declares in the catalog, so the bundle projects `data` by name and the
+	// generic encoder serializes it. Only the fault envelope is still Go, and
+	// it is still mutated below.
 	{
 		name: "railway-encode-aws-fault",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),

@@ -586,7 +586,90 @@ func Bundle() *model.Bundle {
 		op("GetSshKey", "GET", "/v1/ssh_keys/{id}", 200, true),
 		op("DeleteSshKey", "DELETE", "/v1/ssh_keys/{id}", 204, false),
 	}
-	railway := []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"}
+	// Real bindings, not mk(): mk() binds every operation to POST /, and
+	// internal/conformance builds its request from this catalog. All seven
+	// operations share the one GraphQL endpoint; the codec routes by the query
+	// document. The output shapes declare the {"data": ...} envelope the pack's
+	// encoder used to synthesize, so the bundle projects it by name.
+	railwayOps := []model.Operation{
+		op("projectCreate", "POST", "/graphql/v2", 200, false),
+		op("projects", "POST", "/graphql/v2", 200, true),
+		op("project", "POST", "/graphql/v2", 200, true),
+		op("projectDelete", "POST", "/graphql/v2", 200, false),
+		op("serviceCreate", "POST", "/graphql/v2", 200, false),
+		op("service", "POST", "/graphql/v2", 200, true),
+		op("serviceDelete", "POST", "/graphql/v2", 200, false),
+	}
+	railwaySvc := svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", railwayOps)
+	railwaySvc.OperationByName("projectCreate").Output = "ProjectCreateResult"
+	railwaySvc.OperationByName("projects").Output = "ProjectsResult"
+	railwaySvc.OperationByName("project").Output = "ProjectResult"
+	railwaySvc.OperationByName("projectDelete").Output = "ProjectDeleteResult"
+	railwaySvc.OperationByName("serviceCreate").Output = "ServiceCreateResult"
+	railwaySvc.OperationByName("service").Output = "ServiceResult"
+	railwaySvc.OperationByName("serviceDelete").Output = "ServiceDeleteResult"
+	railwaySvc.Shapes = map[string]model.Shape{
+		"String":  {ID: "String", Kind: model.KindString},
+		"Boolean": {ID: "Boolean", Kind: model.KindBoolean},
+		"RailwayProject": {ID: "RailwayProject", Kind: model.KindStructure, Members: map[string]model.Member{
+			"id":   {Shape: "String"},
+			"name": {Shape: "String"},
+		}},
+		"RailwayService": {ID: "RailwayService", Kind: model.KindStructure, Members: map[string]model.Member{
+			"id":        {Shape: "String"},
+			"name":      {Shape: "String"},
+			"projectId": {Shape: "String"},
+		}},
+		"RailwayProjectEdge": {ID: "RailwayProjectEdge", Kind: model.KindStructure, Members: map[string]model.Member{
+			"node": {Shape: "RailwayProject"},
+		}},
+		"RailwayProjectEdgeList": {ID: "RailwayProjectEdgeList", Kind: model.KindList, Member: "RailwayProjectEdge"},
+		"RailwayProjectConnection": {ID: "RailwayProjectConnection", Kind: model.KindStructure, Members: map[string]model.Member{
+			"edges": {Shape: "RailwayProjectEdgeList"},
+		}},
+		"ProjectCreateResult": {ID: "ProjectCreateResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ProjectCreateData"},
+		}},
+		"ProjectCreateData": {ID: "ProjectCreateData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"projectCreate": {Shape: "RailwayProject"},
+		}},
+		"ProjectsResult": {ID: "ProjectsResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ProjectsData"},
+		}},
+		"ProjectsData": {ID: "ProjectsData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"projects": {Shape: "RailwayProjectConnection"},
+		}},
+		"ProjectResult": {ID: "ProjectResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ProjectData"},
+		}},
+		"ProjectData": {ID: "ProjectData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"project": {Shape: "RailwayProject"},
+		}},
+		"ProjectDeleteResult": {ID: "ProjectDeleteResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ProjectDeleteData"},
+		}},
+		"ProjectDeleteData": {ID: "ProjectDeleteData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"projectDelete": {Shape: "Boolean"},
+		}},
+		"ServiceCreateResult": {ID: "ServiceCreateResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ServiceCreateData"},
+		}},
+		"ServiceCreateData": {ID: "ServiceCreateData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"serviceCreate": {Shape: "RailwayService"},
+		}},
+		"ServiceResult": {ID: "ServiceResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ServiceData"},
+		}},
+		"ServiceData": {ID: "ServiceData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"service": {Shape: "RailwayService"},
+		}},
+		"ServiceDeleteResult": {ID: "ServiceDeleteResult", Kind: model.KindStructure, Members: map[string]model.Member{
+			"data": {Shape: "ServiceDeleteData"},
+		}},
+		"ServiceDeleteData": {ID: "ServiceDeleteData", Kind: model.KindStructure, Members: map[string]model.Member{
+			"serviceDelete": {Shape: "Boolean"},
+		}},
+	}
 	// Real bindings, not mk(): mk() binds every operation to POST /, and
 	// internal/conformance builds its request from this catalog rather than
 	// from the generated model. The names are the document's.
@@ -1664,7 +1747,7 @@ func Bundle() *model.Bundle {
 			tableSvc,
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", digitalocean),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", hetzner),
-			svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", mk(railway)),
+			railwaySvc,
 			svc("fly.machines", "fly", model.ProtoRESTJSON1, "", "", "", fly),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),

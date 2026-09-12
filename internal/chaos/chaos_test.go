@@ -35,7 +35,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
-	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -8107,7 +8106,10 @@ func TestFlyConcurrentDuplicateApps(t *testing.T) {
 }
 
 func TestRailwayConcurrentProjectCreate(t *testing.T) {
-	p := rwapi.New(spitest.Deps(t))
+	p, err := bundled.New("railway.graphql", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	var wg sync.WaitGroup
@@ -8127,25 +8129,31 @@ func TestRailwayConcurrentProjectCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projects", Input: map[string]any{}})
-	if err != nil || got.Output["_list"] == nil {
+	data, _ := got.Output["data"].(map[string]any)
+	conn, _ := data["projects"].(map[string]any)
+	edges, _ := conn["edges"].([]any)
+	if err != nil || len(edges) != 16 {
 		t.Fatalf("list after concurrent create %#v %v", got, err)
 	}
 }
 
 func TestRailwayConcurrentServiceDelete(t *testing.T) {
-	p := rwapi.New(spitest.Deps(t))
+	p, err := bundled.New("railway.graphql", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	proj, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"name": "web"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pid := proj.Output["projectCreate"].(map[string]any)["id"]
+	pid := proj.Output["data"].(map[string]any)["projectCreate"].(map[string]any)["id"]
 	svc, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceCreate", Input: map[string]any{"name": "api", "projectId": pid}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sid := svc.Output["serviceCreate"].(map[string]any)["id"]
+	sid := svc.Output["data"].(map[string]any)["serviceCreate"].(map[string]any)["id"]
 	var wg sync.WaitGroup
 	errCh := make(chan error, 32)
 	for i := 0; i < 16; i++ {

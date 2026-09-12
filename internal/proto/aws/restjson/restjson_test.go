@@ -413,8 +413,13 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 			t.Errorf("railway %q: %#v %v, want %s", test.query, op, err, test.want)
 		}
 	}
+	// Railway keeps its router and its fault envelope. The response encoder
+	// went with the pack: the bundle projects the {"data": ...} envelope each
+	// operation declares, so the generic encoder serializes it unchanged --
+	// the connection edges included.
 	w = httptest.NewRecorder()
-	if err := codec.Encode(rw, &model.Operation{Name: "projects"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"id": "1", "name": "web"}}, "_wrap": "projects"}}); err != nil {
+	rwOut := map[string]any{"data": map[string]any{"projects": map[string]any{"edges": []any{map[string]any{"node": map[string]any{"id": "1", "name": "web"}}}}}}
+	if err := codec.Encode(rw, &model.Operation{Name: "projects"}, w, &spi.Response{Output: rwOut}); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"data"`) || !strings.Contains(w.Body.String(), `"edges"`) || !strings.Contains(w.Body.String(), `"node"`) {

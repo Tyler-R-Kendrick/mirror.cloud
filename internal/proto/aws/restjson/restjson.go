@@ -629,9 +629,6 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if svc.ID == "azure.table" {
 		return encodeAzureTable(w, status, op, resp)
 	}
-	if svc.ID == "railway.graphql" {
-		return encodeRailway(w, status, resp)
-	}
 	// A status that forbids a body gets none. An engine-served operation
 	// always projects an output map -- empty when its response shape declares
 	// no members -- so without this a 204 reaches net/http with `{}` behind
@@ -742,39 +739,6 @@ func azureTableEntityJSON(m map[string]any) map[string]any {
 	return out
 }
 
-func encodeRailway(w http.ResponseWriter, status int, resp *spi.Response) error {
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-	}
-	w.WriteHeader(status)
-	if resp.Output == nil {
-		return json.NewEncoder(w).Encode(map[string]any{"data": nil})
-	}
-	wrap, _ := resp.Output["_wrap"].(string)
-	if lst, ok := resp.Output["_list"]; ok {
-		items, _ := lst.([]any)
-		if items == nil {
-			items = []any{}
-		}
-		var edges []any
-		for _, item := range items {
-			edges = append(edges, map[string]any{"node": item})
-		}
-		if edges == nil {
-			edges = []any{}
-		}
-		if wrap == "" {
-			wrap = "projects"
-		}
-		return json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{wrap: map[string]any{"edges": edges}}})
-	}
-	if wrap != "" {
-		if rec, ok := resp.Output[wrap]; ok {
-			return json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{wrap: rec}})
-		}
-	}
-	return json.NewEncoder(w).Encode(map[string]any{"data": resp.Output})
-}
 func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.ResponseWriter, f *spi.Fault, requestID string) error {
 	status := f.HTTPStatus
 	if status == 0 {

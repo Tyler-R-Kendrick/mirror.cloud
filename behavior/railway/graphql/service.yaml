@@ -1,0 +1,113 @@
+schema: bir/1
+service: railway.graphql
+
+# Extracted from internal/services/railway/graphql (220 lines of Go): seven
+# GraphQL operations over one POST endpoint, routed by the query document
+# (restjson railwayRoute, which stays -- it is the router, not the pack).
+# Authored from that pack, not from the live Railway API.
+provenance: authored
+
+# A GraphQL request carries its arguments four ways, and the pack's hydrate()
+# flattened all of them into the request input before dispatch: a member set
+# directly (what engine-level callers send), the same member inside
+# `variables`, inside `variables.input`, or inside a top-level `input` object.
+# The first non-empty string wins, in that order. Every member read below is
+# the same four-place chain, which is what hydrate computed in Go.
+resources:
+  project:
+    collection: rwproj
+    id:
+      # Rand.Hex(8) in the pack: eight hex characters.
+      generate: { kind: hex, bytes: 8 }
+      derive: "('id' in input && input.id != null && string(input.id) != '') ? string(input.id) : (('variables' in input && input.variables != null && 'id' in input.variables && input.variables.id != null && string(input.variables.id) != '') ? string(input.variables.id) : (('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'id' in input.variables.input && input.variables.input.id != null && string(input.variables.input.id) != '') ? string(input.variables.input.id) : (('input' in input && input.input != null && 'id' in input.input && input.input.id != null && string(input.input.id) != '') ? string(input.input.id) : '')))"
+    record:
+      id: id
+      name: "('name' in input && input.name != null && string(input.name) != '') ? string(input.name) : (('variables' in input && input.variables != null && 'name' in input.variables && input.variables.name != null && string(input.variables.name) != '') ? string(input.variables.name) : (('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'name' in input.variables.input && input.variables.input.name != null && string(input.variables.input.name) != '') ? string(input.variables.input.name) : (('input' in input && input.input != null && 'name' in input.input && input.input.name != null && string(input.input.name) != '') ? string(input.input.name) : '')))"
+
+  service:
+    collection: rwsvc
+    id:
+      generate: { kind: hex, bytes: 8 }
+      derive: "('id' in input && input.id != null && string(input.id) != '') ? string(input.id) : (('variables' in input && input.variables != null && 'id' in input.variables && input.variables.id != null && string(input.variables.id) != '') ? string(input.variables.id) : (('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'id' in input.variables.input && input.variables.input.id != null && string(input.variables.input.id) != '') ? string(input.variables.input.id) : (('input' in input && input.input != null && 'id' in input.input && input.input.id != null && string(input.input.id) != '') ? string(input.input.id) : '')))"
+    record:
+      id: id
+      name: "('name' in input && input.name != null && string(input.name) != '') ? string(input.name) : (('variables' in input && input.variables != null && 'name' in input.variables && input.variables.name != null && string(input.variables.name) != '') ? string(input.variables.name) : (('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'name' in input.variables.input && input.variables.input.name != null && string(input.variables.input.name) != '') ? string(input.variables.input.name) : (('input' in input && input.input != null && 'name' in input.input && input.input.name != null && string(input.input.name) != '') ? string(input.input.name) : '')))"
+      # The pack fell back to projectID when projectId was empty.
+      projectId: "('projectId' in input && input.projectId != null && string(input.projectId) != '') ? string(input.projectId) : (('variables' in input && input.variables != null && 'projectId' in input.variables && input.variables.projectId != null && string(input.variables.projectId) != '') ? string(input.variables.projectId) : (('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'projectId' in input.variables.input && input.variables.input.projectId != null && string(input.variables.input.projectId) != '') ? string(input.variables.input.projectId) : (('input' in input && input.input != null && 'projectId' in input.input && input.input.projectId != null && string(input.input.projectId) != '') ? string(input.input.projectId) : (('projectID' in input && input.projectID != null && string(input.projectID) != '') ? string(input.projectID) : (('variables' in input && input.variables != null && 'projectID' in input.variables && input.variables.projectID != null && string(input.variables.projectID) != '') ? string(input.variables.projectID) : (('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'projectID' in input.variables.input && input.variables.input.projectID != null && string(input.variables.input.projectID) != '') ? string(input.variables.input.projectID) : (('input' in input && input.input != null && 'projectID' in input.input && input.input.projectID != null && string(input.input.projectID) != '') ? string(input.input.projectID) : '')))))))"
+
+# GraphQL-style faults: HTTP 200 with an errors array, which the codec's
+# EncodeFault railway branch still writes.
+errors:
+  BadUserInput:
+    code: BAD_USER_INPUT
+    http: 200
+    fault: client
+  NotFound:
+    code: NOT_FOUND
+    http: 200
+    fault: client
+
+operations:
+  projectCreate:
+    require:
+      - { cond: "('name' in input && input.name != null && string(input.name) != '') || ('variables' in input && input.variables != null && 'name' in input.variables && input.variables.name != null && string(input.variables.name) != '') || ('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'name' in input.variables.input && input.variables.input.name != null && string(input.variables.input.name) != '') || ('input' in input && input.input != null && 'name' in input.input && input.input.name != null && string(input.input.name) != '')", error: BadUserInput, message: "project name is required" }
+    effects:
+      - create: { resource: project }
+    output:
+      data: "{'projectCreate': rec}"
+
+  # The pack answered a bare list and the codec wrapped each item as a
+  # connection edge; the bundle projects the connection itself.
+  projects:
+    select: { binding: items, resource: project }
+    output:
+      data: "{'projects': {'edges': items.map(i, {'node': i})}}"
+
+  project:
+    reads:
+      rec: { resource: project }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Project not found" }
+    output:
+      data: "{'project': rec}"
+
+  projectDelete:
+    reads:
+      rec: { resource: project }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Project not found" }
+    effects:
+      - delete: { resource: project }
+    output:
+      data: "{'projectDelete': true}"
+
+  # Name check before the project lookup, matching the pack: an empty name is
+  # BAD_USER_INPUT even when the projectId names nothing.
+  serviceCreate:
+    reads:
+      proj: { resource: project, key: "('projectId' in input && input.projectId != null && string(input.projectId) != '') ? string(input.projectId) : (('variables' in input && input.variables != null && 'projectId' in input.variables && input.variables.projectId != null && string(input.variables.projectId) != '') ? string(input.variables.projectId) : (('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'projectId' in input.variables.input && input.variables.input.projectId != null && string(input.variables.input.projectId) != '') ? string(input.variables.input.projectId) : (('input' in input && input.input != null && 'projectId' in input.input && input.input.projectId != null && string(input.input.projectId) != '') ? string(input.input.projectId) : (('projectID' in input && input.projectID != null && string(input.projectID) != '') ? string(input.projectID) : (('variables' in input && input.variables != null && 'projectID' in input.variables && input.variables.projectID != null && string(input.variables.projectID) != '') ? string(input.variables.projectID) : (('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'projectID' in input.variables.input && input.variables.input.projectID != null && string(input.variables.input.projectID) != '') ? string(input.variables.input.projectID) : (('input' in input && input.input != null && 'projectID' in input.input && input.input.projectID != null && string(input.input.projectID) != '') ? string(input.input.projectID) : '')))))))" }
+    require:
+      - { cond: "('name' in input && input.name != null && string(input.name) != '') || ('variables' in input && input.variables != null && 'name' in input.variables && input.variables.name != null && string(input.variables.name) != '') || ('variables' in input && input.variables != null && 'input' in input.variables && input.variables.input != null && 'name' in input.variables.input && input.variables.input.name != null && string(input.variables.input.name) != '') || ('input' in input && input.input != null && 'name' in input.input && input.input.name != null && string(input.input.name) != '')", error: BadUserInput, message: "service name is required" }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+    effects:
+      - create: { resource: service }
+    output:
+      data: "{'serviceCreate': rec}"
+
+  service:
+    reads:
+      rec: { resource: service }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Service not found" }
+    output:
+      data: "{'service': rec}"
+
+  serviceDelete:
+    reads:
+      rec: { resource: service }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Service not found" }
+    effects:
+      - delete: { resource: service }
+    output:
+      data: "{'serviceDelete': true}"

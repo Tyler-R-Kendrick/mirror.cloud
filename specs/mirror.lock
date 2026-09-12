@@ -37,6 +37,22 @@
     "vercel.kv": {
       "source": "authored",
       "ref": "2026-09-11T22:29:30Z"
+    },
+    "azure.blobs": {
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z"
+    },
+    "azure.queue": {
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z"
+    },
+    "azure.table": {
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z"
+    },
+    "railway.graphql": {
+      "source": "authored",
+      "ref": "2026-09-12T02:28:49Z"
     }
   },
   "files": [
@@ -1225,6 +1241,30 @@
       "ingested": "2026-08-28T18:51:00Z"
     },
     {
+      "serviceId": "azure.blobs",
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z",
+      "path": "azure/blobs.json",
+      "sha256": "31f061fdbbe907c41d4db14b7313d036a6db1d6a261d934647e444af15aba46f",
+      "ingested": "2026-09-12T02:44:35Z"
+    },
+    {
+      "serviceId": "azure.queue",
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z",
+      "path": "azure/queue.json",
+      "sha256": "b3902e623126cb86febe558ce3260c3374657d70599e4f218af2f8632a1e7266",
+      "ingested": "2026-09-12T02:44:35Z"
+    },
+    {
+      "serviceId": "azure.table",
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z",
+      "path": "azure/table.json",
+      "sha256": "f84d7900b6e093ee7724031bd943e89506fc63947f5ee302d0c1444e26b518a2",
+      "ingested": "2026-09-12T02:44:35Z"
+    },
+    {
       "serviceId": "cloudflare.api",
       "source": "https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json",
       "ref": "2026-09-11T07:32:38Z",
@@ -1271,6 +1311,14 @@
       "path": "hostinger/api.json",
       "sha256": "b0a41fa77d2a6ec50cda065cd28310e057b0fc0fd75c1ea6d8bfb838e983a05c",
       "ingested": "2026-09-11T00:55:54Z"
+    },
+    {
+      "serviceId": "railway.graphql",
+      "source": "authored",
+      "ref": "2026-09-12T02:28:49Z",
+      "path": "railway/graphql.json",
+      "sha256": "01106ac44b0b149963f2b29a43640a0cb166b4f15616cc1f54b90bc96f866262",
+      "ingested": "2026-09-12T02:28:49Z"
     },
     {
       "serviceId": "vercel.api",

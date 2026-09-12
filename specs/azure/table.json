@@ -1,0 +1,316 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Azure Table Storage",
+    "version": "authored-1",
+    "description": "The Azure Table Storage data plane, as mirror serves it.\n\nTHIS DOCUMENT IS AUTHORED, NOT VENDORED. The vendor's own description of this surface is Swagger 2.0 with x-ms-paths, which the OpenAPI receiver cannot ingest; it stays vendored at specs/azure/table/table.json as the parity ledger's pin, and this document is the OpenAPI 3.0.3 transcription of the subset mirror serves, evidenced by that pin and by the Azurite behavior the behavior bundle (behavior/azure/table) transcribes. The lock records this file with source `authored`: its sha256 still pins the bytes, but nothing refetches it, so it cannot tell you the vendor changed something.\n\nThe entity address is the OData key syntax -- `/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')` -- carried verbatim because that is the address a client sends. Two request members are not on the wire at all and are declared with x-mirror-input: the codec moves the entity body under `__entity` so it does not pollute the control members, and derives `table` from a CreateTable body's TableName. A bundle spreading `input.__entity` is validated against the input shape, so the shape has to declare what only the codec can produce.\n\nThe members the address templates name ({container}, {blob}, and the like) are declared with x-mirror-input rather than as OpenAPI parameters. The router binds them from the address regardless, and declaring them as path parameters would make the receiver mark them required -- an engine-required member faults a request that arrives without it before the behavior bundle applies the service's own validation, and a container-less PUT must be answered InvalidResourceName by the bundle, not a generic validation fault."
+  },
+  "x-mirror-endpoint-prefix": "table",
+  "servers": [
+    {
+      "url": "https://core.windows.net"
+    }
+  ],
+  "paths": {
+    "/Tables": {
+      "post": {
+        "operationId": "CreateTable",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Table"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "table"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "TableName": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "ListTables",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/Tables('{table}')": {
+      "delete": {
+        "operationId": "DeleteTable",
+        "responses": {
+          "204": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "table"
+        ]
+      }
+    },
+    "/{table}": {
+      "post": {
+        "operationId": "InsertEntity",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityResult"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "table",
+          "__entity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "PartitionKey": {
+                    "type": "string"
+                  },
+                  "RowKey": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/{table}()": {
+      "get": {
+        "operationId": "QueryEntities",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityList"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "table"
+        ]
+      }
+    },
+    "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')": {
+      "get": {
+        "operationId": "GetEntity",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityResult"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "table",
+          "PartitionKey",
+          "RowKey"
+        ]
+      },
+      "put": {
+        "operationId": "UpdateEntity",
+        "responses": {
+          "204": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityResult"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "table",
+          "PartitionKey",
+          "RowKey",
+          "__entity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "PartitionKey": {
+                    "type": "string"
+                  },
+                  "RowKey": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "MergeEntity",
+        "responses": {
+          "204": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityResult"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "table",
+          "PartitionKey",
+          "RowKey",
+          "__entity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "PartitionKey": {
+                    "type": "string"
+                  },
+                  "RowKey": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "DeleteEntity",
+        "responses": {
+          "204": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "table",
+          "PartitionKey",
+          "RowKey"
+        ]
+      }
+    },
+    "/$batch": {
+      "post": {
+        "operationId": "SubmitBatch",
+        "responses": {
+          "202": {
+            "description": "The request succeeded."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "String": {
+        "type": "string"
+      },
+      "Map": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/String"
+        }
+      },
+      "Table": {
+        "type": "object",
+        "properties": {
+          "TableName": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "TableList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Table"
+        }
+      },
+      "Entity": {
+        "type": "object",
+        "properties": {
+          "PartitionKey": {
+            "$ref": "#/components/schemas/String"
+          },
+          "RowKey": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "EntityList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Entity"
+        }
+      },
+      "EntityResult": {
+        "type": "object",
+        "properties": {
+          "entity": {
+            "$ref": "#/components/schemas/Map"
+          },
+          "prefer": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      }
+    }
+  }
+}

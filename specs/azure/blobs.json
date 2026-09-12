@@ -1,0 +1,1135 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Azure Blob Storage",
+    "version": "authored-1",
+    "description": "The Azure Blob Storage data plane, as mirror serves it.\n\nTHIS DOCUMENT IS AUTHORED, NOT VENDORED. The vendor's own description of this surface is Swagger 2.0 with x-ms-paths, which the OpenAPI receiver cannot ingest; it stays vendored at specs/azure/blob-storage.json as the parity ledger's pin, and this document is the OpenAPI 3.0.3 transcription of the subset mirror serves, evidenced by that pin and by the Azurite behavior the behavior bundle (behavior/azure/blobs) transcribes. The lock records this file with source `authored`: its sha256 still pins the bytes, but nothing refetches it, so it cannot tell you the vendor changed something. Treat every statement in it as `authored` provenance.\n\nTwo things OpenAPI cannot say are carried by mirror extensions. x-mirror-protocol is restXml because the wire format is XML and the codec serving it is chosen by that field. And the paths carry their query strings verbatim -- `/{container}?restype=container` is one binding, distinguished from `/{container}` by the query, which is how the router and the conformance requests already address these operations.\n\nUnsupportedQuery declares only a 400: it is the route for a comp the service does not implement, the behavior bundle always faults it, and the recorded 400 is what the fault path answers; the model's success code for it is a field no request can reach.\n\nThe members the address templates name ({container}, {blob}, and the like) are declared with x-mirror-input rather than as OpenAPI parameters. The router binds them from the address regardless, and declaring them as path parameters would make the receiver mark them required -- an engine-required member faults a request that arrives without it before the behavior bundle applies the service's own validation, and a container-less PUT must be answered InvalidResourceName by the bundle, not a generic validation fault."
+  },
+  "x-mirror-protocol": "restXml",
+  "servers": [
+    {
+      "url": "https://core.windows.net"
+    }
+  ],
+  "paths": {
+    "/{container}?restype=container": {
+      "put": {
+        "operationId": "CreateContainer",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      },
+      "get": {
+        "operationId": "GetContainer",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      },
+      "delete": {
+        "operationId": "DeleteContainer",
+        "responses": {
+          "202": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/?comp=list": {
+      "get": {
+        "operationId": "ListContainers",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/{container}/{blob}": {
+      "put": {
+        "operationId": "PutBlob",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "CreatePageBlob",
+            "response": "#/components/schemas/Blob"
+          },
+          {
+            "name": "CreateAppendBlob",
+            "response": "#/components/schemas/Blob"
+          },
+          {
+            "name": "StartCopyFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 202
+          },
+          {
+            "name": "CopyBlobFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 202
+          }
+        ]
+      },
+      "get": {
+        "operationId": "GetBlob",
+        "responses": {
+          "200": {
+            "description": "The blob's stored bytes, with its content type.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlobBody"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      },
+      "delete": {
+        "operationId": "DeleteBlob",
+        "responses": {
+          "202": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      },
+      "head": {
+        "operationId": "GetBlobProperties",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}?restype=container&comp=list": {
+      "get": {
+        "operationId": "ListBlobs",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlobList"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=block": {
+      "put": {
+        "operationId": "PutBlock",
+        "responses": {
+          "201": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob",
+          "blockid"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "StageBlockFromURL",
+            "response": "#/components/schemas/Blob"
+          }
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=blocklist": {
+      "put": {
+        "operationId": "PutBlockList",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      },
+      "get": {
+        "operationId": "GetBlockList",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockList"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=appendblock": {
+      "put": {
+        "operationId": "AppendBlock",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "AppendBlockFromURL",
+            "response": "#/components/schemas/Blob"
+          }
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=unsupported": {
+      "put": {
+        "operationId": "UnsupportedQuery",
+        "responses": {
+          "400": {
+            "description": "The query parameter is not supported."
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ],
+        "description": "The route for a `comp` the service does not implement. The behavior bundle always faults it with InvalidQueryParameterValue, so the recorded 400 is what the fault path answers; no request reaches a success status here."
+      }
+    },
+    "/{container}?restype=container&comp=metadata": {
+      "put": {
+        "operationId": "SetContainerMetadata",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      },
+      "get": {
+        "operationId": "GetContainerMetadata",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/{container}?restype=container&comp=acl": {
+      "put": {
+        "operationId": "SetContainerAcl",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      },
+      "get": {
+        "operationId": "GetContainerAcl",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/{container}?comp=lease&restype=container&acquire": {
+      "put": {
+        "operationId": "AcquireContainerLease",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/{container}?comp=lease&restype=container&release": {
+      "put": {
+        "operationId": "ReleaseContainerLease",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/{container}?comp=lease&restype=container&renew": {
+      "put": {
+        "operationId": "RenewContainerLease",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/{container}?comp=lease&restype=container&break": {
+      "put": {
+        "operationId": "BreakContainerLease",
+        "responses": {
+          "202": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/{container}?comp=lease&restype=container&change": {
+      "put": {
+        "operationId": "ChangeContainerLease",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Container"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container"
+        ]
+      }
+    },
+    "/?restype=service&comp=properties": {
+      "get": {
+        "operationId": "GetServiceProperties",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "SetServiceProperties",
+        "responses": {
+          "202": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/?restype=service&comp=stats": {
+      "get": {
+        "operationId": "GetServiceStats",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/?restype=account&comp=properties": {
+      "get": {
+        "operationId": "GetAccountInfo",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/{container}/{blob}?comp=metadata": {
+      "put": {
+        "operationId": "SetBlobMetadata",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      },
+      "get": {
+        "operationId": "GetBlobMetadata",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=properties": {
+      "put": {
+        "operationId": "SetBlobProperties",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "ResizePageBlob",
+            "response": "#/components/schemas/Blob"
+          },
+          {
+            "name": "SetBlobSequenceNumber",
+            "response": "#/components/schemas/Blob"
+          }
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=page": {
+      "put": {
+        "operationId": "PutPage",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "ClearPages",
+            "response": "#/components/schemas/Blob"
+          },
+          {
+            "name": "PutPageFromURL",
+            "response": "#/components/schemas/Blob"
+          }
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=pagelist": {
+      "get": {
+        "operationId": "GetPageRanges",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageRangeList"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "GetPageRangesDiff",
+            "response": "#/components/schemas/PageRangeList",
+            "readonly": true
+          }
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=snapshot": {
+      "put": {
+        "operationId": "CreateSnapshot",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=copy": {
+      "put": {
+        "operationId": "AbortCopy",
+        "responses": {
+          "204": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=tags": {
+      "put": {
+        "operationId": "SetTags",
+        "responses": {
+          "204": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      },
+      "get": {
+        "operationId": "GetTags",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/?comp=blobs": {
+      "get": {
+        "operationId": "FilterBlobs",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilterBlobResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/?comp=batch": {
+      "post": {
+        "operationId": "SubmitBatch",
+        "responses": {
+          "202": {
+            "description": "The request succeeded."
+          }
+        }
+      }
+    },
+    "/{container}/{blob}?comp=tier": {
+      "put": {
+        "operationId": "SetBlobTier",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=lease&acquire": {
+      "put": {
+        "operationId": "AcquireBlobLease",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=lease&release": {
+      "put": {
+        "operationId": "ReleaseBlobLease",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=lease&renew": {
+      "put": {
+        "operationId": "RenewBlobLease",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=lease&break": {
+      "put": {
+        "operationId": "BreakBlobLease",
+        "responses": {
+          "202": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    },
+    "/{container}/{blob}?comp=lease&change": {
+      "put": {
+        "operationId": "ChangeBlobLease",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "String": {
+        "type": "string"
+      },
+      "Map": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/String"
+        }
+      },
+      "Container": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Map"
+          },
+          "acl": {
+            "$ref": "#/components/schemas/String"
+          },
+          "public_access": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_status": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_state": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_duration": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "ContainerList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Container"
+        }
+      },
+      "Blob": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "container": {
+            "$ref": "#/components/schemas/String"
+          },
+          "value": {
+            "$ref": "#/components/schemas/String"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Map"
+          },
+          "content_type": {
+            "$ref": "#/components/schemas/String"
+          },
+          "cache_control": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_encoding": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_language": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_disposition": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_md5": {
+            "$ref": "#/components/schemas/String"
+          },
+          "sequence_number": {
+            "$ref": "#/components/schemas/String"
+          },
+          "append_offset": {
+            "$ref": "#/components/schemas/String"
+          },
+          "committed_block_count": {
+            "$ref": "#/components/schemas/String"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/String"
+          },
+          "copy_id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "copy_status": {
+            "$ref": "#/components/schemas/String"
+          },
+          "blob_type": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_length": {
+            "$ref": "#/components/schemas/String"
+          },
+          "etag": {
+            "$ref": "#/components/schemas/String"
+          },
+          "last_modified": {
+            "$ref": "#/components/schemas/String"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/Map"
+          },
+          "tag_count": {
+            "$ref": "#/components/schemas/String"
+          },
+          "access_tier": {
+            "$ref": "#/components/schemas/String"
+          },
+          "access_tier_inferred": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_status": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_state": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_duration": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "FilterBlob": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "container": {
+            "$ref": "#/components/schemas/String"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/Map"
+          }
+        }
+      },
+      "FilterBlobList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/FilterBlob"
+        }
+      },
+      "FilterBlobResult": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "$ref": "#/components/schemas/String"
+          },
+          "blobs": {
+            "$ref": "#/components/schemas/FilterBlobList"
+          }
+        }
+      },
+      "BlobList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Blob"
+        }
+      },
+      "BlobBody": {
+        "type": "string"
+      },
+      "Block": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "value": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "BlockList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Block"
+        }
+      },
+      "PageRange": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "$ref": "#/components/schemas/String"
+          },
+          "end": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "PageRanges": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PageRange"
+        }
+      },
+      "PageRangeList": {
+        "type": "object",
+        "properties": {
+          "ranges": {
+            "$ref": "#/components/schemas/PageRanges"
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "properties": {
+            "$ref": "#/components/schemas/String"
+          },
+          "geo_status": {
+            "$ref": "#/components/schemas/String"
+          },
+          "account_kind": {
+            "$ref": "#/components/schemas/String"
+          },
+          "sku_name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "hns": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      }
+    }
+  }
+}

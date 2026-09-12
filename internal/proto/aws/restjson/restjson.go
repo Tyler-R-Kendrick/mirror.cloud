@@ -359,23 +359,150 @@ func railwayRoute(r *http.Request) string {
 	in := map[string]any{}
 	_ = json.Unmarshal(b, &in)
 	q, _ := in["query"].(string)
-	switch {
-	case strings.Contains(q, "projectCreate"):
-		return "projectCreate"
-	case strings.Contains(q, "projectDelete"):
-		return "projectDelete"
-	case strings.Contains(q, "serviceCreate"):
-		return "serviceCreate"
-	case strings.Contains(q, "serviceDelete"):
-		return "serviceDelete"
-	case strings.Contains(q, "projects"):
-		return "projects"
-	case strings.Contains(q, "project"):
-		return "project"
-	case strings.Contains(q, "service"):
-		return "service"
-	default:
-		return "Unknown"
+	return gqlRootField(q)
+}
+
+// gqlRootField answers which field a GraphQL document selects, which for a
+// service whose every request is one POST to one path IS the operation.
+//
+// It scans rather than substring-matches because substring matching is wrong on
+// ordinary documents, not just adversarial ones. Railway's schema declares both
+// `project` and `projectId` on Service, so `{ service(id:"s") { id projectId } }`
+// contains "project" and a longest-name-first switch answered a service lookup
+// with the project handler. The same switch misroutes on an operation name
+// (`query GetService($projectId: String!)`), on a comment, and on a string
+// literal -- three ways to be wrong that a scanner simply does not have.
+//
+// This is deliberately a router, not a GraphQL implementation: it answers which
+// field, and nothing about the selection set, because nothing in this tree
+// projects one yet.
+func gqlRootField(q string) string {
+	i, n := 0, len(q)
+
+	// GraphQL's ignored tokens: whitespace, commas, and # comments.
+	skip := func() {
+		for i < n {
+			switch c := q[i]; {
+			case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',':
+				i++
+			case c == '#':
+				for i < n && q[i] != '\n' {
+					i++
+				}
+			default:
+				return
+			}
+		}
+	}
+	// A string literal, skipped wherever one may appear, so that a brace or a
+	// paren inside one cannot close a group early.
+	skipString := func() {
+		i++
+		for i < n && q[i] != '"' {
+			if q[i] == '\\' {
+				i++
+			}
+			i++
+		}
+	}
+	name := func() string {
+		start := i
+		for i < n {
+			c := q[i]
+			if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9' && i > start) {
+				i++
+				continue
+			}
+			break
+		}
+		return q[start:i]
+	}
+	// The selection set opens at the first brace that is not inside a string or
+	// a variable-definition group -- which is all that an operation name,
+	// variable definitions and directives can put in the way.
+	toSelectionSet := func() bool {
+		depth := 0
+		for i < n {
+			switch q[i] {
+			case '"':
+				skipString()
+			case '(':
+				depth++
+			case ')':
+				if depth > 0 {
+					depth--
+				}
+			case '{':
+				if depth == 0 {
+					i++
+					return true
+				}
+			}
+			i++
+		}
+		return false
+	}
+	// From just past an opening brace to just past its match.
+	skipBlock := func() bool {
+		depth := 1
+		for i < n {
+			switch q[i] {
+			case '"':
+				skipString()
+			case '{':
+				depth++
+			case '}':
+				if depth--; depth == 0 {
+					i++
+					return true
+				}
+			}
+			i++
+		}
+		return false
+	}
+	// The first field of a selection set, seeing past an alias.
+	field := func() string {
+		skip()
+		first := name()
+		if first == "" {
+			return "Unknown"
+		}
+		skip()
+		if i < n && q[i] == ':' {
+			i++
+			skip()
+			if aliased := name(); aliased != "" {
+				return aliased
+			}
+			return "Unknown"
+		}
+		return first
+	}
+
+	for {
+		skip()
+		if i >= n {
+			return "Unknown"
+		}
+		if q[i] == '{' { // query shorthand, with no operation type at all
+			i++
+			return field()
+		}
+		switch name() {
+		case "query", "mutation", "subscription":
+			if !toSelectionSet() {
+				return "Unknown"
+			}
+			return field()
+		case "fragment":
+			// A fragment definition may precede the operation it serves.
+			if !toSelectionSet() || !skipBlock() {
+				return "Unknown"
+			}
+		default:
+			return "Unknown"
+		}
 	}
 }
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {

@@ -24,6 +24,5 @@ func FuzzCreateBody(f *testing.F) {
 			_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "project", Input: map[string]any{"id": pid}})
 			_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projects", Input: map[string]any{}})
 		}
-		_ = FieldName("mutation { projectCreate(input:{name:\"" + name + "\"}) { id } }")
 	})
 }

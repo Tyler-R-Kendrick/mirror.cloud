@@ -36,32 +36,32 @@ jobs:
         run: test -z "$(gofmt -l . | grep -v node_modules || true)"
       - name: anti-drift ratchet
         if: ${{ !cancelled() }}
-        run: make ratchet
+        run: set -o pipefail; make ratchet 2>&1 | tee -a ci-run.log
       - name: extraction equivalence
         if: ${{ !cancelled() }}
         # Named separately so it can be a required check: no pack may be
         # deleted without its recording replaying green against the bundle
         # that replaced it.
-        run: make equivalence
+        run: set -o pipefail; make equivalence 2>&1 | tee -a ci-run.log
       - name: unit and coverage floor
         if: ${{ !cancelled() }}
-        run: make test-coverage
+        run: set -o pipefail; make test-coverage 2>&1 | tee -a ci-run.log
       - name: protocol contracts
         if: ${{ !cancelled() }}
-        run: go test ./internal/conformance ./internal/proto/... -count=1
+        run: set -o pipefail; go test ./internal/conformance ./internal/proto/... -count=1 2>&1 | tee -a ci-run.log
       - name: aws sdk round-trip
         if: ${{ !cancelled() }}
         working-directory: test/sdk/go
         run: go test ./... -count=1
       - name: snapshots
         if: ${{ !cancelled() }}
-        run: make test-snapshot
+        run: set -o pipefail; make test-snapshot 2>&1 | tee -a ci-run.log
       - name: chaos
         if: ${{ !cancelled() }}
-        run: make test-chaos
+        run: set -o pipefail; make test-chaos 2>&1 | tee -a ci-run.log
       - name: bdd and functional
         if: ${{ !cancelled() }}
-        run: make test-bdd
+        run: set -o pipefail; make test-bdd 2>&1 | tee -a ci-run.log
       - name: fuzz seeds
         if: ${{ !cancelled() }}
         run: make test-fuzz-seeds
@@ -70,7 +70,15 @@ jobs:
         run: make test-fuzz
       - name: race detector
         if: ${{ !cancelled() }}
-        run: make test-race
+        run: set -o pipefail; make test-race 2>&1 | tee -a ci-run.log
+      # Last, and reporting only: it names which of this job's failures
+      # were expected and which were not. It suppresses nothing -- every
+      # step above has already reported its own verdict -- but a job red
+      # for the ratchet used to look identical whether or not something
+      # else had broken, and twice it was not identical.
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log
 
   # Separate matrix job: the mutation suite had grown to fifty-eight minutes
   # against a sixty-minute timeout, which meant the next mutant anyone added
@@ -98,7 +106,10 @@ jobs:
           go-version: "1.24"
           cache-dependency-path: test/sdk/go/go.sum
       - name: mutation shard ${{ matrix.shard }} of 4
-        run: make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=4
+        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=4 2>&1 | tee -a ci-run.log
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log
 
   # Separate job: syncing specs leaves ~92 MB under specs/, and a populated
   # specs/ changes what the runtime boots from, so it must not share a

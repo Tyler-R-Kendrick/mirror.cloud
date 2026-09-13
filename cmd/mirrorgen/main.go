@@ -258,11 +258,11 @@ func readBundle(path string) (model.Bundle, error) {
 type setEntry struct {
 	ID   string
 	Tier model.Tier
-	// Paths narrows a service to the operations whose URI begins with one of
-	// these prefixes, for the vendor that publishes one document per platform
-	// rather than one per service. Empty means the whole document, which is
-	// every service today. See narrow.go.
-	Paths []string
+	// Select narrows a service to some of its operations, for the vendor that
+	// publishes one document per platform rather than one per service: by URI
+	// prefix, or by operation name where every operation shares one endpoint.
+	// Empty means the whole document. See narrow.go.
+	Select selector
 }
 
 func loadSet(path string) ([]setEntry, error) {
@@ -282,11 +282,11 @@ func loadSet(path string) ([]setEntry, error) {
 			e.Tier = model.Tier(fields[1])
 		}
 		if len(fields) > 2 {
-			paths, err := parseSelector(fields[2:])
+			sel, err := parseSelector(fields[2:])
 			if err != nil {
 				return nil, fmt.Errorf("%s: %s: %w", path, fields[0], err)
 			}
-			e.Paths = paths
+			e.Select = sel
 		}
 		out = append(out, e)
 	}

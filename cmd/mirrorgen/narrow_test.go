@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ func platform() model.Service {
 // vendor's one-document-per-platform publication costs what its selected
 // surface costs, not what the platform costs.
 func TestNarrowKeepsOnlyWhatTheSelectedOperationsReach(t *testing.T) {
-	got, err := narrow(platform(), []string{"/v4/kv/"})
+	got, err := narrow(platform(), selector{Paths: []string{"/v4/kv/"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,7 @@ func TestNarrowKeepsOnlyWhatTheSelectedOperationsReach(t *testing.T) {
 // the same silence as a document ingested and dropped, or a model generated
 // and not embedded.
 func TestNarrowRefusesASelectorThatMatchesNothing(t *testing.T) {
-	_, err := narrow(platform(), []string{"/v4/spectrum/"})
+	_, err := narrow(platform(), selector{Paths: []string{"/v4/spectrum/"}})
 	if err == nil {
 		t.Fatal("a selector matching no operation produced a model instead of an error")
 	}
@@ -111,7 +112,7 @@ func TestNarrowRefusesASelectorThatMatchesNothing(t *testing.T) {
 // models byte-identical: narrowing is opt-in per service.
 func TestNarrowWithoutASelectorChangesNothing(t *testing.T) {
 	before := platform()
-	got, err := narrow(before, nil)
+	got, err := narrow(before, selector{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,8 +137,8 @@ func TestParseSelector(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Sorted, so the same line always narrows the same way.
-	if strings.Join(got, ",") != "/a/,/b/" {
-		t.Fatalf("prefixes = %v", got)
+	if strings.Join(got.Paths, ",") != "/a/,/b/" {
+		t.Fatalf("prefixes = %v", got.Paths)
 	}
 	if _, err := parseSelector([]string{"tags=kv"}); err == nil {
 		t.Error("an unknown field was accepted as a selector")
@@ -161,10 +162,10 @@ func TestLoadSetReadsASelector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || len(got[0].Paths) != 0 {
+	if len(got) != 2 || !got[0].Select.empty() {
 		t.Fatalf("entries = %+v", got)
 	}
-	if len(got[1].Paths) != 1 || got[1].Paths[0] != "/v4/kv/" {
+	if len(got[1].Select.Paths) != 1 || got[1].Select.Paths[0] != "/v4/kv/" {
 		t.Fatalf("selector = %+v", got[1])
 	}
 
@@ -202,7 +203,7 @@ func TestCatalogModeIgnoresAPathSelector(t *testing.T) {
 			"Out": {ID: "Out", Kind: model.KindStructure},
 		},
 	}
-	want := []setEntry{{ID: "vendor.api", Tier: model.TierMock, Paths: []string{"/v4/kv/"}}}
+	want := []setEntry{{ID: "vendor.api", Tier: model.TierMock, Select: selector{Paths: []string{"/v4/kv/"}}}}
 
 	got, err := applySet([]model.Service{stub}, want, true)
 	if err != nil {
@@ -215,5 +216,143 @@ func TestCatalogModeIgnoresAPathSelector(t *testing.T) {
 
 	if _, err := applySet([]model.Service{stub}, want, false); err == nil {
 		t.Error("spec mode: a selector that matches no operation must still be fatal")
+	}
+}
+
+// oneEndpoint is the shape a GraphQL document ingests into: every operation
+// answers at the same URI, so a `paths=` selector is all-or-nothing on it and
+// cannot express "these three".
+func oneEndpoint() model.Service {
+	svc := model.Service{
+		ID:     "vendor.api",
+		Shapes: map[string]model.Shape{},
+	}
+	for _, name := range []string{"project", "projects", "projectCreate", "deployment", "deploymentCreate"} {
+		in, out := name+".input", name+".output"
+		svc.Operations = append(svc.Operations, model.Operation{
+			Name:   name,
+			HTTP:   model.HTTPBinding{Method: "POST", URI: "/graphql", Code: 200},
+			Input:  in,
+			Output: out,
+		})
+		svc.Shapes[in] = model.Shape{ID: in, Kind: model.KindStructure}
+		svc.Shapes[out] = model.Shape{ID: out, Kind: model.KindStructure}
+	}
+	return svc
+}
+
+// TestNarrowByFieldSelectsFromOneEndpoint is why `fields=` exists. Narrowing by
+// URI keeps all five here or none; naming the operations keeps three, and drops
+// the shapes only the other two reach.
+func TestNarrowByFieldSelectsFromOneEndpoint(t *testing.T) {
+	got, err := narrow(oneEndpoint(), selector{Fields: []string{"project", "projects", "projectCreate"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, op := range got.Operations {
+		names = append(names, op.Name)
+	}
+	sort.Strings(names)
+	if strings.Join(names, ",") != "project,projectCreate,projects" {
+		t.Fatalf("kept %v", names)
+	}
+	if _, ok := got.Shapes["deployment.output"]; ok {
+		t.Error("a shape only the dropped operations reach survived")
+	}
+	if _, ok := got.Shapes["project.output"]; !ok {
+		t.Error("a shape a kept operation reaches was dropped")
+	}
+	// The prefix every operation shares would have kept all five, which is the
+	// all-or-nothing this selector exists to escape.
+	all, err := narrow(oneEndpoint(), selector{Paths: []string{"/graphql"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Operations) != 5 {
+		t.Fatalf("paths= on one endpoint kept %d, want all 5", len(all.Operations))
+	}
+}
+
+// A name is matched whole. `project` must not take `projectCreate` with it --
+// the prefix-matching that C34 and the railway routing bug are both about.
+func TestNarrowByFieldMatchesWholeNames(t *testing.T) {
+	got, err := narrow(oneEndpoint(), selector{Fields: []string{"project"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Operations) != 1 || got.Operations[0].Name != "project" {
+		var names []string
+		for _, op := range got.Operations {
+			names = append(names, op.Name)
+		}
+		t.Fatalf("kept %v, want only project", names)
+	}
+}
+
+// The two kinds are alternatives, not a filter pair: a line declaring both asks
+// for the union of two ways of pointing at operations.
+func TestNarrowUnionsTheTwoSelectorKinds(t *testing.T) {
+	svc := oneEndpoint()
+	svc.Operations = append(svc.Operations, model.Operation{
+		Name:   "health",
+		HTTP:   model.HTTPBinding{Method: "GET", URI: "/healthz", Code: 200},
+		Input:  "project.input",
+		Output: "project.output",
+	})
+	got, err := narrow(svc, selector{Paths: []string{"/healthz"}, Fields: []string{"project"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, op := range got.Operations {
+		names = append(names, op.Name)
+	}
+	sort.Strings(names)
+	if strings.Join(names, ",") != "health,project" {
+		t.Fatalf("kept %v, want the union", names)
+	}
+}
+
+// A selector matching nothing is fatal whichever kind it is, and the error says
+// which kind was tried -- the report is the only way to tell a typo from a
+// document that genuinely moved.
+func TestNarrowRefusesAFieldSelectorThatMatchesNothing(t *testing.T) {
+	_, err := narrow(oneEndpoint(), selector{Fields: []string{"noSuchField"}})
+	if err == nil {
+		t.Fatal("a field selector matching no operation produced a model instead of an error")
+	}
+	for _, want := range []string{"vendor.api", "fields=noSuchField", "5"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not say %q: %v", want, err)
+		}
+	}
+}
+
+// Each kind refuses the other's spelling, because a value under the wrong key
+// is a typo that would otherwise read as a selector matching nothing.
+func TestParseSelectorKeepsTheTwoKindsApart(t *testing.T) {
+	got, err := parseSelector([]string{"fields=b,a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.Fields, ",") != "a,b" {
+		t.Fatalf("fields = %v, want them sorted", got.Fields)
+	}
+	if len(got.Paths) != 0 {
+		t.Errorf("fields= populated Paths: %+v", got)
+	}
+	both, err := parseSelector([]string{"paths=/v4/", "fields=kv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(both.Paths) != 1 || len(both.Fields) != 1 {
+		t.Fatalf("one line declaring both = %+v", both)
+	}
+	if _, err := parseSelector([]string{"fields=/v4/kv"}); err == nil {
+		t.Error("a URI prefix was accepted as an operation name")
+	}
+	if _, err := parseSelector([]string{"paths=kv"}); err == nil {
+		t.Error("an operation name was accepted as a URI prefix")
 	}
 }

@@ -8098,7 +8098,9 @@ func TestRailwayConcurrentProjectCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projects", Input: map[string]any{}})
-	if err != nil || got.Output["_list"] == nil {
+	// `edges`, not `_list`: the connection the schema declares is built by the
+	// service, since what shape a field answers is what its schema says.
+	if err != nil || got.Output["edges"] == nil {
 		t.Fatalf("list after concurrent create %#v %v", got, err)
 	}
 }
@@ -8111,12 +8113,13 @@ func TestRailwayConcurrentServiceDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pid := proj.Output["projectCreate"].(map[string]any)["id"]
+	// An operation's output is the field's value, with no field name inside it.
+	pid := proj.Output["id"]
 	svc, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceCreate", Input: map[string]any{"name": "api", "projectId": pid}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sid := svc.Output["serviceCreate"].(map[string]any)["id"]
+	sid := svc.Output["id"]
 	var wg sync.WaitGroup
 	errCh := make(chan error, 32)
 	for i := 0; i < 16; i++ {

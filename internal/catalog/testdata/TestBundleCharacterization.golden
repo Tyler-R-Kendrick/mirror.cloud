@@ -858,7 +858,7 @@
   },
   {
     "ID": "railway.graphql",
-    "Protocol": "restJson1",
+    "Protocol": "graphql",
     "Ops": [
       "projectCreate",
       "projects",

@@ -22,23 +22,29 @@ func TestRailwayGraphQLCharacterization(t *testing.T) {
 		}
 		return map[string]any{"status": res.Status, "output": res.Output}
 	}
-	create := inv("projectCreate", map[string]any{"name": "web"})
-	pid := ""
-	if m, ok := create.(map[string]any); ok {
-		if out, ok := m["output"].(map[string]any); ok {
-			if rec, ok := out["projectCreate"].(map[string]any); ok {
-				pid = str(rec["id"])
-			}
+	// An operation's output is the field's value itself, with no field name
+	// wrapped around it -- which field answered is what the codec knows from
+	// the operation.
+	newID := func(res any) string {
+		m, ok := res.(map[string]any)
+		if !ok {
+			return ""
 		}
+		out, ok := m["output"].(map[string]any)
+		if !ok {
+			return ""
+		}
+		return str(out["id"])
+	}
+	create := inv("projectCreate", map[string]any{"name": "web"})
+	pid := newID(create)
+	if pid == "" {
+		t.Fatalf("projectCreate answered no id, so every step below would read a miss: %#v", create)
 	}
 	svc := inv("serviceCreate", map[string]any{"name": "api", "projectId": pid})
-	sid := ""
-	if m, ok := svc.(map[string]any); ok {
-		if out, ok := m["output"].(map[string]any); ok {
-			if rec, ok := out["serviceCreate"].(map[string]any); ok {
-				sid = str(rec["id"])
-			}
-		}
+	sid := newID(svc)
+	if sid == "" {
+		t.Fatalf("serviceCreate answered no id: %#v", svc)
 	}
 	golden.AssertJSON(t, map[string]any{
 		"create":      create,

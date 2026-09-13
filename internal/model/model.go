@@ -26,6 +26,12 @@ const (
 	ProtoAWSQuery   Protocol = "awsQuery"
 	ProtoEC2Query   Protocol = "ec2Query"
 	ProtoGCPRESTSON Protocol = "gcpRestJson"
+	// ProtoGraphQL is one POST to one endpoint whose body carries a document
+	// naming the field to run. It is a protocol like the others and not a
+	// vendor's habit: the operation, its arguments and the response envelope
+	// are all specified by GraphQL itself, so a codec for it serves any
+	// service whose schema a receiver can read.
+	ProtoGraphQL Protocol = "graphql"
 )
 
 // Confidence records the evidentiary class of a model cell. Higher-precedence

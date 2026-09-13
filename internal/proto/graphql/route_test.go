@@ -1,4 +1,4 @@
-package restjson
+package graphql
 
 import "testing"
 
@@ -68,8 +68,8 @@ func TestGraphQLRootField(t *testing.T) {
 		{"unterminated", `query {`, "Unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := gqlRootField(tc.doc); got != tc.want {
-				t.Fatalf("gqlRootField(%q) = %q, want %q", tc.doc, got, tc.want)
+			if got := rootField(tc.doc).Name; got != tc.want {
+				t.Fatalf("rootField(%q) = %q, want %q", tc.doc, got, tc.want)
 			}
 		})
 	}
@@ -79,7 +79,7 @@ func TestGraphQLRootField(t *testing.T) {
 // than to "Unknown", so the not-implemented fault and the x-mirror-not-
 // implemented header say which field was asked for.
 func TestGraphQLRootFieldNamesAnUnservedField(t *testing.T) {
-	if got := gqlRootField(`mutation { deploymentCreate(input:{}) { id } }`); got != "deploymentCreate" {
+	if got := rootField(`mutation { deploymentCreate(input:{}) { id } }`).Name; got != "deploymentCreate" {
 		t.Fatalf("unserved field = %q, want deploymentCreate", got)
 	}
 }

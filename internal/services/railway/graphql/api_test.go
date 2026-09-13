@@ -20,27 +20,31 @@ func TestProjectAndServiceLifecycle(t *testing.T) {
 		}
 		return res
 	}
+	// An operation's output is the field's value, with no field name inside it:
+	// which field answered is what the codec knows from the operation, and a
+	// pack that repeated it was telling a generic layer its own convention.
 	created := inv("projectCreate", map[string]any{"name": "web"})
-	proj, _ := created.Output["projectCreate"].(map[string]any)
+	proj := created.Output
 	if proj["name"] != "web" {
 		t.Fatalf("create %#v", created.Output)
 	}
 	pid := str(proj["id"])
 	got := inv("project", map[string]any{"id": pid})
-	if got.Output["project"].(map[string]any)["name"] != "web" {
+	if got.Output["name"] != "web" {
 		t.Fatalf("get %#v", got.Output)
 	}
+	// The schema says `projects` answers a connection, so the pack builds one.
 	list := inv("projects", nil)
-	if len(list.Output["_list"].([]any)) != 1 {
+	if len(list.Output["edges"].([]any)) != 1 {
 		t.Fatalf("list %#v", list.Output)
 	}
 	svc := inv("serviceCreate", map[string]any{"name": "api", "projectId": pid})
-	if svc.Output["serviceCreate"].(map[string]any)["name"] != "api" {
+	if svc.Output["name"] != "api" {
 		t.Fatalf("service %#v", svc.Output)
 	}
-	sid := str(svc.Output["serviceCreate"].(map[string]any)["id"])
+	sid := str(svc.Output["id"])
 	gots := inv("service", map[string]any{"id": sid})
-	if gots.Output["service"].(map[string]any)["id"] != sid {
+	if gots.Output["id"] != sid {
 		t.Fatalf("get service %#v", gots.Output)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceDelete", Input: map[string]any{"id": sid}}); err != nil {

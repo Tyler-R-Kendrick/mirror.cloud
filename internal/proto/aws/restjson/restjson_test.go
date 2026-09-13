@@ -400,46 +400,6 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		t.Fatalf("hz 204 %d %q", w.Code, w.Body.String())
 	}
 
-	rw := &model.Service{ID: "railway.graphql"}
-	for _, test := range []struct{ query, want string }{
-		{`mutation { projectCreate(input:{name:"web"}) { id } }`, "projectCreate"},
-		{`{ projects { edges { node { id } } } }`, "projects"},
-		{`{ project(id:"x") { id } }`, "project"},
-		{`mutation { projectDelete(id:"x") }`, "projectDelete"},
-		{`mutation { serviceCreate(input:{name:"api"}) { id } }`, "serviceCreate"},
-		{`mutation { serviceDelete(id:"x") }`, "serviceDelete"},
-		{`{ service(id:"x") { id } }`, "service"},
-		// Routing scans for the root field rather than substring-matching the
-		// document, which lets it tell two conditions apart that the old switch
-		// could only answer the same way. A field this service does not serve
-		// routes to its own name, so the not-implemented fault and the
-		// x-mirror-not-implemented header say WHICH field was asked for; only a
-		// document with no root field to find is "Unknown".
-		{`{ unknown }`, "unknown"},
-		{`not a graphql document`, "Unknown"},
-		{``, "Unknown"},
-	} {
-		req := httptest.NewRequest(http.MethodPost, "/graphql/v2", strings.NewReader(`{"query":`+jsonQuote(test.query)+`}`))
-		op, err := codec.Route(rw, req)
-		if err != nil || op.Name != test.want {
-			t.Errorf("railway %q: %#v %v, want %s", test.query, op, err, test.want)
-		}
-	}
-	w = httptest.NewRecorder()
-	if err := codec.Encode(rw, &model.Operation{Name: "projects"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"id": "1", "name": "web"}}, "_wrap": "projects"}}); err != nil {
-		t.Fatal(err)
-	}
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"data"`) || !strings.Contains(w.Body.String(), `"edges"`) || !strings.Contains(w.Body.String(), `"node"`) {
-		t.Fatalf("rw list encode %d %s", w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	if err := codec.EncodeFault(rw, &model.Operation{Name: "project"}, w, &spi.Fault{Code: "NOT_FOUND", Message: "Project not found", HTTPStatus: 200, Fault: "client"}, "id"); err != nil {
-		t.Fatal(err)
-	}
-	if w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"errors"`) || !strings.Contains(w.Body.String(), `"NOT_FOUND"`) {
-		t.Fatalf("rw fault %d %#v %s", w.Code, w.Header(), w.Body.String())
-	}
-
 	// Fly keeps only its fault envelope. The route table and the response
 	// encoder went with the pack: the bundle answers the document's own
 	// members -- an App and a Machine are the body, not something nested under

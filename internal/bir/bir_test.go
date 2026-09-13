@@ -421,3 +421,138 @@ func TestDeleteWhereIsCheckedLikeAFilter(t *testing.T) {
 		}
 	})
 }
+
+// TestFxKeysAreCheckedAtLoad covers the one binding whose keys the CEL
+// environment cannot check for itself.
+//
+// Every other binding is declared by name, so naming one that does not exist is
+// already a load error. `fx` is a single binding holding a map, so `fx.anything`
+// type-checks and a key no effect binds reaches a request as a nil. The Railway
+// bundle projected `fx.project.id` from six operations and loaded clean; only
+// the equivalence recording caught it, and an extraction without a recording
+// would have shipped it.
+func TestFxKeysAreCheckedAtLoad(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(string) string
+		want string // "" means the bundle must still load
+	}{
+		{
+			// The Railway mistake, exactly: a create binds its own name, not
+			// the resource's.
+			name: "a key named for the resource rather than the effect",
+			edit: func(b string) string { return strings.Replace(b, "      ThingId: id", "      ThingId: fx.thing.Id", 1) },
+			want: "reads fx.thing but this operation's effects bind [create]",
+		},
+		{
+			name: "the effect's own name is accepted",
+			edit: func(b string) string {
+				return strings.Replace(b, "      ThingId: id", "      ThingId: fx.create.Id", 1)
+			},
+		},
+		{
+			// An operation with no effects binds nothing, and says so plainly
+			// rather than listing an empty set.
+			name: "an operation with no effects at all",
+			edit: func(b string) string { return strings.Replace(b, "      Thing: rec", "      Thing: fx.create", 1) },
+			want: "this operation has no effect that binds anything",
+		},
+		{
+			// Walking the syntax rather than the text: a key inside a string
+			// literal is not a reference.
+			name: "a key spelled inside a string literal",
+			edit: func(b string) string {
+				return strings.Replace(b, "      ThingId: id", `      ThingId: "'fx.nope.id'"`, 1)
+			},
+		},
+		{
+			// ... and one nested inside a call and a list still is.
+			name: "a key nested inside a call",
+			edit: func(b string) string {
+				return strings.Replace(b, "      ThingId: id", `      ThingId: "string([fx.nope.id][0])"`, 1)
+			},
+			want: "reads fx.nope",
+		},
+		{
+			// A comprehension's body is walked too, which is where a list
+			// projection puts its expression.
+			name: "a key inside a comprehension",
+			edit: func(b string) string {
+				return strings.Replace(b, "      ThingId: id", `      ThingId: "[1].map(n, fx.nope.id)[0]"`, 1)
+			},
+			want: "reads fx.nope",
+		},
+		{
+			// A generate binds whatever `bind` names, so that key is legal
+			// while the effect's own name is not in play.
+			name: "a generate's bind is accepted",
+			edit: func(b string) string {
+				return strings.Replace(b,
+					"    effects:\n      - create: { resource: thing }",
+					"    effects:\n      - generate: { bind: token, kind: hex, bytes: 4 }\n      - create: { resource: thing }", 1)
+			},
+			want: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := tc.edit(demoBundle)
+			if tc.name == "a generate's bind is accepted" {
+				body = strings.Replace(body, "      ThingId: id", "      ThingId: fx.token", 1)
+			}
+			_, err := loadDemo(t, body)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("bundle was refused but should load: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("bundle loaded, want a refusal")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error did not mention %q:\n%v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestUnaddressableReadIsRefused covers the other half of the same finding.
+//
+// A read with no key of its own asks the resource how it is addressed. A
+// resource declaring no singleton, no input_members and no derive answers the
+// EMPTY key for every request, so the read misses every record and the effects
+// behind it quietly do nothing. The Railway bundle shipped that way through a
+// clean load: four steps missed, and the deletes behind them reported success
+// while deleting nothing. Silence is the worst of the failure modes here, which
+// is why it is a refusal rather than a warning.
+func TestUnaddressableReadIsRefused(t *testing.T) {
+	withoutInputMembers := strings.Replace(demoBundle,
+		"      generate: { kind: hex, bytes: 8 }\n      input_members: [ThingId]",
+		"      generate: { kind: hex, bytes: 8 }", 1)
+	if withoutInputMembers == demoBundle {
+		t.Fatal("fixture did not change; the demo bundle no longer declares input_members")
+	}
+	_, err := loadDemo(t, withoutInputMembers)
+	if err == nil {
+		t.Fatal("bundle loaded, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "says nothing about how it is addressed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// A read that brings its own key needs nothing from the resource.
+	withOwnKey := strings.Replace(withoutInputMembers,
+		"      rec: { resource: thing }",
+		"      rec: { resource: thing, key: input.ThingId }", 1)
+	if _, err := loadDemo(t, withOwnKey); err != nil {
+		t.Fatalf("a read with its own key was refused: %v", err)
+	}
+
+	// So does a singleton.
+	asSingleton := strings.Replace(withoutInputMembers,
+		"    collection: things",
+		"    collection: things\n    singleton: only", 1)
+	if _, err := loadDemo(t, asSingleton); err != nil {
+		t.Fatalf("a singleton resource was refused: %v", err)
+	}
+}

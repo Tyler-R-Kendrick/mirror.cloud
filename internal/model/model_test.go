@@ -106,3 +106,56 @@ func TestBodyMembersLooksThroughAUnion(t *testing.T) {
 		}
 	}
 }
+
+// TestScalarBodyAdmitsEveryScalar pins what may claim to BE a body: every
+// scalar kind and a union of nothing but those, and nothing that has members.
+//
+// The reasoning for the set is on scalarKindBody. What this test is for is the
+// boundary, which is the part a later edit can move without noticing: the
+// admitted kinds are enumerated one by one so widening the set silently is not
+// possible, and the refused ones are enumerated beside them so narrowing it
+// back is caught in the same place. The union arm is checked in both
+// directions because "every arm is a body" and "some arm is a body" differ
+// only on the mixed case.
+func TestScalarBodyAdmitsEveryScalar(t *testing.T) {
+	svc := &Service{Shapes: map[string]Shape{
+		"S": {Kind: KindString}, "B": {Kind: KindBlob},
+		"Bool": {Kind: KindBoolean}, "Int": {Kind: KindInteger},
+		"Long": {Kind: KindLong}, "Float": {Kind: KindFloat}, "Double": {Kind: KindDouble},
+		"Struct": {Kind: KindStructure, Members: map[string]Member{"a": {Shape: "S"}}},
+		"List":   {Kind: KindList, Member: "S"},
+		"Map":    {Kind: KindMap, Key: "S", Member: "S"},
+		"Enum":   {Kind: KindEnum, EnumValues: []string{"A"}},
+		"Doc":    {Kind: KindDocument},
+		// A union is a body only when every arm is one.
+		"TextOrBytes": {Kind: KindUnion, Members: map[string]Member{"option0": {Shape: "S"}, "option1": {Shape: "B"}}},
+		"BoolOrInt":   {Kind: KindUnion, Members: map[string]Member{"option0": {Shape: "Bool"}, "option1": {Shape: "Int"}}},
+		"ScalarOrNot": {Kind: KindUnion, Members: map[string]Member{"option0": {Shape: "Bool"}, "option1": {Shape: "Struct"}}},
+		"EmptyUnion":  {Kind: KindUnion},
+		"UnknownArm":  {Kind: KindUnion, Members: map[string]Member{"option0": {Shape: "Nowhere"}}},
+	}}
+	for _, test := range []struct {
+		shape string
+		want  bool
+	}{
+		{"S", true}, {"B", true},
+		// The widening: a scalar body is a body whatever its kind.
+		{"Bool", true}, {"Int", true}, {"Long", true}, {"Float", true}, {"Double", true},
+		// Shapes with members, which a reader finds by name, are not bodies.
+		{"Struct", false}, {"List", false}, {"Map", false},
+		// An enum is a closed string set and a document is "any JSON"; neither
+		// is claimed here, because neither appeared as an operation's whole
+		// response and guessing is what this predicate exists to refuse.
+		{"Enum", false}, {"Doc", false},
+		{"TextOrBytes", true}, {"BoolOrInt", true},
+		{"ScalarOrNot", false}, {"EmptyUnion", false}, {"UnknownArm", false},
+		{"Absent", false},
+	} {
+		if got := svc.ScalarBody(test.shape); got != test.want {
+			t.Errorf("ScalarBody(%s) = %v, want %v", test.shape, got, test.want)
+		}
+	}
+	if (*Service)(nil).ScalarBody("S") {
+		t.Error("a nil service claimed a scalar body")
+	}
+}

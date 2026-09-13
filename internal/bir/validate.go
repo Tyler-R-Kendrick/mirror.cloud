@@ -560,7 +560,7 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 		// one.
 		if !svc.ScalarBody(op.Output) {
 			*problems = append(*problems, fmt.Errorf(
-				"%s: %s: %q projects an opaque body but %s is a %s, not a string, a blob or a union of those",
+				"%s: %s: %q projects the body itself but %s is a %s, not a scalar, a blob or a union of those",
 				s.ServiceID, where, member, op.Output, shape.Kind))
 		}
 		return

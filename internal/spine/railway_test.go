@@ -10,8 +10,6 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 )
 
 func TestBootedServerRailwayGraphQL(t *testing.T) {

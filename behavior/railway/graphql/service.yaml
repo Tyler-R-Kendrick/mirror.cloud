@@ -1,0 +1,176 @@
+schema: bir/1
+service: railway.graphql
+
+# Extracted from internal/services/railway/graphql. Every cell is `authored` --
+# transcribed from that pack, not established against the real Railway API --
+# except the response envelope, which the generated model DECLARES and which the
+# pack invented. See `quirks`.
+provenance: authored
+
+# What this service calls a missing required argument.
+#
+# The model says which members are required -- the schema declares
+# `projectCreate(input: ProjectCreateInput!)`, so `input` is non-null -- but it
+# does not say what a service calls their absence, and the engine's default,
+# ValidationException at 400, is a default rather than a fact. This service
+# answers a refusal the way it answers every other: BAD_USER_INPUT carrying
+# HTTP 200, because in GraphQL the transport succeeded and the field did not.
+#
+# Stating it here is what keeps the schema and the pack from contradicting each
+# other. The pack answered BAD_USER_INPUT for `projectCreate` with no argument
+# at all, having no notion of a required one; the document says the argument is
+# required. Both are satisfied by enforcing requiredness from the document and
+# naming the error from the service.
+missing_input_error: BadUserInput
+
+resources:
+  project:
+    collection: rwproj
+    id:
+      # `id` is the argument every read and delete of a project carries: the
+      # schema declares project(id:), projectDelete(id:). Without it a keyless
+      # read addresses the empty key and misses every record.
+      input_members: [id]
+      generate: { kind: hex, bytes: 8 }
+    record:
+      id: id
+      # `input.input` is not a typo. The outer `input` is the request's decoded
+      # arguments; the inner one is the argument the schema names, because
+      # projectCreate is declared `projectCreate(input: ProjectCreateInput!)`.
+      # It read `input.name` while a pack flattened the argument object to the
+      # top level before dispatch; the flattening is gone, so the path is the
+      # one the document describes.
+      name: input.input.name
+
+  service:
+    collection: rwsvc
+    id:
+      input_members: [id]
+      generate: { kind: hex, bytes: 8 }
+    record:
+      id: id
+      name: input.input.name
+      # The pack read `projectId` and fell back to `projectID`. Both spellings
+      # reach the store under the first, which is the one the schema declares.
+      projectId: "has(input.input.projectId) ? input.input.projectId : (has(input.input.projectID) ? input.input.projectID : '')"
+
+errors:
+  # 200, and that is not a transcription slip. GraphQL answers a refusal with a
+  # 200 carrying an `errors` array -- the transport succeeded, the field did
+  # not -- and the pack's rwFault passed 200 for exactly that reason. Every
+  # other bundle in this tree refuses with a 4xx because every other protocol
+  # puts the outcome in the status line.
+  BadUserInput:
+    code: BAD_USER_INPUT
+    http: 200
+    fault: client
+  NotFound:
+    code: NOT_FOUND
+    http: 200
+    fault: client
+
+operations:
+  projectCreate:
+    require:
+      # `cond` is a precondition: the error fires when it does NOT hold.
+      - { cond: "has(input.input) && has(input.input.name) && string(input.input.name) != ''", error: BadUserInput, message: "project name is required" }
+    effects:
+      - create: { resource: project }
+    output:
+      id: rec.id
+      name: rec.name
+
+  projects:
+    # `edges` is a DECLARED member of QueryProjectsConnection. The pack put the
+    # raw records behind a `_list` instruction and encodeRailway wrapped each in
+    # a `node` in Go; here the wrapping is the projection, against a member the
+    # document says exists.
+    list: { resource: project, member: edges }
+    output:
+      edges: "items.map(n, {'node': n})"
+
+  project:
+    reads:
+      rec: { resource: project }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Project not found" }
+    output:
+      id: rec.id
+      name: rec.name
+
+  projectDelete:
+    reads:
+      rec: { resource: project }
+    require:
+      # The pack read the project before deleting and let the miss propagate,
+      # so deleting something absent is NOT_FOUND rather than a silent true.
+      - { cond: rec_found, error: NotFound, message: "Project not found" }
+    effects:
+      - delete: { resource: project }
+    output:
+      # The declared output shape is Boolean: the body IS `true`, with no
+      # member to name it. `_raw` is how a bundle says "the body is this
+      # value" -- the same escape hatch `_list` is for a bare array.
+      _raw: "true"
+
+  serviceCreate:
+    reads:
+      # The parent must exist. The pack proved this by calling its own project
+      # handler and returning that error unchanged, which is why the message
+      # says Project and not Service.
+      parent:
+        resource: project
+        key: "has(input.input) ? (has(input.input.projectId) ? input.input.projectId : (has(input.input.projectID) ? input.input.projectID : '')) : ''"
+    require:
+      - { cond: "has(input.input) && has(input.input.name) && string(input.input.name) != ''", error: BadUserInput, message: "service name is required" }
+      - { cond: parent_found, error: NotFound, message: "Project not found" }
+    effects:
+      - create: { resource: service }
+    output:
+      id: rec.id
+      name: rec.name
+      projectId: rec.projectId
+
+  service:
+    reads:
+      rec: { resource: service }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Service not found" }
+    output:
+      id: rec.id
+      name: rec.name
+      projectId: rec.projectId
+
+  serviceDelete:
+    reads:
+      rec: { resource: service }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Service not found" }
+    effects:
+      - delete: { resource: service }
+    output:
+      _raw: "true"
+
+quirks:
+  - note: >
+      A refusal answers HTTP 200 carrying a GraphQL errors array, not a 4xx:
+      the transport succeeded and the field did not. Every other bundle in this
+      tree refuses with a 4xx because every other protocol puts the outcome in
+      the status line. Transcribed from the pack, which passed 200 to every
+      rwFault, and it is also what the GraphQL specification describes for a
+      well-formed request whose execution fails -- but nothing here has been
+      checked against the real Railway API, so this stays `authored`.
+    provenance: authored
+
+  - operation: projects
+    note: >
+      The {data: {projects: {edges: [{node}]}}} envelope is projected from data
+      by this bundle. The pack emitted `_wrap` and `_list` instructions and
+      encodeRailway assembled the envelope in Go from them.
+      QueryProjectsConnection DECLARES `edges` and `pageInfo`, so the envelope
+      is the response shape the document gives rather than a convention the
+      emulator invented. That is C48's resolution reaching the last pack that
+      needed it: the same synthesis died for DigitalOcean because the document
+      declared the members, and C53 recorded that Railway had no document to do
+      the same -- which introspection turned out to disprove.
+    provenance: declared

@@ -36,7 +36,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	azblobs "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
-	rwapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/railway/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -8078,7 +8077,10 @@ func TestFlyConcurrentDuplicateApps(t *testing.T) {
 }
 
 func TestRailwayConcurrentProjectCreate(t *testing.T) {
-	p := rwapi.New(spitest.Deps(t))
+	p, err := bundled.New("railway.graphql", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	var wg sync.WaitGroup
@@ -8087,7 +8089,7 @@ func TestRailwayConcurrentProjectCreate(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"name": "web"}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"input": map[string]any{"name": "web"}}}); err != nil {
 				errCh <- err
 			}
 		}(i)
@@ -8106,16 +8108,19 @@ func TestRailwayConcurrentProjectCreate(t *testing.T) {
 }
 
 func TestRailwayConcurrentServiceDelete(t *testing.T) {
-	p := rwapi.New(spitest.Deps(t))
+	p, err := bundled.New("railway.graphql", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	proj, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"name": "web"}})
+	proj, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"input": map[string]any{"name": "web"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// An operation's output is the field's value, with no field name inside it.
 	pid := proj.Output["id"]
-	svc, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceCreate", Input: map[string]any{"name": "api", "projectId": pid}})
+	svc, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceCreate", Input: map[string]any{"input": map[string]any{"name": "api", "projectId": pid}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,12 +21,12 @@
     {
       "test": "TestRatchetNotExceeded",
       "package": "./internal/check",
-      "why": "Deliberate, and the point of the ratchet. The baseline is the PRE-DRIFT target, not a floor to raise: two packs -- azure/blobs and railway/graphql -- were added after it was cut, so the tree exceeds it until both are extracted. Goes green by deleting those packs, never by running `ratchet -write`."
+      "why": "Deliberate, and the point of the ratchet. The baseline is the PRE-DRIFT target, not a floor to raise: one pack -- azure/blobs -- is still in the tree after it was cut, so the tree exceeds it until that pack is extracted. It was two until railway/graphql went, which is what moved every count here down. Goes green by deleting the pack, never by running `ratchet -write`."
     },
     {
       "test": "TestRatchetBaselineMatchesTree",
       "package": "./internal/check",
-      "why": "The other half of the same statement: ratchet.json is deliberately stale relative to the tree, for exactly as long as TestRatchetNotExceeded is red, and for the same two packs."
+      "why": "The other half of the same statement: ratchet.json is deliberately stale relative to the tree, for exactly as long as TestRatchetNotExceeded is red, and now for the one remaining pack rather than two."
     },
     {
       "test": "TestEveryServedServiceIsDescribedByASpecification",

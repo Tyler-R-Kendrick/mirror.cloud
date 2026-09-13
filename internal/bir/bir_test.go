@@ -115,9 +115,9 @@ func TestValidationRejects(t *testing.T) {
 			// a body may claim it. The demo output is a structure, so this is
 			// the same mistake as `_list` on one, and has to be caught by the
 			// same check rather than fall through to "not a member of".
-			name: "opaque-body output on a structure",
+			name: "scalar-body output on a structure",
 			edit: func(b string) string { return strings.Replace(b, "      ThingId: id", "      _raw: id", 1) },
-			want: "projects an opaque body but",
+			want: "projects the body itself but",
 		},
 		{
 			name: "output member not in the model",

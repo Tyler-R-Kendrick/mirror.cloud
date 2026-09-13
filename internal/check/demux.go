@@ -27,11 +27,17 @@ import (
 // 282 lines of one vendor's routing sat in the AWS REST-JSON codec until
 // someone happened to look.
 //
-// This does not fix the routing. The cure C34 names is architectural -- a
-// provider resolves from its model the way every AWS service does -- and is
-// worth doing on its own merits. What this buys is that the number cannot grow
-// quietly, and that each provider which moves to model resolution shows up as a
-// fall rather than as nothing at all.
+// Seven of the eight are now gone, which is what this metric was built to
+// make visible: a request naming no AWS service is placed from the non-AWS
+// models, by the host its specification declares and otherwise by the
+// operation paths it declares. azureRequest remains because Azure's documents
+// declare neither -- no `servers`, and every operation bound to `/` because
+// the surface is addressed by query parameter and header.
+//
+// The count stays because the pressure that produced eight has not gone away.
+// The next provider to arrive will be easier to add as a predicate than as a
+// specification, and this is what makes that choice visible rather than
+// quiet.
 
 const edgeRel = "internal/edge"
 

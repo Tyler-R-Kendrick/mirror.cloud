@@ -82,9 +82,22 @@ type Service struct {
 	QueryVersion   string   // awsQuery/ec2Query Version parameter; "" otherwise
 	XMLNamespace   string   // restXml/awsQuery response xmlns; "" otherwise
 	Aliases        []string // alternate endpoint prefixes / host matches
-	Operations     []Operation
-	Shapes         map[string]Shape // shape ID -> shape
-	Source         SourceRef
+	// Hosts are the endpoint hosts the specification itself declares -- an
+	// OpenAPI document's `servers`, a Discovery document's `baseUrl`. They are
+	// how a request addressed the way a vendor's own client addresses it says
+	// which service it is for, and the reason to carry them is that the demux
+	// had to guess otherwise: eight hand-written predicates asking whether a
+	// host contained a vendor's name, each of which took an AWS service the
+	// first time the name was a common word.
+	// Omitted when empty so that adding this field leaves every model that
+	// declares no host byte-identical: a hundred and fifty changed files for a
+	// seven-service change hides the seven, and this repository has already
+	// landed a regeneration that rewrote twenty-nine models nobody was looking
+	// at.
+	Hosts      []string `json:",omitempty"`
+	Operations []Operation
+	Shapes     map[string]Shape // shape ID -> shape
+	Source     SourceRef
 }
 
 // Operation is one RPC or REST method on a Service.

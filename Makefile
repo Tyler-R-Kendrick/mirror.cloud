@@ -255,10 +255,20 @@ generate:
 specs-sync:
 	bash scripts/specs-sync.sh
 
-# Moves the pins forward: AWS from its default branch, Google Discovery
-# refetched. Whatever changed upstream lands as a reviewable diff in the lock,
-# in specs/gcp/ and in the regenerated models -- which is how an unannounced
-# vendor change gets noticed, so it must be a deliberate act and never a side
-# effect of a build.
+# Moves the pins forward. Whatever changed upstream lands as a reviewable diff
+# in the lock, under specs/ and in the regenerated models -- which is how an
+# unannounced vendor change gets noticed, so it must be a deliberate act and
+# never a side effect of a build.
+#
+# SERVICE scopes it. `make specs-refresh SERVICE=railway.graphql` moves that one
+# pin and leaves every other document at its committed copy; SERVICE=aws moves
+# the AWS pin, which is one commit covering every aws.* service. Without it,
+# every pin moves.
+#
+# Scope it whenever the reason for the refresh is one service. Refreshing all of
+# them to pick up a single schema change also re-pinned AWS and rewrote
+# twenty-nine unrelated models into a pull request about one of them, and CI
+# agreed with all of it: the models were regenerated consistently, so every
+# check passed.
 specs-refresh:
-	SPECS_REFRESH=1 bash scripts/specs-sync.sh
+	SPECS_REFRESH=$(or $(SERVICE),1) bash scripts/specs-sync.sh

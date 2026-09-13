@@ -7,11 +7,29 @@
 # the lock byte-for-byte on any machine, at any time. That property is what
 # makes the committed models trustworthy as a build input, and CI asserts it.
 #
-# SPECS_REFRESH=1 (or `make specs-refresh`) moves the pins forward instead:
-# AWS is taken from AWS_REF, Discovery is refetched, and whatever changed
-# upstream shows up as a reviewable diff in the lock, in specs/gcp/ and in the
+# SPECS_REFRESH moves the pins forward instead: the named upstreams are
+# refetched, AWS is taken from AWS_REF rather than the lock, and whatever
+# changed shows up as a reviewable diff in the lock, under specs/ and in the
 # regenerated models. Discovering an unannounced vendor change is the point of
 # that diff, so it must never happen silently as a side effect of a build.
+#
+# WHAT IT REFRESHES, and why that is a list rather than a flag. `1` or `all`
+# moves every pin, which is what a deliberate vendor sweep wants. Anything else
+# is a comma-separated list of service ids -- `railway.graphql`, or
+# `gcp.storage,cloudflare.api` -- and `aws` for the AWS pin, which covers every
+# aws.* service because they share one repository and one commit.
+#
+# The list exists because all-or-nothing is a trap that has already been
+# sprung. Refreshing one service to pick up a schema change also re-pinned AWS
+# and rewrote twenty-nine unrelated models, and the result was a green build
+# carrying thirty documents' worth of upstream drift into a pull request about
+# one of them. Nothing in CI would have caught it: every model was regenerated
+# consistently, so every check agreed. A name here keeps a refresh as narrow as
+# the reason for it.
+#
+# An id that names nothing in the set is fatal, for the same reason an
+# unresolved service is: a typo that silently refreshes nothing looks exactly
+# like a refresh that found no change.
 #
 # Service IDs are resolved by asking `mirrorgen -index` what each upstream
 # model declares, not by guessing directory names: the receivers that derive
@@ -47,6 +65,22 @@ need_cmd git
 need_cmd sha256sum
 need_cmd python3
 need_cmd go
+
+# refreshes answers whether this run moves the pin for one document. `aws` is
+# the AWS pin, which is one commit covering every aws.* service.
+refreshes() {
+  case "$REFRESH" in
+    "") return 1 ;;
+    1 | all) return 0 ;;
+  esac
+  local want="$1" item
+  local -a names
+  IFS=',' read -ra names <<< "$REFRESH"
+  for item in ${names+"${names[@]}"}; do
+    [[ "$item" == "$want" ]] && return 0
+  done
+  return 1
+}
 
 # fetch <url> [request-body-file]
 #
@@ -104,6 +138,29 @@ if [[ -f "$SET" ]]; then
   done < "$SET"
 fi
 
+# A refresh naming something the set does not contain refreshes nothing, and
+# looks exactly like a refresh that found no change upstream. Refuse it while
+# the names are still in hand.
+case "$REFRESH" in
+  "" | 1 | all) ;;
+  *)
+    declare -a known=()
+    ((want_aws)) && known+=("aws")
+    for entry in ${want_urls+"${want_urls[@]}"}; do
+      known+=("${entry%%$'\t'*}")
+    done
+    IFS=',' read -ra asked <<< "$REFRESH"
+    for want in ${asked+"${asked[@]}"}; do
+      hit=0
+      for have in ${known+"${known[@]}"}; do
+        [[ "$want" == "$have" ]] && hit=1 && break
+      done
+      ((hit)) || die "SPECS_REFRESH names $want, which is not in the set; it refreshes \
+nothing and would look like an upstream with no changes. Known: ${known[*]}"
+    done
+    ;;
+esac
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/mirror-specs.XXXXXX")"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
@@ -127,7 +184,7 @@ PY
 
 if ((want_aws)); then
   pin=""
-  if [[ -z "$REFRESH" ]]; then
+  if ! refreshes aws; then
     pin="$(pinned_aws_ref)"
   fi
 
@@ -197,8 +254,8 @@ for entry in ${want_urls+"${want_urls[@]}"}; do
     # nothing supplies, which is the case this script makes fatal below.
     [[ -s "$dest" ]] || die "$uid is declared authored but specs/$upath is missing or empty"
     echo "specs-sync: $uid is authored, not vendored (no upstream to fetch)" >&2
-  elif [[ -z "$REFRESH" && -s "$dest" ]]; then
-    echo "specs-sync: using the committed $uid document (SPECS_REFRESH=1 to refetch)" >&2
+  elif ! refreshes "$uid" && [[ -s "$dest" ]]; then
+    echo "specs-sync: using the committed $uid document (SPECS_REFRESH=$uid to refetch just this one)" >&2
   else
     if [[ -n "$ubody" ]]; then
       echo "specs-sync: fetching $uid from $uurl (POST $ubody)…" >&2

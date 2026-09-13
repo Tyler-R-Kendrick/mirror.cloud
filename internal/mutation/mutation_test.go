@@ -21941,10 +21941,14 @@ var mutants = []mutant{
 	{
 		name: "graphql-route-ignore-alias",
 		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
-		old:  "\tif s.i < s.n && s.q[s.i] == ':' {",
-		new:  "\tif false && s.i < s.n && s.q[s.i] == ':' {",
-		pkg:  "./internal/proto/graphql",
-		run:  "TestGraphQLRootField",
+		// Widened past the condition: three sites test for a colon -- an
+		// alias, an argument name, and an input-object field -- and the
+		// condition alone names all three, with the shallower one a substring
+		// of the deeper two. The body is what tells them apart.
+		old: "\tif s.i < s.n && s.q[s.i] == ':' {\n\t\ts.i++\n\t\ts.skip()\n\t\tif name = s.name(); name == \"\" {",
+		new: "\tif false && s.i < s.n && s.q[s.i] == ':' {\n\t\ts.i++\n\t\ts.skip()\n\t\tif name = s.name(); name == \"\" {",
+		pkg: "./internal/proto/graphql",
+		run: "TestGraphQLRootField",
 	},
 	{
 		name: "graphql-route-comment-opens-a-selection-set",

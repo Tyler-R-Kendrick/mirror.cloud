@@ -289,3 +289,34 @@ func TestOperationOrderIsStable(t *testing.T) {
 		}
 	}
 }
+
+// The endpoint is the one thing the schema cannot say, so it comes from where
+// the document was fetched: the path of that URL is the endpoint the schema
+// describes, not an inference about it.
+func TestEndpointComesFromProvenance(t *testing.T) {
+	for _, tc := range []struct{ name, repo, want string }{
+		{"a fetched document", "https://backboard.railway.com/graphql/v2", "/graphql/v2"},
+		{"a trailing slash is not part of the path", "https://api.example.com/graphql/", "/graphql"},
+		{"a query string is not part of the path", "https://api.example.com/gql?foo=1", "/gql"},
+		{"no provenance at all", "", defaultEndpoint},
+		{"a host with no path says nothing more than the default", "https://api.example.com", defaultEndpoint},
+		{"nor does a bare root", "https://api.example.com/", defaultEndpoint},
+		{"an unparseable URL degrades to the default", "://not a url", defaultEndpoint},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svcs, err := (Receiver{}).Ingest(context.Background(),
+				model.SourceRef{Repo: tc.repo, Path: "vendor/api.json"}, []byte(fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, o := range svcs[0].Operations {
+				if o.HTTP.URI != tc.want {
+					t.Fatalf("%s binds to %q, want %q", o.Name, o.HTTP.URI, tc.want)
+				}
+				if o.HTTP.Method != "POST" {
+					t.Errorf("%s method = %q", o.Name, o.HTTP.Method)
+				}
+			}
+		})
+	}
+}

@@ -17,21 +17,25 @@
 // reachable from there are the shape graph. That mapping is total: nothing in
 // an introspection result has to be dropped or guessed at.
 //
-// WHAT IT CANNOT KNOW, AND THIS IS A PROPERTY OF THE FORMAT. An introspection
-// result does not carry the endpoint it was served from. OpenAPI has `servers`,
-// Discovery has `baseUrl`, Smithy has an endpoint prefix trait; GraphQL has
-// nothing, because the schema is the answer to a question asked AT an endpoint
-// the client already knew. So every operation here binds to POST at
-// defaultEndpoint, and a caller that serves a schema somewhere else has to say
-// so from outside the document. Writing the real path in here would be one
-// provider's deployment detail compiled into a format reader -- the smell C41
-// records, and the reason this file names no vendor.
+// WHAT THE DOCUMENT CANNOT SAY, AND THIS IS A PROPERTY OF THE FORMAT. An
+// introspection result does not carry the endpoint it was served from. OpenAPI
+// has `servers`, Discovery has `baseUrl`, Smithy has an endpoint prefix trait;
+// GraphQL has nothing, because the schema is the answer to a question asked AT
+// an endpoint the client already knew.
+//
+// So it comes from provenance instead. SourceRef.Repo records where a document
+// was fetched from, and the path of that URL is exactly the endpoint the schema
+// describes -- not an inference about it. A document with no URL (vendored, or
+// authored) falls back to defaultEndpoint. What this deliberately does NOT do
+// is name a provider: writing one deployment's real path into a format reader
+// is the smell C41 records, and no vendor appears in this package.
 package graphql
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -43,11 +47,28 @@ type Receiver struct{}
 
 func (Receiver) Name() string { return "graphql" }
 
-// defaultEndpoint is where operations bind absent outside knowledge. `/graphql`
-// is the community default and the one every GraphQL server documents first; it
-// is a default, not a discovery, and the package comment says why there can be
-// no discovery.
+// defaultEndpoint is where operations bind when provenance carries no URL.
+// `/graphql` is the community default and the one every GraphQL server
+// documents first; it is a fallback, not a discovery.
 const defaultEndpoint = "/graphql"
+
+// endpoint answers where this schema's operations are served: the path of the
+// URL the document was fetched from, or the default when it was not fetched.
+//
+// A URL with no path, or one whose path is "/", says nothing more than the
+// default does -- a GraphQL server at the root of a host is possible but it is
+// also what an unparseable URL degrades to, and the default is the better
+// answer for both.
+func endpoint(src model.SourceRef) string {
+	if src.Repo == "" {
+		return defaultEndpoint
+	}
+	u, err := url.Parse(src.Repo)
+	if err != nil || u.Path == "" || u.Path == "/" {
+		return defaultEndpoint
+	}
+	return strings.TrimSuffix(u.Path, "/")
+}
 
 // Detect looks for the introspection result's own root. `__schema` with a
 // `queryType` is the shape of an answer to the introspection query and of
@@ -80,6 +101,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		}
 	}
 	sh := &shaper{types: types, shapes: map[string]model.Shape{}, active: map[string]bool{}}
+	uri := endpoint(src)
 
 	svc := model.Service{
 		ID:             serviceID(src.Path),
@@ -110,7 +132,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 			out, _ := sh.resolve(f.Type)
 			svc.Operations = append(svc.Operations, model.Operation{
 				Name: f.Name,
-				HTTP: model.HTTPBinding{Method: "POST", URI: defaultEndpoint, Code: 200},
+				HTTP: model.HTTPBinding{Method: "POST", URI: uri, Code: 200},
 				// A field with no arguments still gets an input shape, because
 				// an operation the engine can validate must have one to
 				// validate against; it is simply a structure with no members.

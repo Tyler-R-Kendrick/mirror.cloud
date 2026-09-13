@@ -148,6 +148,14 @@ func ingestSpecs(ctx context.Context, specsDir string) ([][]model.Service, int, 
 	if _, err := os.Stat(specsDir); err != nil {
 		return nil, 0, nil
 	}
+	// Where each url-sourced document came from. specs/urls.tsv has always
+	// known this and the model never recorded it: SourceRef carried the path
+	// and the hash, and `Repo` -- the field whose whole job is to say where a
+	// document came from -- was empty for every document mirror fetches rather
+	// than vendors. That is a hole in provenance for its own sake, and it is
+	// also the only place one format's endpoint can come from: a GraphQL
+	// introspection result does not carry the path it was served at.
+	sources := specURLs(specsDir)
 	// Absent or unreadable lock: fall back to the ID each model declares. That
 	// is correct for the index (which has no lock) and for the ~82% of services
 	// whose declared ID is already canonical.
@@ -176,7 +184,7 @@ func ingestSpecs(ctx context.Context, specsDir string) ([][]model.Service, int, 
 		// whole point: the lock pins the vendor's own bytes, so hashing a
 		// document we re-serialized would pin our serialization instead and an
 		// unannounced upstream change would stop being visible.
-		src := model.SourceRef{Path: rel, SHA256: sha256Hex(data)}
+		src := model.SourceRef{Repo: sources[filepath.ToSlash(rel)], Path: rel, SHA256: sha256Hex(data)}
 		// Detect is shown the head of the file, which for a vendor's own JSON
 		// is enough: such a document leads with `openapi` or `smithy`. A
 		// re-serialized one does not -- json.Marshal sorts keys -- so a YAML
@@ -263,6 +271,36 @@ type setEntry struct {
 	// prefix, or by operation name where every operation shares one endpoint.
 	// Empty means the whole document. See narrow.go.
 	Select selector
+}
+
+// specURLs reads specs/urls.tsv into a path-to-URL map. It is deliberately
+// forgiving: a malformed row is skipped rather than fatal, because this fills
+// provenance and derives a default, and neither is worth refusing to build
+// over. internal/check/urls_test.go is what holds the table to its format.
+func specURLs(specsDir string) map[string]string {
+	out := map[string]string{}
+	b, err := os.ReadFile(filepath.Join(specsDir, "urls.tsv"))
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 3 {
+			continue
+		}
+		path, url := strings.TrimSpace(fields[1]), strings.TrimSpace(fields[2])
+		// `authored` is the word urls.tsv uses for a document with no upstream.
+		// It is not a URL and must not be recorded as one.
+		if path == "" || url == "" || url == "authored" {
+			continue
+		}
+		out[path] = url
+	}
+	return out
 }
 
 func loadSet(path string) ([]setEntry, error) {

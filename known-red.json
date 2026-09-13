@@ -31,7 +31,7 @@
     {
       "test": "TestEveryServedServiceIsDescribedByASpecification",
       "package": "./internal/specboot",
-      "why": "Five services are served with no generated model. Three are AWS services whose Smithy model the receiver cannot yet ingest (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb); two are the hand-written packs still to be extracted (azure.blobs, railway.graphql). The count may only fall."
+      "why": "Four services are served with no generated model. Three are AWS services whose Smithy model the receiver cannot yet ingest (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb); one is the hand-written pack still to be extracted (azure.blobs). It was five until railway.graphql got a model of its own -- a GraphQL receiver, its schema fetched by POSTing an introspection query and pinned like any other vendored document. The count may only fall."
     }
   ]
 }

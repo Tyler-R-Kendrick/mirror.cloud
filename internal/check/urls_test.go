@@ -22,7 +22,7 @@ import (
 // which is the shape of thing that ends up not being added at all -- and eight
 // providers did arrive instead as hand-written Go packs.
 
-type urlEntry struct{ serviceID, path, url string }
+type urlEntry struct{ serviceID, path, url, body string }
 
 // declaredSet reads the service IDs specs/mirror.set asks to be generated.
 func declaredSet(t *testing.T) map[string]bool {
@@ -58,10 +58,18 @@ func urlTable(t *testing.T) []urlEntry {
 			continue
 		}
 		fields := strings.Split(text, "\t")
-		if len(fields) != 3 {
-			t.Fatalf("specs/urls.tsv:%d: want 3 tab-separated fields, got %d: %q", line, len(fields), text)
+		// A fourth field is optional and names a request body: the document is
+		// fetched by POSTing it rather than by getting the URL. One format is
+		// only reachable that way -- a GraphQL schema is the ANSWER to an
+		// introspection query, not a file served at a path.
+		if len(fields) != 3 && len(fields) != 4 {
+			t.Fatalf("specs/urls.tsv:%d: want 3 or 4 tab-separated fields, got %d: %q", line, len(fields), text)
 		}
-		out = append(out, urlEntry{fields[0], fields[1], fields[2]})
+		e := urlEntry{fields[0], fields[1], fields[2], ""}
+		if len(fields) == 4 {
+			e.body = fields[3]
+		}
+		out = append(out, e)
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)

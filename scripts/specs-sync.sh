@@ -48,11 +48,34 @@ need_cmd sha256sum
 need_cmd python3
 need_cmd go
 
+# fetch <url> [request-body-file]
+#
+# With a body file this is a POST rather than a GET, because one format is only
+# reachable that way: a GraphQL schema is not served at a URL, it is the ANSWER
+# to an introspection query posted to an endpoint. The body is a committed
+# document under specs/ rather than a string in this script or a column in the
+# table, for the same reason the schema it fetches is committed -- a different
+# query returns a different schema, so the question has to be as reviewable as
+# the answer.
 fetch() {
+  local url="$1" body="${2:-}"
+  if [[ -z "$body" ]]; then
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --retry 2 --max-time 60 "$url"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -qO- --timeout=60 "$url"
+    else
+      die "need curl or wget"
+    fi
+    return
+  fi
+  [[ -s "$body" ]] || die "request body $body is missing or empty"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --retry 2 --max-time 60 "$1"
+    curl -fsSL --retry 2 --max-time 120 -X POST \
+      -H 'Content-Type: application/json' --data-binary "@$body" "$url"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO- --timeout=60 "$1"
+    wget -qO- --timeout=120 --method=POST \
+      --header='Content-Type: application/json' --body-file="$body" "$url"
   else
     die "need curl or wget"
   fi
@@ -72,10 +95,10 @@ if [[ -f "$SET" ]]; then
       want_aws=1
       continue
     fi
-    while IFS=$'\t' read -r uid upath uurl; do
+    while IFS=$'\t' read -r uid upath uurl ubody; do
       [[ -z "$uid" || "$uid" == \#* ]] && continue
       if [[ "$uid" == "$id" ]]; then
-        want_urls+=("$uid"$'\t'"$upath"$'\t'"$uurl")
+        want_urls+=("$uid"$'\t'"$upath"$'\t'"$uurl"$'\t'"${ubody:-}")
       fi
     done < "$URLS"
   done < "$SET"
@@ -164,7 +187,7 @@ fi
 : > "$TMP/urls.tsv"
 fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 for entry in ${want_urls+"${want_urls[@]}"}; do
-  IFS=$'\t' read -r uid upath uurl <<< "$entry"
+  IFS=$'\t' read -r uid upath uurl ubody <<< "$entry"
   dest="$ROOT/specs/$upath"
   mkdir -p "$(dirname "$dest")"
   if [[ "$uurl" == "authored" ]]; then
@@ -177,9 +200,16 @@ for entry in ${want_urls+"${want_urls[@]}"}; do
   elif [[ -z "$REFRESH" && -s "$dest" ]]; then
     echo "specs-sync: using the committed $uid document (SPECS_REFRESH=1 to refetch)" >&2
   else
-    echo "specs-sync: fetching $uid from $uurl…" >&2
-    if ! fetch "$uurl" > "$TMP/doc.json"; then
-      die "failed to fetch $uurl"
+    if [[ -n "$ubody" ]]; then
+      echo "specs-sync: fetching $uid from $uurl (POST $ubody)…" >&2
+      if ! fetch "$uurl" "$ROOT/specs/$ubody" > "$TMP/doc.json"; then
+        die "failed to fetch $uurl"
+      fi
+    else
+      echo "specs-sync: fetching $uid from $uurl…" >&2
+      if ! fetch "$uurl" > "$TMP/doc.json"; then
+        die "failed to fetch $uurl"
+      fi
     fi
     if [[ -s "$dest" ]] && ! cmp -s "$TMP/doc.json" "$dest"; then
       echo "specs-sync: $uid changed upstream; review the diff in specs/$(dirname "$upath")/" >&2

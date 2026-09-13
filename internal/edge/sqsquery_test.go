@@ -17,7 +17,7 @@ import (
 // address the account -- a client that sends either to a queue URL has made a
 // mistake the queue in the path cannot resolve.
 func TestAQueueURLEndpointServesQueueActions(t *testing.T) {
-	// The generated bundle, which is what the edge serves: catalog.Bundle()
+	// The generated bundle, which is what the edge serves: specboot.Bundle()
 	// records no shapes, and a rule that reads the model needs a model.
 	svc := specboot.Bundle().ServiceByID("aws.sqs")
 	if svc == nil {
@@ -92,7 +92,7 @@ func TestTheQueueEndpointRuleReadsTheModel(t *testing.T) {
 	}
 
 	// A model that records no shapes at all cannot say whether SendMessage is
-	// about a queue, and silence is not a "no". catalog.Bundle() is exactly
+	// about a queue, and silence is not a "no". specboot.Bundle() is exactly
 	// this shape, so reading it as a rejection would take every queue action
 	// down at every queue URL -- strictly worse than not checking.
 	unanswerable := *svc

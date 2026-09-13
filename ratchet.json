@@ -56,15 +56,8 @@
   ],
   "routing_mismatches": 0,
   "routing_mismatch_services": null,
-  "demux_guesses": 8,
+  "demux_guesses": 1,
   "demux_guess_names": [
-    "azureRequest",
-    "cloudflareRequest",
-    "digitaloceanRequest",
-    "flyRequest",
-    "hetznerRequest",
-    "hostingerRequest",
-    "railwayRequest",
-    "vercelService"
+    "azureRequest"
   ]
 }

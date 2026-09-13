@@ -12098,7 +12098,7 @@ var mutants = []mutant{
 		// so the service that was addressed never gets asked.
 		name: "demux-let-a-provider-guess-take-an-addressed-aws-service",
 		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  "\tif !awsAddressed(r) || s.resolveByModel(r) == nil {",
+		old:  "\tif !awsAddressed(r) || byModel == nil {",
 		new:  "\tif true {",
 		pkg:  "./internal/edge",
 		run:  "TestAProviderPathGuessDoesNotTakeAnAddressedAWSService",
@@ -21605,15 +21605,54 @@ var mutants = []mutant{
 		run:  "TestBundlesMatchRecordedPacks",
 	},
 	{
-		// Two products on two hosts, and the KV host contains the REST API's
-		// name. Test this before the general one or every KV command routes to
-		// vercel.api, which serves no operation at `/` and answers 501.
-		name: "vercel-kv-host-falls-through",
-		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  "	if strings.Contains(host, \"vercel-storage\") {",
-		new:  "	if false {",
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerVercelAPI",
+		// A request that named no AWS service is placed from the non-AWS
+		// models only. Widen that and `/v1/apps` -- Fly's app list and AWS
+		// Pinpoint's GetApps -- is claimed by two models at once, which the
+		// resolver declines rather than guesses, so an unsigned Fly request
+		// reaches nothing. This is the collision C34 names, and the scoping is
+		// the whole reason path resolution could replace the predicates.
+		name: "provider-paths-answer-for-aws",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "	return ok && provider == \"aws\"",
+		new:  "	return ok && provider == \"\"",
+		pkg:  "./internal/edge",
+		run:  "TestAWSServicesAreNotAnsweredByProviderModels",
+	},
+	{
+		// The declared host is matched whole or as a subdomain, never as a
+		// substring. `Contains` is what the eight deleted predicates asked,
+		// and it answers for `api.vercel.com.example.invalid` -- a host in
+		// somebody else's domain.
+		name: "declared-host-matched-as-substring",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "	if host != declared && !strings.HasSuffix(host, \".\"+declared) {",
+		new:  "	if !strings.Contains(host, declared) {",
+		pkg:  "./internal/edge",
+		run:  "TestADeclaredHostIsMatchedWholeNotAsASubstring",
+	},
+	{
+		// The subdomain form is load-bearing rather than defensive: Vercel's
+		// KV document says deployments address a per-store subdomain of the
+		// host it declares, and KV's whole surface is `POST /`, so the host is
+		// the only thing that places it.
+		name: "declared-host-exact-only",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "	if host != declared && !strings.HasSuffix(host, \".\"+declared) {",
+		new:  "	if host != declared {",
+		pkg:  "./internal/edge",
+		run:  "TestDeclaredHostsPlaceTheirService",
+	},
+	{
+		// The hosts a specification declares reach the served model through
+		// adoptGenerated. Drop that one line and host resolution answers for
+		// nothing, while every test reading a generated model directly still
+		// passes -- which is why the test counts the hosts it found.
+		name: "adopted-model-drops-declared-hosts",
+		file: filepath.Join("internal", "specboot", "generated.go"),
+		old:  "		svc.Hosts = gen.Hosts",
+		new:  "		svc.Hosts = nil",
+		pkg:  "./internal/edge",
+		run:  "TestDeclaredHostsPlaceTheirService",
 	},
 	{
 		// KV's errors are a plain string, which is what its document declares

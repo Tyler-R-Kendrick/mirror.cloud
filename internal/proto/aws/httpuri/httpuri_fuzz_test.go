@@ -39,6 +39,13 @@ func FuzzParseAndMatch(f *testing.F) {
 		}
 		p := httpuri.Parse(uri)
 		bound, ok := p.Match(path, query)
+		// Claims is Match with the binding switched off, and the demux uses it
+		// to decide which service answers while the codec uses Match to decide
+		// which operation does. The two disagreeing would be invisible: a
+		// service would be chosen for a request its own patterns then refuse.
+		if claims := p.Claims(httpuri.SplitPath(path), query); claims != ok {
+			t.Fatalf("Parse(%q): Claims(%q) = %v but Match = %v", uri, path, claims, ok)
+		}
 		if !ok {
 			if bound != nil {
 				t.Fatalf("Parse(%q).Match(%q) refused but bound %v", uri, path, bound)

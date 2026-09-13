@@ -180,6 +180,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		Namespace:      doc.Info.Title,
 		Protocol:       model.ProtoRESTJSON1,
 		EndpointPrefix: provider(id),
+		Hosts:          serverHosts(doc),
 		Source:         src,
 	}
 	for _, uri := range sortedKeys(doc.Paths) {
@@ -380,6 +381,42 @@ func basePath(doc document) string {
 		p = "/" + p
 	}
 	return p
+}
+
+// serverHosts are the hosts the document's `servers` declare, deduplicated and
+// in the order they are written.
+//
+// This is the same field basePath reads, asked a different question: basePath
+// wants the version prefix a client repeats in every path, and this wants the
+// host a client sends. Both are facts the vendor wrote down, and reading the
+// second one is what lets the demux stop asking whether a host CONTAINS a
+// vendor's name -- a question that was true of `api.iotwireless` for `vercel`
+// and is false of every host a spec actually declares.
+//
+// A templated host (`https://{region}.example.com`) is dropped for the reason
+// basePath drops a templated path: the document alone cannot resolve the
+// variable, and a host with a brace in it matches nothing a client sends. A
+// port is kept out for the same reason the demux strips one before comparing.
+func serverHosts(doc document) []string {
+	var hosts []string
+	seen := map[string]bool{}
+	for _, s := range doc.Servers {
+		raw := s.URL
+		if raw == "" || strings.ContainsAny(raw, "{}") {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			continue
+		}
+		h := strings.ToLower(u.Hostname())
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		hosts = append(hosts, h)
+	}
+	return hosts
 }
 
 // serviceID derives `<provider>.<service>` from where the document sits, which

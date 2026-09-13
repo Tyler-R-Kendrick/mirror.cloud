@@ -2,7 +2,6 @@
 package restjson
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -33,9 +32,6 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	}
 	if svc.ID == "aws.es" {
 		return opensearchOp(svc, r), nil
-	}
-	if svc.ID == "railway.graphql" {
-		return railwayOp(svc, r), nil
 	}
 	// An X-Amz-Target names an operation outright, and an explicit statement
 	// beats one inferred from a path. No SDK sends it for a restJson1 service,
@@ -339,277 +335,6 @@ func opensearchOp(svc *model.Service, r *http.Request) *model.Operation {
 	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
 }
 
-func railwayOp(svc *model.Service, r *http.Request) *model.Operation {
-	name := railwayRoute(r)
-	if op := svc.OperationByName(name); op != nil {
-		return op
-	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
-}
-
-func railwayRoute(r *http.Request) string {
-	if r.URL != nil && !strings.Contains(r.URL.Path, "/graphql/v2") {
-		return "Unknown"
-	}
-	if r.Body == nil {
-		return "Unknown"
-	}
-	b, _ := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewReader(b))
-	in := map[string]any{}
-	_ = json.Unmarshal(b, &in)
-	q, _ := in["query"].(string)
-	return gqlRootField(q)
-}
-
-// gqlRootField answers which field a GraphQL document selects, which for a
-// service whose every request is one POST to one path IS the operation.
-//
-// It scans rather than substring-matches because substring matching is wrong on
-// ordinary documents, not just adversarial ones. Railway's schema declares both
-// `project` and `projectId` on Service, so `{ service(id:"s") { id projectId } }`
-// contains "project" and a longest-name-first switch answered a service lookup
-// with the project handler. The same switch misroutes on an operation name
-// (`query GetService($projectId: String!)`), on a comment, and on a string
-// literal -- three ways to be wrong that a scanner simply does not have.
-//
-// This is deliberately a router, not a GraphQL implementation: it answers which
-// field, and nothing about the selection set, because nothing in this tree
-// projects one yet.
-// seekFragment finds `fragment NAME on Type {` anywhere in a document and
-// leaves *pos just inside that brace, so a root selection which is a spread can
-// be followed to the field it actually selects. It is a separate scan rather
-// than a reuse of gqlRootField's closures because it must not disturb their
-// position until it succeeds.
-func seekFragment(q, want string, pos *int, n int) bool {
-	isName := func(c byte, first bool) bool {
-		return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (!first && c >= '0' && c <= '9')
-	}
-	for i := 0; i+8 <= n; i++ {
-		if q[i] != 'f' || q[i:i+8] != "fragment" {
-			continue
-		}
-		if i > 0 && isName(q[i-1], false) { // part of a longer word
-			continue
-		}
-		j := i + 8
-		if j < n && isName(q[j], false) {
-			continue
-		}
-		// the fragment's name
-		for j < n && (q[j] == ' ' || q[j] == '\t' || q[j] == '\n' || q[j] == '\r' || q[j] == ',') {
-			j++
-		}
-		start := j
-		for j < n && isName(q[j], j == start) {
-			j++
-		}
-		if q[start:j] != want {
-			continue
-		}
-		// its body opens at the next brace outside a string, comment or group
-		depth := 0
-		for ; j < n; j++ {
-			switch q[j] {
-			case '"':
-				for j++; j < n && q[j] != '"'; j++ {
-					if q[j] == '\\' {
-						j++
-					}
-				}
-			case '#':
-				for ; j < n && q[j] != '\n'; j++ {
-				}
-			case '(':
-				depth++
-			case ')':
-				if depth > 0 {
-					depth--
-				}
-			case '{':
-				if depth == 0 {
-					*pos = j + 1
-					return true
-				}
-			}
-		}
-		return false
-	}
-	return false
-}
-
-func gqlRootField(q string) string {
-	i, n := 0, len(q)
-
-	// A comment runs to the end of its line. Every scan below has to know this,
-	// not just the one that skips ignored tokens: a comment is the one place a
-	// brace can appear that does not open anything, and a scan that reads it
-	// raw lets a comment's TEXT decide which operation ran -- the exact defect
-	// this function replaced a substring switch to avoid.
-	skipComment := func() {
-		for i < n && q[i] != '\n' {
-			i++
-		}
-	}
-	// GraphQL's ignored tokens: whitespace, commas, and # comments.
-	skip := func() {
-		for i < n {
-			switch c := q[i]; {
-			case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',':
-				i++
-			case c == '#':
-				skipComment()
-			default:
-				return
-			}
-		}
-	}
-	// A string literal, skipped wherever one may appear, so that a brace or a
-	// paren inside one cannot close a group early.
-	skipString := func() {
-		i++
-		for i < n && q[i] != '"' {
-			if q[i] == '\\' {
-				i++
-			}
-			i++
-		}
-	}
-	name := func() string {
-		start := i
-		for i < n {
-			c := q[i]
-			if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9' && i > start) {
-				i++
-				continue
-			}
-			break
-		}
-		return q[start:i]
-	}
-	// The selection set opens at the first brace that is not inside a string or
-	// a variable-definition group -- which is all that an operation name,
-	// variable definitions and directives can put in the way.
-	toSelectionSet := func() bool {
-		depth := 0
-		for i < n {
-			switch q[i] {
-			case '"':
-				skipString()
-			case '#':
-				skipComment()
-			case '(':
-				depth++
-			case ')':
-				if depth > 0 {
-					depth--
-				}
-			case '{':
-				if depth == 0 {
-					i++
-					return true
-				}
-			}
-			i++
-		}
-		return false
-	}
-	// From just past an opening brace to just past its match.
-	skipBlock := func() bool {
-		depth := 1
-		for i < n {
-			switch q[i] {
-			case '"':
-				skipString()
-			case '#':
-				skipComment()
-			case '{':
-				depth++
-			case '}':
-				if depth--; depth == 0 {
-					i++
-					return true
-				}
-			}
-			i++
-		}
-		return false
-	}
-	// The first field of a selection set, seeing past an alias, an inline
-	// fragment and a named spread. Depth-bounded: a document may define
-	// fragments that refer to each other in a cycle, and this runs on input
-	// nobody vouched for.
-	var selection func(depth int) string
-	selection = func(depth int) string {
-		if depth > 8 {
-			return "Unknown"
-		}
-		skip()
-		if i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {
-			i += 3
-			skip()
-			switch word := name(); word {
-			case "on": // inline fragment with a type condition
-				skip()
-				name()
-				if !toSelectionSet() {
-					return "Unknown"
-				}
-				return selection(depth + 1)
-			case "": // inline fragment with no type condition
-				if !toSelectionSet() {
-					return "Unknown"
-				}
-				return selection(depth + 1)
-			default: // a named spread: the field lives in its definition
-				if !seekFragment(q, word, &i, n) {
-					return "Unknown"
-				}
-				return selection(depth + 1)
-			}
-		}
-		first := name()
-		if first == "" {
-			return "Unknown"
-		}
-		skip()
-		if i < n && q[i] == ':' {
-			i++
-			skip()
-			if aliased := name(); aliased != "" {
-				return aliased
-			}
-			return "Unknown"
-		}
-		return first
-	}
-	field := func() string { return selection(0) }
-
-	for {
-		skip()
-		if i >= n {
-			return "Unknown"
-		}
-		if q[i] == '{' { // query shorthand, with no operation type at all
-			i++
-			return field()
-		}
-		switch name() {
-		case "query", "mutation", "subscription":
-			if !toSelectionSet() {
-				return "Unknown"
-			}
-			return field()
-		case "fragment":
-			// A fragment definition may precede the operation it serves.
-			if !toSelectionSet() || !skipBlock() {
-				return "Unknown"
-			}
-		default:
-			return "Unknown"
-		}
-	}
-}
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
 	body, _ := io.ReadAll(r.Body)
 	in := map[string]any{}
@@ -691,9 +416,6 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		_, err := io.WriteString(w, raw)
 		return err
 	}
-	if svc.ID == "railway.graphql" {
-		return encodeRailway(w, status, resp)
-	}
 	// A status that forbids a body gets none. An engine-served operation
 	// always projects an output map -- empty when its response shape declares
 	// no members -- so without this a 204 reaches net/http with `{}` behind
@@ -728,39 +450,6 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	return json.NewEncoder(w).Encode(resp.Output)
 }
 
-func encodeRailway(w http.ResponseWriter, status int, resp *spi.Response) error {
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-	}
-	w.WriteHeader(status)
-	if resp.Output == nil {
-		return json.NewEncoder(w).Encode(map[string]any{"data": nil})
-	}
-	wrap, _ := resp.Output["_wrap"].(string)
-	if lst, ok := resp.Output["_list"]; ok {
-		items, _ := lst.([]any)
-		if items == nil {
-			items = []any{}
-		}
-		var edges []any
-		for _, item := range items {
-			edges = append(edges, map[string]any{"node": item})
-		}
-		if edges == nil {
-			edges = []any{}
-		}
-		if wrap == "" {
-			wrap = "projects"
-		}
-		return json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{wrap: map[string]any{"edges": edges}}})
-	}
-	if wrap != "" {
-		if rec, ok := resp.Output[wrap]; ok {
-			return json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{wrap: rec}})
-		}
-	}
-	return json.NewEncoder(w).Encode(map[string]any{"data": resp.Output})
-}
 func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.ResponseWriter, f *spi.Fault, requestID string) error {
 	status := f.HTTPStatus
 	if status == 0 {
@@ -811,10 +500,6 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	if svc.ID == "hetzner.v1" {
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
-	}
-	if svc.ID == "railway.graphql" {
-		w.WriteHeader(status)
-		return json.NewEncoder(w).Encode(map[string]any{"errors": []any{map[string]any{"message": f.Message, "extensions": map[string]any{"code": f.Code}}}})
 	}
 	if svc.ID == "fly.machines" {
 		w.WriteHeader(status)

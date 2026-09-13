@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -80,7 +81,7 @@ func (p *Pack) projectCreate(ctx context.Context, req *spi.Request) (*spi.Respon
 	id := p.deps.Rand.Hex(8)
 	rec := map[string]any{"id": id, "name": name}
 	_ = p.col(req, "rwproj").Put(ctx, id, mustJSON(rec))
-	return &spi.Response{Output: map[string]any{"_wrap": "projectCreate", "projectCreate": rec}}, nil
+	return &spi.Response{Output: rec}, nil
 }
 
 func (p *Pack) projects(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -95,7 +96,15 @@ func (p *Pack) projects(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if items == nil {
 		items = []any{}
 	}
-	return &spi.Response{Output: map[string]any{"_list": items, "_wrap": "projects"}}, nil
+	// The schema says `projects` answers a connection, so the connection is
+	// built here. It used to be built by the codec from a bare list, which put
+	// one service's response shape inside a generic layer; what the shape is
+	// comes from the schema, and the schema is this service's.
+	edges := make([]any, 0, len(items))
+	for _, item := range items {
+		edges = append(edges, map[string]any{"node": item})
+	}
+	return &spi.Response{Output: map[string]any{"edges": edges}}, nil
 }
 
 func (p *Pack) project(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -106,7 +115,7 @@ func (p *Pack) project(ctx context.Context, req *spi.Request) (*spi.Response, er
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(b, &rec)
-	return &spi.Response{Output: map[string]any{"_wrap": "project", "project": rec}}, nil
+	return &spi.Response{Output: rec}, nil
 }
 
 func (p *Pack) projectDelete(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -116,7 +125,7 @@ func (p *Pack) projectDelete(ctx context.Context, req *spi.Request) (*spi.Respon
 	}
 	_ = got
 	_ = p.col(req, "rwproj").Delete(ctx, str(req.Input["id"]))
-	return &spi.Response{Output: map[string]any{"_wrap": "projectDelete", "projectDelete": true}}, nil
+	return &spi.Response{Output: map[string]any{bir.TopLevelRaw: true}}, nil
 }
 
 func (p *Pack) serviceCreate(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -134,7 +143,7 @@ func (p *Pack) serviceCreate(ctx context.Context, req *spi.Request) (*spi.Respon
 	id := p.deps.Rand.Hex(8)
 	rec := map[string]any{"id": id, "name": name, "projectId": pid}
 	_ = p.col(req, "rwsvc").Put(ctx, id, mustJSON(rec))
-	return &spi.Response{Output: map[string]any{"_wrap": "serviceCreate", "serviceCreate": rec}}, nil
+	return &spi.Response{Output: rec}, nil
 }
 
 func (p *Pack) service(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -145,7 +154,7 @@ func (p *Pack) service(ctx context.Context, req *spi.Request) (*spi.Response, er
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(b, &rec)
-	return &spi.Response{Output: map[string]any{"_wrap": "service", "service": rec}}, nil
+	return &spi.Response{Output: rec}, nil
 }
 
 func (p *Pack) serviceDelete(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -155,7 +164,7 @@ func (p *Pack) serviceDelete(ctx context.Context, req *spi.Request) (*spi.Respon
 	}
 	_ = got
 	_ = p.col(req, "rwsvc").Delete(ctx, str(req.Input["id"]))
-	return &spi.Response{Output: map[string]any{"_wrap": "serviceDelete", "serviceDelete": true}}, nil
+	return &spi.Response{Output: map[string]any{bir.TopLevelRaw: true}}, nil
 }
 
 func hydrate(req *spi.Request) {

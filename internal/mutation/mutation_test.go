@@ -21927,48 +21927,84 @@ var mutants = []mutant{
 		run:  "TestDeleteMissingService",
 	},
 	{
-		name: "railway-encode-aws-fault",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "if svc.ID == \"railway.graphql\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"errors\": []any{map[string]any{\"message\": f.Message, \"extensions\": map[string]any{\"code\": f.Code}}}})",
-		new:  "if false && svc.ID == \"railway.graphql\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"errors\": []any{map[string]any{\"message\": f.Message, \"extensions\": map[string]any{\"code\": f.Code}}}})",
-		pkg:  "./internal/proto/aws/restjson",
-		run:  "TestRESTJSON",
+		name: "graphql-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "graphql", "graphql.go"),
+		old:  "\treturn json.NewEncoder(w).Encode(map[string]any{\n\t\t\"errors\": []any{map[string]any{",
+		new:  "\treturn json.NewEncoder(w).Encode(map[string]any{\n\t\t\"__type\": []any{map[string]any{",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestEncodeFaultIsAGraphQLError",
 	},
-	// Railway's routing had neither an assertion nor a mutant until the scanner
+	// GraphQL routing had neither an assertion nor a mutant until the scanner
 	// replaced the substring switch: the document decided the operation, and
-	// nothing checked that it decided correctly. These two name the parts of
-	// the scan that a substring match does not have.
+	// nothing checked that it decided correctly. These name the parts of the
+	// scan that a substring match does not have.
 	{
-		name: "railway-route-ignore-alias",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "\t\tif i < n && q[i] == ':' {",
-		new:  "\t\tif false && i < n && q[i] == ':' {",
-		pkg:  "./internal/proto/aws/restjson",
+		name: "graphql-route-ignore-alias",
+		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
+		old:  "\tif s.i < s.n && s.q[s.i] == ':' {",
+		new:  "\tif false && s.i < s.n && s.q[s.i] == ':' {",
+		pkg:  "./internal/proto/graphql",
 		run:  "TestGraphQLRootField",
 	},
 	{
-		name: "railway-route-comment-opens-a-selection-set",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "\t\t\tcase '#':\n\t\t\t\tskipComment()\n\t\t\tcase '(':",
-		new:  "\t\t\tcase '\\v':\n\t\t\t\tskipComment()\n\t\t\tcase '(':",
-		pkg:  "./internal/proto/aws/restjson",
+		name: "graphql-route-comment-opens-a-selection-set",
+		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
+		old:  "\t\tcase '#':\n\t\t\ts.skipComment()\n\t\tcase '(':",
+		new:  "\t\tcase '\\v':\n\t\t\ts.skipComment()\n\t\tcase '(':",
+		pkg:  "./internal/proto/graphql",
 		run:  "TestGraphQLRootField",
 	},
 	{
-		name: "railway-route-ignore-fragment-spread",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "\t\tif i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {",
-		new:  "\t\tif false && i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {",
-		pkg:  "./internal/proto/aws/restjson",
+		name: "graphql-route-ignore-fragment-spread",
+		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
+		old:  "\tif s.i+2 < s.n && s.q[s.i] == '.' && s.q[s.i+1] == '.' && s.q[s.i+2] == '.' {",
+		new:  "\tif false && s.i+2 < s.n && s.q[s.i] == '.' && s.q[s.i+1] == '.' && s.q[s.i+2] == '.' {",
+		pkg:  "./internal/proto/graphql",
 		run:  "TestGraphQLRootField",
 	},
 	{
-		name: "railway-route-read-comments-as-selection",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "\t\t\tcase c == '#':",
-		new:  "\t\t\tcase false:",
-		pkg:  "./internal/proto/aws/restjson",
+		name: "graphql-route-read-comments-as-selection",
+		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
+		old:  "\t\tcase c == '#':",
+		new:  "\t\tcase false:",
+		pkg:  "./internal/proto/graphql",
 		run:  "TestGraphQLRootField",
+	},
+	// Decode is where a GraphQL request stops being an envelope and becomes the
+	// arguments the model declares. Both halves of that are load-bearing: the
+	// variable a generated client sends the whole argument in, and the refusal
+	// of a document whose arguments cannot be read to the end.
+	{
+		name: "graphql-decode-ignore-variables",
+		file: filepath.Join("internal", "proto", "graphql", "graphql.go"),
+		old:  "\t\treturn vars[string(t)]",
+		new:  "\t\treturn string(t)",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestDecodePresentsArguments",
+	},
+	{
+		name: "graphql-decode-accept-partial-arguments",
+		file: filepath.Join("internal", "proto", "graphql", "graphql.go"),
+		old:  "\tif root.Bad {",
+		new:  "\tif false && root.Bad {",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestDecodeRefusesUnreadableArguments",
+	},
+	{
+		name: "graphql-encode-under-the-wrong-key",
+		file: filepath.Join("internal", "proto", "graphql", "graphql.go"),
+		old:  "map[string]any{\"data\": map[string]any{op.Name: answer}}",
+		new:  "map[string]any{\"data\": map[string]any{\"result\": answer}}",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestEncodePlacesTheAnswerUnderTheField",
+	},
+	{
+		name: "graphql-route-any-path",
+		file: filepath.Join("internal", "proto", "graphql", "endpoint.go"),
+		old:  "\treturn trimSlash(path(r)) == want",
+		new:  "\treturn strings.Contains(path(r), want)",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestRouteRefusesAnotherPath",
 	},
 	// The six mutants that rewrote the Fly pack's empty-image, empty-name,
 	// duplicate-app, missing-app and missing-machine branches are gone with

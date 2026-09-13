@@ -172,7 +172,7 @@ test-fuzz:
 	$(GO) test ./internal/proto/aws/restxml -run '^$$' -fuzz '^FuzzAzureRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/azure/blobs -run '^$$' -fuzz '^FuzzBlobBytes$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzDigitalOceanRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzRailwayRoute$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./internal/proto/graphql -run '^$$' -fuzz '^FuzzCodec$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/railway/graphql -run '^$$' -fuzz '^FuzzCreateBody$$' -fuzztime=10000x -parallel=4
 
 # The timeout is set from measurement, not from hope. The suite runs every

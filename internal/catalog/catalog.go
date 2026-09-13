@@ -352,7 +352,22 @@ func Bundle() *model.Bundle {
 		op("GetSshKey", "GET", "/v1/ssh_keys/{id}", 200, true),
 		op("DeleteSshKey", "DELETE", "/v1/ssh_keys/{id}", 204, false),
 	}
-	railway := []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"}
+	// Real bindings, not mk(): mk() binds every operation to POST "/", and a
+	// GraphQL service is served at ONE path that its schema's provenance
+	// recorded. The codec reads that path off the operations to know where the
+	// service answers, so binding them to "/" here says the service is served
+	// somewhere it is not.
+	railwayEndpoint := "/graphql/v2"
+	railway := []model.Operation{}
+	for _, n := range []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"} {
+		// Which fields are readonly is named outright rather than derived from
+		// the spelling: GraphQL puts queries and mutations in separate types
+		// and says nothing through the name, and every prefix test here would
+		// read `projectCreate` as a `project` -- which is the substring bug
+		// this service's routing already had once.
+		readonly := n == "project" || n == "projects" || n == "service"
+		railway = append(railway, op(n, "POST", railwayEndpoint, 200, readonly))
+	}
 	// Real bindings, not mk(): mk() binds every operation to POST /, and
 	// internal/conformance builds its request from this catalog rather than
 	// from the generated model. The names are the document's.
@@ -1429,7 +1444,7 @@ func Bundle() *model.Bundle {
 			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", digitalocean),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", hetzner),
-			svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", mk(railway)),
+			svc("railway.graphql", "railway", model.ProtoGraphQL, "", "", "", railway),
 			svc("fly.machines", "fly", model.ProtoRESTJSON1, "", "", "", fly),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),

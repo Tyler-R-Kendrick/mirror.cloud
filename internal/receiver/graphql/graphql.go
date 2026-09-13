@@ -106,7 +106,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 	svc := model.Service{
 		ID:             serviceID(src.Path),
 		Namespace:      doc.QueryType.Name,
-		Protocol:       model.ProtoRESTJSON1,
+		Protocol:       model.ProtoGraphQL,
 		EndpointPrefix: provider(serviceID(src.Path)),
 		Shapes:         sh.shapes,
 		Source:         src,

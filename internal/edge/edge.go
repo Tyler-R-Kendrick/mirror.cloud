@@ -25,6 +25,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/restjson"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/restxml"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
+	graphqlproto "github.com/tyler-r-kendrick/mirror.cloud/internal/proto/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -66,6 +67,7 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 			model.ProtoAWSQuery:   awsquery.Codec{},
 			model.ProtoEC2Query:   awsquery.Codec{},
 			model.ProtoGCPRESTSON: gcprest.Codec{},
+			model.ProtoGraphQL:    graphqlproto.Codec{},
 		},
 		advertise: cfg.AdvertiseURL,
 	}

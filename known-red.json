@@ -31,7 +31,7 @@
     {
       "test": "TestEveryServedServiceIsDescribedByASpecification",
       "package": "./internal/specboot",
-      "why": "Four services are served with no generated model. Three are AWS services whose Smithy model the receiver cannot yet ingest (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb); one is the hand-written pack still to be extracted (azure.blobs). It was five until railway.graphql got a model of its own -- a GraphQL receiver, its schema fetched by POSTing an introspection query and pinned like any other vendored document. The count may only fall."
+      "why": "Red for ONE service: azure.blobs, the hand-written pack still to be extracted. The other three served without a generated model (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb) do not make it red -- the test allows exactly the services specs/aws-dirs.json records in its \"unavailable\" map, which it now reads rather than transcribes. AWS publishes no model for those three in api-models-aws at all, so there is nothing for a receiver to ingest and no work that makes them go away; this entry used to say the receiver could not ingest them, which sent a reader after a bug that does not exist. Goes green when azure.blobs is extracted, and not before. It was five services until railway.graphql got a model of its own -- a GraphQL receiver, its schema fetched by POSTing an introspection query and pinned like any other vendored document. The count may only fall."
     }
   ]
 }

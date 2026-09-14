@@ -57,6 +57,13 @@ func adoptGenerated(b *model.Bundle) {
 		svc.QueryVersion = gen.QueryVersion
 		svc.XMLNamespace = gen.XMLNamespace
 		svc.Aliases = gen.Aliases
+		// The hosts the specification declares. The catalog cannot carry these
+		// honestly -- they are spec facts, and transcribing them here is how
+		// the protocol disagreements this function exists to fix got in -- so
+		// the generated model is the only source, and forgetting this line
+		// would leave the demux's host resolution answering for nothing while
+		// every test that reads a generated model directly still passed.
+		svc.Hosts = gen.Hosts
 		svc.Shapes = gen.Shapes
 		svc.Source = gen.Source
 		svc.Operations = unionOperations(gen.Operations, svc.Operations)

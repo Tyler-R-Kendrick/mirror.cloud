@@ -9,22 +9,27 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
+	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
+	// Links the bundle's registration in. Without it the registry has no pack
+	// for railway.graphql and the edge answers from the mock tier -- which
+	// looks like a working service returning synthesized data, not like a
+	// failure.
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
+// TestRailwayGraphQLBehavior drives the served service over its real HTTP
+// surface. It boots the runtime rather than constructing an edge directly,
+// because a bundle is served from the generated model and `edge.New` falls back
+// to the hand-authored catalog when none is supplied.
 func TestRailwayGraphQLBehavior(t *testing.T) {
-	deps := spitest.Deps(t)
 	cfg := config.Default()
 	cfg.Services = []string{"railway.graphql"}
-	reg, err := registry.New(deps, cfg.Services, nil)
+	rt, err := rtpkg.Boot(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	gql := func(query, vars string) (map[string]any, http.Header) {
 		t.Helper()

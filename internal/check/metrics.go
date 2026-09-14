@@ -61,6 +61,16 @@ type Metrics struct {
 	// absent here that mismatches is a new one, which is the case worth
 	// failing on: the count alone would let a fix and a regression cancel.
 	RoutingMismatchServices []string `json:"routing_mismatch_services"`
+
+	// DemuxGuesses counts the demux's provider-named routing branches --
+	// hand-written provider code that lives in internal/edge and so is counted
+	// by none of the metrics above. See demux.go for what they cost and why
+	// they were invisible.
+	DemuxGuesses int `json:"demux_guesses"`
+	// DemuxGuessNames is the sorted list behind that count, for the same reason
+	// RoutingMismatchServices exists: a count alone lets one provider's guess
+	// be deleted while another's is added.
+	DemuxGuessNames []string `json:"demux_guess_names"`
 }
 
 const (
@@ -151,6 +161,9 @@ func Measure(root string) (Metrics, error) {
 	// runtime serves in a protocol the specification disagrees with.
 	served, spec := ServedAndSpecRouting()
 	m.RoutingMismatches, m.RoutingMismatchServices = MeasureRouting(served, spec)
+	if m.DemuxGuesses, m.DemuxGuessNames, err = MeasureDemuxGuesses(root); err != nil {
+		return m, err
+	}
 	return m, nil
 }
 
@@ -210,6 +223,7 @@ func comparable(baseline, current Metrics) []struct {
 		{"fault_sites", baseline.FaultSites, current.FaultSites},
 		{"register_sites", baseline.RegisterSites, current.RegisterSites},
 		{"routing_mismatches", baseline.RoutingMismatches, current.RoutingMismatches},
+		{"demux_guesses", baseline.DemuxGuesses, current.DemuxGuesses},
 	}
 }
 
@@ -250,6 +264,8 @@ func ClearAbsent(m *Metrics, present map[string]json.RawMessage) {
 			m.RegisterSites = NotComparable
 		case "routing_mismatches":
 			m.RoutingMismatches, m.RoutingMismatchServices = NotComparable, nil
+		case "demux_guesses":
+			m.DemuxGuesses, m.DemuxGuessNames = NotComparable, nil
 		}
 	}
 }
@@ -288,6 +304,20 @@ func Compare(baseline, current Metrics) (regressions []Regression, newPacks []st
 				Metric:   "routing_mismatch/" + id,
 				Baseline: 0, Current: 1,
 			})
+		}
+	}
+	if baseline.DemuxGuesses != NotComparable {
+		declared := make(map[string]bool, len(baseline.DemuxGuessNames))
+		for _, name := range baseline.DemuxGuessNames {
+			declared[name] = true
+		}
+		for _, name := range current.DemuxGuessNames {
+			if !declared[name] {
+				regressions = append(regressions, Regression{
+					Metric:   "demux_guess/" + name,
+					Baseline: 0, Current: 1,
+				})
+			}
 		}
 	}
 	return regressions, newPacks

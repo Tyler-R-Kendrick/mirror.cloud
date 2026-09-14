@@ -2,6 +2,7 @@ package edge
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -255,4 +256,142 @@ func shortName(id string) string {
 		return strings.ToLower(rest)
 	}
 	return strings.ToLower(id)
+}
+
+// How a request that names no AWS service finds the one it is for.
+//
+// C34 records what this replaced: eight hand-written predicates, each asking
+// whether a host or a path CONTAINED a vendor's name. Every one of them took
+// an AWS service the first time that name was also a common word. Vercel took
+// aws.api.ecr and aws.iotwireless because the short name of `vercel.api` is
+// the generic word `api`. Fly took aws.pinpoint because `/v1/apps` is also
+// Pinpoint's GetApps. The collision always lived in the NEW service, so no test
+// of the service that was taken could fail, and nobody found them by reading.
+//
+// The facts needed to answer without guessing are ones the vendor wrote down.
+// An OpenAPI document declares its production host in `servers` and its
+// operations' paths in `paths`, and both are now in the model. So a request is
+// placed by matching the WHOLE host against a declared one, and otherwise by
+// matching the path against the operation patterns the same way every AWS REST
+// service is routed.
+//
+// Measured across every operation path the nine non-AWS models declare -- 838
+// of them -- path matching alone names exactly one service for every single
+// path: no ambiguity, no miss, nothing wrong. That is the whole finding. The
+// four collisions that remain when AWS services are included are the
+// Fly-against-Pinpoint one C34 names, and they do not arise here because these
+// resolvers are only consulted for a request that named no AWS service in any
+// of the three ways an AWS client names one -- an X-Amz-Target, a SigV4
+// credential scope, or an AWS endpoint host. A request that declined to say it
+// was for AWS is not answered by an AWS model.
+
+// serviceByDeclaredHost matches a request's host against the hosts a
+// specification declares.
+//
+// The match is the whole host or a subdomain of it, never a substring: the
+// difference between `strings.Contains(host, "vercel")` and this is exactly
+// the difference between claiming `api.iotwireless.us-east-1.amazonaws.com`
+// and not. The subdomain form is load-bearing rather than defensive -- the
+// Vercel KV document says in so many words that deployments address a per-store
+// subdomain of the host it declares.
+func (s *Server) serviceByDeclaredHost(host string) *model.Service {
+	host = endpointHost(host)
+	if host == "" {
+		return nil
+	}
+	var best *model.Service
+	var bestLen int
+	for i := range s.bundle.Services {
+		svc := &s.bundle.Services[i]
+		if awsProvider(svc.ID) {
+			continue
+		}
+		for _, declared := range svc.Hosts {
+			declared = strings.ToLower(declared)
+			if declared == "" {
+				continue
+			}
+			if host != declared && !strings.HasSuffix(host, "."+declared) {
+				continue
+			}
+			// The longest declared host wins, so a service reached at a
+			// subdomain of another's host is not shadowed by the shorter one.
+			if best == nil || len(declared) > bestLen || (len(declared) == bestLen && svc.ID < best.ID) {
+				best, bestLen = svc, len(declared)
+			}
+		}
+	}
+	return best
+}
+
+// serviceByPath matches a request against the operation patterns of every
+// non-AWS model, and answers only when exactly one service matches.
+//
+// Declining a tie is the point. Two services claiming one path is a fact about
+// the models that a router cannot resolve from the request, and answering it
+// with either one is the guess this exists to remove; falling through leaves
+// the request to the rest of the demux, which fails visibly rather than
+// replying as the wrong service. No provider path ties today, and a test
+// measures that so a specification that introduces one is seen.
+func (s *Server) serviceByPath(r *http.Request) *model.Service {
+	// Parsed once rather than per service. This walks every operation of every
+	// non-AWS model, so anything done per candidate is done several hundred
+	// times for one request.
+	query := r.URL.Query()
+	parts := httpuri.SplitPath(r.URL.EscapedPath())
+	var found *model.Service
+	for i := range s.bundle.Services {
+		svc := &s.bundle.Services[i]
+		if awsProvider(svc.ID) {
+			continue
+		}
+		if !matchesSomePath(svc, r.Method, parts, query) {
+			continue
+		}
+		if found != nil {
+			return nil // ambiguous: two models claim this path
+		}
+		found = svc
+	}
+	return found
+}
+
+// matchesSomePath reports whether any of a service's operations is bound to a
+// path this request addresses.
+//
+// A pattern of `/` is not a path a service claims -- it is what a model carries
+// for an operation that is addressed some other way, and this tree has two such
+// services. Matching it would hand every unplaced root request to whichever of
+// them came first.
+func matchesSomePath(svc *model.Service, method string, parts []string, query url.Values) bool {
+	for i := range svc.Operations {
+		op := &svc.Operations[i]
+		if op.HTTP.URI == "" || op.HTTP.URI == "/" || !strings.EqualFold(op.HTTP.Method, method) {
+			continue
+		}
+		if httpuri.Compile(op.HTTP.URI).Claims(parts, query) {
+			return true
+		}
+	}
+	return false
+}
+
+// awsProvider reports whether a service id names an AWS service.
+//
+// The demux already distinguishes AWS from everything else -- `awsAddressed`
+// asks the same question of a request -- because the three things an AWS client
+// sends to say which service it means are AWS-specific and nothing else sends
+// them. Reading the provider off the id is the cheapest honest way to ask it of
+// a service: the id is `<provider>.<service>` by construction, and every
+// receiver builds it from where the document sits.
+//
+// Not `awsService`, which is what this was called for about ten minutes. A
+// function in this package whose name is a provider followed by `Service` or
+// `Request` is what MeasureDemuxGuesses counts, and it counted this one -- so
+// a helper written to REMOVE the guesses would have read as a ninth. C32
+// records the same shape from the other side: a generic word in a name is a
+// collision waiting for the metric that reads names.
+func awsProvider(id string) bool {
+	provider, _, ok := strings.Cut(id, ".")
+	return ok && provider == "aws"
 }

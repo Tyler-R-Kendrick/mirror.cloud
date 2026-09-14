@@ -25,6 +25,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/restjson"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/restxml"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
+	graphqlproto "github.com/tyler-r-kendrick/mirror.cloud/internal/proto/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -66,6 +67,7 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 			model.ProtoAWSQuery:   awsquery.Codec{},
 			model.ProtoEC2Query:   awsquery.Codec{},
 			model.ProtoGCPRESTSON: gcprest.Codec{},
+			model.ProtoGraphQL:    graphqlproto.Codec{},
 		},
 		advertise: cfg.AdvertiseURL,
 	}
@@ -498,46 +500,42 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			}
 		}
 	}
-	// The provider guesses below claim a path rather than an endpoint, and a
-	// path is not theirs to claim when the request has already said which AWS
-	// service it is for. `flyRequest` is true of any path containing
-	// `/v1/apps`, which is also AWS Pinpoint's GetApps, so a signed Pinpoint
-	// request was answered by Fly. This is the third time a new provider has
-	// taken an AWS service this way -- Vercel took ECR and IoT Wireless by
-	// name, Fly took Pinpoint by path -- so the guard is on the class rather
-	// than on the instance.
+	// A request that names no AWS service is placed from the non-AWS models:
+	// by the host its specification declares, and otherwise by the operation
+	// paths it declares. Both resolvers are in resolve.go, and the comment
+	// above them records what they replaced and what was measured.
 	//
-	// An SDK says which service it means in ways a provider client never does:
-	// a SigV4 credential scope, an X-Amz-Target, an AWS endpoint host. Where
-	// one of those is present and the model can place it, the model wins.
-	if !awsAddressed(r) || s.resolveByModel(r) == nil {
-		if flyRequest(r) {
-			return s.bundle.ServiceByID("fly.machines")
+	// The guard is unchanged and is the whole reason this is safe to ask of
+	// the models alone. An SDK says which service it means in ways a provider
+	// client never does -- a SigV4 credential scope, an X-Amz-Target, an AWS
+	// endpoint host -- so where one of those is present and the model can
+	// place it, the model wins and nothing below is consulted. `flyRequest`
+	// answering a signed Pinpoint request is the failure this prevents, and it
+	// is prevented for the class rather than for the instance.
+	// Resolved once and reused. It is a pure question of the request against
+	// the bundle, and asking it twice walked every service twice.
+	byModel := s.resolveByModel(r)
+	if !awsAddressed(r) || byModel == nil {
+		if svc := s.serviceByDeclaredHost(host); svc != nil {
+			return svc
 		}
-		if railwayRequest(r) {
-			return s.bundle.ServiceByID("railway.graphql")
+		if svc := s.serviceByPath(r); svc != nil {
+			return svc
 		}
-		if hetznerRequest(r) {
-			return s.bundle.ServiceByID("hetzner.v1")
-		}
-		if digitaloceanRequest(r) {
-			return s.bundle.ServiceByID("digitalocean.v2")
-		}
-		if id := azureService(r); id != "" {
-			return s.bundle.ServiceByID(id)
-		}
-		if cloudflareRequest(r) {
-			return s.bundle.ServiceByID("cloudflare.api")
-		}
-		if hostingerRequest(r) {
-			return s.bundle.ServiceByID("hostinger.api")
-		}
-		if id := vercelService(r); id != "" {
+		// Azure is the one provider no model can place. Its documents declare
+		// no `servers`, and its operations are addressed by query parameter
+		// and by header rather than by path -- `restype=container`, an
+		// `x-ms-blob-type` -- so the model carries `/` for all eight and there
+		// is nothing to match. It stays a predicate until azure.blobs is
+		// extracted to a bundle whose paths a receiver can read, and it is
+		// counted as the guess it is. One predicate names all three services:
+		// the host says queue or table before anything says blob.
+		if id := azureRequest(r); id != "" {
 			return s.bundle.ServiceByID(id)
 		}
 	}
-	if svc := s.resolveByModel(r); svc != nil {
-		return svc
+	if byModel != nil {
+		return byModel
 	}
 	if action == "" && r.Method == http.MethodGet && sqsQueuePath(r.URL.Path) {
 		return s.bundle.ServiceByID("aws.sqs")
@@ -588,53 +586,7 @@ func awsAddressed(r *http.Request) bool {
 	return strings.HasSuffix(host, ".amazonaws.com") || strings.HasSuffix(host, ".api.aws")
 }
 
-func flyRequest(r *http.Request) bool {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "machines.dev") {
-		return true
-	}
-	return strings.Contains(r.URL.Path, "/v1/apps")
-}
-
-func railwayRequest(r *http.Request) bool {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "railway") {
-		return true
-	}
-	return strings.Contains(r.URL.Path, "/graphql/v2")
-}
-
-func hetznerRequest(r *http.Request) bool {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "hetzner") {
-		return true
-	}
-	path := r.URL.Path
-	return strings.HasPrefix(path, "/v1/servers") || strings.HasPrefix(path, "/v1/ssh_keys")
-}
-
-func digitaloceanRequest(r *http.Request) bool {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "digitalocean") {
-		return true
-	}
-	path := r.URL.Path
-	return strings.HasPrefix(path, "/v2/droplets") || strings.HasPrefix(path, "/v2/domains")
-}
-
-func azureService(r *http.Request) string {
+func azureRequest(r *http.Request) string {
 	host := strings.ToLower(r.Host)
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
@@ -645,86 +597,14 @@ func azureService(r *http.Request) string {
 	if strings.Contains(host, "table.core.windows.net") {
 		return "azure.table"
 	}
-	if azureRequest(r) {
+	if strings.Contains(host, "blob.core.windows.net") || strings.Contains(host, "azure") {
+		return "azure.blobs"
+	}
+	q := r.URL.Query()
+	if q.Get("restype") == "container" || q.Get("comp") == "list" || r.Header.Get("x-ms-blob-type") != "" {
 		return "azure.blobs"
 	}
 	return ""
-}
-
-func azureRequest(r *http.Request) bool {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "blob.core.windows.net") || strings.Contains(host, "azure") {
-		return true
-	}
-	q := r.URL.Query()
-	return q.Get("restype") == "container" || q.Get("comp") == "list" || r.Header.Get("x-ms-blob-type") != ""
-}
-
-func hostingerRequest(r *http.Request) bool {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "hostinger") {
-		return true
-	}
-	path := r.URL.Path
-	return strings.HasPrefix(path, "/api/dns/") || strings.HasPrefix(path, "/api/domains/")
-}
-
-func cloudflareRequest(r *http.Request) bool {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "cloudflare") {
-		return true
-	}
-	return strings.Contains(r.URL.Path, "/client/v4/")
-}
-
-// vercelService names which Vercel service a request is for, or "" for none.
-//
-// It answers a service id rather than a bool because Vercel is two products on
-// two hosts. The REST API is api.vercel.com; Vercel KV is the data plane at
-// kv.vercel-storage.com, which is Upstash Redis behind a Vercel name and takes
-// POST / with the command as a JSON array. One hand-written pack used to carry
-// both under `vercel.api`, so one predicate was enough; they are separate
-// services now, and a host containing `vercel` is no longer an answer.
-//
-// The KV host is tested first because it contains `vercel` too, so the order
-// here is the whole distinction. The path fallback stays with the REST API:
-// nothing addresses KV by path -- its only path is `/`, which would claim the
-// root from every other service the demux has not yet placed.
-func vercelService(r *http.Request) string {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "vercel-storage") {
-		return "vercel.kv"
-	}
-	if strings.Contains(host, "vercel") {
-		return "vercel.api"
-	}
-	path := r.URL.Path
-	if len(path) < 4 || path[0] != '/' || path[1] != 'v' || path[2] < '1' || path[2] > '9' {
-		return ""
-	}
-	if strings.Contains(path, "/projects") || strings.Contains(path, "/deployments") || strings.Contains(path, "/user") || strings.Contains(path, "/teams") {
-		return "vercel.api"
-	}
-	return ""
-}
-
-// kvRequest reports whether a Vercel request addresses the KV data plane:
-// every store's host is a subdomain of kv.vercel-storage.com, which the
-// authored document (specs/vercel/kv.json) records as the service's server.
-func kvRequest(r *http.Request) bool {
-	return strings.Contains(strings.ToLower(r.Host), "kv.vercel-storage")
 }
 
 func sqsQueuePath(path string) bool {

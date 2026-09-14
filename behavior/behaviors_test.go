@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/behavior"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
@@ -48,14 +49,8 @@ func TestEveryBundleLoads(t *testing.T) {
 // will consume rather than a fixture.
 func generatedModel(t *testing.T, serviceID string) *model.Service {
 	t.Helper()
-	provider, service := split(serviceID)
-	var pkg []rune
-	for _, r := range service {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			pkg = append(pkg, r)
-		}
-	}
-	path := filepath.Join("..", "internal", "generated", provider, string(pkg), "model.json.gz")
+	provider, pkg := generated.ServicePath(serviceID)
+	path := filepath.Join("..", "internal", "generated", provider, pkg, "model.json.gz")
 	f, err := os.Open(path)
 	if err != nil {
 		t.Fatalf("no generated model for %s at %s: %v\n"+
@@ -81,15 +76,6 @@ func hasOperation(svc *model.Service, name string) bool {
 		}
 	}
 	return false
-}
-
-func split(id string) (string, string) {
-	for i := 0; i < len(id); i++ {
-		if id[i] == '.' {
-			return id[:i], id[i+1:]
-		}
-	}
-	return "", id
 }
 
 // TestEveryBundleOnDiskIsEmbedded catches the failure that has no symptom: a

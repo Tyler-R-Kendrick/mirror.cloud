@@ -9,14 +9,21 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
-	generatedpp "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/aws/pinpoint"
-	generatedcf "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/cloudflare/api"
-	generateddo "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/digitalocean/v2"
-	generatedvercel "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/vercel/api"
-	generatedkv "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/vercel/kv"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
+
+// generatedModel loads a canonical model through the generic registry; the
+// per-service packages that used to wrap it are gone.
+func generatedModel(tb testing.TB, id string) *model.Service {
+	tb.Helper()
+	svc, err := generated.Model(id)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return svc
+}
 
 func TestRESTJSONServiceRoutes(t *testing.T) {
 	codec := Codec{}
@@ -43,16 +50,6 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"aws.lambda", http.MethodDelete, "/2015-03-31/functions/f/aliases/a", "", "DeleteAlias"},
 		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/aliases", "", "ListAliases"},
 		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/aliases/a", "", "GetAlias"},
-		{"azure.table", http.MethodPost, "/Tables", "", "CreateTable"},
-		{"azure.table", http.MethodGet, "/Tables", "", "ListTables"},
-		{"azure.table", http.MethodDelete, "/Tables('t')", "", "DeleteTable"},
-		{"azure.table", http.MethodPost, "/t", "", "InsertEntity"},
-		{"azure.table", http.MethodGet, "/t()", "", "QueryEntities"},
-		{"azure.table", http.MethodGet, "/t(PartitionKey='p',RowKey='r')", "", "GetEntity"},
-		{"azure.table", http.MethodPut, "/t(PartitionKey='p',RowKey='r')", "", "UpdateEntity"},
-		{"azure.table", http.MethodPatch, "/t(PartitionKey='p',RowKey='r')", "", "MergeEntity"},
-		{"azure.table", http.MethodDelete, "/t(PartitionKey='p',RowKey='r')", "", "DeleteEntity"},
-		{"azure.table", http.MethodPost, "/$batch", "", "SubmitBatch"},
 		{"aws.lambda", http.MethodPost, "/2015-03-31/functions/f/policy", "", "AddPermission"},
 		{"aws.lambda", http.MethodDelete, "/2015-03-31/functions/f/policy/sid", "", "RemovePermission"},
 		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/policy", "", "GetPolicy"},
@@ -256,7 +253,7 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	// by name and call the array `_redis`; it is a generic rule now -- the
 	// model declares `body` a LIST bound to the payload -- and the service is
 	// vercel.kv, because the command endpoint was always a second product.
-	kv := generatedkv.Model()
+	kv := generatedModel(t, "vercel.kv")
 	kvOp := kv.OperationByName("Command")
 	decoded, err = codec.Decode(kv, kvOp, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`["GET","k"]`)))
 	if err != nil {
@@ -271,14 +268,7 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	// the bare string Upstash answers.
 	vercel := &model.Service{ID: "vercel.api"}
 	w = httptest.NewRecorder()
-	if err := codec.EncodeFault(vercel, &model.Operation{Name: "Command"}, w, &spi.Fault{Code: "bad_request", Message: "GET needs key", HTTPStatus: 400, Fault: "client"}, "id"); err != nil {
-		t.Fatal(err)
-	}
-	if w.Code != 400 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"bad_request"`) {
-		t.Fatalf("vercel kv fault %d %#v %s", w.Code, w.Header(), w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	if err := codec.EncodeFault(&model.Service{ID: "vercel.api"}, &model.Operation{Name: "GetProject"}, w, &spi.Fault{Code: "not_found", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+	if err := codec.EncodeFault(vercel, &model.Operation{Name: "GetProject"}, w, &spi.Fault{Code: "not_found", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"not_found"`) {
@@ -296,7 +286,7 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	// the real shapes: `body` is the payload member and `workers-kv_value` is
 	// a union of a string and a blob, which is what makes it the body rather
 	// than something to parse.
-	cf := generatedcf.Model()
+	cf := generatedModel(t, "cloudflare.api")
 	putReq := httptest.NewRequest(http.MethodPut, "/client/v4/accounts/a/storage/kv/namespaces/n/values/k", strings.NewReader("hello"))
 	decoded, err = codec.Decode(cf, cf.OperationByName("WorkersKvNamespaceWriteKeyValuePairWithMetadata"), putReq)
 	if err != nil || decoded.Input["body"] != "hello" {
@@ -410,51 +400,6 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 		t.Fatalf("hz 204 %d %q", w.Code, w.Body.String())
 	}
 
-	rw := &model.Service{ID: "railway.graphql"}
-	for _, test := range []struct{ query, want string }{
-		{`mutation { projectCreate(input:{name:"web"}) { id } }`, "projectCreate"},
-		{`{ projects { edges { node { id } } } }`, "projects"},
-		{`{ project(id:"x") { id } }`, "project"},
-		{`mutation { projectDelete(id:"x") }`, "projectDelete"},
-		{`mutation { serviceCreate(input:{name:"api"}) { id } }`, "serviceCreate"},
-		{`mutation { serviceDelete(id:"x") }`, "serviceDelete"},
-		{`{ service(id:"x") { id } }`, "service"},
-		// Routing scans for the root field rather than substring-matching the
-		// document, which lets it tell two conditions apart that the old switch
-		// could only answer the same way. A field this service does not serve
-		// routes to its own name, so the not-implemented fault and the
-		// x-mirror-not-implemented header say WHICH field was asked for; only a
-		// document with no root field to find is "Unknown".
-		{`{ unknown }`, "unknown"},
-		{`not a graphql document`, "Unknown"},
-		{``, "Unknown"},
-	} {
-		req := httptest.NewRequest(http.MethodPost, "/graphql/v2", strings.NewReader(`{"query":`+jsonQuote(test.query)+`}`))
-		op, err := codec.Route(rw, req)
-		if err != nil || op.Name != test.want {
-			t.Errorf("railway %q: %#v %v, want %s", test.query, op, err, test.want)
-		}
-	}
-	// Railway keeps its router and its fault envelope. The response encoder
-	// went with the pack: the bundle projects the {"data": ...} envelope each
-	// operation declares, so the generic encoder serializes it unchanged --
-	// the connection edges included.
-	w = httptest.NewRecorder()
-	rwOut := map[string]any{"data": map[string]any{"projects": map[string]any{"edges": []any{map[string]any{"node": map[string]any{"id": "1", "name": "web"}}}}}}
-	if err := codec.Encode(rw, &model.Operation{Name: "projects"}, w, &spi.Response{Output: rwOut}); err != nil {
-		t.Fatal(err)
-	}
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"data"`) || !strings.Contains(w.Body.String(), `"edges"`) || !strings.Contains(w.Body.String(), `"node"`) {
-		t.Fatalf("rw list encode %d %s", w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	if err := codec.EncodeFault(rw, &model.Operation{Name: "project"}, w, &spi.Fault{Code: "NOT_FOUND", Message: "Project not found", HTTPStatus: 200, Fault: "client"}, "id"); err != nil {
-		t.Fatal(err)
-	}
-	if w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"errors"`) || !strings.Contains(w.Body.String(), `"NOT_FOUND"`) {
-		t.Fatalf("rw fault %d %#v %s", w.Code, w.Header(), w.Body.String())
-	}
-
 	// Fly keeps only its fault envelope. The route table and the response
 	// encoder went with the pack: the bundle answers the document's own
 	// members -- an App and a Machine are the body, not something nested under
@@ -481,7 +426,7 @@ func jsonQuote(s string) string {
 // is asserted here rather than left to be discovered: the deleted table joined
 // every remaining segment into the key and this does not.
 func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
-	cf := generatedcf.Model()
+	cf := generatedModel(t, "cloudflare.api")
 	const base = "/client/v4/accounts/a/storage/kv/namespaces"
 	for _, test := range []struct{ method, path, want string }{
 		{http.MethodPost, base, "WorkersKvNamespaceCreateANamespace"},
@@ -508,17 +453,6 @@ func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
 	}
 }
 
-// TestVercelRoutesFromItsGeneratedModel replaces the fifteen route-table
-// rows that went with the pack. What answers them now is httpuri.Match over
-// the document's own patterns, which is how every modelled service routes.
-// The KV row's answer is a different service: vercel.kv's model binds the
-// command endpoint to POST /.
-//
-// Four of the pack's URIs named versions the document does not serve, and
-// the last case pins one: GET /v9/projects matched ListProjects in the table
-// and matches nothing in the document, which lists projects at /v10. The
-// table could not say so; the model can.
-
 // TestDigitalOceanRoutesFromItsGeneratedModel replaces the eight route-table
 // rows that went with the pack. The URIs are the same; what answers them is
 // httpuri.Match over the model's own patterns, which is how every modelled
@@ -532,7 +466,7 @@ func TestCloudflareRoutesFromItsGeneratedModel(t *testing.T) {
 // DELETE /v2/droplets is a different operation from the one addressing a
 // droplet, which a table keyed on segment count had to special-case.
 func TestDigitalOceanRoutesFromItsGeneratedModel(t *testing.T) {
-	do := generateddo.Model()
+	do := generatedModel(t, "digitalocean.v2")
 	for _, test := range []struct{ method, path, want string }{
 		{http.MethodPost, "/v2/droplets", "DropletsCreate"},
 		{http.MethodGet, "/v2/droplets", "DropletsList"},
@@ -573,7 +507,7 @@ func TestDigitalOceanRoutesFromItsGeneratedModel(t *testing.T) {
 // The KV row is gone for a different reason: POST / was Vercel KV, which is a
 // second product on a second host and is its own service now.
 func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
-	vercel := generatedvercel.Model()
+	vercel := generatedModel(t, "vercel.api")
 	for _, test := range []struct{ method, path, want string }{
 		{http.MethodGet, "/v2/user", "GetAuthUser"},
 		{http.MethodPost, "/v11/projects", "CreateProject"},
@@ -632,7 +566,7 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 // same way would either drop the structure or hand a pack a JSON string where
 // it expects members.
 func TestStructuredPayloadStillDecodesAsAStructure(t *testing.T) {
-	pp := generatedpp.Model()
+	pp := generatedModel(t, "aws.pinpoint")
 	op := pp.OperationByName("CreateApp")
 	if op == nil {
 		t.Fatal("pinpoint has no CreateApp")

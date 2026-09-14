@@ -246,9 +246,6 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	return &spi.Response{Output: out}, nil
 }
 
-// validateInput enforces the model's required members and constraints. This is
-// the check the empty-shape catalog silently disabled; it runs before any
-// behavior so a malformed request never reaches an effect.
 // splatPayload reports whether the codec presents this payload member by
 // spreading the body's members across the input rather than by setting it.
 func (e *Engine) splatPayload(m model.Member) bool {
@@ -261,6 +258,9 @@ func (e *Engine) splatPayload(m model.Member) bool {
 	return e.model.Shapes[m.Shape].Kind != model.KindList
 }
 
+// validateInput enforces the model's required members and constraints. This is
+// the check the empty-shape catalog silently disabled; it runs before any
+// behavior so a malformed request never reaches an effect.
 func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault {
 	if op.Input == "" {
 		return nil

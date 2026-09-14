@@ -178,4 +178,4 @@ vercel.kv emulate
 azure.blobs emulate
 azure.queue emulate
 azure.table emulate
-railway.graphql emulate
+railway.graphql emulate fields=project,projects,service,projectCreate,projectDelete,serviceCreate,serviceDelete

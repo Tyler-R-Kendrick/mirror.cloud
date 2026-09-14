@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 )
@@ -34,7 +33,7 @@ func sdkRequest(svc *model.Service) *http.Request {
 // Nothing said so, because every booted-server test called its service the way
 // the demux happened to accept rather than the way a client does.
 func TestEveryServiceIsReachableTheWayAnSDKAddressesIt(t *testing.T) {
-	bundle := catalog.Bundle()
+	bundle := specboot.Bundle()
 	server := &Server{bundle: bundle}
 	var wrong, missing []string
 	for i := range bundle.Services {
@@ -233,7 +232,7 @@ func claimingRequest(svc *model.Service) (*http.Request, bool) {
 // The two agree for every service in today's bundle, so nothing else here
 // would notice the host being ignored.
 func TestTheHostWinsOverTheCredentialScope(t *testing.T) {
-	bundle := catalog.Bundle()
+	bundle := specboot.Bundle()
 	server := &Server{bundle: bundle}
 	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	r.Host = "guardduty.us-east-1.amazonaws.com"
@@ -391,7 +390,7 @@ func servicesAnsweringTo(bundle *model.Bundle, label string) []string {
 // that reports an entry when it stops applying, so the table cannot grow
 // branches that defend nothing.
 func TestEveryClientSpellingIsLoadBearing(t *testing.T) {
-	bundle := catalog.Bundle()
+	bundle := specboot.Bundle()
 	server := &Server{bundle: bundle}
 	bare := &Server{bundle: bundle}
 	for label, id := range clientSpellings {
@@ -469,7 +468,7 @@ func TestHostLabel(t *testing.T) {
 // replies. The dualstack form inserts labels after the service instead, which a
 // whole-prefix match already reads past.
 func TestEveryEndpointVariantReachesItsService(t *testing.T) {
-	bundle := catalog.Bundle()
+	bundle := specboot.Bundle()
 	server := &Server{bundle: bundle}
 	for host, want := range map[string]string{
 		"guardduty.us-east-1.amazonaws.com":                 "aws.guardduty",
@@ -517,7 +516,7 @@ func sharing(bundle *model.Bundle, prefix string) []string {
 // about the two AWS services changed, and nothing in their own tests noticed,
 // because the collision is in a third service's name.
 func TestADottedEndpointPrefixIsNotItsLeadingLabel(t *testing.T) {
-	bundle := catalog.Bundle()
+	bundle := specboot.Bundle()
 	server := &Server{bundle: bundle}
 	for _, id := range []string{"aws.api.ecr", "aws.iotwireless", "aws.iot-data"} {
 		svc := bundle.ServiceByID(id)
@@ -551,7 +550,7 @@ func TestADottedEndpointPrefixIsNotItsLeadingLabel(t *testing.T) {
 // A client pointed at a local endpoint -- `mirror` itself, an IP, any host with
 // no service name in it -- has nothing else to go on.
 func TestAServiceIsReachableByItsCredentialScopeAlone(t *testing.T) {
-	bundle := catalog.Bundle()
+	bundle := specboot.Bundle()
 	server := &Server{bundle: bundle}
 	for _, id := range []string{"aws.guardduty", "aws.api.ecr", "aws.sns"} {
 		svc := bundle.ServiceByID(id)
@@ -617,7 +616,7 @@ func TestTheLongestEndpointPrefixWins(t *testing.T) {
 // model. A provider client sends none of that, so its own routing is untouched,
 // which the second half of this test holds.
 func TestAProviderPathGuessDoesNotTakeAnAddressedAWSService(t *testing.T) {
-	bundle := catalog.Bundle()
+	bundle := specboot.Bundle()
 	server := &Server{bundle: bundle}
 
 	signed := httptest.NewRequest(http.MethodGet, "/v1/apps", nil)

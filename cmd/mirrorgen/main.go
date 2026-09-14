@@ -17,14 +17,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/fusion"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/aws/smithy"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/gcp/discovery"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/openapi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specdiff"
 )
@@ -139,13 +140,22 @@ func loadBundle(ctx context.Context, specsDir string, forceCatalog bool) (model.
 func ingestSpecs(ctx context.Context, specsDir string) ([][]model.Service, int, error) {
 	// Order matters only in that each Detect is exclusive: Smithy documents
 	// declare `smithy`, Discovery declares `discoveryVersion`, OpenAPI declares
-	// `openapi`, and no document carries two.
-	recvs := []receiver.Receiver{smithy.Receiver{}, discovery.Receiver{}, openapi.Receiver{}}
+	// `openapi`, a GraphQL introspection result declares `__schema`, and no
+	// document carries two.
+	recvs := []receiver.Receiver{smithy.Receiver{}, discovery.Receiver{}, openapi.Receiver{}, graphql.Receiver{}}
 	var groups [][]model.Service
 	n := 0
 	if _, err := os.Stat(specsDir); err != nil {
 		return nil, 0, nil
 	}
+	// Where each url-sourced document came from. specs/urls.tsv has always
+	// known this and the model never recorded it: SourceRef carried the path
+	// and the hash, and `Repo` -- the field whose whole job is to say where a
+	// document came from -- was empty for every document mirror fetches rather
+	// than vendors. That is a hole in provenance for its own sake, and it is
+	// also the only place one format's endpoint can come from: a GraphQL
+	// introspection result does not carry the path it was served at.
+	sources := specURLs(specsDir)
 	// Absent or unreadable lock: fall back to the ID each model declares. That
 	// is correct for the index (which has no lock) and for the ~82% of services
 	// whose declared ID is already canonical.
@@ -174,7 +184,7 @@ func ingestSpecs(ctx context.Context, specsDir string) ([][]model.Service, int, 
 		// whole point: the lock pins the vendor's own bytes, so hashing a
 		// document we re-serialized would pin our serialization instead and an
 		// unannounced upstream change would stop being visible.
-		src := model.SourceRef{Path: rel, SHA256: sha256Hex(data)}
+		src := model.SourceRef{Repo: sources[filepath.ToSlash(rel)], Path: rel, SHA256: sha256Hex(data)}
 		// Detect is shown the head of the file, which for a vendor's own JSON
 		// is enough: such a document leads with `openapi` or `smithy`. A
 		// re-serialized one does not -- json.Marshal sorts keys -- so a YAML
@@ -256,11 +266,41 @@ func readBundle(path string) (model.Bundle, error) {
 type setEntry struct {
 	ID   string
 	Tier model.Tier
-	// Paths narrows a service to the operations whose URI begins with one of
-	// these prefixes, for the vendor that publishes one document per platform
-	// rather than one per service. Empty means the whole document, which is
-	// every service today. See narrow.go.
-	Paths []string
+	// Select narrows a service to some of its operations, for the vendor that
+	// publishes one document per platform rather than one per service: by URI
+	// prefix, or by operation name where every operation shares one endpoint.
+	// Empty means the whole document. See narrow.go.
+	Select selector
+}
+
+// specURLs reads specs/urls.tsv into a path-to-URL map. It is deliberately
+// forgiving: a malformed row is skipped rather than fatal, because this fills
+// provenance and derives a default, and neither is worth refusing to build
+// over. internal/check/urls_test.go is what holds the table to its format.
+func specURLs(specsDir string) map[string]string {
+	out := map[string]string{}
+	b, err := os.ReadFile(filepath.Join(specsDir, "urls.tsv"))
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 3 {
+			continue
+		}
+		path, url := strings.TrimSpace(fields[1]), strings.TrimSpace(fields[2])
+		// `authored` is the word urls.tsv uses for a document with no upstream.
+		// It is not a URL and must not be recorded as one.
+		if path == "" || url == "" || url == "authored" {
+			continue
+		}
+		out[path] = url
+	}
+	return out
 }
 
 func loadSet(path string) ([]setEntry, error) {
@@ -280,11 +320,11 @@ func loadSet(path string) ([]setEntry, error) {
 			e.Tier = model.Tier(fields[1])
 		}
 		if len(fields) > 2 {
-			paths, err := parseSelector(fields[2:])
+			sel, err := parseSelector(fields[2:])
 			if err != nil {
 				return nil, fmt.Errorf("%s: %s: %w", path, fields[0], err)
 			}
-			e.Paths = paths
+			e.Select = sel
 		}
 		out = append(out, e)
 	}
@@ -371,7 +411,7 @@ func emitAll(outDir string, svcs []model.Service) error {
 }
 
 func emitService(outDir string, svc model.Service) error {
-	provider, pkg := splitID(svc.ID)
+	provider, pkg := generated.ServicePath(svc.ID)
 	dir := filepath.Join(outDir, provider, pkg)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -391,39 +431,16 @@ func emitService(outDir string, svc model.Service) error {
 	if err := os.WriteFile(filepath.Join(dir, "model.json.gz"), gz, 0o644); err != nil {
 		return err
 	}
-	// Remove any uncompressed model left by an earlier generator so the tree
-	// never carries two sources of truth.
-	if err := os.Remove(filepath.Join(dir, "model.json")); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	goSrc := fmt.Sprintf(modelGoTmpl, pkg, pkg)
-	return os.WriteFile(filepath.Join(dir, "model.go"), []byte(goSrc), 0o644)
-}
-
-func splitID(id string) (provider, pkg string) {
-	provider, rest, ok := strings.Cut(id, ".")
-	if !ok {
-		provider, rest = "unknown", id
-	}
-	pkg = sanitizePkg(rest)
-	if pkg == "" {
-		pkg = "service"
-	}
-	return provider, pkg
-}
-
-func sanitizePkg(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
+	// Remove the artifacts earlier generators left so the tree never carries
+	// two sources of truth: an uncompressed model.json, or a per-service
+	// model.go wrapper -- the generic internal/generated registry (index.go)
+	// serves every model from the gzipped bytes.
+	for _, stale := range []string{"model.json", "model.go"} {
+		if err := os.Remove(filepath.Join(dir, stale)); err != nil && !os.IsNotExist(err) {
+			return err
 		}
 	}
-	out := b.String()
-	if out != "" && unicode.IsDigit(rune(out[0])) {
-		out = "s" + out
-	}
-	return out
+	return nil
 }
 
 func marshalService(svc model.Service) ([]byte, error) {
@@ -444,62 +461,6 @@ func sha256Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
-
-const modelGoTmpl = `// Code generated by mirrorgen; DO NOT EDIT.
-
-// Package %s is the lazily-parsed canonical model for this service.
-package %s
-
-import (
-	"bytes"
-	"compress/gzip"
-	_ "embed"
-	"encoding/json"
-	"io"
-	"sync"
-
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-)
-
-//go:embed model.json.gz
-var raw []byte
-
-var (
-	once sync.Once
-	svc  *model.Service
-)
-
-// Model returns the canonical service model, inflated and parsed once on
-// first use. Services that are never served cost only their compressed bytes.
-func Model() *model.Service {
-	once.Do(func() {
-		zr, err := gzip.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			panic("mirrorgen: " + err.Error())
-		}
-		defer zr.Close()
-		plain, err := io.ReadAll(zr)
-		if err != nil {
-			panic("mirrorgen: " + err.Error())
-		}
-		svc = new(model.Service)
-		if err := json.Unmarshal(plain, svc); err != nil {
-			panic("mirrorgen: " + err.Error())
-		}
-	})
-	return svc
-}
-
-// Operations returns operation names in model order.
-func Operations() []string {
-	m := Model()
-	out := make([]string, len(m.Operations))
-	for i, op := range m.Operations {
-		out[i] = op.Name
-	}
-	return out
-}
-`
 
 // runIndex walks a spec tree and reports every service it can ingest, one
 // `service-id<TAB>relative-path` pair per line, sorted. Ingestion errors on
@@ -593,7 +554,6 @@ import (
 	"io/fs"
 	"path"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -626,17 +586,8 @@ func Model(serviceID string) (*model.Service, error) {
 	if svc, ok := cached[serviceID]; ok {
 		return svc, nil
 	}
-	provider, rest, ok := strings.Cut(serviceID, ".")
-	if !ok {
-		return nil, fmt.Errorf("generated: %q has no provider prefix", serviceID)
-	}
-	var pkg strings.Builder
-	for _, r := range strings.ToLower(rest) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			pkg.WriteRune(r)
-		}
-	}
-	raw, err := files.ReadFile(path.Join(provider, pkg.String(), "model.json.gz"))
+	provider, pkg := ServicePath(serviceID)
+	raw, err := files.ReadFile(path.Join(provider, pkg, "model.json.gz"))
 	if err != nil {
 		return nil, fmt.Errorf("generated: no model for %s: %w", serviceID, err)
 	}

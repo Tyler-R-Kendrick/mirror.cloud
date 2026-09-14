@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"cel.dev/cel-go/cel"
+
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
@@ -33,6 +35,11 @@ func Validate(s *Service, svc *model.Service) error {
 	// actually in scope. An expression naming anything else fails to load,
 	// which turns a typo in behavior data into a build error rather than a
 	// request-time surprise.
+	// inspect, when set, sees every expression that compiles, so a check that
+	// needs the syntax rather than the source text can run over it. It is set
+	// for the length of one operation and cleared after, because what it checks
+	// -- which keys `fx` can hold -- is a property of that operation's effects.
+	var inspect func(pathStr string, ast *cel.Ast)
 	compilerFor := func(names ...string) func(string, string) {
 		env, err := envFor(names...)
 		if err != nil {
@@ -51,6 +58,9 @@ func Validate(s *Service, svc *model.Service) error {
 			if _, err := env.Program(ast); err != nil {
 				problems = append(problems, fmt.Errorf("%s: %s: %w", s.ServiceID, pathStr, err))
 				return
+			}
+			if inspect != nil {
+				inspect(pathStr, ast)
 			}
 			compiled.Programs[pathStr] = Program{Source: src}
 		}
@@ -214,11 +224,32 @@ func Validate(s *Service, svc *model.Service) error {
 		}
 		compile := compilerFor(scope...)
 
+		// `fx` is one binding holding a map, so every key type-checks and a key
+		// no effect binds fails at request time rather than here. The keys are
+		// knowable from the effects, so they are checked as each expression of
+		// this operation compiles.
+		fxk := fxKeys(op)
+		inspect = func(pathStr string, ast *cel.Ast) {
+			checkFxRefs(s.ServiceID, pathStr, ast, fxk, &problems)
+		}
+
 		for _, b := range sortedKeys(op.Reads) {
 			r := op.Reads[b]
-			if _, ok := s.Resources[r.Resource]; !ok {
+			res, ok := s.Resources[r.Resource]
+			if !ok {
 				problems = append(problems, fmt.Errorf("%s: %s.reads.%s: unknown resource %q",
 					s.ServiceID, where, b, r.Resource))
+			}
+			// A read with no key of its own asks the resource how it is
+			// addressed: a fixed singleton key, the request members that carry
+			// the ID, or a derivation. A resource declaring none of the three
+			// answers the EMPTY key for every request, so the read misses every
+			// record and the effects behind it quietly do nothing -- which is
+			// how a delete that deletes nothing reports success.
+			if ok && r.Key == "" && res.Singleton == "" && len(res.ID.InputMembers) == 0 && res.ID.Derive == "" {
+				problems = append(problems, fmt.Errorf(
+					"%s: %s.reads.%s: resource %q says nothing about how it is addressed, so this read resolves the empty key and can never find a record; give it resources.%s.id.input_members, a singleton, or a derive -- or a key of its own",
+					s.ServiceID, where, b, r.Resource, r.Resource))
 			}
 			compile(where+".reads."+b+".key", r.Key)
 		}
@@ -560,7 +591,7 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 		// one.
 		if !svc.ScalarBody(op.Output) {
 			*problems = append(*problems, fmt.Errorf(
-				"%s: %s: %q projects an opaque body but %s is a %s, not a string, a blob or a union of those",
+				"%s: %s: %q projects the body itself but %s is a %s, not a scalar, a blob or a union of those",
 				s.ServiceID, where, member, op.Output, shape.Kind))
 		}
 		return

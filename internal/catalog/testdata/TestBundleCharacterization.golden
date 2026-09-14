@@ -765,7 +765,19 @@
       "CreateDeployment",
       "GetDeployments",
       "GetDeployment",
-      "DeleteDeployment"
+      "DeleteDeployment",
+      "UpdateProject",
+      "EditProjectEnv",
+      "GetProjectDomain",
+      "UpdateProjectDomain",
+      "RemoveProjectDomain",
+      "VerifyProjectDomain",
+      "CreateCustomEnvironment",
+      "GetProjectsByIdOrNameCustomEnvironments",
+      "GetCustomEnvironment",
+      "UpdateCustomEnvironment",
+      "RemoveCustomEnvironment",
+      "RequestPromote"
     ]
   },
   {
@@ -931,7 +943,7 @@
   },
   {
     "ID": "railway.graphql",
-    "Protocol": "restJson1",
+    "Protocol": "graphql",
     "Ops": [
       "projectCreate",
       "projects",

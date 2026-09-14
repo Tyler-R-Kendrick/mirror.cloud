@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
@@ -51,6 +52,33 @@ type Pattern struct {
 	// matched on one would put an empty key into the request's input. No model
 	// carries one -- the fuzzer does, which is what it is for.
 	bad bool
+}
+
+// compiled memoizes Parse for patterns that come out of a model.
+//
+// Parsing is not expensive, and doing it per operation per request is: the
+// demux asks every non-AWS model whether it claims a path, which is several
+// hundred Parse calls on a fixed set of strings, and that measured at 300µs
+// against 327ns for a request the model places by target. A Pattern is
+// immutable once parsed and its fields are only read, so one copy serves every
+// goroutine.
+//
+// Keyed by the pattern string, so it is bounded by the models -- a few
+// thousand entries, built once. `Parse` itself stays uncached, because the
+// fuzzer calls it with arbitrary input and a cache on that path would grow
+// without limit.
+var compiled sync.Map // string -> Pattern
+
+// Compile is Parse for a pattern a model carries. Callers routing a request
+// over a whole bundle should use it; anything parsing caller-supplied text
+// should not.
+func Compile(uri string) Pattern {
+	if p, ok := compiled.Load(uri); ok {
+		return p.(Pattern)
+	}
+	p := Parse(uri)
+	compiled.Store(uri, p)
+	return p
 }
 
 // Parse reads one `httpUri` value. A pattern that binds nothing and constrains
@@ -111,6 +139,37 @@ func Parse(uri string) Pattern {
 // The path must be the escaped one -- net/url decodes `%2F` into a separator
 // on the way in, and a decoded path splits a single label into two segments.
 func (p Pattern) Match(path string, query url.Values) (map[string]string, bool) {
+	return p.match(SplitPath(path), query, true)
+}
+
+// SplitPath cuts an escaped path into the segments Match compares, so a caller
+// asking many patterns about one request can do it once.
+//
+// The demux asks every operation of every non-AWS model whether it claims a
+// path -- several hundred patterns for one request -- and splitting inside the
+// match meant splitting the same string that many times.
+func SplitPath(path string) []string {
+	var parts []string
+	for _, part := range strings.Split(strings.Trim(path, "/"), "/") {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+// Claims reports whether a pattern matches, without binding anything.
+//
+// It is Match's own body with the binding switched off, rather than a second
+// reading of the grammar, because two implementations of a matcher drift and
+// the drift is invisible: the router would keep answering while the thing that
+// decided WHICH router answered had stopped agreeing with it.
+func (p Pattern) Claims(parts []string, query url.Values) bool {
+	_, ok := p.match(parts, query, false)
+	return ok
+}
+
+func (p Pattern) match(parts []string, query url.Values, bind bool) (map[string]string, bool) {
 	if p.bad {
 		return nil, false
 	}
@@ -132,13 +191,10 @@ func (p Pattern) Match(path string, query url.Values) (map[string]string, bool) 
 			}
 		}
 	}
-	var parts []string
-	for _, part := range strings.Split(strings.Trim(path, "/"), "/") {
-		if part != "" {
-			parts = append(parts, part)
-		}
+	var bound map[string]string
+	if bind {
+		bound = map[string]string{}
 	}
-	bound := map[string]string{}
 	// The pattern and the path advance independently, because a greedy label
 	// consumes more than one segment.
 	at := 0
@@ -151,7 +207,9 @@ func (p Pattern) Match(path string, query url.Values) (map[string]string, bool) 
 			if take < 1 {
 				return nil, false
 			}
-			bound[seg.label] = strings.Join(parts[at:at+take], "/")
+			if bind {
+				bound[seg.label] = strings.Join(parts[at:at+take], "/")
+			}
 			at += take
 			continue
 		}
@@ -165,11 +223,13 @@ func (p Pattern) Match(path string, query url.Values) (map[string]string, bool) 
 			at++
 			continue
 		}
-		v, err := url.PathUnescape(parts[at])
-		if err != nil {
-			v = parts[at]
+		if bind {
+			v, err := url.PathUnescape(parts[at])
+			if err != nil {
+				v = parts[at]
+			}
+			bound[seg.label] = v
 		}
-		bound[seg.label] = v
 		at++
 	}
 	if at != len(parts) {
@@ -201,7 +261,7 @@ func Match(svc *model.Service, r *http.Request) (*model.Operation, map[string]st
 		if op.HTTP.URI == "" || !strings.EqualFold(op.HTTP.Method, r.Method) {
 			continue
 		}
-		p := Parse(op.HTTP.URI)
+		p := Compile(op.HTTP.URI)
 		bound, ok := p.Match(r.URL.EscapedPath(), query)
 		if !ok {
 			continue

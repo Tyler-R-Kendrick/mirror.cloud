@@ -13,7 +13,6 @@ import (
 	"io/fs"
 	"path"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -46,17 +45,8 @@ func Model(serviceID string) (*model.Service, error) {
 	if svc, ok := cached[serviceID]; ok {
 		return svc, nil
 	}
-	provider, rest, ok := strings.Cut(serviceID, ".")
-	if !ok {
-		return nil, fmt.Errorf("generated: %q has no provider prefix", serviceID)
-	}
-	var pkg strings.Builder
-	for _, r := range strings.ToLower(rest) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			pkg.WriteRune(r)
-		}
-	}
-	raw, err := files.ReadFile(path.Join(provider, pkg.String(), "model.json.gz"))
+	provider, pkg := ServicePath(serviceID)
+	raw, err := files.ReadFile(path.Join(provider, pkg, "model.json.gz"))
 	if err != nil {
 		return nil, fmt.Errorf("generated: no model for %s: %w", serviceID, err)
 	}

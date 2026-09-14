@@ -1,0 +1,365 @@
+{
+  "schema": "trace/1",
+  "service": "railway.graphql",
+  "source": "pack:internal/services/railway/graphql@a188c4d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Inputs are in the shape the schema declares -- projectCreate and serviceCreate take one argument named `input` -- which is what the GraphQL codec presents and what the engine validates against; the pack's own hydrate() flattened that argument before dispatch, so the first recording was pack-shaped and could not be replayed. Every expectation describes that pack, not the real Railway API; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "projectCreate",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BAD_USER_INPUT",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "projectCreate",
+      "input": {
+        "input": {
+          "name": "web"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "7c589129",
+        "name": "web"
+      }
+    },
+    {
+      "operation": "project",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "7c589129",
+        "name": "web"
+      }
+    },
+    {
+      "operation": "projects",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "edges": [
+          {
+            "node": {
+              "id": "7c589129",
+              "name": "web"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "serviceCreate",
+      "input": {
+        "input": {
+          "name": "api"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NOT_FOUND",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "serviceCreate",
+      "input": {
+        "input": {
+          "projectId": {
+            "$fromPath": "id",
+            "$fromStep": 1
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BAD_USER_INPUT",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "serviceCreate",
+      "input": {
+        "input": {
+          "name": "api",
+          "projectId": "nope"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NOT_FOUND",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "serviceCreate",
+      "input": {
+        "input": {
+          "name": "api",
+          "projectId": {
+            "$fromPath": "id",
+            "$fromStep": 1
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "5f59f223",
+        "name": "api",
+        "projectId": "7c589129"
+      }
+    },
+    {
+      "operation": "service",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "5f59f223",
+        "name": "api",
+        "projectId": "7c589129"
+      }
+    },
+    {
+      "operation": "serviceCreate",
+      "input": {
+        "input": {
+          "name": "api2",
+          "projectID": {
+            "$fromPath": "id",
+            "$fromStep": 1
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "9c8e2cb0",
+        "name": "api2",
+        "projectId": "7c589129"
+      }
+    },
+    {
+      "operation": "service",
+      "input": {
+        "id": "missing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NOT_FOUND",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "serviceDelete",
+      "input": {
+        "id": "missing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NOT_FOUND",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "serviceDelete",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 9
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_raw": true
+      }
+    },
+    {
+      "operation": "service",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 9
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NOT_FOUND",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "projectDelete",
+      "input": {
+        "id": "missing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NOT_FOUND",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "projectDelete",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_raw": true
+      }
+    },
+    {
+      "operation": "project",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NOT_FOUND",
+        "http_status": 200,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "projects",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "edges": []
+      }
+    }
+  ]
+}

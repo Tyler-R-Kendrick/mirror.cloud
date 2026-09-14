@@ -144,18 +144,8 @@ func TestGeneratedIDsAreCanonical(t *testing.T) {
 	dir := generatedRoot(t)
 	svcs := loadGenerated(t)
 	for id, svc := range svcs {
-		provider, rest, ok := strings.Cut(id, ".")
-		if !ok {
-			t.Errorf("service ID %q has no provider prefix", id)
-			continue
-		}
-		var pkg strings.Builder
-		for _, r := range strings.ToLower(rest) {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-				pkg.WriteRune(r)
-			}
-		}
-		want := filepath.Join(dir, provider, pkg.String(), "model.json.gz")
+		provider, pkg := generated.ServicePath(id)
+		want := filepath.Join(dir, provider, pkg, "model.json.gz")
 		if _, err := os.Stat(want); err != nil {
 			t.Errorf("%s: expected model at %s: %v", id, want, err)
 		}

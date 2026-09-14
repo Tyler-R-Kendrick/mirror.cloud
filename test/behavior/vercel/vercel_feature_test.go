@@ -152,4 +152,62 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("delete missing shape %#v", body)
 		}
 	})
+	t.Run("Given a project When updated and renamed Then the new name resolves and the old one does not", func(t *testing.T) {
+		code, upd, _ := call(http.MethodPatch, "/v9/projects/bdd-app", `{"framework":"astro"}`, "")
+		if code != 200 || upd["framework"] != "astro" || upd["name"] != "bdd-app" {
+			t.Fatalf("update %d %#v", code, upd)
+		}
+		code, ren, _ := call(http.MethodPatch, "/v9/projects/bdd-app", `{"name":"bdd-app2"}`, "")
+		if code != 200 || ren["name"] != "bdd-app2" || ren["framework"] != "astro" {
+			t.Fatalf("rename %d %#v", code, ren)
+		}
+		if code, body, _ := call(http.MethodGet, "/v9/projects/bdd-app", "", ""); code != 404 {
+			t.Fatalf("the old name still resolves %d %#v", code, body)
+		}
+		code, got, _ := call(http.MethodGet, "/v9/projects/bdd-app2", "", "")
+		if code != 200 || got["id"] != ren["id"] {
+			t.Fatalf("get by new name %d %#v", code, got)
+		}
+	})
+	t.Run("Given a custom environment When addressed by slug or id Then both answer", func(t *testing.T) {
+		code, cenv, _ := call(http.MethodPost, "/v9/projects/bdd-app2/custom-environments", `{"slug":"staging"}`, "")
+		if code != 201 || cenv["slug"] != "staging" {
+			t.Fatalf("create %d %#v", code, cenv)
+		}
+		code, bySlug, _ := call(http.MethodGet, "/v9/projects/bdd-app2/custom-environments/staging", "", "")
+		if code != 200 || bySlug["id"] != cenv["id"] {
+			t.Fatalf("by slug %d %#v", code, bySlug)
+		}
+		code, byID, _ := call(http.MethodGet, "/v9/projects/bdd-app2/custom-environments/"+cenv["id"].(string), "", "")
+		if code != 200 || byID["slug"] != "staging" {
+			t.Fatalf("by id %d %#v", code, byID)
+		}
+		code, _, _ = call(http.MethodDelete, "/v9/projects/bdd-app2/custom-environments/staging", "", "")
+		if code != 200 {
+			t.Fatalf("remove %d", code)
+		}
+		if code, body, _ := call(http.MethodGet, "/v9/projects/bdd-app2/custom-environments/staging", "", ""); code != 404 {
+			t.Fatalf("still there after remove %d %#v", code, body)
+		}
+	})
+	t.Run("Given a deployment When promoted Then 201 and an unknown one is not_found", func(t *testing.T) {
+		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-app2","project":"bdd-app2"}`, "")
+		if code != 200 {
+			t.Fatalf("deploy %d %#v", code, dpl)
+		}
+		code, prj, _ := call(http.MethodGet, "/v9/projects/bdd-app2", "", "")
+		if code != 200 {
+			t.Fatalf("get project %d %#v", code, prj)
+		}
+		promote := "/v10/projects/" + prj["id"].(string) + "/promote/"
+		code, body, _ := call(http.MethodPost, promote+dpl["id"].(string), "", "")
+		if code != 201 {
+			t.Fatalf("promote %d %#v", code, body)
+		}
+		code, body, hdr := call(http.MethodPost, promote+"dpl_nope", "", "")
+		errObj, _ := body["error"].(map[string]any)
+		if code != 404 || errObj["code"] != "not_found" || hdr.Get("x-amzn-errortype") != "" {
+			t.Fatalf("promote missing %d %#v %#v", code, hdr, body)
+		}
+	})
 }

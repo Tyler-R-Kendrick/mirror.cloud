@@ -3,13 +3,14 @@ package edge
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 )
 
 func TestDemuxQueryServiceAliases(t *testing.T) {
-	server := &Server{bundle: catalog.Bundle()}
+	server := &Server{bundle: specboot.Bundle()}
 	cases := []struct{ prefix, service string }{
 		{"s3-control", "aws.s3control"}, {"s3tables", "aws.s3tables"}, {"s3", "aws.s3"},
 		{"sts", "aws.sts"}, {"sns", "aws.sns"}, {"iam", "aws.iam"}, {"sqs", "aws.sqs"},
@@ -67,7 +68,7 @@ func TestDemuxQueryServiceAliases(t *testing.T) {
 }
 
 func TestDemuxTargetsAndPaths(t *testing.T) {
-	server := &Server{bundle: catalog.Bundle()}
+	server := &Server{bundle: specboot.Bundle()}
 	cases := []struct {
 		method, target, host, path, service string
 	}{
@@ -75,7 +76,7 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		{http.MethodPost, "DynamoDB_20120810.ListTables", "localhost", "/", "aws.dynamodb"},
 		{http.MethodGet, "", "bucket.s3.us-east-1.amazonaws.com", "/key", "aws.s3"},
 		{http.MethodGet, "", "localhost", "/storage/v1/b", "gcp.storage"},
-		{http.MethodGet, "", "localhost", "/v9/projects", "vercel.api"},
+		{http.MethodGet, "", "localhost", "/v10/projects", "vercel.api"},
 		{http.MethodGet, "", "api.vercel.com", "/v13/deployments", "vercel.api"},
 		{http.MethodPost, "", "id.kv.vercel-storage.com", "/", "vercel.kv"},
 		{http.MethodGet, "", "localhost", "/client/v4/accounts/a/storage/kv/namespaces", "cloudflare.api"},
@@ -112,10 +113,30 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 	if service := server.demux(unknown); service != nil {
 		t.Fatalf("unknown target demuxed to %s", service.ID)
 	}
+
+	// A version the document does not declare is not the service's path.
+	//
+	// `GET /v9/projects` used to reach vercel.api, because the predicate that
+	// answered for it asked whether a path looked like `/v<digit>/` and
+	// contained `projects`. Vercel's document lists the project list at
+	// `/v10/projects` and nothing at `/v9/projects`, so the old answer was to
+	// a request Vercel itself refuses -- the same error the deleted pack's
+	// route table made by stripping the version segment before matching, which
+	// the catalog already records as a deliberate break.
+	//
+	// This asserts the class rather than the instance: a path that differs
+	// from a declared one only in a version nobody declared belongs to no
+	// service, and a resolver reading the model cannot invent it.
+	for _, path := range []string{"/v9/projects", "/v1/droplets", "/v3/servers"} {
+		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil)
+		if svc := server.demux(req); svc != nil && !strings.HasPrefix(svc.ID, "aws.") {
+			t.Errorf("demux GET %s = %s; no non-AWS model declares that path", path, svc.ID)
+		}
+	}
 }
 
 func TestDemuxSQSQueueURLsWithQueryActions(t *testing.T) {
-	server := &Server{bundle: catalog.Bundle()}
+	server := &Server{bundle: specboot.Bundle()}
 	for _, path := range []string{"/000000000000/q", "/queue/eu-west-1/000000000000/q"} {
 		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path+"?Action=GetQueueAttributes", nil)
 		service := server.demux(req)
@@ -133,7 +154,7 @@ func TestDemuxSQSQueueURLsWithQueryActions(t *testing.T) {
 }
 
 func TestDemuxSNSConfirmationURL(t *testing.T) {
-	server := &Server{bundle: catalog.Bundle()}
+	server := &Server{bundle: specboot.Bundle()}
 	for _, topicARN := range []string{
 		"arn:aws:sns:us-east-1:123456789012:topic",
 		"arn:aws-us-gov:sns:us-gov-west-1:123456789012:topic",

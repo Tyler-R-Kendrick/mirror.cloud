@@ -55,5 +55,9 @@
     "gcp/gcs"
   ],
   "routing_mismatches": 0,
-  "routing_mismatch_services": null
+  "routing_mismatch_services": null,
+  "demux_guesses": 1,
+  "demux_guess_names": [
+    "azureRequest"
+  ]
 }

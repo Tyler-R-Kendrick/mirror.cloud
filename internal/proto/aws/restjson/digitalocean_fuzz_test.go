@@ -5,8 +5,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-
-	generateddo "github.com/tyler-r-kendrick/mirror.cloud/internal/generated/digitalocean/v2"
 )
 
 // FuzzDigitalOceanRoute drives routing over the generated model rather than
@@ -25,7 +23,7 @@ func FuzzDigitalOceanRoute(f *testing.F) {
 	f.Add("DELETE", "/v2/domains/ex.test")
 	f.Add("PATCH", "/v2/domains/ex.test/records/7")
 	f.Add("GET", "/v2/droplets/1/destroy_with_associated_resources/status")
-	do := generateddo.Model()
+	do := generatedModel(f, "digitalocean.v2")
 	f.Fuzz(func(t *testing.T, method, path string) {
 		if method == "" {
 			method = http.MethodGet

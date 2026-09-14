@@ -51,8 +51,8 @@
       "ref": "2026-09-12T02:44:35Z"
     },
     "railway.graphql": {
-      "source": "authored",
-      "ref": "2026-09-12T02:28:49Z"
+      "source": "https://backboard.railway.com/graphql/v2",
+      "ref": "2026-09-13T06:20:57Z"
     }
   },
   "files": [
@@ -1314,11 +1314,11 @@
     },
     {
       "serviceId": "railway.graphql",
-      "source": "authored",
-      "ref": "2026-09-12T02:28:49Z",
+      "source": "https://backboard.railway.com/graphql/v2",
+      "ref": "2026-09-13T06:20:57Z",
       "path": "railway/graphql.json",
-      "sha256": "01106ac44b0b149963f2b29a43640a0cb166b4f15616cc1f54b90bc96f866262",
-      "ingested": "2026-09-12T02:28:49Z"
+      "sha256": "3e69291aa94529fa50300af51f74979555fef57412e72c5d2c4fe31d9d6dd735",
+      "ingested": "2026-09-13T06:20:57Z"
     },
     {
       "serviceId": "vercel.api",

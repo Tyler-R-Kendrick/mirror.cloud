@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
@@ -40,12 +41,8 @@ func TestEmitRoundTrip(t *testing.T) {
 	if got.ID != "aws.s3" || len(got.Operations) == 0 {
 		t.Fatalf("got %+v", got)
 	}
-	goSrc, err := os.ReadFile(filepath.Join(dir, "aws", "s3", "model.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(goSrc)[:len("// Code generated")] != "// Code generated" {
-		t.Fatalf("header %s", goSrc[:40])
+	if _, err := os.Stat(filepath.Join(dir, "aws", "s3", "model.go")); !os.IsNotExist(err) {
+		t.Fatalf("per-service model.go should not be emitted: %v", err)
 	}
 
 	// Regenerating must produce identical bytes, including the gzip container:
@@ -64,16 +61,6 @@ func TestEmitRoundTrip(t *testing.T) {
 	}
 	if string(first) != string(second) {
 		t.Fatal("generation is not byte-idempotent")
-	}
-}
-
-func TestSanitizePkg(t *testing.T) {
-	if got := sanitizePkg("resource-groups-tagging-api"); got != "resourcegroupstaggingapi" {
-		t.Fatal(got)
-	}
-	p, pkg := splitID("gcp.storage")
-	if p != "gcp" || pkg != "storage" {
-		t.Fatalf("%s %s", p, pkg)
 	}
 }
 
@@ -157,14 +144,14 @@ func TestDiffFilteringAndEmission(t *testing.T) {
 	if err := emitAll(out, filtered); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "gcp", "keep", "model.go")); err != nil {
+	if _, err := os.Stat(filepath.Join(out, "gcp", "keep", "model.json.gz")); err != nil {
 		t.Fatal(err)
 	}
-	provider, pkg := splitID("123-service")
-	if provider != "unknown" || pkg != "s123service" {
-		t.Fatalf("split %q %q", provider, pkg)
+	provider, pkg := generated.ServicePath("123-service")
+	if provider != "unknown" || pkg != "123service" {
+		t.Fatalf("path %q %q", provider, pkg)
 	}
-	provider, pkg = splitID("aws.---")
+	provider, pkg = generated.ServicePath("aws.---")
 	if provider != "aws" || pkg != "service" {
 		t.Fatalf("empty package %q %q", provider, pkg)
 	}

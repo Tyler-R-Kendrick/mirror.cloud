@@ -8682,9 +8682,9 @@ var mutants = []mutant{
 	},
 	{
 		name: "mirrorgen-ignore-unknown-provider",
-		file: filepath.Join("cmd", "mirrorgen", "main.go"),
-		old:  `provider, rest = "unknown", id`,
-		new:  `provider, rest = "aws", id`,
+		file: filepath.Join("internal", "generated", "path.go"),
+		old:  `provider, rest = "unknown", serviceID`,
+		new:  `provider, rest = "aws", serviceID`,
 		pkg:  "./cmd/mirrorgen",
 		run:  "TestDiffFilteringAndEmission",
 	},
@@ -12098,7 +12098,7 @@ var mutants = []mutant{
 		// so the service that was addressed never gets asked.
 		name: "demux-let-a-provider-guess-take-an-addressed-aws-service",
 		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  "\tif !awsAddressed(r) || s.resolveByModel(r) == nil {",
+		old:  "\tif !awsAddressed(r) || byModel == nil {",
 		new:  "\tif true {",
 		pkg:  "./internal/edge",
 		run:  "TestAProviderPathGuessDoesNotTakeAnAddressedAWSService",
@@ -21605,15 +21605,54 @@ var mutants = []mutant{
 		run:  "TestBundlesMatchRecordedPacks",
 	},
 	{
-		// Two products on two hosts, and the KV host contains the REST API's
-		// name. Test this before the general one or every KV command routes to
-		// vercel.api, which serves no operation at `/` and answers 501.
-		name: "vercel-kv-host-falls-through",
-		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  "	if strings.Contains(host, \"vercel-storage\") {",
-		new:  "	if false {",
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerVercelAPI",
+		// A request that named no AWS service is placed from the non-AWS
+		// models only. Widen that and `/v1/apps` -- Fly's app list and AWS
+		// Pinpoint's GetApps -- is claimed by two models at once, which the
+		// resolver declines rather than guesses, so an unsigned Fly request
+		// reaches nothing. This is the collision C34 names, and the scoping is
+		// the whole reason path resolution could replace the predicates.
+		name: "provider-paths-answer-for-aws",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "	return ok && provider == \"aws\"",
+		new:  "	return ok && provider == \"\"",
+		pkg:  "./internal/edge",
+		run:  "TestAWSServicesAreNotAnsweredByProviderModels",
+	},
+	{
+		// The declared host is matched whole or as a subdomain, never as a
+		// substring. `Contains` is what the eight deleted predicates asked,
+		// and it answers for `api.vercel.com.example.invalid` -- a host in
+		// somebody else's domain.
+		name: "declared-host-matched-as-substring",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "	if host != declared && !strings.HasSuffix(host, \".\"+declared) {",
+		new:  "	if !strings.Contains(host, declared) {",
+		pkg:  "./internal/edge",
+		run:  "TestADeclaredHostIsMatchedWholeNotAsASubstring",
+	},
+	{
+		// The subdomain form is load-bearing rather than defensive: Vercel's
+		// KV document says deployments address a per-store subdomain of the
+		// host it declares, and KV's whole surface is `POST /`, so the host is
+		// the only thing that places it.
+		name: "declared-host-exact-only",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "	if host != declared && !strings.HasSuffix(host, \".\"+declared) {",
+		new:  "	if host != declared {",
+		pkg:  "./internal/edge",
+		run:  "TestDeclaredHostsPlaceTheirService",
+	},
+	{
+		// The hosts a specification declares reach the served model through
+		// adoptGenerated. Drop that one line and host resolution answers for
+		// nothing, while every test reading a generated model directly still
+		// passes -- which is why the test counts the hosts it found.
+		name: "adopted-model-drops-declared-hosts",
+		file: filepath.Join("internal", "specboot", "generated.go"),
+		old:  "		svc.Hosts = gen.Hosts",
+		new:  "		svc.Hosts = nil",
+		pkg:  "./internal/edge",
+		run:  "TestDeclaredHostsPlaceTheirService",
 	},
 	{
 		// KV's errors are a plain string, which is what its document declares
@@ -21842,63 +21881,103 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
-	// The six mutants that rewrote the Railway pack's empty-name,
-	// missing-project and missing-service branches are gone with the Go they
-	// rewrote, as Azure's and DigitalOcean's were. The behaviour is `require`
-	// rules in behavior/railway/graphql/service.yaml, and
-	// internal/bundled/railway_test.go asserts the same by invocation: an
-	// empty or absent name answers BAD_USER_INPUT/200, an unknown or deleted
-	// id answers NOT_FOUND/200, and a service create against a missing project
-	// answers NOT_FOUND/200.
+	// The six mutants that rewrote the Railway pack's empty-name, missing-project
+	// and missing-service branches are gone with the Go they rewrote, as Fly's,
+	// Hostinger's and Hetzner's were. The behaviour is `require` rules in
+	// behavior/railway/graphql/service.yaml, and the equivalence recording
+	// replays all eighteen steps -- every fault path among them -- against the
+	// bundle with none superseded.
 	//
-	// The response encoder branch they shared went too: its `_wrap`/`_list`
-	// envelope synthesized the {"data": ...} shape each operation's output now
-	// declares in the catalog, so the bundle projects `data` by name and the
-	// generic encoder serializes it. Only the fault envelope is still Go, and
-	// it is still mutated below.
+	// What the recording caught that no mutant had: the pack answered
+	// BAD_USER_INPUT for a projectCreate carrying no argument at all, because it
+	// had no notion of a required one, while the schema declares
+	// `projectCreate(input: ProjectCreateInput!)`. Enforcing the document and
+	// naming the error from the service -- `missing_input_error` -- satisfies
+	// both, where superseding the step would have recorded a disagreement the
+	// bundle did not actually have.
 	{
-		name: "railway-encode-aws-fault",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "if svc.ID == \"railway.graphql\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"errors\": []any{map[string]any{\"message\": f.Message, \"extensions\": map[string]any{\"code\": f.Code}}}})",
-		new:  "if false && svc.ID == \"railway.graphql\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"errors\": []any{map[string]any{\"message\": f.Message, \"extensions\": map[string]any{\"code\": f.Code}}}})",
-		pkg:  "./internal/proto/aws/restjson",
-		run:  "TestRESTJSON",
+		name: "graphql-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "graphql", "graphql.go"),
+		old:  "\treturn json.NewEncoder(w).Encode(map[string]any{\n\t\t\"errors\": []any{map[string]any{",
+		new:  "\treturn json.NewEncoder(w).Encode(map[string]any{\n\t\t\"__type\": []any{map[string]any{",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestEncodeFaultIsAGraphQLError",
 	},
-	// Railway's routing had neither an assertion nor a mutant until the scanner
+	// GraphQL routing had neither an assertion nor a mutant until the scanner
 	// replaced the substring switch: the document decided the operation, and
-	// nothing checked that it decided correctly. These two name the parts of
-	// the scan that a substring match does not have.
+	// nothing checked that it decided correctly. These name the parts of the
+	// scan that a substring match does not have.
 	{
-		name: "railway-route-ignore-alias",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "\t\tif i < n && q[i] == ':' {",
-		new:  "\t\tif false && i < n && q[i] == ':' {",
-		pkg:  "./internal/proto/aws/restjson",
+		name: "graphql-route-ignore-alias",
+		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
+		// Widened past the condition: three sites test for a colon -- an
+		// alias, an argument name, and an input-object field -- and the
+		// condition alone names all three, with the shallower one a substring
+		// of the deeper two. The body is what tells them apart.
+		old: "\tif s.i < s.n && s.q[s.i] == ':' {\n\t\ts.i++\n\t\ts.skip()\n\t\tif name = s.name(); name == \"\" {",
+		new: "\tif false && s.i < s.n && s.q[s.i] == ':' {\n\t\ts.i++\n\t\ts.skip()\n\t\tif name = s.name(); name == \"\" {",
+		pkg: "./internal/proto/graphql",
+		run: "TestGraphQLRootField",
+	},
+	{
+		name: "graphql-route-comment-opens-a-selection-set",
+		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
+		old:  "\t\tcase '#':\n\t\t\ts.skipComment()\n\t\tcase '(':",
+		new:  "\t\tcase '\\v':\n\t\t\ts.skipComment()\n\t\tcase '(':",
+		pkg:  "./internal/proto/graphql",
 		run:  "TestGraphQLRootField",
 	},
 	{
-		name: "railway-route-comment-opens-a-selection-set",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "\t\t\tcase '#':\n\t\t\t\tskipComment()\n\t\t\tcase '(':",
-		new:  "\t\t\tcase '\\v':\n\t\t\t\tskipComment()\n\t\t\tcase '(':",
-		pkg:  "./internal/proto/aws/restjson",
+		name: "graphql-route-ignore-fragment-spread",
+		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
+		old:  "\tif s.i+2 < s.n && s.q[s.i] == '.' && s.q[s.i+1] == '.' && s.q[s.i+2] == '.' {",
+		new:  "\tif false && s.i+2 < s.n && s.q[s.i] == '.' && s.q[s.i+1] == '.' && s.q[s.i+2] == '.' {",
+		pkg:  "./internal/proto/graphql",
 		run:  "TestGraphQLRootField",
 	},
 	{
-		name: "railway-route-ignore-fragment-spread",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "\t\tif i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {",
-		new:  "\t\tif false && i+2 < n && q[i] == '.' && q[i+1] == '.' && q[i+2] == '.' {",
-		pkg:  "./internal/proto/aws/restjson",
+		name: "graphql-route-read-comments-as-selection",
+		file: filepath.Join("internal", "proto", "graphql", "scan.go"),
+		old:  "\t\tcase c == '#':",
+		new:  "\t\tcase false:",
+		pkg:  "./internal/proto/graphql",
 		run:  "TestGraphQLRootField",
 	},
+	// Decode is where a GraphQL request stops being an envelope and becomes the
+	// arguments the model declares. Both halves of that are load-bearing: the
+	// variable a generated client sends the whole argument in, and the refusal
+	// of a document whose arguments cannot be read to the end.
 	{
-		name: "railway-route-read-comments-as-selection",
-		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  "\t\t\tcase c == '#':",
-		new:  "\t\t\tcase false:",
-		pkg:  "./internal/proto/aws/restjson",
-		run:  "TestGraphQLRootField",
+		name: "graphql-decode-ignore-variables",
+		file: filepath.Join("internal", "proto", "graphql", "graphql.go"),
+		old:  "\t\treturn vars[string(t)]",
+		new:  "\t\treturn string(t)",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestDecodePresentsArguments",
+	},
+	{
+		name: "graphql-decode-accept-partial-arguments",
+		file: filepath.Join("internal", "proto", "graphql", "graphql.go"),
+		old:  "\tif root.Bad {",
+		new:  "\tif false && root.Bad {",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestDecodeRefusesUnreadableArguments",
+	},
+	{
+		name: "graphql-encode-under-the-wrong-key",
+		file: filepath.Join("internal", "proto", "graphql", "graphql.go"),
+		old:  "map[string]any{\"data\": map[string]any{op.Name: answer}}",
+		new:  "map[string]any{\"data\": map[string]any{\"result\": answer}}",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestEncodePlacesTheAnswerUnderTheField",
+	},
+	{
+		name: "graphql-route-any-path",
+		file: filepath.Join("internal", "proto", "graphql", "endpoint.go"),
+		old:  "\treturn trimSlash(path(r)) == want",
+		new:  "\treturn strings.Contains(path(r), want)",
+		pkg:  "./internal/proto/graphql",
+		run:  "TestRouteRefusesAnotherPath",
 	},
 	// The six mutants that rewrote the Fly pack's empty-image, empty-name,
 	// duplicate-app, missing-app and missing-machine branches are gone with

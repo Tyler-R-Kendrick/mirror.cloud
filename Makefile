@@ -34,7 +34,6 @@ test-snapshot:
 	$(GO) test ./internal/services/aws/states -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/gcp/gcs -run 'Characterization$$' -count=1
 	$(GO) test ./internal/bundled -run 'TestAzureBlobCharacterization$$' -count=1
-	$(GO) test ./internal/bundled -run 'TestRailwayGraphQLCharacterization$$' -count=1
 
 test-chaos:
 	$(GO) test ./internal/chaos -count=1
@@ -43,7 +42,7 @@ test-bdd:
 	$(GO) test ./test/behavior/... ./test/terraform -count=1
 
 test-fuzz-seeds:
-	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/sqs ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml -count=1
+	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/sqs ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql -count=1
 
 test-fuzz:
 	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzDeframeAWSChunked$$' -fuzztime=10000x -parallel=4
@@ -172,8 +171,7 @@ test-fuzz:
 	$(GO) test ./internal/proto/aws/restxml -run '^$$' -fuzz '^FuzzAzureRoute$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/bundled -run '^$$' -fuzz '^FuzzBlobBytes$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzDigitalOceanRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzRailwayRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/bundled -run '^$$' -fuzz '^FuzzRailwayCreateBody$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./internal/proto/graphql -run '^$$' -fuzz '^FuzzCodec$$' -fuzztime=10000x -parallel=4
 
 # The timeout is set from measurement, not from hope. The suite runs every
 # mutant against the full pack surface, so its cost tracks the emulator's
@@ -257,10 +255,20 @@ generate:
 specs-sync:
 	bash scripts/specs-sync.sh
 
-# Moves the pins forward: AWS from its default branch, Google Discovery
-# refetched. Whatever changed upstream lands as a reviewable diff in the lock,
-# in specs/gcp/ and in the regenerated models -- which is how an unannounced
-# vendor change gets noticed, so it must be a deliberate act and never a side
-# effect of a build.
+# Moves the pins forward. Whatever changed upstream lands as a reviewable diff
+# in the lock, under specs/ and in the regenerated models -- which is how an
+# unannounced vendor change gets noticed, so it must be a deliberate act and
+# never a side effect of a build.
+#
+# SERVICE scopes it. `make specs-refresh SERVICE=railway.graphql` moves that one
+# pin and leaves every other document at its committed copy; SERVICE=aws moves
+# the AWS pin, which is one commit covering every aws.* service. Without it,
+# every pin moves.
+#
+# Scope it whenever the reason for the refresh is one service. Refreshing all of
+# them to pick up a single schema change also re-pinned AWS and rewrote
+# twenty-nine unrelated models into a pull request about one of them, and CI
+# agreed with all of it: the models were regenerated consistently, so every
+# check passed.
 specs-refresh:
-	SPECS_REFRESH=1 bash scripts/specs-sync.sh
+	SPECS_REFRESH=$(or $(SERVICE),1) bash scripts/specs-sync.sh

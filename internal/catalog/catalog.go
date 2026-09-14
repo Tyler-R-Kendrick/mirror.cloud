@@ -253,6 +253,18 @@ func Bundle() *model.Bundle {
 		op("GetDeployments", "GET", "/v7/deployments", 200, true),
 		op("GetDeployment", "GET", "/v13/deployments/{idOrUrl}", 200, true),
 		op("DeleteDeployment", "DELETE", "/v13/deployments/{id}", 200, false),
+		op("UpdateProject", "PATCH", "/v9/projects/{idOrName}", 200, false),
+		op("EditProjectEnv", "PATCH", "/v9/projects/{idOrName}/env/{id}", 200, false),
+		op("GetProjectDomain", "GET", "/v9/projects/{idOrName}/domains/{domain}", 200, true),
+		op("UpdateProjectDomain", "PATCH", "/v9/projects/{idOrName}/domains/{domain}", 200, false),
+		op("RemoveProjectDomain", "DELETE", "/v9/projects/{idOrName}/domains/{domain}", 200, false),
+		op("VerifyProjectDomain", "POST", "/v9/projects/{idOrName}/domains/{domain}/verify", 200, false),
+		op("CreateCustomEnvironment", "POST", "/v9/projects/{idOrName}/custom-environments", 201, false),
+		op("GetProjectsByIdOrNameCustomEnvironments", "GET", "/v9/projects/{idOrName}/custom-environments", 200, true),
+		op("GetCustomEnvironment", "GET", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, true),
+		op("UpdateCustomEnvironment", "PATCH", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, false),
+		op("RemoveCustomEnvironment", "DELETE", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, false),
+		op("RequestPromote", "POST", "/v10/projects/{projectId}/promote/{deploymentId}", 201, false),
 	}
 	// Vercel KV is the data plane -- Upstash Redis behind a Vercel host -- and
 	// its whole surface is one operation: POST / with the command as a JSON
@@ -613,89 +625,21 @@ func Bundle() *model.Bundle {
 		op("GetSshKey", "GET", "/v1/ssh_keys/{id}", 200, true),
 		op("DeleteSshKey", "DELETE", "/v1/ssh_keys/{id}", 204, false),
 	}
-	// Real bindings, not mk(): mk() binds every operation to POST /, and
-	// internal/conformance builds its request from this catalog. All seven
-	// operations share the one GraphQL endpoint; the codec routes by the query
-	// document. The output shapes declare the {"data": ...} envelope the pack's
-	// encoder used to synthesize, so the bundle projects it by name.
-	railwayOps := []model.Operation{
-		op("projectCreate", "POST", "/graphql/v2", 200, false),
-		op("projects", "POST", "/graphql/v2", 200, true),
-		op("project", "POST", "/graphql/v2", 200, true),
-		op("projectDelete", "POST", "/graphql/v2", 200, false),
-		op("serviceCreate", "POST", "/graphql/v2", 200, false),
-		op("service", "POST", "/graphql/v2", 200, true),
-		op("serviceDelete", "POST", "/graphql/v2", 200, false),
-	}
-	railwaySvc := svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", railwayOps)
-	railwaySvc.OperationByName("projectCreate").Output = "ProjectCreateResult"
-	railwaySvc.OperationByName("projects").Output = "ProjectsResult"
-	railwaySvc.OperationByName("project").Output = "ProjectResult"
-	railwaySvc.OperationByName("projectDelete").Output = "ProjectDeleteResult"
-	railwaySvc.OperationByName("serviceCreate").Output = "ServiceCreateResult"
-	railwaySvc.OperationByName("service").Output = "ServiceResult"
-	railwaySvc.OperationByName("serviceDelete").Output = "ServiceDeleteResult"
-	railwaySvc.Shapes = map[string]model.Shape{
-		"String":  {ID: "String", Kind: model.KindString},
-		"Boolean": {ID: "Boolean", Kind: model.KindBoolean},
-		"RailwayProject": {ID: "RailwayProject", Kind: model.KindStructure, Members: map[string]model.Member{
-			"id":   {Shape: "String"},
-			"name": {Shape: "String"},
-		}},
-		"RailwayService": {ID: "RailwayService", Kind: model.KindStructure, Members: map[string]model.Member{
-			"id":        {Shape: "String"},
-			"name":      {Shape: "String"},
-			"projectId": {Shape: "String"},
-		}},
-		"RailwayProjectEdge": {ID: "RailwayProjectEdge", Kind: model.KindStructure, Members: map[string]model.Member{
-			"node": {Shape: "RailwayProject"},
-		}},
-		"RailwayProjectEdgeList": {ID: "RailwayProjectEdgeList", Kind: model.KindList, Member: "RailwayProjectEdge"},
-		"RailwayProjectConnection": {ID: "RailwayProjectConnection", Kind: model.KindStructure, Members: map[string]model.Member{
-			"edges": {Shape: "RailwayProjectEdgeList"},
-		}},
-		"ProjectCreateResult": {ID: "ProjectCreateResult", Kind: model.KindStructure, Members: map[string]model.Member{
-			"data": {Shape: "ProjectCreateData"},
-		}},
-		"ProjectCreateData": {ID: "ProjectCreateData", Kind: model.KindStructure, Members: map[string]model.Member{
-			"projectCreate": {Shape: "RailwayProject"},
-		}},
-		"ProjectsResult": {ID: "ProjectsResult", Kind: model.KindStructure, Members: map[string]model.Member{
-			"data": {Shape: "ProjectsData"},
-		}},
-		"ProjectsData": {ID: "ProjectsData", Kind: model.KindStructure, Members: map[string]model.Member{
-			"projects": {Shape: "RailwayProjectConnection"},
-		}},
-		"ProjectResult": {ID: "ProjectResult", Kind: model.KindStructure, Members: map[string]model.Member{
-			"data": {Shape: "ProjectData"},
-		}},
-		"ProjectData": {ID: "ProjectData", Kind: model.KindStructure, Members: map[string]model.Member{
-			"project": {Shape: "RailwayProject"},
-		}},
-		"ProjectDeleteResult": {ID: "ProjectDeleteResult", Kind: model.KindStructure, Members: map[string]model.Member{
-			"data": {Shape: "ProjectDeleteData"},
-		}},
-		"ProjectDeleteData": {ID: "ProjectDeleteData", Kind: model.KindStructure, Members: map[string]model.Member{
-			"projectDelete": {Shape: "Boolean"},
-		}},
-		"ServiceCreateResult": {ID: "ServiceCreateResult", Kind: model.KindStructure, Members: map[string]model.Member{
-			"data": {Shape: "ServiceCreateData"},
-		}},
-		"ServiceCreateData": {ID: "ServiceCreateData", Kind: model.KindStructure, Members: map[string]model.Member{
-			"serviceCreate": {Shape: "RailwayService"},
-		}},
-		"ServiceResult": {ID: "ServiceResult", Kind: model.KindStructure, Members: map[string]model.Member{
-			"data": {Shape: "ServiceData"},
-		}},
-		"ServiceData": {ID: "ServiceData", Kind: model.KindStructure, Members: map[string]model.Member{
-			"service": {Shape: "RailwayService"},
-		}},
-		"ServiceDeleteResult": {ID: "ServiceDeleteResult", Kind: model.KindStructure, Members: map[string]model.Member{
-			"data": {Shape: "ServiceDeleteData"},
-		}},
-		"ServiceDeleteData": {ID: "ServiceDeleteData", Kind: model.KindStructure, Members: map[string]model.Member{
-			"serviceDelete": {Shape: "Boolean"},
-		}},
+	// Real bindings, not mk(): mk() binds every operation to POST "/", and a
+	// GraphQL service is served at ONE path that its schema's provenance
+	// recorded. The codec reads that path off the operations to know where the
+	// service answers, so binding them to "/" here says the service is served
+	// somewhere it is not.
+	railwayEndpoint := "/graphql/v2"
+	railway := []model.Operation{}
+	for _, n := range []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service", "serviceDelete"} {
+		// Which fields are readonly is named outright rather than derived from
+		// the spelling: GraphQL puts queries and mutations in separate types
+		// and says nothing through the name, and every prefix test here would
+		// read `projectCreate` as a `project` -- which is the substring bug
+		// this service's routing already had once.
+		readonly := n == "project" || n == "projects" || n == "service"
+		railway = append(railway, op(n, "POST", railwayEndpoint, 200, readonly))
 	}
 	// Real bindings, not mk(): mk() binds every operation to POST /, and
 	// internal/conformance builds its request from this catalog rather than
@@ -1775,7 +1719,7 @@ func Bundle() *model.Bundle {
 			tableSvc,
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", digitalocean),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", hetzner),
-			railwaySvc,
+			svc("railway.graphql", "railway", model.ProtoGraphQL, "", "", "", railway),
 			svc("fly.machines", "fly", model.ProtoRESTJSON1, "", "", "", fly),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),

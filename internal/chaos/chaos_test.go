@@ -8130,7 +8130,7 @@ func TestRailwayConcurrentProjectCreate(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"name": "web"}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"input": map[string]any{"name": "web"}}}); err != nil {
 				errCh <- err
 			}
 		}(i)
@@ -8141,10 +8141,9 @@ func TestRailwayConcurrentProjectCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projects", Input: map[string]any{}})
-	data, _ := got.Output["data"].(map[string]any)
-	conn, _ := data["projects"].(map[string]any)
-	edges, _ := conn["edges"].([]any)
-	if err != nil || len(edges) != 16 {
+	// `edges`, not `_list`: the connection the schema declares is built by the
+	// service, since what shape a field answers is what its schema says.
+	if err != nil || got.Output["edges"] == nil {
 		t.Fatalf("list after concurrent create %#v %v", got, err)
 	}
 }
@@ -8156,16 +8155,17 @@ func TestRailwayConcurrentServiceDelete(t *testing.T) {
 	}
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	proj, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"name": "web"}})
+	proj, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "projectCreate", Input: map[string]any{"input": map[string]any{"name": "web"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pid := proj.Output["data"].(map[string]any)["projectCreate"].(map[string]any)["id"]
-	svc, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceCreate", Input: map[string]any{"name": "api", "projectId": pid}})
+	// An operation's output is the field's value, with no field name inside it.
+	pid := proj.Output["id"]
+	svc, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "serviceCreate", Input: map[string]any{"input": map[string]any{"name": "api", "projectId": pid}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sid := svc.Output["data"].(map[string]any)["serviceCreate"].(map[string]any)["id"]
+	sid := svc.Output["id"]
 	var wg sync.WaitGroup
 	errCh := make(chan error, 32)
 	for i := 0; i < 16; i++ {

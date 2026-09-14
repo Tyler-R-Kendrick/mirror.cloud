@@ -26,6 +26,12 @@ const (
 	ProtoAWSQuery   Protocol = "awsQuery"
 	ProtoEC2Query   Protocol = "ec2Query"
 	ProtoGCPRESTSON Protocol = "gcpRestJson"
+	// ProtoGraphQL is one POST to one endpoint whose body carries a document
+	// naming the field to run. It is a protocol like the others and not a
+	// vendor's habit: the operation, its arguments and the response envelope
+	// are all specified by GraphQL itself, so a codec for it serves any
+	// service whose schema a receiver can read.
+	ProtoGraphQL Protocol = "graphql"
 )
 
 // Confidence records the evidentiary class of a model cell. Higher-precedence
@@ -76,9 +82,22 @@ type Service struct {
 	QueryVersion   string   // awsQuery/ec2Query Version parameter; "" otherwise
 	XMLNamespace   string   // restXml/awsQuery response xmlns; "" otherwise
 	Aliases        []string // alternate endpoint prefixes / host matches
-	Operations     []Operation
-	Shapes         map[string]Shape // shape ID -> shape
-	Source         SourceRef
+	// Hosts are the endpoint hosts the specification itself declares -- an
+	// OpenAPI document's `servers`, a Discovery document's `baseUrl`. They are
+	// how a request addressed the way a vendor's own client addresses it says
+	// which service it is for, and the reason to carry them is that the demux
+	// had to guess otherwise: eight hand-written predicates asking whether a
+	// host contained a vendor's name, each of which took an AWS service the
+	// first time the name was a common word.
+	// Omitted when empty so that adding this field leaves every model that
+	// declares no host byte-identical: a hundred and fifty changed files for a
+	// seven-service change hides the seven, and this repository has already
+	// landed a regeneration that rewrote twenty-nine models nobody was looking
+	// at.
+	Hosts      []string `json:",omitempty"`
+	Operations []Operation
+	Shapes     map[string]Shape // shape ID -> shape
+	Source     SourceRef
 }
 
 // Operation is one RPC or REST method on a Service.
@@ -213,8 +232,29 @@ func (s *Service) OperationByName(name string) *Operation {
 	return nil
 }
 
+// scalarKindBody is the set of kinds that can BE a body, shared by ScalarBody's
+// direct case and its union arm so the two cannot drift apart.
+//
+// A JSON body may be any JSON value, and a scalar-returning operation is not
+// hypothetical: GraphQL root fields return Boolean and Int directly --
+// Railway's projectDelete answers `true` and nothing else. Admitting only
+// strings and blobs made such an operation expressible as a Go pack and nothing
+// else, which is the state `_list` was added to escape for bare arrays; the
+// argument is the same one kind over. What is still refused is a structure, a
+// list or a map claiming to BE the body, because those have members and naming
+// one is how a reader finds them. An enum is a closed string set and a document
+// is "any JSON"; neither is claimed here, because neither has appeared as an
+// operation's whole response and guessing is what this predicate refuses.
+func scalarKindBody(k ShapeKind) bool {
+	switch k {
+	case KindString, KindBlob, KindBoolean, KindInteger, KindLong, KindFloat, KindDouble:
+		return true
+	}
+	return false
+}
+
 // ScalarBody reports whether a shape is an opaque body rather than a structure
-// to serialize: a string, a blob, or a union of nothing but those.
+// to serialize: a scalar, a blob, or a union of nothing but those.
 //
 // It is the difference between a payload that IS the bytes and a payload that
 // is the body's structure, and both spellings appear in the same models.
@@ -234,16 +274,16 @@ func (s *Service) ScalarBody(shapeID string) bool {
 	if !ok {
 		return false
 	}
-	switch shape.Kind {
-	case KindString, KindBlob:
+	if scalarKindBody(shape.Kind) {
 		return true
-	case KindUnion:
+	}
+	if shape.Kind == KindUnion {
 		if len(shape.Members) == 0 {
 			return false
 		}
 		for _, m := range shape.Members {
 			opt, ok := s.Shapes[m.Shape]
-			if !ok || (opt.Kind != KindString && opt.Kind != KindBlob) {
+			if !ok || !scalarKindBody(opt.Kind) {
 				return false
 			}
 		}

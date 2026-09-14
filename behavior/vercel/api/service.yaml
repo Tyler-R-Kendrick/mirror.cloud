@@ -36,12 +36,15 @@ resources:
       # this resolves; addressing by name goes through project_name below.
       input_members: [idOrName]
     record:
+      # Input-independent, because a write re-evaluates every member here:
+      # UpdateProject patches this resource, and `name`/`framework` read from
+      # `input` would answer the update's body (or fail on its absence) rather
+      # than the project's. Both live on the create effects instead, which is
+      # where the request that knows them runs.
       id: "'prj_' + id"
-      name: "string(input.name)"
       accountId: "identity.account"
       createdAt: "int(now) * 1000"
       updatedAt: "int(now) * 1000"
-      framework: "('framework' in input && input.framework != null) ? input.framework : null"
 
   # Project names are unique, and the pack enforced that with a second row in
   # the SAME collection keyed `name:<name>`, skipped when listing. It is a
@@ -69,18 +72,20 @@ resources:
       generate: { kind: hex, bytes: 10 }
       input_members: [id]
     record:
+      # Input-independent for the same reason the project's is: EditProjectEnv
+      # patches this resource, and `key`/`value`/`type`/`target` read from
+      # `input` would reset to their defaults on any edit that omits them.
+      # They live on the create effect instead.
       id: "'env_' + id"
-      key: "string(input.key)"
-      value: "('value' in input && input.value != null) ? string(input.value) : ''"
-      type: "('type' in input && input.type != null) ? string(input.type) : 'encrypted'"
-      target: >
-        ('target' in input && input.target != null) ? input.target
-          : ['production', 'preview', 'development']
 
   domain:
     collection: "vdom:{project.id}"
     parent: project
     id:
+      # `name` on the add, `domain` on the get/update/remove/verify: the two
+      # labels name the same record. input_members is tried first and an add
+      # carries no `domain`, so it still falls through to the derive.
+      input_members: [domain]
       derive: "('name' in input && input.name != null) ? string(input.name) : ''"
     record:
       name: id
@@ -97,6 +102,46 @@ resources:
       verified: "true"
       createdAt: "int(now) * 1000"
       updatedAt: "int(now) * 1000"
+
+  custom_environment:
+    collection: "vcenv:{project.id}"
+    parent: project
+    # Keyed on the record's id, as the project is: the document gives the id
+    # an env_ prefix, so the record member rather than the raw draw is the
+    # store key.
+    key: id
+    id:
+      # No `generate`, for the project's reason: the create draws the id as an
+      # effect because the slug index write needs the same one. Addressed by
+      # id directly or by slug through custom_environment_slug, the two
+      # spellings of the path label `environmentSlugOrId`.
+      input_members: [environmentSlugOrId]
+    record:
+      # Input-independent for the project's reason: UpdateCustomEnvironment
+      # patches this resource. `slug`, `description` and `branchMatcher` live
+      # on the create effect, whose request is the one that carries them.
+      id: "'env_' + id"
+      # The document declares the enum and nothing to set it from: a custom
+      # environment is preview-shaped (it exists to match branches), which is
+      # a judgment call and is recorded in `quirks`.
+      type: "'preview'"
+      createdAt: "int(now) * 1000"
+      updatedAt: "int(now) * 1000"
+
+  # Slugs are unique per project, the same shape of constraint as project
+  # names, so the same shape of index: a separate collection rather than a
+  # prefixed row the listing would have to know about.
+  custom_environment_slug:
+    collection: "vcenvslug:{project.id}"
+    parent: project
+    id:
+      # Total, for the project_name reason: a request carrying neither member
+      # must yield an empty key rather than an evaluation error. The label
+      # first, because get/update/remove name the environment that way and a
+      # create names it `slug`.
+      derive: >
+        ('environmentSlugOrId' in input && input.environmentSlugOrId != null) ? string(input.environmentSlugOrId)
+          : (('slug' in input && input.slug != null) ? string(input.slug) : '')
 
   deployment:
     collection: vdeploy
@@ -187,6 +232,11 @@ operations:
           key: "'prj_' + fx.pid"
           record:
             id: "'prj_' + fx.pid"
+            # `name` and `framework` live here rather than on the resource:
+            # the resource record must stay input-independent because
+            # UpdateProject's patch re-evaluates it.
+            name: "string(input.name)"
+            framework: "('framework' in input && input.framework != null) ? input.framework : null"
     output:
       id: rec.id
       name: rec.name
@@ -317,7 +367,18 @@ operations:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
       - { cond: "'key' in input && input.key != null && string(input.key) != ''", error: BadRequest, message: "Env key is required" }
     effects:
-      - create: { resource: env }
+      # `key`, `value`, `type` and `target` live here rather than on the
+      # resource: the resource record must stay input-independent because
+      # EditProjectEnv's patch re-evaluates it.
+      - create:
+          resource: env
+          record:
+            key: "string(input.key)"
+            value: "('value' in input && input.value != null) ? string(input.value) : ''"
+            type: "('type' in input && input.type != null) ? string(input.type) : 'encrypted'"
+            target: >
+              ('target' in input && input.target != null) ? input.target
+                : ['production', 'preview', 'development']
     output:
       # The document declares {created, failed} for this operation where the
       # pack answered the variable itself -- see the quirk.
@@ -444,6 +505,10 @@ operations:
           record:
             id: "'prj_' + fx.newproj"
             name: "('project' in input && input.project != null) ? string(input.project) : string(input.name)"
+            # A deployment create carries no framework; the member stays null,
+            # which is what the resource record answered for it before the
+            # member moved onto the creates.
+            framework: "null"
       - create:
           resource: deployment
           key: "'dpl_' + fx.depid"
@@ -492,6 +557,404 @@ operations:
     output:
       uid: dep.uid
       state: "'DELETED'"
+
+  # The twelve below have no pack behind them: the pack never served them, so
+  # there was nothing to transcribe. Each is written from the document alone
+  # -- its path, its declared response members, its status -- and keeps to the
+  # state the fourteen above establish. Where the document is thin the
+  # behavior is minimal and `quirks` says so.
+
+  UpdateProject:
+    reads:
+      # The same by_name-then-project pair every project-scoped operation
+      # here resolves: `idOrName` may be the key or the name the index holds.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      # A rename collides with whatever already holds the new name. The index
+      # derive would answer for `idOrName` rather than the new name, so the
+      # key is explicit.
+      taken:
+        resource: project_name
+        key: "('name' in input && input.name != null) ? string(input.name) : ''"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "!('name' in input) || input.name == null || string(input.name) != ''", error: BadRequest, message: "Project name is required" }
+      - { cond: "!taken_found || string(input.name) == string(proj.name)", error: Conflict, message: "A project with the same name already exists." }
+    effects:
+      # The old name is freed and the new one claimed only when the name
+      # actually moves; renaming to the current name is not a collision with
+      # itself. `id` in the patch's record is the key the read resolved --
+      # without the explicit member the resource record would prefix it a
+      # second time and the row would move.
+      - delete:
+          resource: project_name
+          key: "string(proj.name)"
+          when: "'name' in input && input.name != null && string(input.name) != string(proj.name)"
+      - put:
+          resource: project_name
+          key: "string(input.name)"
+          when: "'name' in input && input.name != null && string(input.name) != string(proj.name)"
+          record:
+            project: "string(proj.id)"
+      - patch:
+          resource: project
+          # Explicit key: the read resolved the id (possibly through the name
+          # index), and without this the write re-resolves from
+          # `input.idOrName` -- the NAME -- and merges against the wrong row.
+          key: "string(proj.id)"
+          record:
+            id: id
+            name: "('name' in input && input.name != null) ? string(input.name) : string(proj.name)"
+            framework: "('framework' in input) ? input.framework : proj.framework"
+    output:
+      id: rec.id
+      name: rec.name
+      accountId: rec.accountId
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      framework: rec.framework
+
+  EditProjectEnv:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      variable: { resource: env }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: variable_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "!('key' in input) || input.key == null || string(input.key) != ''", error: BadRequest, message: "Env key is required" }
+    effects:
+      # One patch, every member falling back to what the read found: a member
+      # the request did not carry keeps its value. `id` is explicit for the
+      # reason UpdateProject's is.
+      - patch:
+          resource: env
+          # Explicit key, as UpdateProject's: here `input.id` happens to be
+          # the store key already, but the write should address the record the
+          # operation read, not re-derive one from the request.
+          key: "string(variable.id)"
+          record:
+            id: id
+            key: "('key' in input && input.key != null) ? string(input.key) : string(variable.key)"
+            value: "('value' in input && input.value != null) ? string(input.value) : string(variable.value)"
+            type: "('type' in input && input.type != null) ? string(input.type) : string(variable.type)"
+            target: "('target' in input && input.target != null) ? input.target : variable.target"
+    output:
+      id: rec.id
+      key: rec.key
+      value: rec.value
+      type: rec.type
+      target: rec.target
+
+  GetProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      name: dom.name
+      apexName: dom.apexName
+      projectId: proj.id
+      verified: dom.verified
+      createdAt: dom.createdAt
+      updatedAt: dom.updatedAt
+      # The three an update can set are null until one does: the shape
+      # declares them optional, and an add does not establish them.
+      gitBranch: "('gitBranch' in dom) ? dom.gitBranch : null"
+      redirect: "('redirect' in dom) ? dom.redirect : null"
+      redirectStatusCode: "('redirectStatusCode' in dom) ? dom.redirectStatusCode : null"
+
+  UpdateProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      # The unconditional patch refreshes updatedAt and guarantees `rec` for
+      # the output; each conditional one stores a member only when the request
+      # carried it, so an absent member stays absent from the record rather
+      # than becoming null -- the same split CodeCommit's repository
+      # description needed.
+      - patch:
+          resource: domain
+          record:
+            updatedAt: "int(now) * 1000"
+      - patch:
+          resource: domain
+          when: "'gitBranch' in input"
+          record:
+            gitBranch: "input.gitBranch"
+      - patch:
+          resource: domain
+          when: "'redirect' in input"
+          record:
+            redirect: "input.redirect"
+      - patch:
+          resource: domain
+          when: "'redirectStatusCode' in input"
+          record:
+            redirectStatusCode: "input.redirectStatusCode"
+    output:
+      name: rec.name
+      apexName: rec.apexName
+      projectId: proj.id
+      verified: rec.verified
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      gitBranch: "('gitBranch' in rec) ? rec.gitBranch : null"
+      redirect: "('redirect' in rec) ? rec.redirect : null"
+      redirectStatusCode: "('redirectStatusCode' in rec) ? rec.redirectStatusCode : null"
+
+  RemoveProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - delete: { resource: domain }
+    # No output: the response shape declares no members. `removeRedirects` is
+    # accepted and read by nothing -- there are no redirects to remove.
+
+  VerifyProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+    # No effects: the domain is verified from creation, which is the add's
+    # quirk, so there is nothing for verify to move. It answers the domain.
+    output:
+      name: dom.name
+      apexName: dom.apexName
+      projectId: proj.id
+      verified: dom.verified
+      createdAt: dom.createdAt
+      updatedAt: dom.updatedAt
+      gitBranch: "('gitBranch' in dom) ? dom.gitBranch : null"
+      redirect: "('redirect' in dom) ? dom.redirect : null"
+      redirectStatusCode: "('redirectStatusCode' in dom) ? dom.redirectStatusCode : null"
+
+  CreateCustomEnvironment:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      taken: { resource: custom_environment_slug }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "'slug' in input && input.slug != null && string(input.slug) != ''", error: BadRequest, message: "Environment slug is required" }
+      - { cond: "!taken_found", error: Conflict, message: "A custom environment with the same slug already exists." }
+    effects:
+      # The id is drawn first, because both writes need the same one and
+      # neither can borrow it from the other -- the project's two-write
+      # pattern. The index is written first because every write rebinds `rec`
+      # and the output projects the environment from it.
+      - generate: { bind: eid, kind: hex, bytes: 10 }
+      - put:
+          resource: custom_environment_slug
+          record:
+            environment: "'env_' + fx.eid"
+      - create:
+          resource: custom_environment
+          key: "'env_' + fx.eid"
+          record:
+            id: "'env_' + fx.eid"
+            slug: "string(input.slug)"
+            # Both members are always written, so every record carries them
+            # and the listing is uniform; an update's fallback can rely on
+            # them being there.
+            description: "('description' in input && input.description != null) ? string(input.description) : ''"
+            branchMatcher: "('branchMatcher' in input && input.branchMatcher != null) ? input.branchMatcher : null"
+    output:
+      id: rec.id
+      slug: rec.slug
+      type: rec.type
+      description: rec.description
+      branchMatcher: rec.branchMatcher
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+
+  GetProjectsByIdOrNameCustomEnvironments:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    list: { resource: custom_environment, member: environments }
+    output:
+      # A fixed limit: the document declares the member's shape and no value
+      # for it -- see the quirk.
+      accountLimit: "{'total': 12}"
+
+  GetCustomEnvironment:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      # The by_slug-then-environment pair is the project's by_name pattern
+      # one level down: `environmentSlugOrId` may be the id or the slug the
+      # index holds.
+      by_slug: { resource: custom_environment_slug }
+      cenv:
+        resource: custom_environment
+        key: >
+          by_slug_found ? string(by_slug.environment)
+            : (('environmentSlugOrId' in input && input.environmentSlugOrId != null) ? string(input.environmentSlugOrId) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: cenv_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      id: cenv.id
+      slug: cenv.slug
+      type: cenv.type
+      description: cenv.description
+      branchMatcher: cenv.branchMatcher
+      createdAt: cenv.createdAt
+      updatedAt: cenv.updatedAt
+
+  UpdateCustomEnvironment:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      by_slug: { resource: custom_environment_slug }
+      cenv:
+        resource: custom_environment
+        key: >
+          by_slug_found ? string(by_slug.environment)
+            : (('environmentSlugOrId' in input && input.environmentSlugOrId != null) ? string(input.environmentSlugOrId) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: cenv_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      # One patch, both members falling back to what the read found; the
+      # create writes both unconditionally, so the fallback keys are always
+      # there. `id` is explicit for UpdateProject's reason.
+      - patch:
+          resource: custom_environment
+          # Explicit key: addressed by slug, the write would otherwise
+          # re-resolve from `input.environmentSlugOrId` -- the SLUG -- and
+          # merge against an empty row, losing every member it does not set.
+          key: "string(cenv.id)"
+          record:
+            id: id
+            description: "('description' in input && input.description != null) ? string(input.description) : string(cenv.description)"
+            branchMatcher: "('branchMatcher' in input && input.branchMatcher != null) ? input.branchMatcher : cenv.branchMatcher"
+    output:
+      id: rec.id
+      slug: rec.slug
+      type: rec.type
+      description: rec.description
+      branchMatcher: rec.branchMatcher
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+
+  RemoveCustomEnvironment:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      by_slug: { resource: custom_environment_slug }
+      cenv:
+        resource: custom_environment
+        key: >
+          by_slug_found ? string(by_slug.environment)
+            : (('environmentSlugOrId' in input && input.environmentSlugOrId != null) ? string(input.environmentSlugOrId) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: cenv_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - delete: { resource: custom_environment }
+      # Keyed off the stored record, not the request: a remove may address the
+      # environment by id and never carry its slug.
+      - delete:
+          resource: custom_environment_slug
+          key: "string(cenv.slug)"
+          missing: ignore
+    # The document answers the removed environment, so this does too.
+    # `deleteUnassignedEnvironmentVariables` is accepted and read by nothing.
+    output:
+      id: cenv.id
+      slug: cenv.slug
+      type: cenv.type
+      description: cenv.description
+      branchMatcher: cenv.branchMatcher
+      createdAt: cenv.createdAt
+      updatedAt: cenv.updatedAt
+
+  RequestPromote:
+    reads:
+      # The label is spelled `projectId`, which the name index's derive does
+      # not know, so the key is explicit; addressing by name still works
+      # through the index, as it does everywhere else here.
+      by_name:
+        resource: project_name
+        key: "('projectId' in input && input.projectId != null) ? string(input.projectId) : ''"
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('projectId' in input && input.projectId != null) ? string(input.projectId) : '')
+      dep:
+        resource: deployment
+        key: "('deploymentId' in input && input.deploymentId != null) ? string(input.deploymentId) : ''"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    # No effects and no output: the document declares an empty 201, and a
+    # promote moves no state a client of this surface can read back -- see the
+    # quirk.
 
 quirks:
   - operation: GetProjects
@@ -543,3 +1006,51 @@ quirks:
 
       The deployment is READY immediately. There is no build, so a client that
       waits for readyState to advance is already done.
+  - operation: UpdateProject
+    note: >
+      The document's update shape declares some fifty members; the bundle
+      tracks only the ones its create establishes -- name and framework -- so
+      an update carrying buildCommand, rootDirectory or the rest is accepted
+      and dropped. No pack ever served this operation, so there is no
+      transcription to outrank; the document declares the members and says
+      nothing about which an update must honor.
+  - operation: EditProjectEnv
+    note: >
+      `comment`, `gitBranch` and `customEnvironmentIds` are accepted and
+      dropped: the variable record carries only what CreateProjectEnv
+      establishes (key, value, type, target), and the document declares the
+      members without saying what an edit must do with them.
+  - operation: UpdateProjectDomain
+    note: >
+      The document declares a 409 for this operation without saying what
+      produces it -- redirect targets and git branches are stored verbatim,
+      so the conflict is never answered. Simplified deliberately: the shape
+      of the disagreement is known (a declared status with no declared
+      trigger), which a probe run can overturn.
+  - operation: VerifyProjectDomain
+    note: >
+      Answers the domain, which is already verified: true from creation --
+      the add's quirk -- so verify moves nothing. A real verify is a DNS
+      round trip that can fail; this one cannot, which follows from the
+      creation behavior rather than being a second invention.
+  - operation: CreateCustomEnvironment
+    note: >
+      The body's `slug` and the team-slug query share one member name in the
+      narrowed model; the body value is what arrives. `type` is answered
+      "preview" for every custom environment: the document declares the enum
+      and nothing to set it from, and a custom environment exists to match
+      branches, which is the preview kind. Both are judgment calls a probe
+      run can overturn.
+  - operation: GetProjectsByIdOrNameCustomEnvironments
+    note: >
+      accountLimit.total is a fixed 12. The document declares the member --
+      "the maximum number of custom environments allowed either by the team's
+      plan type or a custom override" -- and no value for it, and no pack
+      ever answered one. The create does not enforce it either.
+  - operation: RequestPromote
+    note: >
+      A promote changes no stored state: the document declares an empty 201
+      and this surface has no member that records which deployment is
+      promoted, so a later GetDeployment reads exactly as it did before. The
+      404s for an unknown project or deployment are the bundle's own rule,
+      the document declaring its usual error statuses without bodies.

@@ -146,6 +146,13 @@ type sibling struct {
 	Summary  string `json:"summary"`
 	Readonly bool   `json:"readonly"`
 	Code     int    `json:"code"`
+	// Input is `x-mirror-input` on a sibling: request members the router
+	// places for THIS operation, declared for the same reason as the parent
+	// operation's own list. A sibling sharing one binding with operations
+	// that take different members -- one PUT carrying Put Block's blockid
+	// and Set Container Metadata's metadata alike -- cannot borrow the
+	// parent's request shape, so it names its own members here.
+	Input []string `json:"x-mirror-input"`
 }
 
 type mediaType struct {
@@ -291,10 +298,16 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 				if sib.Code != 0 {
 					HTTP.Code = sib.Code
 				}
+				sibInput := input
+				if len(sib.Input) > 0 {
+					sibInput = sib.Name + "Request"
+					sh.shapes[sibInput] = model.Shape{ID: sibInput, Kind: model.KindStructure, Members: map[string]model.Member{}}
+					sh.synthesize(sibInput, sib.Input)
+				}
 				svc.Operations = append(svc.Operations, model.Operation{
 					Name:       sib.Name,
 					HTTP:       HTTP,
-					Input:      input,
+					Input:      sibInput,
 					Output:     strings.TrimPrefix(sib.Response, componentSchemas),
 					Readonly:   sib.Readonly,
 					Confidence: model.ConfDeclared,

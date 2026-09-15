@@ -27,11 +27,6 @@
       "test": "TestRatchetBaselineMatchesTree",
       "package": "./internal/check",
       "why": "The other half of the same statement: ratchet.json is deliberately stale relative to the tree, for exactly as long as TestRatchetNotExceeded is red. It compares packs, case_labels, services_loc and fault_sites for EQUALITY, so it stays red until the tree is brought down to the baseline -- not until azure/blobs is deleted, which moves only packs. See that entry for the measured breakdown of what is left after it goes."
-    },
-    {
-      "test": "TestEveryServedServiceIsDescribedByASpecification",
-      "package": "./internal/specboot",
-      "why": "Red for ONE service: azure.blobs, the hand-written pack still to be extracted. The other three served without a generated model (aws.elastictranscoder, aws.lookoutmetrics, aws.qldb) do not make it red -- the test allows exactly the services specs/aws-dirs.json records in its \"unavailable\" map, which it now reads rather than transcribes. AWS publishes no model for those three in api-models-aws at all, so there is nothing for a receiver to ingest and no work that makes them go away; this entry used to say the receiver could not ingest them, which sent a reader after a bug that does not exist. Goes green when azure.blobs is extracted, and not before. It was five services until railway.graphql got a model of its own -- a GraphQL receiver, its schema fetched by POSTing an introspection query and pinned like any other vendored document. The count may only fall."
     }
   ]
 }

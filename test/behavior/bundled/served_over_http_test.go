@@ -63,6 +63,14 @@ func reachable(ir *bir.Service, svc *model.Service) (model.Operation, bool) {
 		if _, served := ir.Operations[op.Name]; !served {
 			continue
 		}
+		// `/` is what the model carries for an operation addressed some other
+		// way -- Azure's, by host and query parameter. A request built from
+		// the model alone cannot supply the discriminator, the same case as
+		// the shared binding below, so it joins that skip class rather than
+		// asking the codec for an operation it cannot name.
+		if op.HTTP.URI == "" || op.HTTP.URI == "/" {
+			continue
+		}
 		if shared[op.HTTP.Method+" "+op.HTTP.URI] > 1 {
 			continue
 		}

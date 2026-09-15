@@ -342,7 +342,15 @@ func (s *Server) serviceByPath(r *http.Request) *model.Service {
 	var found *model.Service
 	for i := range s.bundle.Services {
 		svc := &s.bundle.Services[i]
-		if awsProvider(svc.ID) {
+		// Azure is out alongside AWS, for the mirror-image reason: AWS says
+		// which service it means in the credential scope, and Azure says it in
+		// the host and the query (`restype=container`, `comp=block`) -- never
+		// in a path its operations own. Its one distinctive path shape,
+		// `/{container}/{blob}`, is every two-segment path in the bundle, so
+		// its models would claim half of them and tie with the rest. Its
+		// requests are placed by the declared hosts and by the one predicate
+		// the demux still keeps for exactly this.
+		if awsProvider(svc.ID) || azureProvider(svc.ID) {
 			continue
 		}
 		if !matchesSomePath(svc, r.Method, parts, query) {
@@ -394,4 +402,13 @@ func matchesSomePath(svc *model.Service, method string, parts []string, query ur
 func awsProvider(id string) bool {
 	provider, _, ok := strings.Cut(id, ".")
 	return ok && provider == "aws"
+}
+
+// azureProvider reads the provider off the id the same way awsProvider does.
+// It exists for path resolution, where Azure's models must not take part, and
+// it is deliberately not named after the provider-plus-Request/Service shape
+// MeasureDemuxGuesses counts.
+func azureProvider(id string) bool {
+	provider, _, ok := strings.Cut(id, ".")
+	return ok && provider == "azure"
 }

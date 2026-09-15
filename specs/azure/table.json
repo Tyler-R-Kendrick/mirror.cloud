@@ -8,44 +8,11 @@
   "x-mirror-endpoint-prefix": "table",
   "servers": [
     {
-      "url": "https://core.windows.net"
+      "url": "https://table.core.windows.net"
     }
   ],
   "paths": {
-    "/Tables": {
-      "post": {
-        "operationId": "CreateTable",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Table"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "table"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "TableName": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
+    "/": {
       "get": {
         "operationId": "ListTables",
         "responses": {
@@ -59,100 +26,28 @@
               }
             }
           }
-        }
-      }
-    },
-    "/Tables('{table}')": {
-      "delete": {
-        "operationId": "DeleteTable",
-        "responses": {
-          "204": {
-            "description": "The request succeeded."
-          }
         },
-        "x-mirror-input": [
-          "table"
-        ]
-      }
-    },
-    "/{table}": {
-      "post": {
-        "operationId": "InsertEntity",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntityResult"
-                }
-              }
-            }
+        "x-mirror-operations": [
+          {
+            "name": "QueryEntities",
+            "response": "#/components/schemas/EntityList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "table"
+            ]
+          },
+          {
+            "name": "GetEntity",
+            "response": "#/components/schemas/EntityResult",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "table",
+              "PartitionKey",
+              "RowKey"
+            ]
           }
-        },
-        "x-mirror-input": [
-          "table",
-          "__entity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "PartitionKey": {
-                    "type": "string"
-                  },
-                  "RowKey": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/{table}()": {
-      "get": {
-        "operationId": "QueryEntities",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntityList"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "table"
-        ]
-      }
-    },
-    "/{table}(PartitionKey='{PartitionKey}',RowKey='{RowKey}')": {
-      "get": {
-        "operationId": "GetEntity",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntityResult"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "table",
-          "PartitionKey",
-          "RowKey"
         ]
       },
       "put": {
@@ -194,6 +89,59 @@
           }
         }
       },
+      "post": {
+        "operationId": "SubmitBatch",
+        "responses": {
+          "202": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-operations": [
+          {
+            "name": "CreateTable",
+            "response": "#/components/schemas/Table",
+            "code": 201,
+            "x-mirror-input": [
+              "table",
+              "TableName"
+            ]
+          },
+          {
+            "name": "InsertEntity",
+            "response": "#/components/schemas/EntityResult",
+            "code": 201,
+            "x-mirror-input": [
+              "table",
+              "__entity",
+              "PartitionKey",
+              "RowKey"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "DeleteTable",
+        "responses": {
+          "204": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "table"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "DeleteEntity",
+            "response": "#/components/schemas/Empty",
+            "code": 204,
+            "x-mirror-input": [
+              "table",
+              "PartitionKey",
+              "RowKey"
+            ]
+          }
+        ]
+      },
       "patch": {
         "operationId": "MergeEntity",
         "responses": {
@@ -230,29 +178,6 @@
                 }
               }
             }
-          }
-        }
-      },
-      "delete": {
-        "operationId": "DeleteEntity",
-        "responses": {
-          "204": {
-            "description": "The request succeeded."
-          }
-        },
-        "x-mirror-input": [
-          "table",
-          "PartitionKey",
-          "RowKey"
-        ]
-      }
-    },
-    "/$batch": {
-      "post": {
-        "operationId": "SubmitBatch",
-        "responses": {
-          "202": {
-            "description": "The request succeeded."
           }
         }
       }
@@ -310,6 +235,10 @@
             "$ref": "#/components/schemas/String"
           }
         }
+      },
+      "Empty": {
+        "type": "object",
+        "properties": {}
       }
     }
   }

@@ -8,481 +8,147 @@
   "x-mirror-protocol": "restXml",
   "servers": [
     {
-      "url": "https://core.windows.net"
+      "url": "https://blob.core.windows.net"
     }
   ],
   "paths": {
-    "/{container}?restype=container": {
-      "put": {
-        "operationId": "CreateContainer",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      },
+    "/": {
       "get": {
-        "operationId": "GetContainer",
+        "operationId": "FilterBlobs",
         "responses": {
           "200": {
             "description": "The request succeeded.",
             "content": {
               "application/xml": {
                 "schema": {
-                  "$ref": "#/components/schemas/Container"
+                  "$ref": "#/components/schemas/FilterBlobResult"
                 }
               }
             }
           }
         },
-        "x-mirror-input": [
-          "container"
-        ]
-      },
-      "delete": {
-        "operationId": "DeleteContainer",
-        "responses": {
-          "202": {
-            "description": "The request succeeded."
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/?comp=list": {
-      "get": {
-        "operationId": "ListContainers",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContainerList"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/{container}/{blob}": {
-      "put": {
-        "operationId": "PutBlob",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ],
         "x-mirror-operations": [
           {
-            "name": "CreatePageBlob",
-            "response": "#/components/schemas/Blob"
+            "name": "ListContainers",
+            "response": "#/components/schemas/ContainerList",
+            "code": 200,
+            "readonly": true
           },
           {
-            "name": "CreateAppendBlob",
-            "response": "#/components/schemas/Blob"
+            "name": "GetAccountInfo",
+            "response": "#/components/schemas/Account",
+            "code": 200,
+            "readonly": true
           },
           {
-            "name": "StartCopyFromURL",
+            "name": "GetServiceProperties",
+            "response": "#/components/schemas/Account",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetServiceStats",
+            "response": "#/components/schemas/Account",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetBlob",
+            "response": "#/components/schemas/BlobBody",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetBlockList",
+            "response": "#/components/schemas/BlockList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetBlobMetadata",
             "response": "#/components/schemas/Blob",
-            "code": 202
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
           },
           {
-            "name": "CopyBlobFromURL",
+            "name": "GetPageRanges",
+            "response": "#/components/schemas/PageRangeList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetPageRangesDiff",
+            "response": "#/components/schemas/PageRangeList",
+            "readonly": true,
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetTags",
             "response": "#/components/schemas/Blob",
-            "code": 202
-          }
-        ]
-      },
-      "get": {
-        "operationId": "GetBlob",
-        "responses": {
-          "200": {
-            "description": "The blob's stored bytes, with its content type.",
-            "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "$ref": "#/components/schemas/BlobBody"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      },
-      "delete": {
-        "operationId": "DeleteBlob",
-        "responses": {
-          "202": {
-            "description": "The request succeeded."
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      },
-      "head": {
-        "operationId": "GetBlobProperties",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}?restype=container&comp=list": {
-      "get": {
-        "operationId": "ListBlobs",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/BlobList"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=block": {
-      "put": {
-        "operationId": "PutBlock",
-        "responses": {
-          "201": {
-            "description": "The request succeeded."
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob",
-          "blockid"
-        ],
-        "x-mirror-operations": [
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
           {
-            "name": "StageBlockFromURL",
-            "response": "#/components/schemas/Blob"
-          }
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=blocklist": {
-      "put": {
-        "operationId": "PutBlockList",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      },
-      "get": {
-        "operationId": "GetBlockList",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/BlockList"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=appendblock": {
-      "put": {
-        "operationId": "AppendBlock",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ],
-        "x-mirror-operations": [
+            "name": "GetContainer",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
           {
-            "name": "AppendBlockFromURL",
-            "response": "#/components/schemas/Blob"
+            "name": "GetContainerAcl",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "ListBlobs",
+            "response": "#/components/schemas/BlobList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "GetContainerMetadata",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container"
+            ]
           }
         ]
-      }
-    },
-    "/{container}/{blob}?comp=unsupported": {
-      "put": {
-        "operationId": "UnsupportedQuery",
-        "responses": {
-          "400": {
-            "description": "The query parameter is not supported."
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ],
-        "description": "The route for a `comp` the service does not implement. The behavior bundle always faults it with InvalidQueryParameterValue, so the recorded 400 is what the fault path answers; no request reaches a success status here."
-      }
-    },
-    "/{container}?restype=container&comp=metadata": {
-      "put": {
-        "operationId": "SetContainerMetadata",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      },
-      "get": {
-        "operationId": "GetContainerMetadata",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/{container}?restype=container&comp=acl": {
-      "put": {
-        "operationId": "SetContainerAcl",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      },
-      "get": {
-        "operationId": "GetContainerAcl",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/{container}?comp=lease&restype=container&acquire": {
-      "put": {
-        "operationId": "AcquireContainerLease",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/{container}?comp=lease&restype=container&release": {
-      "put": {
-        "operationId": "ReleaseContainerLease",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/{container}?comp=lease&restype=container&renew": {
-      "put": {
-        "operationId": "RenewContainerLease",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/{container}?comp=lease&restype=container&break": {
-      "put": {
-        "operationId": "BreakContainerLease",
-        "responses": {
-          "202": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/{container}?comp=lease&restype=container&change": {
-      "put": {
-        "operationId": "ChangeContainerLease",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Container"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container"
-        ]
-      }
-    },
-    "/?restype=service&comp=properties": {
-      "get": {
-        "operationId": "GetServiceProperties",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Account"
-                }
-              }
-            }
-          }
-        }
       },
       "put": {
         "operationId": "SetServiceProperties",
@@ -497,266 +163,319 @@
               }
             }
           }
-        }
-      }
-    },
-    "/?restype=service&comp=stats": {
-      "get": {
-        "operationId": "GetServiceStats",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Account"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/?restype=account&comp=properties": {
-      "get": {
-        "operationId": "GetAccountInfo",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Account"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/{container}/{blob}?comp=metadata": {
-      "put": {
-        "operationId": "SetBlobMetadata",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
         },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      },
-      "get": {
-        "operationId": "GetBlobMetadata",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=properties": {
-      "put": {
-        "operationId": "SetBlobProperties",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ],
         "x-mirror-operations": [
           {
-            "name": "ResizePageBlob",
-            "response": "#/components/schemas/Blob"
+            "name": "PutBlob",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
           },
           {
-            "name": "SetBlobSequenceNumber",
-            "response": "#/components/schemas/Blob"
-          }
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=page": {
-      "put": {
-        "operationId": "PutPage",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ],
-        "x-mirror-operations": [
+            "name": "CreatePageBlob",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "CreateAppendBlob",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "StartCopyFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 202,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "CopyBlobFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 202,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AppendBlock",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AppendBlockFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "PutBlock",
+            "response": "#/components/schemas/Empty",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob",
+              "blockid"
+            ]
+          },
+          {
+            "name": "StageBlockFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob",
+              "blockid"
+            ]
+          },
+          {
+            "name": "PutBlockList",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AbortCopy",
+            "response": "#/components/schemas/Empty",
+            "code": 204,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AcquireBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "BreakBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 202,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "ChangeBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "ReleaseBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "RenewBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetBlobMetadata",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "PutPage",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
           {
             "name": "ClearPages",
-            "response": "#/components/schemas/Blob"
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
           },
           {
             "name": "PutPageFromURL",
-            "response": "#/components/schemas/Blob"
-          }
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=pagelist": {
-      "get": {
-        "operationId": "GetPageRanges",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/PageRangeList"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ],
-        "x-mirror-operations": [
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
           {
-            "name": "GetPageRangesDiff",
-            "response": "#/components/schemas/PageRangeList",
-            "readonly": true
+            "name": "SetBlobProperties",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "ResizePageBlob",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetBlobSequenceNumber",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "CreateSnapshot",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetTags",
+            "response": "#/components/schemas/Blob",
+            "code": 204,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetBlobTier",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "UnsupportedQuery",
+            "response": "#/components/schemas/Empty",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AcquireContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 201,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "BreakContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 202,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "ChangeContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "ReleaseContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "RenewContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "CreateContainer",
+            "response": "#/components/schemas/Container",
+            "code": 201,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "SetContainerAcl",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "SetContainerMetadata",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
           }
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=snapshot": {
-      "put": {
-        "operationId": "CreateSnapshot",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=copy": {
-      "put": {
-        "operationId": "AbortCopy",
-        "responses": {
-          "204": {
-            "description": "The request succeeded."
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=tags": {
-      "put": {
-        "operationId": "SetTags",
-        "responses": {
-          "204": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
         ]
       },
-      "get": {
-        "operationId": "GetTags",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/?comp=blobs": {
-      "get": {
-        "operationId": "FilterBlobs",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/FilterBlobResult"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/?comp=batch": {
       "post": {
         "operationId": "SubmitBatch",
         "responses": {
@@ -764,116 +483,31 @@
             "description": "The request succeeded."
           }
         }
-      }
-    },
-    "/{container}/{blob}?comp=tier": {
-      "put": {
-        "operationId": "SetBlobTier",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=lease&acquire": {
-      "put": {
-        "operationId": "AcquireBlobLease",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=lease&release": {
-      "put": {
-        "operationId": "ReleaseBlobLease",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=lease&renew": {
-      "put": {
-        "operationId": "RenewBlobLease",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "container",
-          "blob"
-        ]
-      }
-    },
-    "/{container}/{blob}?comp=lease&break": {
-      "put": {
-        "operationId": "BreakBlobLease",
+      },
+      "delete": {
+        "operationId": "DeleteBlob",
         "responses": {
           "202": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blob"
-                }
-              }
-            }
+            "description": "The request succeeded."
           }
         },
         "x-mirror-input": [
           "container",
           "blob"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "DeleteContainer",
+            "response": "#/components/schemas/Empty",
+            "code": 202,
+            "x-mirror-input": [
+              "container"
+            ]
+          }
         ]
-      }
-    },
-    "/{container}/{blob}?comp=lease&change": {
-      "put": {
-        "operationId": "ChangeBlobLease",
+      },
+      "head": {
+        "operationId": "GetBlobProperties",
         "responses": {
           "200": {
             "description": "The request succeeded.",
@@ -1129,6 +763,10 @@
             "$ref": "#/components/schemas/String"
           }
         }
+      },
+      "Empty": {
+        "type": "object",
+        "properties": {}
       }
     }
   }

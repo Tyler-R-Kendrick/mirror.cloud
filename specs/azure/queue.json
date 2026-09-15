@@ -9,42 +9,11 @@
   "x-mirror-endpoint-prefix": "queue",
   "servers": [
     {
-      "url": "https://core.windows.net"
+      "url": "https://queue.core.windows.net"
     }
   ],
   "paths": {
-    "/{queue}": {
-      "put": {
-        "operationId": "CreateQueue",
-        "responses": {
-          "201": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Queue"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "queue"
-        ]
-      },
-      "delete": {
-        "operationId": "DeleteQueue",
-        "responses": {
-          "204": {
-            "description": "The request succeeded."
-          }
-        },
-        "x-mirror-input": [
-          "queue"
-        ]
-      }
-    },
-    "/?comp=list": {
+    "/": {
       "get": {
         "operationId": "ListQueues",
         "responses": {
@@ -58,10 +27,108 @@
               }
             }
           }
-        }
-      }
-    },
-    "/{queue}/messages": {
+        },
+        "x-mirror-operations": [
+          {
+            "name": "GetServiceProperties",
+            "response": "#/components/schemas/QueueAccount",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetServiceStats",
+            "response": "#/components/schemas/QueueAccount",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetMessages",
+            "response": "#/components/schemas/MessageList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "PeekMessages",
+            "response": "#/components/schemas/MessageList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "GetQueueAcl",
+            "response": "#/components/schemas/Queue",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "GetQueueProperties",
+            "response": "#/components/schemas/Queue",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "queue"
+            ]
+          }
+        ]
+      },
+      "put": {
+        "operationId": "SetServiceProperties",
+        "responses": {
+          "202": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueAccount"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-operations": [
+          {
+            "name": "CreateQueue",
+            "response": "#/components/schemas/Queue",
+            "code": 201,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "UpdateMessage",
+            "response": "#/components/schemas/Message",
+            "code": 204,
+            "x-mirror-input": [
+              "queue",
+              "messageid"
+            ]
+          },
+          {
+            "name": "SetQueueAcl",
+            "response": "#/components/schemas/Queue",
+            "code": 204,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "SetQueueMetadata",
+            "response": "#/components/schemas/Queue",
+            "code": 204,
+            "x-mirror-input": [
+              "queue"
+            ]
+          }
+        ]
+      },
       "post": {
         "operationId": "PutMessage",
         "responses": {
@@ -80,26 +147,8 @@
           "queue"
         ]
       },
-      "get": {
-        "operationId": "GetMessages",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageList"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "queue"
-        ]
-      },
       "delete": {
-        "operationId": "ClearMessages",
+        "operationId": "DeleteQueue",
         "responses": {
           "204": {
             "description": "The request succeeded."
@@ -107,185 +156,26 @@
         },
         "x-mirror-input": [
           "queue"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "ClearMessages",
+            "response": "#/components/schemas/Empty",
+            "code": 204,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "DeleteMessage",
+            "response": "#/components/schemas/Empty",
+            "code": 204,
+            "x-mirror-input": [
+              "queue",
+              "messageid"
+            ]
+          }
         ]
-      }
-    },
-    "/{queue}/messages?peekonly=true": {
-      "get": {
-        "operationId": "PeekMessages",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageList"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "queue"
-        ]
-      }
-    },
-    "/{queue}/messages/{messageid}": {
-      "put": {
-        "operationId": "UpdateMessage",
-        "responses": {
-          "204": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "queue",
-          "messageid"
-        ]
-      },
-      "delete": {
-        "operationId": "DeleteMessage",
-        "responses": {
-          "204": {
-            "description": "The request succeeded."
-          }
-        },
-        "x-mirror-input": [
-          "queue",
-          "messageid"
-        ]
-      }
-    },
-    "/{queue}?comp=metadata": {
-      "put": {
-        "operationId": "SetQueueMetadata",
-        "responses": {
-          "204": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Queue"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "queue"
-        ]
-      },
-      "get": {
-        "operationId": "GetQueueProperties",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Queue"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "queue"
-        ]
-      }
-    },
-    "/{queue}?comp=acl": {
-      "put": {
-        "operationId": "SetQueueAcl",
-        "responses": {
-          "204": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Queue"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "queue"
-        ]
-      },
-      "get": {
-        "operationId": "GetQueueAcl",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Queue"
-                }
-              }
-            }
-          }
-        },
-        "x-mirror-input": [
-          "queue"
-        ]
-      }
-    },
-    "/?restype=service&comp=properties": {
-      "get": {
-        "operationId": "GetServiceProperties",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueueAccount"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "operationId": "SetServiceProperties",
-        "responses": {
-          "202": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueueAccount"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/?restype=service&comp=stats": {
-      "get": {
-        "operationId": "GetServiceStats",
-        "responses": {
-          "200": {
-            "description": "The request succeeded.",
-            "content": {
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueueAccount"
-                }
-              }
-            }
-          }
-        }
       }
     }
   },
@@ -365,6 +255,10 @@
             "$ref": "#/components/schemas/String"
           }
         }
+      },
+      "Empty": {
+        "type": "object",
+        "properties": {}
       }
     }
   }

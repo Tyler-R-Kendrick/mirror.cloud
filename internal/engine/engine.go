@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -155,6 +156,15 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		return nil, spi.NotImplemented(e.ServiceID(), req.Operation, string(model.TierEmulate))
 	}
 	modelOp := e.modelOps[req.Operation]
+	if req.Input == nil {
+		req.Input = map[string]any{}
+	}
+	if req.Body != nil {
+		if _, ok := req.Input["body"]; !ok {
+			body, _ := io.ReadAll(req.Body)
+			req.Input["body"] = string(body)
+		}
+	}
 
 	if fault := e.validateInput(modelOp, req); fault != nil {
 		return nil, fault
@@ -184,7 +194,7 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if err := ev.evalLets(op); err != nil {
 		return nil, err
 	}
-	if fault := ev.checkRequires(op); fault != nil {
+	if fault := ev.checkRequires(op, false); fault != nil {
 		return nil, fault
 	}
 	// Select is the observation point: expired deadlines fire here, so what an
@@ -192,6 +202,11 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	// anyone last looked. Wait re-observes until the bundle's condition holds.
 	if err := ev.runSelect(ctx, op); err != nil {
 		return nil, err
+	}
+	if op.Select != nil {
+		if fault := ev.checkRequires(op, true); fault != nil {
+			return nil, fault
+		}
 	}
 	if err := ev.runWait(ctx, op); err != nil {
 		return nil, err

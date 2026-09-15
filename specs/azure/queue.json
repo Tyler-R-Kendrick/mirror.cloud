@@ -1,0 +1,265 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Azure Queue Storage",
+    "version": "authored-1",
+    "description": "The Azure Queue Storage data plane, as mirror serves it.\n\nTHIS DOCUMENT IS AUTHORED, NOT VENDORED. The vendor's own description of this surface is Swagger 2.0 with x-ms-paths, which the OpenAPI receiver cannot ingest; it stays vendored at specs/azure/queue-storage.json as the parity ledger's pin, and this document is the OpenAPI 3.0.3 transcription of the subset mirror serves, evidenced by that pin and by the Azurite behavior the behavior bundle (behavior/azure/queue) transcribes. The lock records this file with source `authored`: its sha256 still pins the bytes, but nothing refetches it, so it cannot tell you the vendor changed something.\n\nx-mirror-protocol is restXml because the wire format is XML. The paths carry their query strings verbatim, which is how the router already distinguishes `/{queue}?comp=metadata` from `/{queue}`.\n\nThe members the address templates name ({container}, {blob}, and the like) are declared with x-mirror-input rather than as OpenAPI parameters. The router binds them from the address regardless, and declaring them as path parameters would make the receiver mark them required -- an engine-required member faults a request that arrives without it before the behavior bundle applies the service's own validation, and a container-less PUT must be answered InvalidResourceName by the bundle, not a generic validation fault."
+  },
+  "x-mirror-protocol": "restXml",
+  "x-mirror-endpoint-prefix": "queue",
+  "servers": [
+    {
+      "url": "https://queue.core.windows.net"
+    }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "ListQueues",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueList"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-operations": [
+          {
+            "name": "GetServiceProperties",
+            "response": "#/components/schemas/QueueAccount",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetServiceStats",
+            "response": "#/components/schemas/QueueAccount",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetMessages",
+            "response": "#/components/schemas/MessageList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "PeekMessages",
+            "response": "#/components/schemas/MessageList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "GetQueueAcl",
+            "response": "#/components/schemas/Queue",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "GetQueueProperties",
+            "response": "#/components/schemas/Queue",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "queue"
+            ]
+          }
+        ]
+      },
+      "put": {
+        "operationId": "SetServiceProperties",
+        "responses": {
+          "202": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueAccount"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-operations": [
+          {
+            "name": "CreateQueue",
+            "response": "#/components/schemas/Queue",
+            "code": 201,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "UpdateMessage",
+            "response": "#/components/schemas/Message",
+            "code": 204,
+            "x-mirror-input": [
+              "queue",
+              "messageid"
+            ]
+          },
+          {
+            "name": "SetQueueAcl",
+            "response": "#/components/schemas/Queue",
+            "code": 204,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "SetQueueMetadata",
+            "response": "#/components/schemas/Queue",
+            "code": 204,
+            "x-mirror-input": [
+              "queue"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "operationId": "PutMessage",
+        "responses": {
+          "201": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "queue"
+        ]
+      },
+      "delete": {
+        "operationId": "DeleteQueue",
+        "responses": {
+          "204": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "queue"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "ClearMessages",
+            "response": "#/components/schemas/Empty",
+            "code": 204,
+            "x-mirror-input": [
+              "queue"
+            ]
+          },
+          {
+            "name": "DeleteMessage",
+            "response": "#/components/schemas/Empty",
+            "code": 204,
+            "x-mirror-input": [
+              "queue",
+              "messageid"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "String": {
+        "type": "string"
+      },
+      "Map": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/String"
+        }
+      },
+      "Queue": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Map"
+          },
+          "acl": {
+            "$ref": "#/components/schemas/String"
+          },
+          "approx_count": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "QueueList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Queue"
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "message": {
+            "$ref": "#/components/schemas/String"
+          },
+          "pop_receipt": {
+            "$ref": "#/components/schemas/String"
+          },
+          "dequeue_count": {
+            "$ref": "#/components/schemas/String"
+          },
+          "inserted_at": {
+            "$ref": "#/components/schemas/String"
+          },
+          "expires_at": {
+            "$ref": "#/components/schemas/String"
+          },
+          "visible_at": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "MessageList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Message"
+        }
+      },
+      "QueueAccount": {
+        "type": "object",
+        "properties": {
+          "properties": {
+            "$ref": "#/components/schemas/String"
+          },
+          "geo_status": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "Empty": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

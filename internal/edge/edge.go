@@ -89,7 +89,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	awsChunkedDecoded := false
 	awsChunkedInvalid := false
 	if r.Method == http.MethodOptions {
-		if svc := s.demux(r); svc == nil || svc.ID != "aws.s3" {
+		demuxed := s.demux(r)
+		if demuxed != nil && isAzureStorage(demuxed.ID) {
+			id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
+			s.azureCorsPreflight(w, r, id, demuxed, idgen.Next(s.deps.Rand))
+			return
+		}
+		if demuxed == nil || demuxed.ID != "aws.s3" {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Headers", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "*")
@@ -171,6 +177,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "Request has expired", http.StatusForbidden)
 		return
+	}
+	if svc != nil && isAzureStorage(svc.ID) {
+		if fault := azureAuthFault(r, s.deps.Clock.Now()); fault != nil {
+			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
+			return
+		}
+		if h := s.azureCorsResponseHeaders(r, id, svc.ID); h != nil {
+			w = &azureCorsResponseWriter{ResponseWriter: w, headers: h}
+		}
 	}
 	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures {
 		secret := "test"
@@ -263,6 +278,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	op, err := codec.Route(svc, r)
 	if err != nil {
 		s.fault(w, codec, svc, &model.Operation{Name: "unknown"}, err, rid)
+		return
+	}
+	if (svc.ID == "azure.blobs" || svc.ID == "azure.table") && op.Name == "SubmitBatch" {
+		s.serveAzureBatch(w, r, rid)
 		return
 	}
 	req, err := codec.Decode(svc, op, r)
@@ -509,9 +528,10 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		// `x-ms-blob-type` -- so the model carries `/` for all eight and there
 		// is nothing to match. It stays a predicate until azure.blobs is
 		// extracted to a bundle whose paths a receiver can read, and it is
-		// counted as the guess it is.
-		if azureRequest(r) {
-			return s.bundle.ServiceByID("azure.blobs")
+		// counted as the guess it is. One predicate names all three services:
+		// the host says queue or table before anything says blob.
+		if id := azureRequest(r); id != "" {
+			return s.bundle.ServiceByID(id)
 		}
 	}
 	if byModel != nil {
@@ -566,16 +586,25 @@ func awsAddressed(r *http.Request) bool {
 	return strings.HasSuffix(host, ".amazonaws.com") || strings.HasSuffix(host, ".api.aws")
 }
 
-func azureRequest(r *http.Request) bool {
+func azureRequest(r *http.Request) string {
 	host := strings.ToLower(r.Host)
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
 	}
+	if strings.Contains(host, "queue.core.windows.net") {
+		return "azure.queue"
+	}
+	if strings.Contains(host, "table.core.windows.net") {
+		return "azure.table"
+	}
 	if strings.Contains(host, "blob.core.windows.net") || strings.Contains(host, "azure") {
-		return true
+		return "azure.blobs"
 	}
 	q := r.URL.Query()
-	return q.Get("restype") == "container" || q.Get("comp") == "list" || r.Header.Get("x-ms-blob-type") != ""
+	if q.Get("restype") == "container" || q.Get("comp") == "list" || r.Header.Get("x-ms-blob-type") != "" {
+		return "azure.blobs"
+	}
+	return ""
 }
 
 func sqsQueuePath(path string) bool {

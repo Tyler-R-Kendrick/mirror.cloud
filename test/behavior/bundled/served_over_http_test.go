@@ -46,10 +46,32 @@ import (
 // almost always a list or a describe-all, which is the operation a client
 // reaches for first and the one most likely to be exercised in anger.
 func reachable(ir *bir.Service, svc *model.Service) (model.Operation, bool) {
+	// A binding several served operations share cannot be addressed by the
+	// request this test builds. Railway's seven GraphQL operations are all
+	// POST /graphql/v2 and only the query document tells them apart, which the
+	// model alone does not supply -- the same "not reachable from the model
+	// alone" case the skip below exists for.
+	shared := map[string]int{}
+	for _, op := range svc.Operations {
+		if _, served := ir.Operations[op.Name]; served {
+			shared[op.HTTP.Method+" "+op.HTTP.URI]++
+		}
+	}
 	var best model.Operation
 	found := false
 	for _, op := range svc.Operations {
 		if _, served := ir.Operations[op.Name]; !served {
+			continue
+		}
+		// `/` is what the model carries for an operation addressed some other
+		// way -- Azure's, by host and query parameter. A request built from
+		// the model alone cannot supply the discriminator, the same case as
+		// the shared binding below, so it joins that skip class rather than
+		// asking the codec for an operation it cannot name.
+		if op.HTTP.URI == "" || op.HTTP.URI == "/" {
+			continue
+		}
+		if shared[op.HTTP.Method+" "+op.HTTP.URI] > 1 {
 			continue
 		}
 		if op.Input != "" {

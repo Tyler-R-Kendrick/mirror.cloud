@@ -483,3 +483,156 @@ func TestSharedResponseCycleIsRefusedNotFollowedForever(t *testing.T) {
 		t.Fatal("ingest did not return: the reference walk is unbounded")
 	}
 }
+
+// mirrorDoc carries every x-mirror-* extension: a protocol override, a name
+// the exported spelling cannot produce, a synthesized input member, and two
+// sibling operations sharing one binding.
+const mirrorDoc = `{
+  "openapi": "3.0.3",
+  "info": {"title": "Graph"},
+  "x-mirror-protocol": "restXml",
+  "paths": {
+    "/graphql/v2": {
+      "post": {
+        "operationId": "projectCreate",
+        "x-mirror-name": "projectCreate",
+        "x-mirror-input": ["__entity"],
+        "requestBody": {
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GraphRequest"}}}
+        },
+        "responses": {
+          "200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateResult"}}}}
+        },
+        "x-mirror-operations": [
+          {"name": "projects", "response": "#/components/schemas/ListResult", "readonly": true},
+          {"name": "projectDelete", "response": "#/components/schemas/DeleteResult", "code": 202}
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "GraphRequest": {"type": "object", "properties": {"query": {"type": "string"}}},
+      "CreateResult": {"type": "object", "properties": {"data": {"type": "string"}}},
+      "ListResult": {"type": "object", "properties": {"data": {"type": "string"}}},
+      "DeleteResult": {"type": "object", "properties": {"data": {"type": "string"}}}
+    }
+  }
+}`
+
+// TestMirrorProtocolOverridesTheDefault is the property the extension exists
+// for: a document transcribing an XML service must not flip it to restJson1 at
+// boot, because the codec serving it is chosen by that one field.
+func TestMirrorProtocolOverridesTheDefault(t *testing.T) {
+	svc := ingest(t, "demo/api.json", mirrorDoc)
+	if svc.Protocol != model.ProtoRESTXML {
+		t.Errorf("protocol is %s, want %s", svc.Protocol, model.ProtoRESTXML)
+	}
+	if plain := ingest(t, "demo/api.json", doc); plain.Protocol != model.ProtoRESTJSON1 {
+		t.Errorf("a document without the extension ingests as %s, want %s", plain.Protocol, model.ProtoRESTJSON1)
+	}
+}
+
+func TestMirrorProtocolRefusesAProtocolMirrorDoesNotServe(t *testing.T) {
+	_, err := (openapi.Receiver{}).Ingest(context.Background(),
+		model.SourceRef{Path: "demo/api.json"}, []byte(`{
+			"openapi": "3.0.3", "x-mirror-protocol": "soap",
+			"paths": {"/a": {"get": {"responses": {"200": {}}}}}
+		}`))
+	if err == nil {
+		t.Fatal("a document naming a protocol mirror does not serve was ingested")
+	}
+	if !strings.Contains(err.Error(), "soap") {
+		t.Errorf("the error does not name the refused protocol: %v", err)
+	}
+}
+
+// TestMirrorEndpointPrefixOverridesTheProvider is the Azure Storage shape:
+// three services of one provider are addressed at three different host
+// labels, and the document has to say so because the receiver's default would
+// answer the provider for all of them.
+func TestMirrorEndpointPrefixOverridesTheProvider(t *testing.T) {
+	svc := ingest(t, "demo/queue.json", `{
+		"openapi": "3.0.3", "x-mirror-endpoint-prefix": "queue",
+		"paths": {"/a": {"get": {"responses": {"200": {}}}}}
+	}`)
+	if svc.EndpointPrefix != "queue" {
+		t.Errorf("endpoint prefix is %q, want queue", svc.EndpointPrefix)
+	}
+	if plain := ingest(t, "demo/queue.json", doc); plain.EndpointPrefix != "demo" {
+		t.Errorf("a document without the extension is prefixed %q, want the provider demo",
+			plain.EndpointPrefix)
+	}
+}
+
+// TestMirrorNameKeepsTheServedSpelling covers the lowercase GraphQL operation
+// name: exported() would answer ProjectCreate, and the bundle declares
+// projectCreate.
+func TestMirrorNameKeepsTheServedSpelling(t *testing.T) {
+	svc := ingest(t, "demo/api.json", mirrorDoc)
+	if op := svc.OperationByName("projectCreate"); op == nil {
+		t.Errorf("x-mirror-name was not honored; got %v", names(svc))
+	}
+	if svc.OperationByName("ProjectCreate") != nil {
+		t.Error("the exported spelling survived alongside the served one")
+	}
+}
+
+// TestMirrorOperationsShareTheOneBinding is the GraphQL shape: one POST
+// dispatching on the query document becomes one model.Operation per query,
+// all bound to the same method and URI, each answering with its own shape.
+func TestMirrorOperationsShareTheOneBinding(t *testing.T) {
+	svc := ingest(t, "demo/api.json", mirrorDoc)
+	primary := svc.OperationByName("projectCreate")
+	if primary == nil {
+		t.Fatalf("the primary operation is missing; got %v", names(svc))
+	}
+	for _, name := range []string{"projects", "projectDelete"} {
+		op := svc.OperationByName(name)
+		if op == nil {
+			t.Fatalf("sibling %s is missing; got %v", name, names(svc))
+		}
+		if op.HTTP.Method != primary.HTTP.Method || op.HTTP.URI != primary.HTTP.URI {
+			t.Errorf("%s is bound to %s %s, want the primary's %s %s",
+				name, op.HTTP.Method, op.HTTP.URI, primary.HTTP.Method, primary.HTTP.URI)
+		}
+		if op.Input != primary.Input {
+			t.Errorf("%s takes %s, want the shared request shape %s", name, op.Input, primary.Input)
+		}
+	}
+	if op := svc.OperationByName("projectDelete"); op.HTTP.Code != 202 {
+		t.Errorf("projectDelete answers %d, want its own 202, not the primary's %d",
+			op.HTTP.Code, primary.HTTP.Code)
+	}
+	if op := svc.OperationByName("projects"); !op.Readonly {
+		t.Error("projects is a query and was not marked readonly")
+	}
+	if op := svc.OperationByName("projectDelete"); op.Readonly || op.Output != "DeleteResult" {
+		t.Errorf("projectDelete is readonly=%v with output %q, want false and DeleteResult",
+			op.Readonly, op.Output)
+	}
+	if _, ok := svc.Shapes["DeleteResult"]; !ok {
+		t.Error("a sibling's response schema did not survive into the shape graph")
+	}
+}
+
+// TestMirrorInputDeclaresWhatTheCodecSynthesizes keeps a bundle that spreads a
+// codec-made member loadable: the member is validated against the request
+// shape, so the shape has to admit it exists.
+func TestMirrorInputDeclaresWhatTheCodecSynthesizes(t *testing.T) {
+	svc := ingest(t, "demo/api.json", mirrorDoc)
+	op := svc.OperationByName("projectCreate")
+	if op == nil {
+		t.Fatalf("projectCreate is missing; got %v", names(svc))
+	}
+	req, ok := svc.Shapes[op.Input]
+	if !ok {
+		t.Fatalf("no request shape %q", op.Input)
+	}
+	if _, ok := req.Members["__entity"]; !ok {
+		t.Errorf("__entity is not declared; have %v", memberNames(req))
+	}
+	if _, ok := req.Members["query"]; !ok {
+		t.Errorf("the body's own members were displaced; have %v", memberNames(req))
+	}
+}

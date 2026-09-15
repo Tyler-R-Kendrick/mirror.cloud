@@ -38,6 +38,18 @@
       "source": "authored",
       "ref": "2026-09-11T22:29:30Z"
     },
+    "azure.blobs": {
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z"
+    },
+    "azure.queue": {
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z"
+    },
+    "azure.table": {
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z"
+    },
     "railway.graphql": {
       "source": "https://backboard.railway.com/graphql/v2",
       "ref": "2026-09-13T06:20:57Z"
@@ -1227,6 +1239,30 @@
       "path": "aws/xray/service/2016-04-12/xray-2016-04-12.json",
       "sha256": "ab1a0cfc7a244eb934542d67949631b6b353d1165e263e8cd2dcaff84c9f554c",
       "ingested": "2026-08-28T18:51:00Z"
+    },
+    {
+      "serviceId": "azure.blobs",
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z",
+      "path": "azure/blobs.json",
+      "sha256": "8bdae72b100b53e56b7ab27fed11ffad1c2845f290c76ac08e321cc83a465009",
+      "ingested": "2026-09-12T02:44:35Z"
+    },
+    {
+      "serviceId": "azure.queue",
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z",
+      "path": "azure/queue.json",
+      "sha256": "1755d5947e19ebe7f02c2f79a05a56477391212c7eb861325916ea8396339d0a",
+      "ingested": "2026-09-12T02:44:35Z"
+    },
+    {
+      "serviceId": "azure.table",
+      "source": "authored",
+      "ref": "2026-09-12T02:44:35Z",
+      "path": "azure/table.json",
+      "sha256": "1a61d03ee0245853df99c41633303763a137098cd1b7908b59b05beb10311dcb",
+      "ingested": "2026-09-12T02:44:35Z"
     },
     {
       "serviceId": "cloudflare.api",

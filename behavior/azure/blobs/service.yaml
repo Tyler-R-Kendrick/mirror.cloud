@@ -1,0 +1,1347 @@
+schema: bir/1
+service: azure.blobs
+
+# Extracted from internal/services/azure/blobs. Authored from that pack, not
+# from live Azure. The eight CRUD operations keep the pack's names because
+# restxml azureRoute and the catalog still resolve those names; swagger ingest
+# is a later PR.
+provenance: authored
+
+resources:
+  container:
+    collection: azctr
+    id:
+      derive: "('container' in input && input.container != null) ? lower(string(input.container)) : ''"
+    record:
+      name: id
+
+  # No input-derived resource-level record: every write re-evaluates it, so a
+  # metadata or properties patch would re-run the template against a body-less
+  # request and wipe the value it was not touching. PutBlob carries the full
+  # record; patches and folds declare only the fields they mean to change.
+  # last_modified is input-independent, so re-evaluating it only bumps mtime
+  # (which every Azure write does).
+  blob:
+    collection: "azblob:{container.id}"
+    parent: container
+    id:
+      input_members: [blob]
+    record:
+      last_modified: "int(now)"
+
+  blob_slot:
+    collection: azslot
+    parent: container
+    id:
+      input_members: [blob]
+    record:
+      name: id
+
+  block:
+    collection: "azblock:{blob_slot.id}"
+    parent: blob_slot
+    id:
+      derive: "('blockid' in input && input.blockid != null) ? string(input.blockid) : ''"
+    record:
+      id: id
+      value: "('body' in input && input.body != null) ? string(input.body) : ''"
+
+  account:
+    collection: azacct
+    id:
+      derive: "'default'"
+
+errors:
+  InvalidResourceName:
+    code: InvalidResourceName
+    http: 400
+    fault: client
+  ContainerAlreadyExists:
+    code: ContainerAlreadyExists
+    http: 409
+    fault: client
+  ContainerNotFound:
+    code: ContainerNotFound
+    http: 404
+    fault: client
+  BlobNotFound:
+    code: BlobNotFound
+    http: 404
+    fault: client
+  InvalidBlockList:
+    code: InvalidBlockList
+    http: 400
+    fault: client
+  InvalidQueryParameterValue:
+    code: InvalidQueryParameterValue
+    http: 400
+    fault: client
+  LeaseAlreadyPresent:
+    code: LeaseAlreadyPresent
+    http: 409
+    fault: client
+  LeaseIdMismatchWithLeaseOperation:
+    code: LeaseIdMismatchWithLeaseOperation
+    http: 409
+    fault: client
+  BlobAlreadyExists:
+    code: BlobAlreadyExists
+    http: 409
+    fault: client
+  InvalidBlobType:
+    code: InvalidBlobType
+    http: 409
+    fault: client
+  InvalidHeaderValue:
+    code: InvalidHeaderValue
+    http: 400
+    fault: client
+  RequestedRangeNotSatisfiable:
+    code: RequestedRangeNotSatisfiable
+    http: 416
+    fault: client
+  RequestBodyTooLarge:
+    code: RequestBodyTooLarge
+    http: 413
+    fault: client
+  BlockCountExceedsLimit:
+    code: BlockCountExceedsLimit
+    http: 409
+    fault: client
+  SnapshotsPresent:
+    code: SnapshotsPresent
+    http: 409
+    fault: client
+  NoPendingCopyOperation:
+    code: NoPendingCopyOperation
+    http: 409
+    fault: client
+  ConditionNotMet:
+    code: ConditionNotMet
+    http: 412
+    fault: client
+  # Azurite's NotModified carries the ConditionNotMet code with a 304 status;
+  # EncodeFault writes it header-only.
+  NotModified:
+    code: ConditionNotMet
+    http: 304
+    fault: client
+  MultipleConditionHeadersNotSupported:
+    code: MultipleConditionHeadersNotSupported
+    http: 400
+    fault: client
+  UnsatisfiableCondition:
+    code: UnsatisfiableCondition
+    http: 400
+    fault: client
+  SequenceNumberConditionNotMet:
+    code: SequenceNumberConditionNotMet
+    http: 412
+    fault: client
+  AppendPositionConditionNotMet:
+    code: AppendPositionConditionNotMet
+    http: 412
+    fault: client
+  MaxBlobSizeConditionNotMet:
+    code: MaxBlobSizeConditionNotMet
+    http: 412
+    fault: client
+  TagsTooLarge:
+    code: TagsTooLarge
+    http: 400
+    fault: client
+  EmptyTagName:
+    code: EmptyTagName
+    http: 400
+    fault: client
+  # Azurite's getInvalidTag really returns this code for bad characters.
+  DuplicateTagNames:
+    code: DuplicateTagNames
+    http: 400
+    fault: client
+  InvalidXmlDocument:
+    code: InvalidXmlDocument
+    http: 400
+    fault: client
+  BlobArchived:
+    code: BlobArchived
+    http: 409
+    fault: client
+  AccessTierNotSupportedForBlobType:
+    code: AccessTierNotSupportedForBlobType
+    http: 400
+    fault: client
+  LeaseIdMissing:
+    code: LeaseIdMissing
+    http: 412
+    fault: client
+  LeaseIdMismatchWithBlobOperation:
+    code: LeaseIdMismatchWithBlobOperation
+    http: 409
+    fault: client
+
+operations:
+  CreateContainer:
+    reads:
+      existing: { resource: container }
+    require:
+      - { cond: "'container' in input && string(input.container) != ''", error: InvalidResourceName, message: "The specified resource name contains invalid characters." }
+      - { cond: "!existing_found", error: ContainerAlreadyExists, message: "The specified container already exists." }
+    effects:
+      - create: { resource: container }
+    output:
+      name: id
+
+  GetContainer:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    output:
+      name: rec.name
+      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
+      public_access: "('public_access' in rec && rec.public_access != null) ? string(rec.public_access) : ''"
+      lease_id: "('lease_id' in rec && rec.lease_id != null) ? string(rec.lease_id) : ''"
+      lease_status: "('lease_status' in rec && rec.lease_status != null && string(rec.lease_status) != '') ? string(rec.lease_status) : 'unlocked'"
+      lease_state: "('lease_state' in rec && rec.lease_state != null && string(rec.lease_state) != '') ? string(rec.lease_state) : 'available'"
+      lease_duration: "('lease_duration' in rec && rec.lease_duration != null) ? string(rec.lease_duration) : ''"
+
+  ListContainers:
+    list: { resource: container, member: _list }
+
+  DeleteContainer:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - delete: { resource: container }
+
+  PutBlob:
+    reads:
+      ctr: { resource: container }
+      existing: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
+      # Azurite createBlob special case: If-None-Match * on an existing blob
+      # is a 409, not the write validator's 412.
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!existing_found || !('lease_status' in existing && string(existing.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!existing_found || !('lease_status' in existing && string(existing.lease_status) == 'locked') || string(existing.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+    effects:
+      - put:
+          resource: blob
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "('body' in input && input.body != null) ? string(input.body) : (('value' in input && input.value != null) ? string(input.value) : '')"
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+            content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+            cache_control: "('cache_control' in input && input.cache_control != null) ? string(input.cache_control) : ''"
+            content_encoding: "('content_encoding' in input && input.content_encoding != null) ? string(input.content_encoding) : ''"
+            content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
+            content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
+            content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
+            blob_type: "('blob_type' in input && input.blob_type != null && string(input.blob_type) != '') ? string(input.blob_type) : 'BlockBlob'"
+            access_tier: "('access_tier' in input && input.access_tier != null) ? string(input.access_tier) : ''"
+            access_tier_inferred: "('access_tier' in input && input.access_tier != null) ? 'false' : 'true'"
+            lease_id: "(existing_found && 'lease_id' in existing && existing.lease_id != null) ? string(existing.lease_id) : ''"
+            lease_status: "(existing_found && 'lease_status' in existing && existing.lease_status != null) ? string(existing.lease_status) : ''"
+            lease_state: "(existing_found && 'lease_state' in existing && existing.lease_state != null) ? string(existing.lease_state) : ''"
+            lease_duration: "(existing_found && 'lease_duration' in existing && existing.lease_duration != null) ? string(existing.lease_duration) : ''"
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      # The FilterBlobs index mirrors this blob's tags at account level; an
+      # overwrite replaces the entry wholesale, tags or no tags.
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  GetBlob:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      # Azurite's metadata store validates read conditions before throwing
+      # BlobNotFound: any If-Match on a missing blob is 412, and If-None-Match
+      # * on a missing blob is 400.
+      - { cond: "rec_found || !('if_match_list' in input && size(input.if_match_list) > 0)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "rec_found || !('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "('snapshot' in input && input.snapshot != null) || !('access_tier' in rec && string(rec.access_tier) == 'Archive')", error: BlobArchived, message: "This operation is not permitted on an archived blob." }
+      # Read conditions (Azurite ReadConditionalHeadersValidator).
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || string(input.if_match_list[0]) == '*' || input.if_match_list.exists(m, string(m) == etag)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_unmodified_since_unix' in input) || last_mod <= int(input.if_unmodified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_none_match_list' in input && input.if_none_match_list.exists(m, string(m) == etag)) || (('if_modified_since_unix' in input) && int(input.if_modified_since_unix) < last_mod)", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_modified_since_unix' in input) || int(input.if_modified_since_unix) < last_mod || (('if_none_match_list' in input && size(input.if_none_match_list) > 0) && !input.if_none_match_list.exists(m, string(m) == etag))", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in src && src.tags != null) ? src.tags : {}, ('container' in src && src.container != null) ? string(src.container) : lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      # Guard the snapshot index: an unknown snapshot id must 404 via the
+      # require above, not fault the let before requires run.
+      src: "rec_found ? (('snapshot' in input && input.snapshot != null && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
+      etag: "rec_found ? md5hex(string(src.value) + '|' + toJSON(('metadata' in src && src.metadata != null) ? src.metadata : {}) + '|' + (('content_type' in src && src.content_type != null) ? string(src.content_type) : '')) : ''"
+      last_mod: "rec_found ? (('last_modified' in src && src.last_modified != null) ? int(src.last_modified) : 0) : 0"
+    output:
+      _raw: "string(src.value)"
+
+  CreateSnapshot:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      snap_id: "rec_found ? string(now) + '-' + string((('snapshots' in rec && rec.snapshots != null) ? size(rec.snapshots) : 0)) : ''"
+      snap: "rec_found ? {'id': snap_id, 'value': string(rec.value), 'metadata': (('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in rec && rec.metadata != null) ? rec.metadata : {})), 'content_type': (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : ''), 'cache_control': (('cache_control' in rec && rec.cache_control != null) ? string(rec.cache_control) : ''), 'content_encoding': (('content_encoding' in rec && rec.content_encoding != null) ? string(rec.content_encoding) : ''), 'content_language': (('content_language' in rec && rec.content_language != null) ? string(rec.content_language) : ''), 'content_disposition': (('content_disposition' in rec && rec.content_disposition != null) ? string(rec.content_disposition) : ''), 'content_md5': (('content_md5' in rec && rec.content_md5 != null) ? string(rec.content_md5) : ''), 'blob_type': (('blob_type' in rec && rec.blob_type != null) ? string(rec.blob_type) : 'BlockBlob'), 'tags': (('tags' in rec && rec.tags != null) ? rec.tags : {}), 'last_modified': int(now)} : {}"
+    effects:
+      - patch:
+          resource: blob
+          record:
+            snapshots: "(('snapshots' in rec && rec.snapshots != null) ? rec.snapshots : []) + [snap]"
+    output:
+      snapshot: snap_id
+
+  StartCopyFromURL:
+    reads:
+      ctr: { resource: container }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+      dst: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('source_snapshot' in input && input.source_snapshot != null) || ('snapshots' in src && src.snapshots != null && size(src.snapshots.filter(s, s.id == string(input.source_snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !dst_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('source_if_tags_invalid' in input && input.source_if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('source_if_tags' in input && input.source_if_tags != null && string(input.source_if_tags) != '') || tagmatch(string(input.source_if_tags), ('tags' in srcrec && srcrec.tags != null) ? srcrec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      srcrec: "src_found ? (('source_snapshot' in input && input.source_snapshot != null) ? src.snapshots.filter(s, s.id == string(input.source_snapshot))[0] : src) : {}"
+      smeta: "('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in srcrec && srcrec.metadata != null) ? srcrec.metadata : {})"
+      stags: "('tags' in input && input.tags != null) ? input.tags : (('tags' in srcrec && srcrec.tags != null) ? srcrec.tags : {})"
+    effects:
+      # The src read resolved this resource's id to the source blob; without
+      # an explicit key the put would carry that key and overwrite the source.
+      - put:
+          resource: blob
+          key: "string(input.blob)"
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "string(srcrec.value)"
+            metadata: smeta
+            content_type: "('content_type' in srcrec && srcrec.content_type != null) ? string(srcrec.content_type) : ''"
+            cache_control: "('cache_control' in srcrec && srcrec.cache_control != null) ? string(srcrec.cache_control) : ''"
+            content_encoding: "('content_encoding' in srcrec && srcrec.content_encoding != null) ? string(srcrec.content_encoding) : ''"
+            content_language: "('content_language' in srcrec && srcrec.content_language != null) ? string(srcrec.content_language) : ''"
+            content_disposition: "('content_disposition' in srcrec && srcrec.content_disposition != null) ? string(srcrec.content_disposition) : ''"
+            content_md5: "('content_md5' in srcrec && srcrec.content_md5 != null) ? string(srcrec.content_md5) : ''"
+            blob_type: "('blob_type' in srcrec && srcrec.blob_type != null) ? string(srcrec.blob_type) : 'BlockBlob'"
+            sequence_number: "('sequence_number' in srcrec && srcrec.sequence_number != null) ? string(srcrec.sequence_number) : '0'"
+            append_count: "'0'"
+            lease_id: "(dst_found && 'lease_id' in dst && dst.lease_id != null) ? string(dst.lease_id) : ''"
+            lease_status: "(dst_found && 'lease_status' in dst && dst.lease_status != null) ? string(dst.lease_status) : ''"
+            lease_state: "(dst_found && 'lease_state' in dst && dst.lease_state != null) ? string(dst.lease_state) : ''"
+            lease_duration: "(dst_found && 'lease_duration' in dst && dst.lease_duration != null) ? string(dst.lease_duration) : ''"
+            tags: stags
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': stags}})"
+    output:
+      copy_id: "md5hex(string(input.copy_source) + '|' + string(input.blob))"
+      copy_status: "'success'"
+      content_md5: "('content_md5' in srcrec && srcrec.content_md5 != null) ? string(srcrec.content_md5) : ''"
+
+  CopyBlobFromURL:
+    reads:
+      ctr: { resource: container }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+      dst: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('source_snapshot' in input && input.source_snapshot != null) || ('snapshots' in src && src.snapshots != null && size(src.snapshots.filter(s, s.id == string(input.source_snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !dst_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('source_if_tags_invalid' in input && input.source_if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('source_if_tags' in input && input.source_if_tags != null && string(input.source_if_tags) != '') || tagmatch(string(input.source_if_tags), ('tags' in srcrec && srcrec.tags != null) ? srcrec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      srcrec: "src_found ? (('source_snapshot' in input && input.source_snapshot != null) ? src.snapshots.filter(s, s.id == string(input.source_snapshot))[0] : src) : {}"
+      smeta: "('metadata' in input && input.metadata != null) ? input.metadata : (('metadata' in srcrec && srcrec.metadata != null) ? srcrec.metadata : {})"
+      stags: "('tags' in input && input.tags != null) ? input.tags : (('tags' in srcrec && srcrec.tags != null) ? srcrec.tags : {})"
+    effects:
+      # The src read resolved this resource's id to the source blob; without
+      # an explicit key the put would carry that key and overwrite the source.
+      - put:
+          resource: blob
+          key: "string(input.blob)"
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "string(srcrec.value)"
+            metadata: smeta
+            content_type: "('content_type' in srcrec && srcrec.content_type != null) ? string(srcrec.content_type) : ''"
+            cache_control: "('cache_control' in srcrec && srcrec.cache_control != null) ? string(srcrec.cache_control) : ''"
+            content_encoding: "('content_encoding' in srcrec && srcrec.content_encoding != null) ? string(srcrec.content_encoding) : ''"
+            content_language: "('content_language' in srcrec && srcrec.content_language != null) ? string(srcrec.content_language) : ''"
+            content_disposition: "('content_disposition' in srcrec && srcrec.content_disposition != null) ? string(srcrec.content_disposition) : ''"
+            content_md5: "('content_md5' in srcrec && srcrec.content_md5 != null) ? string(srcrec.content_md5) : ''"
+            blob_type: "('blob_type' in srcrec && srcrec.blob_type != null) ? string(srcrec.blob_type) : 'BlockBlob'"
+            sequence_number: "('sequence_number' in srcrec && srcrec.sequence_number != null) ? string(srcrec.sequence_number) : '0'"
+            append_count: "'0'"
+            lease_id: "(dst_found && 'lease_id' in dst && dst.lease_id != null) ? string(dst.lease_id) : ''"
+            lease_status: "(dst_found && 'lease_status' in dst && dst.lease_status != null) ? string(dst.lease_status) : ''"
+            lease_state: "(dst_found && 'lease_state' in dst && dst.lease_state != null) ? string(dst.lease_state) : ''"
+            lease_duration: "(dst_found && 'lease_duration' in dst && dst.lease_duration != null) ? string(dst.lease_duration) : ''"
+            tags: stags
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': stags}})"
+    output:
+      copy_id: "md5hex(string(input.copy_source) + '|' + string(input.blob))"
+      copy_status: "'success'"
+      content_md5: "('content_md5' in srcrec && srcrec.content_md5 != null) ? string(srcrec.content_md5) : ''"
+
+  AbortCopy:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      # Copies complete synchronously here, so there is never a pending copy
+      # to abort -- Azurite answers the same 409 in that case.
+      - { cond: "false", error: NoPendingCopyOperation, message: "There is currently no pending copy operation." }
+
+  StageBlockFromURL:
+    reads:
+      ctr: { resource: container }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    effects:
+      - put: { resource: blob_slot }
+      - put:
+          resource: block
+          record:
+            id: id
+            value: "('source_range_start' in input) ? substr(string(src.value), int(input.source_range_start), int(input.source_range_end) + 1) : string(src.value)"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  GetBlobProperties:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      # Conditions validate before the 404, same as GetBlob.
+      - { cond: "rec_found || !('if_match_list' in input && size(input.if_match_list) > 0)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "rec_found || !('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      # Read conditions (Azurite ReadConditionalHeadersValidator).
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*')", error: UnsatisfiableCondition, message: "The condition specified using HTTP conditional header(s) cannot be satisfied." }
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 0) || string(input.if_match_list[0]) == '*' || input.if_match_list.exists(m, string(m) == etag)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_unmodified_since_unix' in input) || last_mod <= int(input.if_unmodified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_none_match_list' in input && input.if_none_match_list.exists(m, string(m) == etag)) || (('if_modified_since_unix' in input) && int(input.if_modified_since_unix) < last_mod)", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_modified_since_unix' in input) || int(input.if_modified_since_unix) < last_mod || (('if_none_match_list' in input && size(input.if_none_match_list) > 0) && !input.if_none_match_list.exists(m, string(m) == etag))", error: NotModified, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in src && src.tags != null) ? src.tags : {}, ('container' in src && src.container != null) ? string(src.container) : lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      src: "rec_found ? (('snapshot' in input && input.snapshot != null && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
+      etag: "rec_found ? md5hex(string(src.value) + '|' + toJSON(('metadata' in src && src.metadata != null) ? src.metadata : {}) + '|' + (('content_type' in src && src.content_type != null) ? string(src.content_type) : '')) : ''"
+      last_mod: "rec_found ? (('last_modified' in src && src.last_modified != null) ? int(src.last_modified) : 0) : 0"
+    output:
+      metadata: "('metadata' in src && src.metadata != null) ? src.metadata : {}"
+      content_type: "('content_type' in src && src.content_type != null) ? string(src.content_type) : ''"
+      cache_control: "('cache_control' in src && src.cache_control != null) ? string(src.cache_control) : ''"
+      content_encoding: "('content_encoding' in src && src.content_encoding != null) ? string(src.content_encoding) : ''"
+      content_language: "('content_language' in src && src.content_language != null) ? string(src.content_language) : ''"
+      content_disposition: "('content_disposition' in src && src.content_disposition != null) ? string(src.content_disposition) : ''"
+      content_md5: "('content_md5' in src && src.content_md5 != null) ? string(src.content_md5) : ''"
+      blob_type: "('blob_type' in src && src.blob_type != null && string(src.blob_type) != '') ? string(src.blob_type) : 'BlockBlob'"
+      content_length: "string(blen(string(src.value)))"
+      sequence_number: "('sequence_number' in src && src.sequence_number != null) ? string(src.sequence_number) : ''"
+      tag_count: "string(size(('tags' in src && src.tags != null) ? src.tags : {}))"
+      access_tier: "('access_tier' in src && src.access_tier != null && string(src.access_tier) != '') ? string(src.access_tier) : 'Hot'"
+      access_tier_inferred: "('access_tier' in src && src.access_tier != null && string(src.access_tier) != '') ? 'false' : 'true'"
+      lease_status: "('lease_status' in src && src.lease_status != null && string(src.lease_status) != '') ? string(src.lease_status) : 'unlocked'"
+      lease_state: "('lease_state' in src && src.lease_state != null && string(src.lease_state) != '') ? string(src.lease_state) : 'available'"
+      lease_duration: "('lease_duration' in src && src.lease_duration != null) ? string(src.lease_duration) : ''"
+      etag: "rec_found ? '\"' + etag + '\"' : ''"
+      last_modified: "string(last_mod)"
+
+  SetBlobMetadata:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+    output:
+      metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+
+  GetBlobMetadata:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    output:
+      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
+
+  SetTags:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'InvalidXmlDocument')", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  GetTags:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == (('lease_id' in input && input.lease_id != null) ? string(input.lease_id) : '')", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+      - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in src && src.tags != null) ? src.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      src: "rec_found ? (('snapshot' in input && input.snapshot != null && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0) ? rec.snapshots.filter(s, s.id == string(input.snapshot))[0] : rec) : {}"
+    output:
+      tags: "('tags' in src && src.tags != null) ? src.tags : {}"
+
+  # FilterBlobs answers both /?comp=blobs (service) and
+  # /{container}?restype=container&comp=blobs (container-scoped); a missing
+  # where is an empty result, and matched items carry only the tags the
+  # expression references, like Azurite. The account-level tags_index is
+  # maintained by every tag-changing op.
+  FilterBlobs:
+    reads:
+      acct: { resource: account }
+      ctr: { resource: container }
+    require:
+      - { cond: "!has_ctr || ctr_found", error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('where_invalid' in input && input.where_invalid == true)", error: InvalidQueryParameterValue, message: "The value for one of the query parameters specified in the request URI is invalid." }
+    let:
+      has_ctr: "('container' in input && input.container != null && string(input.container) != '')"
+      wq: "('where' in input && input.where != null) ? string(input.where) : ''"
+      idx: "(acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}"
+      wkeys: "wq != '' ? tagkeys(wq) : []"
+    output:
+      where: wq
+      blobs: "wq == '' ? [] : idx.map(k, idx[k]).filter(b, (!has_ctr || string(b.container) == lower(string(input.container))) && tagmatch(wq, ('tags' in b && b.tags != null) ? b.tags : {}, string(b.container))).map(b, {'name': b.name, 'container': string(b.container), 'tags': without(('tags' in b && b.tags != null) ? b.tags : {}, (('tags' in b && b.tags != null) ? b.tags : {}).map(tk, tk).filter(tk, !wkeys.exists(w, w == tk)))})"
+
+  SetBlobProperties:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+            cache_control: "('cache_control' in input && input.cache_control != null) ? string(input.cache_control) : ''"
+            content_encoding: "('content_encoding' in input && input.content_encoding != null) ? string(input.content_encoding) : ''"
+            content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
+            content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
+            content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
+    output:
+      content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+      cache_control: "('cache_control' in input && input.cache_control != null) ? string(input.cache_control) : ''"
+      content_encoding: "('content_encoding' in input && input.content_encoding != null) ? string(input.content_encoding) : ''"
+      content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
+      content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
+      content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
+
+  CreatePageBlob:
+    reads:
+      ctr: { resource: container }
+      existing: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "'content_length' in input && input.content_length != null", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.content_length) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    effects:
+      - put:
+          resource: blob
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "zeros(int(input.content_length))"
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+            content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+            cache_control: ''
+            content_encoding: ''
+            content_language: ''
+            content_disposition: ''
+            content_md5: ''
+            blob_type: "'PageBlob'"
+            sequence_number: "('sequence_number' in input && input.sequence_number != null) ? string(int(input.sequence_number)) : '0'"
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  PutPage:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'page_write' in input && string(input.page_write) == 'update'", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "'range_start' in input", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_start) % 512 == 0 && (int(input.range_end) + 1) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_end) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+      - { cond: "blen(('body' in input && input.body != null) ? string(input.body) : '') == int(input.range_end) - int(input.range_start) + 1", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('seq_le' in input) || int(input.seq_le) >= seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('seq_lt' in input) || int(input.seq_lt) > seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('seq_eq' in input) || int(input.seq_eq) == seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      seq: "rec_found ? (('sequence_number' in rec && rec.sequence_number != null) ? int(rec.sequence_number) : 0) : 0"
+    effects:
+      - patch:
+          resource: blob
+          record:
+            value: "substr(string(rec.value), 0, int(input.range_start)) + (('body' in input && input.body != null) ? string(input.body) : '') + substr(string(rec.value), int(input.range_end) + 1, blen(string(rec.value)))"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  ClearPages:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'range_start' in input", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_start) % 512 == 0 && (int(input.range_end) + 1) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_end) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+      - { cond: "!('seq_le' in input) || int(input.seq_le) >= seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('seq_lt' in input) || int(input.seq_lt) > seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('seq_eq' in input) || int(input.seq_eq) == seq", error: SequenceNumberConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      seq: "rec_found ? (('sequence_number' in rec && rec.sequence_number != null) ? int(rec.sequence_number) : 0) : 0"
+    effects:
+      - patch:
+          resource: blob
+          record:
+            value: "substr(string(rec.value), 0, int(input.range_start)) + zeros(int(input.range_end) - int(input.range_start) + 1) + substr(string(rec.value), int(input.range_end) + 1, blen(string(rec.value)))"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  GetPageRanges:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "!('range_start' in input) || int(input.range_start) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+    let:
+      npages: "blen(string(rec.value)) / 512"
+      starts: "series(npages).filter(i, substr(string(rec.value), i * 512, i * 512 + 512) != zeros(512) && (i == 0 || substr(string(rec.value), (i - 1) * 512, i * 512) == zeros(512)))"
+      ends: "series(npages).filter(i, substr(string(rec.value), i * 512, i * 512 + 512) != zeros(512) && (i + 1 == npages || substr(string(rec.value), (i + 1) * 512, (i + 2) * 512) == zeros(512)))"
+      all: "series(size(starts)).map(j, {'start': starts[j] * 512, 'end': ends[j] * 512 + 511})"
+    output:
+      ranges: "('range_start' in input) ? all.filter(r, r.end >= int(input.range_start) && r.start <= int(input.range_end)).map(r, {'start': r.start > int(input.range_start) ? r.start : int(input.range_start), 'end': r.end < int(input.range_end) ? r.end : int(input.range_end)}) : all"
+
+  ResizePageBlob:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'content_length' in input && input.content_length != null", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.content_length) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            value: "int(input.content_length) > blen(string(rec.value)) ? string(rec.value) + zeros(int(input.content_length) - blen(string(rec.value))) : substr(string(rec.value), 0, int(input.content_length))"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  SetBlobSequenceNumber:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'sequence_number_action' in input && ['update', 'max', 'increment'].exists(a, a == string(input.sequence_number_action))", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "string(input.sequence_number_action) == 'increment' || 'sequence_number' in input", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+    let:
+      cur: "('sequence_number' in rec && rec.sequence_number != null) ? int(rec.sequence_number) : 0"
+      next: "string(input.sequence_number_action) == 'increment' ? cur + 1 : (string(input.sequence_number_action) == 'max' ? (cur > int(input.sequence_number) ? cur : int(input.sequence_number)) : int(input.sequence_number))"
+    effects:
+      - patch:
+          resource: blob
+          record:
+            sequence_number: "string(next)"
+    output:
+      sequence_number: "string(next)"
+
+  ListBlobs:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    select: { binding: all, resource: blob }
+    let:
+      pfx: "('prefix' in input && input.prefix != null) ? string(input.prefix) : ''"
+      dlm: "('delimiter' in input && input.delimiter != null) ? string(input.delimiter) : ''"
+      inc: "('include' in input && input.include != null) ? string(input.include) : ''"
+    output:
+      # hier folds names containing the delimiter into one BlobPrefix entry
+      # per leading segment, sorted; flat otherwise. It must compute here, not
+      # in a let: select bindings only exist after the select runs.
+      _list: "hier(all.map(b, string(b.name)), pfx, dlm).map(e, all.exists(b, string(b.name) == e) ? {'name': e, 'tags': (inc.contains('tags') && 'tags' in all.filter(b, string(b.name) == e)[0] && all.filter(b, string(b.name) == e)[0].tags != null) ? all.filter(b, string(b.name) == e)[0].tags : {}, 'snapshots': (inc.contains('snapshots') && 'snapshots' in all.filter(b, string(b.name) == e)[0] && all.filter(b, string(b.name) == e)[0].snapshots != null) ? all.filter(b, string(b.name) == e)[0].snapshots : []} : {'prefix': e})"
+
+  DeleteBlob:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('snapshot' in input && input.snapshot != null) || ('snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.snapshot))) > 0)", error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "('snapshot' in input && input.snapshot != null) || !('snapshots' in rec && rec.snapshots != null && size(rec.snapshots) > 0) || ('delete_snapshots' in input && input.delete_snapshots != null)", error: SnapshotsPresent, message: "The blob has one or more snapshots. Specify the x-ms-delete-snapshots header." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+      # Write conditions (Azurite WriteConditionalHeadersValidator):
+      # combination 400s, then the first present condition type decides.
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "cond_types <= 2", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "cond_types != 2 || (inm && ims)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "!inm || string(input.if_none_match_list[0]) != etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || !im || string(input.if_match_list[0]) == '*' || string(input.if_match_list[0]) == etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || im || !ims || last_mod > int(input.if_modified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || im || ims || !('if_unmodified_since_unix' in input) || int(input.if_unmodified_since_unix) >= last_mod", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      inm: "('if_none_match_list' in input && size(input.if_none_match_list) > 0)"
+      im: "('if_match_list' in input && size(input.if_match_list) > 0)"
+      ims: "('if_modified_since_unix' in input)"
+      cond_types: "(inm ? 1 : 0) + (im ? 1 : 0) + (ims ? 1 : 0) + (('if_unmodified_since_unix' in input) ? 1 : 0)"
+      etag: "rec_found ? md5hex(string(rec.value) + '|' + toJSON(('metadata' in rec && rec.metadata != null) ? rec.metadata : {}) + '|' + (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : '')) : ''"
+      last_mod: "rec_found ? (('last_modified' in rec && rec.last_modified != null) ? int(rec.last_modified) : 0) : 0"
+    effects:
+      # Deleting one snapshot removes it from the base record.
+      - patch:
+          when: "('snapshot' in input && input.snapshot != null)"
+          resource: blob
+          record:
+            snapshots: "rec.snapshots.filter(s, s.id != string(input.snapshot))"
+      # x-ms-delete-snapshots: only drops the snapshots, keeps the base.
+      - patch:
+          when: "!('snapshot' in input && input.snapshot != null) && 'delete_snapshots' in input && string(input.delete_snapshots) == 'only'"
+          resource: blob
+          record:
+            snapshots: "[]"
+      # A base delete (with or without include) removes the record outright.
+      - delete:
+          when: "!('snapshot' in input && input.snapshot != null) && !('delete_snapshots' in input && string(input.delete_snapshots) == 'only')"
+          resource: blob
+      - patch:
+          when: "!('snapshot' in input && input.snapshot != null) && !('delete_snapshots' in input && string(input.delete_snapshots) == 'only')"
+          resource: account
+          record:
+            tags_index: "without((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, [lower(string(input.container)) + '/' + string(input.blob)])"
+
+  PutBlock:
+    reads:
+      ctr: { resource: container }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'blockid' in input && string(input.blockid) != ''", error: InvalidResourceName, message: "The specified block id is invalid." }
+    effects:
+      - put: { resource: blob_slot }
+      - put: { resource: block }
+
+  PutBlockList:
+    reads:
+      ctr: { resource: container }
+      slot: { resource: blob_slot }
+      existing: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'blob' in input && string(input.blob) != ''", error: InvalidResourceName, message: "The specified blob name is invalid." }
+      - { cond: "'blockids' in input && input.blockids.all(id, staged.exists(b, string(b.id) == string(id)))", error: InvalidBlockList, message: "The specified block list is invalid." }
+      # Same createBlob special case as PutBlob: If-None-Match * on an
+      # existing blob is a 409.
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 0 && string(input.if_none_match_list[0]) == '*') || !existing_found", error: BlobAlreadyExists, message: "The specified blob already exists." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    select: { binding: staged, resource: block }
+    effects:
+      - put:
+          resource: blob
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "join(input.blockids.map(id, string(staged.filter(b, string(b.id) == string(id))[0].value)), '')"
+            blob_type: "'BlockBlob'"
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+
+  SetBlobTier:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'access_tier' in input && input.access_tier != null && ['Hot', 'Cool', 'Cold', 'Archive'].exists(tier, tier == string(input.access_tier))", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "string(rec.blob_type) == 'BlockBlob'", error: AccessTierNotSupportedForBlobType, message: "The access tier is not supported for this blob type." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            access_tier: "string(input.access_tier)"
+            access_tier_inferred: "'false'"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  AcquireBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked')", error: LeaseAlreadyPresent, message: "There is already a lease present." }
+    effects:
+      - generate: { bind: leaseid, kind: hex, bytes: 16 }
+      - patch:
+          resource: blob
+          record:
+            lease_id: "('proposed_lease_id' in input && string(input.proposed_lease_id) != '') ? string(input.proposed_lease_id) : fx.leaseid"
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+            lease_duration: "('lease_duration' in input && string(input.lease_duration) == '-1') ? 'infinite' : 'fixed'"
+    output:
+      lease_id: "('proposed_lease_id' in input && string(input.proposed_lease_id) != '') ? string(input.proposed_lease_id) : fx.leaseid"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+      lease_duration: "('lease_duration' in input && string(input.lease_duration) == '-1') ? 'infinite' : 'fixed'"
+
+  ReleaseBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            lease_id: "''"
+            lease_status: "'unlocked'"
+            lease_state: "'available'"
+            lease_duration: "''"
+    output:
+      lease_status: "'unlocked'"
+      lease_state: "'available'"
+
+  RenewBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+    output:
+      lease_id: "string(rec.lease_id)"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+
+  BreakBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            lease_id: "''"
+            lease_status: "'unlocked'"
+            lease_state: "'broken'"
+            lease_duration: "''"
+    output:
+      lease_status: "'unlocked'"
+      lease_state: "'broken'"
+
+  ChangeBlobLease:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+      - { cond: "'proposed_lease_id' in input && string(input.proposed_lease_id) != ''", error: InvalidResourceName, message: "The proposed lease ID is invalid." }
+    effects:
+      - patch:
+          resource: blob
+          record:
+            lease_id: "string(input.proposed_lease_id)"
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+    output:
+      lease_id: "string(input.proposed_lease_id)"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+
+  PutPageFromURL:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "'page_write' in input && string(input.page_write) == 'update'", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "'range_start' in input && int(input.range_start) % 512 == 0 && (int(input.range_end) + 1) % 512 == 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "int(input.range_end) < blen(string(rec.value))", error: RequestedRangeNotSatisfiable, message: "The range specified is invalid for the current size of the resource." }
+    let:
+      chunk: "src_found ? (('source_range_start' in input) ? substr(string(src.value), int(input.source_range_start), int(input.source_range_end) + 1) : string(src.value)) : ''"
+    effects:
+      # The src read resolved this resource's id to the source; key the patch
+      # back to the destination, same as the copy puts.
+      - patch:
+          resource: blob
+          key: "string(input.blob)"
+          record:
+            value: "substr(string(rec.value), 0, int(input.range_start)) + chunk + substr(string(rec.value), int(input.range_end) + 1, blen(string(rec.value)))"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"
+
+  AppendBlockFromURL:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+      src: { resource: blob, key: "('source_blob' in input && input.source_blob != null) ? string(input.source_blob) : ''" }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'AppendBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "!('source_invalid' in input && input.source_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: src_found, error: BlobNotFound, message: "The specified blob does not exist." }
+    let:
+      chunk: "src_found ? (('source_range_start' in input) ? substr(string(src.value), int(input.source_range_start), int(input.source_range_end) + 1) : string(src.value)) : ''"
+      offset: "rec_found ? blen(string(rec.value)) : 0"
+      count: "rec_found ? ((('append_count' in rec && rec.append_count != null) ? int(rec.append_count) : 0) + 1) : 0"
+    effects:
+      - patch:
+          resource: blob
+          key: "string(input.blob)"
+          record:
+            value: "string(rec.value) + chunk"
+            append_count: "string(count)"
+    output:
+      append_offset: "string(offset)"
+      committed_block_count: "string(count)"
+
+  # Get Page Ranges Diff: pages whose current bytes differ from the named
+  # snapshot (missing pages in the snapshot read as zeros).
+  GetPageRangesDiff:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'PageBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "('prevsnapshot' in input && input.prevsnapshot != null) && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.prevsnapshot))) > 0", error: BlobNotFound, message: "The specified snapshot does not exist." }
+    let:
+      # Guard the snapshot index: an unknown prevsnapshot must 404 via the
+      # require, not fault the let before requires run.
+      snapval: "(rec_found && 'snapshots' in rec && rec.snapshots != null && size(rec.snapshots.filter(s, s.id == string(input.prevsnapshot))) > 0) ? string(rec.snapshots.filter(s, s.id == string(input.prevsnapshot))[0].value) : ''"
+      npages: "blen(string(rec.value)) / 512"
+      changed: "rec_found ? series(npages).filter(i, substr(string(rec.value), i * 512, i * 512 + 512) != (i * 512 + 512 <= blen(snapval) ? substr(snapval, i * 512, i * 512 + 512) : zeros(512))) : []"
+      starts: "changed.filter(i, i == 0 || !changed.exists(j, j == i - 1))"
+      ends: "changed.filter(i, !changed.exists(j, j == i + 1))"
+      all: "series(size(starts)).map(j, {'start': starts[j] * 512, 'end': ends[j] * 512 + 511})"
+    output:
+      ranges: all
+
+  UnsupportedQuery:
+    require:
+      - { cond: "false", error: InvalidQueryParameterValue, message: "The value for one of the query parameters specified in the request URI is invalid." }
+
+  SetContainerMetadata:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+    output:
+      name: rec.name
+      metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+
+  GetContainerMetadata:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    output:
+      name: rec.name
+      metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
+
+  SetContainerAcl:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            acl: "('acl' in input && input.acl != null) ? string(input.acl) : (('body' in input && input.body != null) ? string(input.body) : '')"
+            public_access: "('public_access' in input && input.public_access != null) ? string(input.public_access) : ''"
+    output:
+      name: rec.name
+      public_access: "('public_access' in input && input.public_access != null) ? string(input.public_access) : ''"
+
+  GetContainerAcl:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    output:
+      acl: "('acl' in rec && rec.acl != null && string(rec.acl) != '') ? string(rec.acl) : '<?xml version=\"1.0\" encoding=\"utf-8\"?><SignedIdentifiers></SignedIdentifiers>'"
+      public_access: "('public_access' in rec && rec.public_access != null) ? string(rec.public_access) : ''"
+
+  AcquireContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked')", error: LeaseAlreadyPresent, message: "There is already a lease present." }
+    effects:
+      - generate: { bind: leaseid, kind: hex, bytes: 16 }
+      - patch:
+          resource: container
+          record:
+            lease_id: "('proposed_lease_id' in input && string(input.proposed_lease_id) != '') ? string(input.proposed_lease_id) : fx.leaseid"
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+            lease_duration: "('lease_duration' in input && string(input.lease_duration) == '-1') ? 'infinite' : 'fixed'"
+    output:
+      lease_id: "('proposed_lease_id' in input && string(input.proposed_lease_id) != '') ? string(input.proposed_lease_id) : fx.leaseid"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+      lease_duration: "('lease_duration' in input && string(input.lease_duration) == '-1') ? 'infinite' : 'fixed'"
+
+  ReleaseContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the container." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            lease_id: "''"
+            lease_status: "'unlocked'"
+            lease_state: "'available'"
+            lease_duration: "''"
+    output:
+      lease_status: "'unlocked'"
+      lease_state: "'available'"
+
+  RenewContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the container." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+    output:
+      lease_id: "string(rec.lease_id)"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+
+  BreakContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            lease_id: "''"
+            lease_status: "'unlocked'"
+            lease_state: "'broken'"
+            lease_duration: "''"
+    output:
+      lease_status: "'unlocked'"
+      lease_state: "'broken'"
+
+  GetServiceProperties:
+    reads:
+      rec: { resource: account }
+    output:
+      properties: "rec_found && 'properties' in rec && rec.properties != null && string(rec.properties) != '' ? string(rec.properties) : ''"
+
+  SetServiceProperties:
+    effects:
+      - put:
+          resource: account
+          record:
+            properties: "('body' in input && input.body != null) ? string(input.body) : ''"
+    output:
+      properties: "('body' in input && input.body != null) ? string(input.body) : ''"
+
+  GetServiceStats:
+    require:
+      - { cond: "'secondary' in input && input.secondary == true", error: InvalidQueryParameterValue, message: "The value for one of the query parameters specified in the request URI is invalid." }
+    output:
+      geo_status: "'live'"
+
+  GetAccountInfo:
+    output:
+      account_kind: "'StorageV2'"
+      sku_name: "'Standard_RAGRS'"
+      hns: "'false'"
+
+  ChangeContainerLease:
+    reads:
+      rec: { resource: container }
+    require:
+      - { cond: rec_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "'lease_id' in rec && string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithLeaseOperation, message: "The lease ID specified did not match the lease ID for the container." }
+      - { cond: "'proposed_lease_id' in input && string(input.proposed_lease_id) != ''", error: InvalidResourceName, message: "The proposed lease ID is invalid." }
+    effects:
+      - patch:
+          resource: container
+          record:
+            lease_id: "string(input.proposed_lease_id)"
+            lease_status: "'locked'"
+            lease_state: "'leased'"
+    output:
+      lease_id: "string(input.proposed_lease_id)"
+      lease_status: "'locked'"
+      lease_state: "'leased'"
+
+  GetBlockList:
+    reads:
+      ctr: { resource: container }
+      slot: { resource: blob_slot }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+    list: { resource: block, member: _list }
+
+  AppendBlock:
+    reads:
+      ctr: { resource: container }
+      rec: { resource: blob }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: rec_found, error: BlobNotFound, message: "The specified blob does not exist." }
+      - { cond: "string(rec.blob_type) == 'AppendBlob'", error: InvalidBlobType, message: "The blob type is invalid for this operation." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || ('lease_id' in input && input.lease_id != null && string(input.lease_id) != '')", error: LeaseIdMissing, message: "There is currently a lease on the blob and no lease ID was specified in the request." }
+      - { cond: "!('lease_status' in rec && string(rec.lease_status) == 'locked') || string(rec.lease_id) == string(input.lease_id)", error: LeaseIdMismatchWithBlobOperation, message: "The lease ID specified did not match the lease ID for the blob." }
+      - { cond: "'body' in input && input.body != null && blen(string(input.body)) > 0", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "blen(string(input.body)) <= 4194304", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
+      - { cond: "!('append_count' in rec && rec.append_count != null) || int(rec.append_count) < 50000", error: BlockCountExceedsLimit, message: "The committed block count has exceeded the maximum permissible limit." }
+      # Write conditions, then the append-specific pair (max size first,
+      # matching Azurite's append handler order).
+      - { cond: "!('if_match_list' in input && size(input.if_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "!('if_none_match_list' in input && size(input.if_none_match_list) > 1)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "cond_types <= 2", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "cond_types != 2 || (inm && ims)", error: MultipleConditionHeadersNotSupported, message: "Multiple condition headers are not supported." }
+      - { cond: "!inm || string(input.if_none_match_list[0]) != etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || !im || string(input.if_match_list[0]) == '*' || string(input.if_match_list[0]) == etag", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || im || !ims || last_mod > int(input.if_modified_since_unix)", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "inm || im || ims || !('if_unmodified_since_unix' in input) || int(input.if_unmodified_since_unix) >= last_mod", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+      - { cond: "!('max_size' in input) || blen(string(rec.value)) + blen(string(input.body)) <= int(input.max_size)", error: MaxBlobSizeConditionNotMet, message: "The max blob size condition specified was not met." }
+      - { cond: "!('append_pos' in input) || blen(string(rec.value)) == int(input.append_pos)", error: AppendPositionConditionNotMet, message: "The append position condition specified was not met." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || tagmatch(string(input.if_tags), ('tags' in rec && rec.tags != null) ? rec.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    let:
+      offset: "rec_found ? blen(string(rec.value)) : 0"
+      count: "rec_found ? ((('append_count' in rec && rec.append_count != null) ? int(rec.append_count) : 0) + 1) : 0"
+      inm: "('if_none_match_list' in input && size(input.if_none_match_list) > 0)"
+      im: "('if_match_list' in input && size(input.if_match_list) > 0)"
+      ims: "('if_modified_since_unix' in input)"
+      cond_types: "(inm ? 1 : 0) + (im ? 1 : 0) + (ims ? 1 : 0) + (('if_unmodified_since_unix' in input) ? 1 : 0)"
+      etag: "rec_found ? md5hex(string(rec.value) + '|' + toJSON(('metadata' in rec && rec.metadata != null) ? rec.metadata : {}) + '|' + (('content_type' in rec && rec.content_type != null) ? string(rec.content_type) : '')) : ''"
+      last_mod: "rec_found ? (('last_modified' in rec && rec.last_modified != null) ? int(rec.last_modified) : 0) : 0"
+    effects:
+      - patch:
+          resource: blob
+          record:
+            value: "string(rec.value) + string(input.body)"
+            append_count: "string(count)"
+    output:
+      append_offset: "string(offset)"
+      committed_block_count: "string(count)"
+
+  CreateAppendBlob:
+    reads:
+      ctr: { resource: container }
+      existing: { resource: blob }
+      acct: { resource: account }
+    require:
+      - { cond: ctr_found, error: ContainerNotFound, message: "The specified container does not exist." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'TagsTooLarge')", error: TagsTooLarge, message: "The tags specified exceed the maximum permissible limit." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'EmptyTagName')", error: EmptyTagName, message: "The name of one of the tag key-value pairs is empty." }
+      - { cond: "!(('tags_invalid' in input) && string(input.tags_invalid) == 'DuplicateTagNames')", error: DuplicateTagNames, message: "The tags specified are invalid. It contains characters that are not permitted." }
+      - { cond: "!('if_tags_invalid' in input && input.if_tags_invalid == true)", error: InvalidHeaderValue, message: "The value for one of the HTTP headers is not in the correct format." }
+      - { cond: "!('if_tags' in input && input.if_tags != null && string(input.if_tags) != '') || !existing_found || tagmatch(string(input.if_tags), ('tags' in existing && existing.tags != null) ? existing.tags : {}, lower(string(input.container)))", error: ConditionNotMet, message: "The condition specified using HTTP conditional header(s) is not met." }
+    effects:
+      - put:
+          resource: blob
+          record:
+            container: "lower(string(input.container))"
+            name: "string(input.blob)"
+            value: "''"
+            metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+            content_type: "('content_type' in input && input.content_type != null) ? string(input.content_type) : ''"
+            cache_control: "('cache_control' in input && input.cache_control != null) ? string(input.cache_control) : ''"
+            content_encoding: "('content_encoding' in input && input.content_encoding != null) ? string(input.content_encoding) : ''"
+            content_language: "('content_language' in input && input.content_language != null) ? string(input.content_language) : ''"
+            content_disposition: "('content_disposition' in input && input.content_disposition != null) ? string(input.content_disposition) : ''"
+            content_md5: "('content_md5' in input && input.content_md5 != null) ? string(input.content_md5) : ''"
+            blob_type: "'AppendBlob'"
+            append_count: "'0'"
+            tags: "('tags' in input && input.tags != null) ? input.tags : {}"
+      - patch:
+          resource: account
+          record:
+            tags_index: "merge((acct_found && 'tags_index' in acct && acct.tags_index != null) ? acct.tags_index : {}, {lower(string(input.container)) + '/' + string(input.blob): {'container': lower(string(input.container)), 'name': string(input.blob), 'tags': ('tags' in input && input.tags != null) ? input.tags : {}}})"
+    output:
+      container: "lower(string(input.container))"
+      name: "string(input.blob)"

@@ -1,6 +1,7 @@
 package restxml
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -824,18 +825,127 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	for _, test := range []struct{ method, path, want string }{
 		{http.MethodPut, "/c?restype=container", "CreateContainer"},
 		{http.MethodGet, "/?comp=list", "ListContainers"},
+		{http.MethodGet, "/?restype=service&comp=properties", "GetServiceProperties"},
+		{http.MethodPut, "/?restype=service&comp=properties", "SetServiceProperties"},
+		{http.MethodGet, "/?restype=service&comp=stats", "GetServiceStats"},
+		{http.MethodGet, "/?restype=account&comp=properties", "GetAccountInfo"},
+		{http.MethodGet, "/c?restype=account&comp=properties", "GetAccountInfo"},
+		{http.MethodGet, "/c/o?restype=account&comp=properties", "GetAccountInfo"},
 		{http.MethodGet, "/c?restype=container", "GetContainer"},
 		{http.MethodDelete, "/c?restype=container", "DeleteContainer"},
 		{http.MethodPut, "/c/o", "PutBlob"},
 		{http.MethodGet, "/c/o", "GetBlob"},
+		{http.MethodHead, "/c/o", "GetBlobProperties"},
+		{http.MethodPut, "/c/o?comp=metadata", "SetBlobMetadata"},
+		{http.MethodGet, "/c/o?comp=metadata", "GetBlobMetadata"},
+		{http.MethodPut, "/c/o?comp=properties", "SetBlobProperties"},
 		{http.MethodGet, "/c?restype=container&comp=list", "ListBlobs"},
 		{http.MethodDelete, "/c/o", "DeleteBlob"},
+		{http.MethodPut, "/c/o?comp=block", "PutBlock"},
+		{http.MethodPut, "/c/o?comp=blocklist", "PutBlockList"},
+		{http.MethodGet, "/c/o?comp=blocklist", "GetBlockList"},
+		{http.MethodPut, "/c/o?comp=tags", "SetTags"},
+		{http.MethodGet, "/c/o?comp=tags", "GetTags"},
+		{http.MethodGet, "/?comp=blobs", "FilterBlobs"},
+		{http.MethodGet, "/c?restype=container&comp=blobs", "FilterBlobs"},
+		{http.MethodPost, "/?comp=batch", "SubmitBatch"},
+		{http.MethodPost, "/c?restype=container&comp=batch", "SubmitBatch"},
+		{http.MethodPut, "/c/o?comp=tier", "SetBlobTier"},
+		{http.MethodGet, "/c/o?comp=pagelist&prevsnapshot=abc", "GetPageRangesDiff"},
+		{http.MethodPut, "/c?restype=container&comp=metadata", "SetContainerMetadata"},
+		{http.MethodGet, "/c?restype=container&comp=metadata", "GetContainerMetadata"},
+		{http.MethodPut, "/c?restype=container&comp=acl", "SetContainerAcl"},
+		{http.MethodGet, "/c?restype=container&comp=acl", "GetContainerAcl"},
+		{http.MethodPut, "/c?restype=container&comp=lease", "UnsupportedQuery"},
 		{http.MethodGet, "/unknown", "Unknown"},
 	} {
 		op, err := codec.Route(az, httptest.NewRequest(test.method, test.path, nil))
 		if err != nil || op.Name != test.want {
 			t.Errorf("azure %s %s: %#v %v, want %s", test.method, test.path, op, err, test.want)
 		}
+	}
+	for action, want := range map[string]string{
+		"acquire": "AcquireContainerLease",
+		"release": "ReleaseContainerLease",
+		"renew":   "RenewContainerLease",
+		"break":   "BreakContainerLease",
+		"change":  "ChangeContainerLease",
+	} {
+		req := httptest.NewRequest(http.MethodPut, "/c?restype=container&comp=lease", nil)
+		req.Header.Set("x-ms-lease-action", action)
+		op, err := codec.Route(az, req)
+		if err != nil || op.Name != want {
+			t.Errorf("azure lease %s: %#v %v, want %s", action, op, err, want)
+		}
+	}
+	for action, want := range map[string]string{
+		"acquire": "AcquireBlobLease",
+		"release": "ReleaseBlobLease",
+		"renew":   "RenewBlobLease",
+		"break":   "BreakBlobLease",
+		"change":  "ChangeBlobLease",
+	} {
+		req := httptest.NewRequest(http.MethodPut, "/c/o?comp=lease", nil)
+		req.Header.Set("x-ms-lease-action", action)
+		op, err := codec.Route(az, req)
+		if err != nil || op.Name != want {
+			t.Errorf("azure blob lease %s: %#v %v, want %s", action, op, err, want)
+		}
+	}
+	copyReq := httptest.NewRequest(http.MethodPut, "/c/o?comp=appendblock", nil)
+	copyReq.Header.Set("x-ms-copy-source", "http://acct.blob.core.windows.net/c/s")
+	if op, err := codec.Route(az, copyReq); err != nil || op.Name != "AppendBlockFromURL" {
+		t.Errorf("azure append from url: %#v %v", op, err)
+	}
+	pageReq := httptest.NewRequest(http.MethodPut, "/c/o?comp=page", nil)
+	pageReq.Header.Set("x-ms-page-write", "update")
+	pageReq.Header.Set("x-ms-copy-source", "http://acct.blob.core.windows.net/c/s")
+	if op, err := codec.Route(az, pageReq); err != nil || op.Name != "PutPageFromURL" {
+		t.Errorf("azure page from url: %#v %v", op, err)
+	}
+	for name, test := range map[string]struct {
+		path, header, value, want string
+	}{
+		"create page blob":   {"/c/o", "x-ms-blob-type", "PageBlob", "CreatePageBlob"},
+		"create append blob": {"/c/o", "x-ms-blob-type", "AppendBlob", "CreateAppendBlob"},
+		"async copy":         {"/c/o", "x-ms-copy-source", "http://acct.blob.core.windows.net/c/s", "StartCopyFromURL"},
+		"stage from url":     {"/c/o?comp=block", "x-ms-copy-source", "http://acct.blob.core.windows.net/c/s", "StageBlockFromURL"},
+		"put page":           {"/c/o?comp=page", "x-ms-page-write", "update", "PutPage"},
+		"clear pages":        {"/c/o?comp=page", "x-ms-page-write", "clear", "ClearPages"},
+		"resize":             {"/c/o?comp=properties", "x-ms-blob-content-length", "512", "ResizePageBlob"},
+		"sequence number":    {"/c/o?comp=properties", "x-ms-sequence-number-action", "increment", "SetBlobSequenceNumber"},
+	} {
+		req := httptest.NewRequest(http.MethodPut, test.path, nil)
+		req.Header.Set(test.header, test.value)
+		op, err := codec.Route(az, req)
+		if err != nil || op.Name != test.want {
+			t.Errorf("azure %s: %#v %v, want %s", name, op, err, test.want)
+		}
+	}
+	if op, err := codec.Route(az, httptest.NewRequest(http.MethodGet, "/c/o?comp=pagelist", nil)); err != nil || op.Name != "GetPageRanges" {
+		t.Errorf("azure page ranges: %#v %v", op, err)
+	}
+	if op, err := codec.Route(az, httptest.NewRequest(http.MethodPut, "/c/o?comp=pagelist", nil)); err != nil || op.Name != "UnsupportedQuery" {
+		t.Errorf("azure page ranges put: %#v %v", op, err)
+	}
+	if op, err := codec.Route(az, httptest.NewRequest(http.MethodPut, "/c/o?comp=snapshot", nil)); err != nil || op.Name != "CreateSnapshot" {
+		t.Errorf("azure snapshot: %#v %v", op, err)
+	}
+	if op, err := codec.Route(az, httptest.NewRequest(http.MethodPut, "/c/o?comp=copy&copyid=x", nil)); err != nil || op.Name != "AbortCopy" {
+		t.Errorf("azure abort copy: %#v %v", op, err)
+	}
+	syncReq := httptest.NewRequest(http.MethodPut, "/c/o", nil)
+	syncReq.Header.Set("x-ms-copy-source", "http://acct.blob.core.windows.net/c/s")
+	syncReq.Header.Set("x-ms-requires-sync", "true")
+	if op, err := codec.Route(az, syncReq); err != nil || op.Name != "CopyBlobFromURL" {
+		t.Errorf("azure sync copy: %#v %v", op, err)
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(az, &model.Operation{Name: "GetPageRanges"}, w, &spi.Response{Output: map[string]any{"ranges": []any{map[string]any{"start": 0, "end": 511}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "<PageRange><Start>0</Start><End>511</End></PageRange>") {
+		t.Fatalf("azure page ranges encode %d %s", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.Encode(az, &model.Operation{Name: "ListContainers"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"name": "c"}}, "_kind": "containers"}}); err != nil {
@@ -850,6 +960,94 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || w.Header().Get("x-ms-error-code") != "BlobNotFound" || !strings.Contains(w.Body.String(), "<Code>BlobNotFound</Code>") {
 		t.Fatalf("azure fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+}
+
+func TestAzureQueueRoutes(t *testing.T) {
+	codec := Codec{}
+	qs := &model.Service{ID: "azure.queue"}
+	for _, test := range []struct{ method, path, want string }{
+		{http.MethodPut, "/q", "CreateQueue"},
+		{http.MethodDelete, "/q", "DeleteQueue"},
+		{http.MethodGet, "/?comp=list", "ListQueues"},
+		{http.MethodPut, "/q?comp=metadata", "SetQueueMetadata"},
+		{http.MethodGet, "/q?comp=metadata", "GetQueueProperties"},
+		{http.MethodPut, "/q?comp=acl", "SetQueueAcl"},
+		{http.MethodGet, "/q?comp=acl", "GetQueueAcl"},
+		{http.MethodGet, "/?restype=service&comp=properties", "GetServiceProperties"},
+		{http.MethodPut, "/?restype=service&comp=properties", "SetServiceProperties"},
+		{http.MethodGet, "/?restype=service&comp=stats", "GetServiceStats"},
+		{http.MethodPost, "/q/messages", "PutMessage"},
+		{http.MethodGet, "/q/messages", "GetMessages"},
+		{http.MethodGet, "/q/messages?peekonly=true", "PeekMessages"},
+		{http.MethodDelete, "/q/messages", "ClearMessages"},
+		{http.MethodPut, "/q/messages/abc?popreceipt=x&visibilitytimeout=5", "UpdateMessage"},
+		{http.MethodDelete, "/q/messages/abc?popreceipt=x", "DeleteMessage"},
+	} {
+		op, err := codec.Route(qs, httptest.NewRequest(test.method, test.path, nil))
+		if err != nil || op.Name != test.want {
+			t.Errorf("azure queue %s %s: %#v %v, want %s", test.method, test.path, op, err, test.want)
+		}
+	}
+}
+
+func TestAzureConditionalHeadersDecode(t *testing.T) {
+	codec := Codec{}
+	az := &model.Service{ID: "azure.blobs"}
+	req := httptest.NewRequest(http.MethodGet, "/c/o", nil)
+	req.Header.Set("If-Match", `"etag1", "etag2"`)
+	req.Header.Set("If-None-Match", `*`)
+	req.Header.Set("If-Modified-Since", "Mon, 01 Jan 2018 00:00:00 GMT")
+	req.Header.Set("If-Unmodified-Since", "Wed, 01 Jan 2020 00:00:00 GMT")
+	req.Header.Set("x-ms-if-sequence-number-eq", "5")
+	req.Header.Set("x-ms-blob-condition-appendpos", "3")
+	req.Header.Set("x-ms-blob-condition-maxsize", "100")
+	req.Header.Set("x-ms-tags", "k1=v1&k2=v%202")
+	req.Header.Set("x-ms-if-tags", "k1='v1'")
+	op, err := codec.Route(az, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := codec.Decode(az, op, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := dec.Input
+	if got := fmt.Sprint(in["if_match_list"]); got != "[etag1 etag2]" {
+		t.Fatalf("if_match_list %#v", in["if_match_list"])
+	}
+	if got := fmt.Sprint(in["if_none_match_list"]); got != "[*]" {
+		t.Fatalf("if_none_match_list %#v", in["if_none_match_list"])
+	}
+	if in["if_modified_since_unix"] != int64(1514764800) || in["if_unmodified_since_unix"] != int64(1577836800) {
+		t.Fatalf("time headers %#v %#v", in["if_modified_since_unix"], in["if_unmodified_since_unix"])
+	}
+	if in["seq_eq"] != "5" || in["append_pos"] != "3" || in["max_size"] != "100" {
+		t.Fatalf("condition headers %#v", in)
+	}
+	tags, _ := in["tags"].(map[string]any)
+	if tags["k1"] != "v1" || tags["k2"] != "v 2" || in["if_tags"] != "k1='v1'" {
+		t.Fatalf("tag headers %#v", in)
+	}
+	bad := httptest.NewRequest(http.MethodGet, "/c/o", nil)
+	bad.Header.Set("x-ms-if-tags", "k1=='v1'")
+	dec, _ = codec.Decode(az, op, bad)
+	if dec.Input["if_tags_invalid"] != true {
+		t.Fatalf("invalid if-tags %#v", dec.Input)
+	}
+	bad = httptest.NewRequest(http.MethodGet, "/c/o", nil)
+	bad.Header.Set("x-ms-tags", "bad~key=v")
+	dec, _ = codec.Decode(az, op, bad)
+	if dec.Input["tags_invalid"] != "DuplicateTagNames" {
+		t.Fatalf("invalid tags %#v", dec.Input)
+	}
+
+	w := httptest.NewRecorder()
+	if err := codec.EncodeFault(az, &model.Operation{Name: "GetBlob"}, w, &spi.Fault{Code: "ConditionNotMet", HTTPStatus: 304, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 304 || w.Body.Len() != 0 || w.Header().Get("x-ms-error-code") != "" {
+		t.Fatalf("304 fault %d %#v %q", w.Code, w.Header(), w.Body.String())
 	}
 }
 

@@ -398,8 +398,21 @@ func (ev *eval) resolveLets(lets map[string]string, base string) ([]string, erro
 // checkRequires evaluates preconditions in declaration order. The first
 // failure decides the error: that ordering is the service's error precedence,
 // stated as data instead of buried in the order of Go if-statements.
-func (ev *eval) checkRequires(op bir.Operation) *spi.Fault {
+func (ev *eval) checkRequires(op bir.Operation, afterSelect bool) *spi.Fault {
+	sel := ""
+	if op.Select != nil {
+		sel = op.Select.Binding
+	}
 	for i, req := range op.Require {
+		// Requires that name the select binding cannot run until select has
+		// bound it (PutBlockList InvalidBlockList). Skip them on the first
+		// pass; the second pass after select evaluates every rule.
+		if !afterSelect && sel != "" && strings.Contains(req.Cond, sel) {
+			continue
+		}
+		if afterSelect && sel != "" && !strings.Contains(req.Cond, sel) {
+			continue
+		}
 		path := fmt.Sprintf("operations.%s.require[%d].cond", ev.req.Operation, i)
 		ok, err := ev.evalBool(path)
 		if err != nil {

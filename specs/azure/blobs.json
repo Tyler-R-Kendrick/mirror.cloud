@@ -1,0 +1,773 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Azure Blob Storage",
+    "version": "authored-1",
+    "description": "The Azure Blob Storage data plane, as mirror serves it.\n\nTHIS DOCUMENT IS AUTHORED, NOT VENDORED. The vendor's own description of this surface is Swagger 2.0 with x-ms-paths, which the OpenAPI receiver cannot ingest; it stays vendored at specs/azure/blob-storage.json as the parity ledger's pin, and this document is the OpenAPI 3.0.3 transcription of the subset mirror serves, evidenced by that pin and by the Azurite behavior the behavior bundle (behavior/azure/blobs) transcribes. The lock records this file with source `authored`: its sha256 still pins the bytes, but nothing refetches it, so it cannot tell you the vendor changed something. Treat every statement in it as `authored` provenance.\n\nTwo things OpenAPI cannot say are carried by mirror extensions. x-mirror-protocol is restXml because the wire format is XML and the codec serving it is chosen by that field. And the paths carry their query strings verbatim -- `/{container}?restype=container` is one binding, distinguished from `/{container}` by the query, which is how the router and the conformance requests already address these operations.\n\nUnsupportedQuery declares only a 400: it is the route for a comp the service does not implement, the behavior bundle always faults it, and the recorded 400 is what the fault path answers; the model's success code for it is a field no request can reach.\n\nThe members the address templates name ({container}, {blob}, and the like) are declared with x-mirror-input rather than as OpenAPI parameters. The router binds them from the address regardless, and declaring them as path parameters would make the receiver mark them required -- an engine-required member faults a request that arrives without it before the behavior bundle applies the service's own validation, and a container-less PUT must be answered InvalidResourceName by the bundle, not a generic validation fault."
+  },
+  "x-mirror-protocol": "restXml",
+  "servers": [
+    {
+      "url": "https://blob.core.windows.net"
+    }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "FilterBlobs",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilterBlobResult"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-operations": [
+          {
+            "name": "ListContainers",
+            "response": "#/components/schemas/ContainerList",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetAccountInfo",
+            "response": "#/components/schemas/Account",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetServiceProperties",
+            "response": "#/components/schemas/Account",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetServiceStats",
+            "response": "#/components/schemas/Account",
+            "code": 200,
+            "readonly": true
+          },
+          {
+            "name": "GetBlob",
+            "response": "#/components/schemas/BlobBody",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetBlockList",
+            "response": "#/components/schemas/BlockList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetBlobMetadata",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetPageRanges",
+            "response": "#/components/schemas/PageRangeList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetPageRangesDiff",
+            "response": "#/components/schemas/PageRangeList",
+            "readonly": true,
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetTags",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "GetContainer",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "GetContainerAcl",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "ListBlobs",
+            "response": "#/components/schemas/BlobList",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "GetContainerMetadata",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "readonly": true,
+            "x-mirror-input": [
+              "container"
+            ]
+          }
+        ]
+      },
+      "put": {
+        "operationId": "SetServiceProperties",
+        "responses": {
+          "202": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-operations": [
+          {
+            "name": "PutBlob",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "CreatePageBlob",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "CreateAppendBlob",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "StartCopyFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 202,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "CopyBlobFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 202,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AppendBlock",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AppendBlockFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "PutBlock",
+            "response": "#/components/schemas/Empty",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob",
+              "blockid"
+            ]
+          },
+          {
+            "name": "StageBlockFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob",
+              "blockid"
+            ]
+          },
+          {
+            "name": "PutBlockList",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AbortCopy",
+            "response": "#/components/schemas/Empty",
+            "code": 204,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AcquireBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "BreakBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 202,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "ChangeBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "ReleaseBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "RenewBlobLease",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetBlobMetadata",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "PutPage",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "ClearPages",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "PutPageFromURL",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetBlobProperties",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "ResizePageBlob",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetBlobSequenceNumber",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "CreateSnapshot",
+            "response": "#/components/schemas/Blob",
+            "code": 201,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetTags",
+            "response": "#/components/schemas/Blob",
+            "code": 204,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "SetBlobTier",
+            "response": "#/components/schemas/Blob",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "UnsupportedQuery",
+            "response": "#/components/schemas/Empty",
+            "code": 200,
+            "x-mirror-input": [
+              "container",
+              "blob"
+            ]
+          },
+          {
+            "name": "AcquireContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 201,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "BreakContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 202,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "ChangeContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "ReleaseContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "RenewContainerLease",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "CreateContainer",
+            "response": "#/components/schemas/Container",
+            "code": 201,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "SetContainerAcl",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          },
+          {
+            "name": "SetContainerMetadata",
+            "response": "#/components/schemas/Container",
+            "code": 200,
+            "x-mirror-input": [
+              "container"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "operationId": "SubmitBatch",
+        "responses": {
+          "202": {
+            "description": "The request succeeded."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "DeleteBlob",
+        "responses": {
+          "202": {
+            "description": "The request succeeded."
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ],
+        "x-mirror-operations": [
+          {
+            "name": "DeleteContainer",
+            "response": "#/components/schemas/Empty",
+            "code": 202,
+            "x-mirror-input": [
+              "container"
+            ]
+          }
+        ]
+      },
+      "head": {
+        "operationId": "GetBlobProperties",
+        "responses": {
+          "200": {
+            "description": "The request succeeded.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          }
+        },
+        "x-mirror-input": [
+          "container",
+          "blob"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "String": {
+        "type": "string"
+      },
+      "Map": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/String"
+        }
+      },
+      "Container": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Map"
+          },
+          "acl": {
+            "$ref": "#/components/schemas/String"
+          },
+          "public_access": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_status": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_state": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_duration": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "ContainerList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Container"
+        }
+      },
+      "Blob": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "container": {
+            "$ref": "#/components/schemas/String"
+          },
+          "value": {
+            "$ref": "#/components/schemas/String"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Map"
+          },
+          "content_type": {
+            "$ref": "#/components/schemas/String"
+          },
+          "cache_control": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_encoding": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_language": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_disposition": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_md5": {
+            "$ref": "#/components/schemas/String"
+          },
+          "sequence_number": {
+            "$ref": "#/components/schemas/String"
+          },
+          "append_offset": {
+            "$ref": "#/components/schemas/String"
+          },
+          "committed_block_count": {
+            "$ref": "#/components/schemas/String"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/String"
+          },
+          "copy_id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "copy_status": {
+            "$ref": "#/components/schemas/String"
+          },
+          "blob_type": {
+            "$ref": "#/components/schemas/String"
+          },
+          "content_length": {
+            "$ref": "#/components/schemas/String"
+          },
+          "etag": {
+            "$ref": "#/components/schemas/String"
+          },
+          "last_modified": {
+            "$ref": "#/components/schemas/String"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/Map"
+          },
+          "tag_count": {
+            "$ref": "#/components/schemas/String"
+          },
+          "access_tier": {
+            "$ref": "#/components/schemas/String"
+          },
+          "access_tier_inferred": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_status": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_state": {
+            "$ref": "#/components/schemas/String"
+          },
+          "lease_duration": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "FilterBlob": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "container": {
+            "$ref": "#/components/schemas/String"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/Map"
+          }
+        }
+      },
+      "FilterBlobList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/FilterBlob"
+        }
+      },
+      "FilterBlobResult": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "$ref": "#/components/schemas/String"
+          },
+          "blobs": {
+            "$ref": "#/components/schemas/FilterBlobList"
+          }
+        }
+      },
+      "BlobList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Blob"
+        }
+      },
+      "BlobBody": {
+        "type": "string"
+      },
+      "Block": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/String"
+          },
+          "value": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "BlockList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Block"
+        }
+      },
+      "PageRange": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "$ref": "#/components/schemas/String"
+          },
+          "end": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "PageRanges": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PageRange"
+        }
+      },
+      "PageRangeList": {
+        "type": "object",
+        "properties": {
+          "ranges": {
+            "$ref": "#/components/schemas/PageRanges"
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "properties": {
+            "$ref": "#/components/schemas/String"
+          },
+          "geo_status": {
+            "$ref": "#/components/schemas/String"
+          },
+          "account_kind": {
+            "$ref": "#/components/schemas/String"
+          },
+          "sku_name": {
+            "$ref": "#/components/schemas/String"
+          },
+          "hns": {
+            "$ref": "#/components/schemas/String"
+          }
+        }
+      },
+      "Empty": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

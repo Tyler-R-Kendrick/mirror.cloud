@@ -12,7 +12,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestAzureBlobBehavior(t *testing.T) {

@@ -167,13 +167,76 @@ resources:
       # with the same value, which an unprojected list cannot do -- the record
       # IS the item, so every member it carries has to be one the item shape
       # declares. The two operations that answer `id` project it from here.
+      #
+      # Input-independent, as the project's is: CancelDeployment patches this
+      # resource, and `name` read from `input` would fail on a request that
+      # does not carry one. It lives on the create effect instead.
       uid: id
-      name: "string(input.name)"
       readyState: "'READY'"
       state: "'READY'"
       createdAt: "int(now) * 1000"
       created: "int(now) * 1000"
       type: "'LAMBDAS'"
+
+  # A team is an account fixture: the vendored document has no create for one
+  # (POST /v2/teams exists only in emulate's routes), so nothing here writes
+  # one and a listing answers whatever records exist -- initially none. The
+  # record is patch-safe: PatchTeam re-evaluates it, so it carries only what
+  # an update may legitimately refresh.
+  team:
+    collection: vteam
+    key: id
+    id:
+      input_members: [teamId]
+    record:
+      id: id
+      updatedAt: "int(now) * 1000"
+
+  # A membership row per invited address, keyed team:email so a repeat invite
+  # to the same address is the conflict the oracle answers. Writes and reads
+  # all carry explicit keys, so there is nothing to derive from a request.
+  team_member:
+    collection: vteammem
+    id:
+      derive: "''"
+
+  # A deployment's alias rows, written by CreateDeployment the way emulate
+  # writes them (one per deployment, the deployment's own URL). Keyed off the
+  # deployment id; the list filters on the record's deploymentId, so the key
+  # is never derived from a request.
+  deployment_alias:
+    collection: vdepalias
+    id:
+      derive: "''"
+
+  # A deployment's build events, written by CreateDeployment (created,
+  # building, ready -- the three the oracle pushes) and CancelDeployment. The
+  # key is the deployment id plus a serial suffix so one flat collection holds
+  # every deployment's events in per-deployment order.
+  deployment_event:
+    collection: vdevent
+    id:
+      derive: "''"
+
+  # A deployment's file descriptors, from the create body's `files`. Keyed
+  # deployment id plus digest; the list filters on the record's deploymentId.
+  deployment_file:
+    collection: vdfile
+    id:
+      derive: "''"
+
+  # An uploaded file's registration, keyed by its digest -- which is how both
+  # writers name it: UploadFile carries it as the digest header, a deployment
+  # create as each file entry's `sha`.
+  file:
+    collection: vfile
+    id:
+      derive: >
+        ('x-vercel-digest' in input && input['x-vercel-digest'] != null) ? string(input['x-vercel-digest'])
+          : (('x-now-digest' in input && input['x-now-digest'] != null) ? string(input['x-now-digest']) : '')
+    record:
+      digest: id
+      contentType: "'application/octet-stream'"
 
 errors:
   BadRequest:
@@ -186,6 +249,12 @@ errors:
     fault: client
   Conflict:
     code: conflict
+    http: 409
+    fault: client
+  # The oracle's invite route answers a second 409 under its own code; the
+  # generic Conflict stays for project names.
+  MemberAlreadyExists:
+    code: member_already_exists
     http: 409
     fault: client
 
@@ -248,6 +317,12 @@ operations:
   GetProjects:
     list: { resource: project, member: projects }
     output:
+      # Projected rather than raw since the protection-bypass work: a project
+      # record may carry the bypass map, which the listed item shape does not
+      # declare, and an unprojected list would answer it (and fail the loader's
+      # record-members check). The projection is exactly the members every
+      # create establishes, so the answer is unchanged.
+      projects: "items.map(i, {'id': i.id, 'name': i.name, 'accountId': i.accountId, 'createdAt': i.createdAt, 'updatedAt': i.updatedAt, 'framework': ('framework' in i) ? i.framework : null})"
       # The pack answered `pagination.count` and nothing else. The listing is
       # unpaginated -- see the quirk -- so every project is on the one page.
       pagination: "{'count': size(items)}"
@@ -509,10 +584,75 @@ operations:
             # which is what the resource record answered for it before the
             # member moved onto the creates.
             framework: "null"
+      # The sub-resource rows the oracle writes beside a deployment: one alias
+      # (the deployment's own URL), three build events, and a file descriptor
+      # per entry in the body's `files`, each with its digest registered. None
+      # of these draws -- the alias id reuses the deployment's draw and the
+      # event keys are serials -- so the recorded draw sequence is untouched.
+      - put:
+          resource: deployment_alias
+          key: "'als_' + fx.depid"
+          record:
+            uid: "'als_' + fx.depid"
+            alias: "string(input.name) + '-' + fx.host + '.vercel.app'"
+            deploymentId: "'dpl_' + fx.depid"
+            projectId: "by_name_found ? string(by_name.project) : 'prj_' + fx.newproj"
+      - put:
+          resource: deployment_event
+          key: "'dpl_' + fx.depid + ':1'"
+          record:
+            deploymentId: "'dpl_' + fx.depid"
+            type: "'created'"
+            payload: "{'text': 'Deployment created'}"
+            date: "int(now) * 1000"
+            serial: "'1'"
+      - put:
+          resource: deployment_event
+          key: "'dpl_' + fx.depid + ':2'"
+          record:
+            deploymentId: "'dpl_' + fx.depid"
+            type: "'building'"
+            payload: "{'text': 'Building'}"
+            date: "int(now) * 1000"
+            serial: "'2'"
+      - put:
+          resource: deployment_event
+          key: "'dpl_' + fx.depid + ':3'"
+          record:
+            deploymentId: "'dpl_' + fx.depid"
+            type: "'ready'"
+            payload: "{'text': 'Deployment ready'}"
+            date: "int(now) * 1000"
+            serial: "'3'"
+      # An entry the oracle skips -- no path or no digest -- is skipped here
+      # too, and the two writes share the guard so they never disagree.
+      - put:
+          resource: file
+          for_each: "('files' in input && input.files != null) ? input.files : []"
+          key: "string(item.sha)"
+          when: "'sha' in item && item.sha != null && string(item.sha) != '' && 'file' in item && item.file != null && string(item.file) != ''"
+          record:
+            size: "('size' in item && item.size != null) ? int(item.size) : 0"
+      - put:
+          resource: deployment_file
+          for_each: "('files' in input && input.files != null) ? input.files : []"
+          key: "'dpl_' + fx.depid + ':' + string(item.sha)"
+          when: "'sha' in item && item.sha != null && string(item.sha) != '' && 'file' in item && item.file != null && string(item.file) != ''"
+          record:
+            uid: "'f_' + string(item.sha)"
+            deploymentId: "'dpl_' + fx.depid"
+            name: "string(item.file)"
+            type: "'file'"
+            mode: "420"
+            contentType: "'application/octet-stream'"
       - create:
           resource: deployment
           key: "'dpl_' + fx.depid"
           record:
+            # `name` lives here rather than on the resource, because the
+            # resource record must stay input-independent: CancelDeployment's
+            # patch re-evaluates it.
+            name: "string(input.name)"
             # Six random bytes in the hostname, which is what makes two
             # deployments of one project addressable apart.
             url: "string(input.name) + '-' + fx.host + '.vercel.app'"
@@ -553,6 +693,11 @@ operations:
     require:
       - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
     effects:
+      # The oracle cascades: a delete takes the deployment's aliases, events
+      # and file descriptors with it.
+      - delete: { resource: deployment_alias, where: "item.deploymentId == string(dep.uid)" }
+      - delete: { resource: deployment_event, where: "item.deploymentId == string(dep.uid)" }
+      - delete: { resource: deployment_file, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: deployment }
     output:
       uid: dep.uid
@@ -956,6 +1101,355 @@ operations:
     # promote moves no state a client of this surface can read back -- see the
     # quirk.
 
+  # The eleven below close the gap against the vendor-authored oracle
+  # (vercel-labs/emulate, pinned in specs/vercel/emulate-inventory.json) that
+  # the vendored document covers: teams, the deployment sub-resources, file
+  # upload registration, promote aliases and protection bypass. Each is
+  # written from the document's shapes and the oracle's route behavior; where
+  # the two disagree the document wins and `quirks` says so.
+
+  GetTeams:
+    # Teams are account fixtures and nothing here creates one -- the vendored
+    # document has no POST /v2/teams -- so this lists whatever records exist,
+    # initially none. Unpaginated, as GetProjects is.
+    list: { resource: team, member: teams }
+    output:
+      pagination: "{'count': size(items), 'next': null, 'prev': null}"
+
+  GetTeam:
+    reads:
+      team: { resource: team }
+    require:
+      - { cond: team_found, error: NotFound, message: "Team not found" }
+    output:
+      # The oracle's formatTeam subset. Every member beyond the key is
+      # guarded: a fixture row carries only what a patch has written.
+      id: team.id
+      slug: "('slug' in team) ? team.slug : null"
+      name: "('name' in team) ? team.name : null"
+      avatar: "('avatar' in team) ? team.avatar : null"
+      description: "('description' in team) ? team.description : null"
+      creatorId: "('creatorId' in team) ? team.creatorId : null"
+      createdAt: "('createdAt' in team) ? team.createdAt : null"
+      updatedAt: "('updatedAt' in team) ? team.updatedAt : null"
+      membership: "('membership' in team) ? team.membership : {'confirmed': true, 'role': 'OWNER'}"
+      billing: "('billing' in team) ? team.billing : {'plan': 'hobby', 'period': null, 'trial': null, 'cancelation': null, 'addons': null}"
+      resourceConfig: "('resourceConfig' in team) ? team.resourceConfig : {'nodeType': 'standard', 'concurrentBuilds': 1}"
+      stagingPrefix: "('stagingPrefix' in team) ? team.stagingPrefix : ''"
+
+  PatchTeam:
+    reads:
+      team: { resource: team }
+    require:
+      - { cond: team_found, error: NotFound, message: "Team not found" }
+    effects:
+      # The unconditional patch refreshes updatedAt and guarantees `rec` for
+      # the output; each conditional one stores a member only when the request
+      # carried it -- UpdateProjectDomain's split. A null description clears
+      # the member, as the oracle's does. The document declares some thirty
+      # more members on the update; the oracle honors only these four, so only
+      # these are stored.
+      - patch:
+          resource: team
+          record:
+            id: id
+      - patch:
+          resource: team
+          when: "'name' in input && input.name != null"
+          record:
+            name: "string(input.name)"
+      - patch:
+          resource: team
+          when: "'slug' in input && input.slug != null"
+          record:
+            slug: "string(input.slug)"
+      - patch:
+          resource: team
+          when: "'description' in input"
+          record:
+            description: "input.description"
+      - patch:
+          resource: team
+          when: "'avatar' in input"
+          record:
+            avatar: "input.avatar"
+    output:
+      id: rec.id
+      slug: "('slug' in rec) ? rec.slug : null"
+      name: "('name' in rec) ? rec.name : null"
+      avatar: "('avatar' in rec) ? rec.avatar : null"
+      description: "('description' in rec) ? rec.description : null"
+      creatorId: "('creatorId' in rec) ? rec.creatorId : null"
+      createdAt: "('createdAt' in rec) ? rec.createdAt : null"
+      updatedAt: "('updatedAt' in rec) ? rec.updatedAt : null"
+      membership: "('membership' in rec) ? rec.membership : {'confirmed': true, 'role': 'OWNER'}"
+      billing: "('billing' in rec) ? rec.billing : {'plan': 'hobby', 'period': null, 'trial': null, 'cancelation': null, 'addons': null}"
+      resourceConfig: "('resourceConfig' in rec) ? rec.resourceConfig : {'nodeType': 'standard', 'concurrentBuilds': 1}"
+      stagingPrefix: "('stagingPrefix' in rec) ? rec.stagingPrefix : ''"
+
+  InviteUserToTeam:
+    reads:
+      team: { resource: team }
+      # The document's body is a list of {email, role, projects}; the oracle's
+      # is a single {uid|email, role}. The 409 check names the first entry, as
+      # the single-entry request every client of the oracle sends.
+      member:
+        resource: team_member
+        key: >
+          ('body' in input && input.body != null && size(input.body) > 0
+            && 'email' in input.body[0] && input.body[0].email != null)
+            ? string(input.teamId) + ':' + string(input.body[0].email) : ''
+    require:
+      - { cond: team_found, error: NotFound, message: "Team not found" }
+      - { cond: "'body' in input && input.body != null && size(input.body) > 0", error: BadRequest, message: "Provide uid or email" }
+      - { cond: "'email' in input.body[0] && input.body[0].email != null && string(input.body[0].email) != ''", error: BadRequest, message: "Provide uid or email" }
+      # The oracle's four roles, not the document's eight: the oracle 400s the
+      # rest, and the model check does not enforce the enum.
+      - { cond: "!('role' in input.body[0]) || input.body[0].role == null || ['OWNER', 'MEMBER', 'DEVELOPER', 'VIEWER'].exists(r, r == string(input.body[0].role))", error: BadRequest, message: "Invalid role" }
+      - { cond: "!member_found", error: MemberAlreadyExists, message: "User is already a member of this team" }
+    effects:
+      - put:
+          resource: team_member
+          for_each: input.body
+          key: "string(input.teamId) + ':' + string(item.email)"
+          record:
+            teamId: "string(input.teamId)"
+            email: "string(item.email)"
+            # There is no user store to resolve an email against, so the uid
+            # is derived deterministically from the address rather than drawn
+            # -- and the oracle's 404 for an unknown user cannot fire.
+            uid: "'usr_' + substr(md5hex(string(item.email)), 0, 20)"
+            username: "string(item.email)"
+            role: "('role' in item && item.role != null) ? string(item.role) : 'MEMBER'"
+            confirmed: "true"
+            joinedFrom: "'email'"
+    output:
+      # The last row written, which for the single-entry body is the only one.
+      email: rec.email
+      role: rec.role
+      uid: rec.uid
+      username: rec.username
+
+  ListDeploymentAliases:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    list:
+      resource: deployment_alias
+      member: aliases
+      filter: "item.deploymentId == string(dep.uid)"
+    output:
+      # The oracle answers {uid, alias, deploymentId, projectId}; the
+      # document's item shape declares uid and alias but neither id, so the
+      # projection answers the two a reader of the document can rely on. The
+      # document also requires a `created` the oracle never sends; it is
+      # omitted, as the oracle omits it.
+      aliases: "items.map(a, {'uid': a.uid, 'alias': a.alias})"
+
+  GetDeploymentEvents:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    list:
+      resource: deployment_event
+      member: _list
+      filter: "item.deploymentId == string(dep.uid)"
+    output:
+      # The store orders by key, which is serial order; the oracle's default
+      # direction is backward -- newest first -- so the projection reverses.
+      # `direction`, `limit` and the rest are accepted and read by nothing,
+      # as GetProjects' pagination members are.
+      _list: "indices(items).map(i, items[size(items) - 1 - i]).map(e, {'type': e.type, 'payload': e.payload, 'date': e.date, 'serial': e.serial})"
+
+  ListDeploymentFiles:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      # The tree's root node carries a drawn uid, as the oracle's does.
+      - generate: { bind: root, kind: hex, bytes: 10 }
+    list:
+      resource: deployment_file
+      member: _list
+      filter: "item.deploymentId == string(dep.uid)"
+    output:
+      # The document answers a bare FileTree array where the oracle wraps the
+      # same tree in {files: [...]}; the document wins, as it does everywhere
+      # here. The tree is flat -- paths are not split into directory nodes the
+      # way the oracle splits them -- which `quirks` records.
+      _list: >
+        [{'uid': 'file_' + fx.root, 'name': '/', 'type': 'directory', 'mode': 16877, 'contentType': null,
+          'children': items.map(f, {'uid': f.uid, 'name': f.name, 'type': 'file', 'mode': f.mode, 'contentType': f.contentType, 'children': []})}]
+
+  CancelDeployment:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      # The oracle refuses unless the deployment is QUEUED or BUILDING, and
+      # its deployments are born READY -- so strictly transcribed the guard
+      # would refuse every cancel. This refuses only a second cancel, which is
+      # the reachable half of the guard.
+      - { cond: "dep.readyState != 'CANCELED'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
+    effects:
+      # The event write comes first: every write rebinds `rec`, and the output
+      # projects the deployment from it. `canceledAt` is answered at cancel
+      # time but not stored -- the listed deployment's item shape does not
+      # declare it, and a listed record is the item.
+      - put:
+          resource: deployment_event
+          key: "string(dep.uid) + ':canceled'"
+          record:
+            deploymentId: "string(dep.uid)"
+            type: "'canceled'"
+            payload: "{'text': 'Deployment canceled'}"
+            date: "int(now) * 1000"
+            serial: "string(int(now) * 1000)"
+      - patch:
+          resource: deployment
+          key: "string(dep.uid)"
+          record:
+            uid: id
+            readyState: "'CANCELED'"
+            state: "'CANCELED'"
+    output:
+      id: rec.uid
+      name: rec.name
+      url: rec.url
+      projectId: rec.projectId
+      readyState: rec.readyState
+      type: rec.type
+      createdAt: rec.createdAt
+      canceledAt: "int(now) * 1000"
+
+  UploadFile:
+    require:
+      - { cond: "('x-vercel-digest' in input && input['x-vercel-digest'] != null && string(input['x-vercel-digest']) != '') || ('x-now-digest' in input && input['x-now-digest'] != null && string(input['x-now-digest']) != '')", error: BadRequest, message: "Missing x-vercel-digest header" }
+    effects:
+      # A re-upload of a known digest merges where the oracle keeps the first
+      # registration; the quirk records it.
+      - put:
+          resource: file
+          record:
+            size: "('Content-Length' in input && input['Content-Length'] != null) ? int(input['Content-Length']) : 0"
+    # No output: the document's 200 is a oneOf of {urls: [...]} and an empty
+    # object, and the oracle answers a bare empty array, which is neither. The
+    # empty object is the one arm the model can serialize.
+
+  ListPromoteAliases:
+    reads:
+      # The label is spelled `projectId`, as RequestPromote's is, so the index
+      # and the project read carry the same explicit keys.
+      by_name:
+        resource: project_name
+        key: "('projectId' in input && input.projectId != null) ? string(input.projectId) : ''"
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('projectId' in input && input.projectId != null) ? string(input.projectId) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    list:
+      resource: deployment_alias
+      member: aliases
+      filter: "item.projectId == string(proj.id)"
+    output:
+      # The document's arm is {aliases: [{alias, id, status}], pagination},
+      # where the oracle answers {status, alias: [...]} -- a shape the model
+      # cannot serialize, so the document wins. Every deployment here is READY
+      # from creation, which is the oracle's PROMOTED condition.
+      aliases: "items.map(a, {'alias': a.alias, 'id': a.uid, 'status': 'PROMOTED'})"
+      pagination: "{'count': size(items), 'next': null, 'prev': null}"
+
+  UpdateProjectProtectionBypass:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      # The map lives on the project record: the response keys bypass metadata
+      # BY secret, and no expression can fold a row collection into a map.
+      # GetProjects projects its items so the member never leaks into a
+      # listing. The draws are guarded the way CreateDeployment's project draw
+      # is: a request without that action does not draw.
+      - generate:
+          bind: pbs
+          kind: hex
+          bytes: 16
+          # Only a generate that left the secret to us draws; a caller-chosen
+          # secret is honored instead, which the document's body declares.
+          when: "'generate' in input && input.generate != null && !('secret' in input.generate && input.generate.secret != null)"
+      - generate:
+          bind: resec
+          kind: hex
+          bytes: 16
+          # A regenerate of a secret the project does not hold draws and
+          # discards: the alternative is a guard that cannot see a secret the
+          # same request's generate just created, and a guard that misses the
+          # draw while the patch below fires answers 500.
+          when: "'revoke' in input && input.revoke != null && 'regenerate' in input.revoke && input.revoke.regenerate == true"
+      # The unconditional patch refreshes updatedAt and guarantees `rec` for
+      # the output; the guarded ones read rec, so they chain.
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          record:
+            id: id
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          when: "'generate' in input && input.generate != null"
+          record:
+            id: id
+            protectionBypass: >
+              merge(('protectionBypass' in rec && rec.protectionBypass != null) ? rec.protectionBypass : {},
+                {('secret' in input.generate && input.generate.secret != null) ? string(input.generate.secret) : fx.pbs:
+                  {'createdAt': int(now) * 1000, 'createdBy': 'usr_' + identity.account, 'scope': 'automation-bypass',
+                   'note': ('note' in input.generate && input.generate.note != null) ? input.generate.note : null}})
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          when: "'revoke' in input && input.revoke != null && !('regenerate' in input.revoke && input.revoke.regenerate == true)"
+          record:
+            id: id
+            protectionBypass: >
+              without(('protectionBypass' in rec && rec.protectionBypass != null) ? rec.protectionBypass : {},
+                [string(input.revoke.secret)])
+      # Regenerate keeps the entry's note and scope under a fresh secret, as
+      # the oracle does.
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          when: "'revoke' in input && input.revoke != null && ('regenerate' in input.revoke && input.revoke.regenerate == true) && 'protectionBypass' in rec && rec.protectionBypass != null && string(input.revoke.secret) in rec.protectionBypass"
+          record:
+            id: id
+            protectionBypass: >
+              merge(without(rec.protectionBypass, [string(input.revoke.secret)]),
+                {fx.resec: merge(rec.protectionBypass[string(input.revoke.secret)],
+                  {'createdAt': int(now) * 1000, 'createdBy': 'usr_' + identity.account})})
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          when: "'update' in input && input.update != null && 'protectionBypass' in rec && rec.protectionBypass != null && string(input.update.secret) in rec.protectionBypass"
+          record:
+            id: id
+            protectionBypass: >
+              merge(rec.protectionBypass,
+                {string(input.update.secret): merge(rec.protectionBypass[string(input.update.secret)],
+                  {'note': ('note' in input.update && input.update.note != null) ? input.update.note : null,
+                   'isEnvVar': ('isEnvVar' in input.update && input.update.isEnvVar != null) ? input.update.isEnvVar : false})})
+    output:
+      protectionBypass: "('protectionBypass' in rec && rec.protectionBypass != null) ? rec.protectionBypass : {}"
+
 quirks:
   - operation: GetProjects
     note: >
@@ -1054,3 +1548,81 @@ quirks:
       promoted, so a later GetDeployment reads exactly as it did before. The
       404s for an unknown project or deployment are the bundle's own rule,
       the document declaring its usual error statuses without bodies.
+  - operation: GetTeams
+    note: >
+      Lists whatever team records exist, which is initially none: teams are
+      account fixtures, and the vendored document declares no create (the
+      oracle's POST /v2/teams has no counterpart in it). Unpaginated, as
+      GetProjects is: limit/since/until are accepted and read by nothing, and
+      pagination.next/prev answer null.
+  - operation: GetTeam
+    note: >
+      404 for any id until a team record exists, which nothing here creates.
+      Members a bare row would not carry answer null -- or the oracle's
+      defaults for membership, billing and resourceConfig -- rather than
+      failing the read.
+  - operation: PatchTeam
+    note: >
+      Honors name, slug, description and avatar -- the four the oracle's patch
+      honors -- of the thirty-odd members the document declares. Two oracle
+      guards have no counterpart: the owner-only 403 (there is no membership
+      store to check a role against) and the slug-conflict 409 (nothing
+      creates teams, so no second team can hold the slug).
+  - operation: InviteUserToTeam
+    note: >
+      There is no user store, so any well-formed email is invitable where the
+      oracle 404s an unknown user, and the answered uid is derived from the
+      address (md5, truncated to the oracle's twenty) rather than looked up;
+      username echoes the email. The role guard is the oracle's four roles,
+      not the document's eight-member enum. A repeat invite to the same
+      address is the oracle's 409 member_already_exists.
+  - operation: ListDeploymentAliases
+    note: >
+      Answers uid and alias per row. The oracle also answers deploymentId and
+      projectId, which the document's alias item shape does not declare, and
+      the document requires a `created` the oracle never sends -- the
+      projection follows the document's shape with the oracle's membership.
+  - operation: GetDeploymentEvents
+    note: >
+      Newest first, the oracle's default direction; `direction`, `limit`,
+      `since`/`until` and the rest are accepted and read by nothing. Events
+      are the ones the create and cancel write -- created, building, ready,
+      canceled -- not a build log.
+  - operation: ListDeploymentFiles
+    note: >
+      Answers the document's bare FileTree array where the oracle wraps the
+      same tree in {files: [...]} -- the document wins, as it does everywhere
+      the two disagree. The tree is flat: every uploaded file is a child of
+      the root under its full path, where the oracle splits nested paths into
+      directory nodes.
+  - operation: CancelDeployment
+    note: >
+      The oracle refuses unless the deployment is QUEUED or BUILDING, and its
+      deployments -- like this bundle's -- are born READY, so the guard
+      transcribed strictly would refuse every cancel. This allows the cancel
+      from READY and keeps the reachable half of the guard: a second cancel
+      answers 400. canceledAt is answered at cancel time but not retained;
+      the listed deployment's item shape does not declare it.
+  - operation: UploadFile
+    note: >
+      Answers the empty object -- the one arm of the document's oneOf the
+      model can serialize -- where the oracle answers a bare empty array. A
+      re-upload of a known digest merges the registration where the oracle
+      keeps the first; a digest travels by header, and the digest headers are
+      the members the resource is keyed from.
+  - operation: ListPromoteAliases
+    note: >
+      Answers the document's {aliases: [{alias, id, status}], pagination}
+      where the oracle answers {status, alias: [...]} -- a shape the model
+      cannot serialize. Every deployment here is READY from creation, which
+      is the oracle's PROMOTED condition, so every alias of the project's
+      deployments reports PROMOTED; the oracle's target=production filter has
+      no counterpart because no deployment record carries a target.
+  - operation: UpdateProjectProtectionBypass
+    note: >
+      The bypass map lives on the project record, keyed by secret, because
+      the response keys metadata BY secret and no expression can fold a row
+      collection into that map; GetProjects projects its items so the member
+      never reaches a listing. Generate honors a caller-chosen secret when the
+      document's body carries one, and the scope is the document's
+      `automation-bypass` enum value where the oracle writes `deployment`.

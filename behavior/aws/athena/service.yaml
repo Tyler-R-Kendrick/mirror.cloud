@@ -1,0 +1,187 @@
+schema: bir/1
+service: aws.athena
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A query finishes the moment it starts: StartQueryExecution runs the
+# SQL synchronously and stores the columns and rows on the execution record,
+# and GetQueryResults reads them back. StopQueryExecution stops nothing.
+provenance: authored
+
+# The pack answered an absent required member with InvalidRequestException:
+# its first() helper folds an absent member to the empty string, the store
+# holds no empty key, and the miss is that fault. The engine's model check now
+# rejects the absence first, so that is also the missing-input answer.
+missing_input_error: InvalidRequest
+
+# Complete and gated, but not yet serving: StartQueryExecution is a query
+# engine, not a CRUD write. The SELECT 1 / unparseable-SQL paths are data
+# below, but a SELECT with FROM invokes aws.glue GetTable and streams aws.s3
+# object bodies through the registry, parsing CSV and JSON-lines; a
+# s3tablescatalog/ catalog does DDL and DML against the s3tables pack's own
+# collections; and SELECT 'lit' needs a string search CEL does not have. The
+# effect vocabulary has no cross-service invocation and no primitive registry
+# exists yet (the engine's prim dispatch reports none registered), so a
+# serving bundle would answer every real query with an empty SUCCEEDED result
+# where the pack scans or fails. The bundle takes over when an
+# aws.athena/query primitive carries runQuery, moved verbatim.
+shadow: >
+  StartQueryExecution's FROM and s3tablescatalog paths call sibling services
+  (aws.glue, aws.s3) and parse object bodies, and SELECT '<literal>' needs
+  string search; none of that is expressible without a primitive registry,
+  which does not exist yet. Everything else the pack does is transcribed and
+  gated below.
+
+resources:
+  workgroup:
+    collection: atwg
+    id:
+      input_members: [Name, WorkGroup]
+    record:
+      Name: id
+      State: "'ENABLED'"
+      Description: "'Description' in input ? string(input.Description) : ''"
+
+  # The pack stored the query's computed columns and rows on the execution
+  # record; reads project them back out. Written only by StartQueryExecution.
+  query_execution:
+    collection: atq
+    id:
+      generate: { kind: hex, bytes: 16 }
+      input_members: [QueryExecutionId]
+    record:
+      QueryExecutionId: id
+      Query: "string(input.QueryString)"
+      WorkGroup: "'WorkGroup' in input ? string(input.WorkGroup) : ''"
+      Status: "{'State': 'SUCCEEDED'}"
+      # Only the SELECT 1 family is expressible; see quirks.
+      columns: >
+        (upper(string(input.QueryString)) == 'SELECT 1'
+          || upper(string(input.QueryString)).startsWith('SELECT 1 ')
+          || upper(string(input.QueryString)) == 'SELECT 1 AS N') ? ['_col0'] : []
+      rows: >
+        (upper(string(input.QueryString)) == 'SELECT 1'
+          || upper(string(input.QueryString)).startsWith('SELECT 1 ')
+          || upper(string(input.QueryString)) == 'SELECT 1 AS N') ? [['1']] : []
+
+errors:
+  InvalidRequest:
+    code: InvalidRequestException
+    http: 400
+    fault: client
+
+operations:
+  CreateWorkGroup:
+    effects:
+      - put: { resource: workgroup }
+    output: {}
+
+  GetWorkGroup:
+    reads:
+      w: { resource: workgroup }
+    require:
+      - { cond: w_found, error: InvalidRequest }
+    output:
+      WorkGroup: w
+
+  ListWorkGroups:
+    list: { resource: workgroup, member: WorkGroups, paginate: model }
+
+  DeleteWorkGroup:
+    effects:
+      - delete: { resource: workgroup, missing: ignore }
+    output: {}
+
+  StartQueryExecution:
+    effects:
+      - create: { resource: query_execution }
+    output:
+      QueryExecutionId: id
+
+  # The pack answered exactly these four members, not the stored record.
+  GetQueryExecution:
+    reads:
+      q: { resource: query_execution }
+    require:
+      - { cond: q_found, error: InvalidRequest }
+    output:
+      QueryExecution: >
+        {'QueryExecutionId': q.QueryExecutionId, 'Query': q.Query,
+         'Status': q.Status, 'WorkGroup': q.WorkGroup}
+
+  # The result set's first row is the column headers, then one row per stored
+  # row, every cell wrapped in VarCharValue.
+  GetQueryResults:
+    reads:
+      q: { resource: query_execution }
+    require:
+      - { cond: q_found, error: InvalidRequest }
+    output:
+      ResultSet: >
+        {'Rows': [{'Data': q.columns.map(c, {'VarCharValue': c})}]
+           + q.rows.map(r, {'Data': r.map(cell, {'VarCharValue': cell})}),
+         'ResultSetMetadata':
+           {'ColumnInfo': q.columns.map(c, {'Name': c, 'Type': 'varchar'})}}
+
+  # The pack stopped nothing: no read, no write, and an unknown id succeeds.
+  StopQueryExecution:
+    output: {}
+
+  ListQueryExecutions:
+    list:
+      resource: query_execution
+      member: QueryExecutionIds
+      paginate: model
+    output:
+      QueryExecutionIds: "items.map(q, q.QueryExecutionId)"
+
+quirks:
+  - operation: StartQueryExecution
+    note: >
+      The pack is a SQL engine: SELECT 1 and SELECT '<literal>' answer inline,
+      a SELECT with FROM resolves the table through aws.glue and scans its
+      S3 location parsing CSV or JSON-lines, and a QueryExecutionContext
+      catalog of s3tablescatalog/<bucket> runs CREATE TABLE, INSERT and CTAS
+      against the s3tables pack's collections. Only the SELECT 1 family and
+      the unparseable-query path (SUCCEEDED, no columns, no rows) are
+      transcribed; the rest is the shadow reason above. The pack also trims
+      whitespace and one trailing semicolon before matching, which CEL cannot
+      express, so 'SELECT 1;' falls to the empty path here. The query runs
+      synchronously at start: the execution is SUCCEEDED (or FAILED, on the
+      untranscribed paths) the moment it is created, with no SubmissionDateTime
+      or CompletionDateTime ever set, and the WorkGroup named is not checked
+      to exist. The model requires QueryString and the engine now rejects its
+      absence, which the pack accepted as an empty, succeeded query.
+  - operation: GetQueryExecution
+    note: >
+      The answer carries QueryExecutionId, Query, Status and WorkGroup only;
+      StatementType, Statistics, ResultConfiguration and every other declared
+      member are never set, and a FAILED execution's StateChangeReason is the
+      upstream glue or s3tables fault's message text.
+  - operation: GetQueryResults
+    note: >
+      The first row of the result set is the header row, so a query over N
+      records answers N+1 rows. MaxResults and NextToken are accepted and
+      ignored: every row comes back in one page.
+  - operation: StopQueryExecution
+    note: >
+      Stopping changes nothing and never faults: an unknown or already
+      finished execution answers success, and the execution keeps its state.
+  - operation: ListQueryExecutions
+    note: >
+      The WorkGroup member the model declares on the request is ignored; every
+      execution in the account and region is listed, whichever workgroup the
+      request names.
+  - operation: CreateWorkGroup
+    note: >
+      Creating over an existing name overwrites the record, resetting State to
+      ENABLED and dropping the old description when the new request omits one,
+      where the real service answers InvalidRequestException. Configuration
+      and Tags are accepted and discarded. The model requires Name; the pack
+      accepted its absence and stored a workgroup under the empty key, which
+      the engine now rejects.
+  - operation: DeleteWorkGroup
+    note: >
+      Deleting is idempotent and ignores RecursiveDeleteOption: an absent
+      workgroup deletes cleanly, and a workgroup with query history deletes
+      without it -- the executions survive in their own collection and still
+      list.

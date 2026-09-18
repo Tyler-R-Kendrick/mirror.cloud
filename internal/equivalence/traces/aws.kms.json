@@ -1,0 +1,1251 @@
+{
+  "schema": "trace/1",
+  "service": "aws.kms",
+  "source": "pack:internal/services/aws/kms@77fba2e7",
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service. The recording covers the pack's expressible surface only: the fifteen crypto operations (Encrypt, Decrypt, GenerateDataKey and its WithoutPlaintext variant, GenerateDataKeyPair and its variant, GenerateMac, VerifyMac, Sign, Verify, DeriveSharedSecret, ReEncrypt, GenerateRandom, GetParametersForImport, ImportKeyMaterial) are the bundle's shadow reason and are deliberately not recorded. Steps whose recorded output carries a member the response shape does not declare are superseded with that reason; the bundle answers only the declared members.",
+  "steps": [
+    {
+      "operation": "ListKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Keys": null
+      }
+    },
+    {
+      "operation": "DescribeKey",
+      "input": {
+        "KeyId": "ffffffff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateKey",
+      "input": {
+        "Description": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyMetadata": {
+          "AWSAccountId": "000000000000",
+          "Arn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+          "CreationDate": 0,
+          "CurrentKeyMaterialId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+          "Description": "d1",
+          "Enabled": true,
+          "EncryptionAlgorithms": [
+            "SYMMETRIC_DEFAULT"
+          ],
+          "KeyId": "aaaaaaaa",
+          "KeyManager": "CUSTOMER",
+          "KeySpec": "SYMMETRIC_DEFAULT",
+          "KeyState": "Enabled",
+          "KeyUsage": "ENCRYPT_DECRYPT",
+          "MultiRegion": false,
+          "Origin": "AWS_KMS"
+        }
+      }
+    },
+    {
+      "operation": "DescribeKey",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyMetadata": {
+          "AWSAccountId": "000000000000",
+          "Arn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+          "CreationDate": 0,
+          "CurrentKeyMaterialId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+          "Description": "d1",
+          "Enabled": true,
+          "EncryptionAlgorithms": [
+            "SYMMETRIC_DEFAULT"
+          ],
+          "KeyId": "aaaaaaaa",
+          "KeyManager": "CUSTOMER",
+          "KeySpec": "SYMMETRIC_DEFAULT",
+          "KeyState": "Enabled",
+          "KeyUsage": "ENCRYPT_DECRYPT",
+          "MultiRegion": false,
+          "Origin": "AWS_KMS"
+        }
+      }
+    },
+    {
+      "operation": "DescribeKey",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.Arn"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyMetadata": {
+          "AWSAccountId": "000000000000",
+          "Arn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+          "CreationDate": 0,
+          "CurrentKeyMaterialId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+          "Description": "d1",
+          "Enabled": true,
+          "EncryptionAlgorithms": [
+            "SYMMETRIC_DEFAULT"
+          ],
+          "KeyId": "aaaaaaaa",
+          "KeyManager": "CUSTOMER",
+          "KeySpec": "SYMMETRIC_DEFAULT",
+          "KeyState": "Enabled",
+          "KeyUsage": "ENCRYPT_DECRYPT",
+          "MultiRegion": false,
+          "Origin": "AWS_KMS"
+        }
+      }
+    },
+    {
+      "operation": "ListKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Keys": [
+          {
+            "KeyId": "aaaaaaaa",
+            "KeyArn": "arn:aws:kms:us-east-1:000000000000:key/7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateAlias",
+      "input": {
+        "AliasName": "alias/x",
+        "TargetKeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAliases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Aliases": [
+          {
+            "AliasName": "alias/x",
+            "TargetKeyId": "aaaaaaaa"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeKey",
+      "input": {
+        "KeyId": "alias/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyMetadata": {
+          "AWSAccountId": "000000000000",
+          "Arn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+          "CreationDate": 0,
+          "CurrentKeyMaterialId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+          "Description": "d1",
+          "Enabled": true,
+          "EncryptionAlgorithms": [
+            "SYMMETRIC_DEFAULT"
+          ],
+          "KeyId": "aaaaaaaa",
+          "KeyManager": "CUSTOMER",
+          "KeySpec": "SYMMETRIC_DEFAULT",
+          "KeyState": "Enabled",
+          "KeyUsage": "ENCRYPT_DECRYPT",
+          "MultiRegion": false,
+          "Origin": "AWS_KMS"
+        }
+      }
+    },
+    {
+      "operation": "UpdateAlias",
+      "input": {
+        "AliasName": "alias/x",
+        "TargetKeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.Arn"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAlias",
+      "input": {
+        "AliasName": "alias/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAlias",
+      "input": {
+        "AliasName": "alias/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAliases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Aliases": null
+      }
+    },
+    {
+      "operation": "EnableKeyRotation",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      },
+      "superseded": "the pack answered the key's KeyId; EnableKeyRotationResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "GetKeyRotationStatus",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyRotationEnabled": true
+      }
+    },
+    {
+      "operation": "DisableKeyRotation",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      },
+      "superseded": "the pack answered the key's KeyId; DisableKeyRotationResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "GetKeyRotationStatus",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyRotationEnabled": false
+      }
+    },
+    {
+      "operation": "DisableKey",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      },
+      "superseded": "the pack answered the key's KeyId; DisableKeyResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeKey",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyMetadata": {
+          "AWSAccountId": "000000000000",
+          "Arn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+          "CreationDate": 0,
+          "CurrentKeyMaterialId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+          "Description": "d1",
+          "Enabled": true,
+          "EncryptionAlgorithms": [
+            "SYMMETRIC_DEFAULT"
+          ],
+          "KeyId": "aaaaaaaa",
+          "KeyManager": "CUSTOMER",
+          "KeyRotationEnabled": false,
+          "KeySpec": "SYMMETRIC_DEFAULT",
+          "KeyState": "Disabled",
+          "KeyUsage": "ENCRYPT_DECRYPT",
+          "MultiRegion": false,
+          "Origin": "AWS_KMS"
+        }
+      }
+    },
+    {
+      "operation": "EnableKey",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      },
+      "superseded": "the pack answered the key's KeyId; EnableKeyResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "ScheduleKeyDeletion",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa",
+        "KeyState": "PendingDeletion",
+        "DeletionDate": "2020-01-31T00:00:00Z"
+      }
+    },
+    {
+      "operation": "CancelKeyDeletion",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      }
+    },
+    {
+      "operation": "UpdateKeyDescription",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        },
+        "Description": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      },
+      "superseded": "the pack answered the key's KeyId; UpdateKeyDescriptionResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeKey",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyMetadata": {
+          "AWSAccountId": "000000000000",
+          "Arn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+          "CreationDate": 0,
+          "CurrentKeyMaterialId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+          "Description": "d2",
+          "Enabled": true,
+          "EncryptionAlgorithms": [
+            "SYMMETRIC_DEFAULT"
+          ],
+          "KeyId": "aaaaaaaa",
+          "KeyManager": "CUSTOMER",
+          "KeyRotationEnabled": false,
+          "KeySpec": "SYMMETRIC_DEFAULT",
+          "KeyState": "Enabled",
+          "KeyUsage": "ENCRYPT_DECRYPT",
+          "MultiRegion": false,
+          "Origin": "AWS_KMS",
+          "DeletionDate": "2020-01-31T00:00:00Z"
+        }
+      }
+    },
+    {
+      "operation": "UpdatePrimaryRegion",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        },
+        "PrimaryRegion": "us-west-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      },
+      "superseded": "the pack answered the key's KeyId; UpdatePrimaryRegionResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "RotateKeyOnDemand",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      }
+    },
+    {
+      "operation": "DeleteImportedKeyMaterial",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa"
+      }
+    },
+    {
+      "operation": "DisableKey",
+      "input": {
+        "KeyId": "eeeeeeee"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetKeyRotationStatus",
+      "input": {
+        "KeyId": "eeeeeeee"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutKeyPolicy",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        },
+        "PolicyName": "default",
+        "Policy": "{\"Version\":\"2012-10-17\"}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetKeyPolicy",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Version\":\"2012-10-17\"}"
+      }
+    },
+    {
+      "operation": "CreateKey",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyMetadata": {
+          "AWSAccountId": "000000000000",
+          "Arn": "arn:aws:kms:us-east-1:000000000000:key/9c8e2cb0",
+          "CreationDate": 0,
+          "CurrentKeyMaterialId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+          "Description": "",
+          "Enabled": true,
+          "EncryptionAlgorithms": [
+            "SYMMETRIC_DEFAULT"
+          ],
+          "KeyId": "bbbbbbbb",
+          "KeyManager": "CUSTOMER",
+          "KeySpec": "SYMMETRIC_DEFAULT",
+          "KeyState": "Enabled",
+          "KeyUsage": "ENCRYPT_DECRYPT",
+          "MultiRegion": false,
+          "Origin": "AWS_KMS"
+        }
+      }
+    },
+    {
+      "operation": "GetKeyPolicy",
+      "input": {
+        "KeyId": {
+          "$fromStep": 31,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{}"
+      }
+    },
+    {
+      "operation": "ListKeyPolicies",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyNames": [
+          "default"
+        ]
+      }
+    },
+    {
+      "operation": "ListKeyRotations",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Rotations": []
+      }
+    },
+    {
+      "operation": "GetKeyLastUsage",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "aaaaaaaa",
+        "LastUsedDate": "2020-01-01T00:00:00Z"
+      },
+      "superseded": "the pack answered LastUsedDate, which GetKeyLastUsageResponse does not declare (the declared member is KeyLastUsage); the bundle answers KeyId only"
+    },
+    {
+      "operation": "GetPublicKey",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UnsupportedOperationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCustomKeyStore",
+      "input": {
+        "CustomKeyStoreName": "cks1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CustomKeyStoreId": "cccccccc"
+      }
+    },
+    {
+      "operation": "DescribeCustomKeyStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CustomKeyStores": [
+          {
+            "CustomKeyStoreName": "cks1",
+            "CustomKeyStoreId": "cccccccc",
+            "ConnectionState": "CONNECTED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DisconnectCustomKeyStore",
+      "input": {
+        "CustomKeyStoreId": {
+          "$fromStep": 37,
+          "$fromPath": "CustomKeyStoreId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeCustomKeyStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CustomKeyStores": [
+          {
+            "CustomKeyStoreName": "cks1",
+            "CustomKeyStoreId": "cccccccc",
+            "ConnectionState": "DISCONNECTED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ConnectCustomKeyStore",
+      "input": {
+        "CustomKeyStoreId": {
+          "$fromStep": 37,
+          "$fromPath": "CustomKeyStoreId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UpdateCustomKeyStore",
+      "input": {
+        "CustomKeyStoreId": {
+          "$fromStep": 37,
+          "$fromPath": "CustomKeyStoreId"
+        },
+        "CustomKeyStoreName": "renamed"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CustomKeyStoreId": "cccccccc"
+      },
+      "superseded": "the pack answered the CustomKeyStoreId; UpdateCustomKeyStoreResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeCustomKeyStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CustomKeyStores": [
+          {
+            "CustomKeyStoreName": "renamed",
+            "CustomKeyStoreId": "cccccccc",
+            "ConnectionState": "CONNECTED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCustomKeyStore",
+      "input": {
+        "CustomKeyStoreId": {
+          "$fromStep": 37,
+          "$fromPath": "CustomKeyStoreId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteCustomKeyStore",
+      "input": {
+        "CustomKeyStoreId": "dddddddd"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeCustomKeyStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CustomKeyStores": null
+      }
+    },
+    {
+      "operation": "CreateGrant",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        },
+        "GranteePrincipal": "arn:aws:iam::000000000000:root",
+        "Operations": [
+          "Decrypt"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GrantId": "eeeeeeee",
+        "GrantToken": "ffffffff"
+      }
+    },
+    {
+      "operation": "ListGrants",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Grants": [
+          {
+            "KeyId": "aaaaaaaa",
+            "GranteePrincipal": "arn:aws:iam::000000000000:root",
+            "Operations": [
+              "Decrypt"
+            ],
+            "GrantId": "eeeeeeee",
+            "GrantToken": "ffffffff"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListRetirableGrants",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Grants": [
+          {
+            "KeyId": "aaaaaaaa",
+            "GranteePrincipal": "arn:aws:iam::000000000000:root",
+            "Operations": [
+              "Decrypt"
+            ],
+            "GrantId": "eeeeeeee",
+            "GrantToken": "ffffffff"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RevokeGrant",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        },
+        "GrantId": {
+          "$fromStep": 47,
+          "$fromPath": "GrantId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListGrants",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Grants": null
+      }
+    },
+    {
+      "operation": "RetireGrant",
+      "input": {
+        "GrantId": "eeeeeeee"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        },
+        "Tags": [
+          {
+            "TagKey": "k",
+            "TagValue": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListResourceTags",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "TagKey": "k",
+            "TagValue": "v"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        },
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListResourceTags",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "ReplicateKey",
+      "input": {
+        "KeyId": {
+          "$fromStep": 2,
+          "$fromPath": "KeyMetadata.KeyId"
+        },
+        "ReplicaRegion": "us-west-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicaKeyMetadata": {
+          "KeyId": "99999999",
+          "Arn": "arn:aws:kms:us-west-2:000000000000:key/4da7b6a4",
+          "KeyState": "Enabled"
+        }
+      }
+    },
+    {
+      "operation": "ListKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Keys": [
+          {
+            "KeyId": "99999999",
+            "KeyArn": "arn:aws:kms:us-west-2:000000000000:key/4da7b6a4"
+          },
+          {
+            "KeyId": "aaaaaaaa",
+            "KeyArn": "arn:aws:kms:us-east-1:000000000000:key/7c589129"
+          },
+          {
+            "KeyId": "bbbbbbbb",
+            "KeyArn": "arn:aws:kms:us-east-1:000000000000:key/9c8e2cb0"
+          }
+        ]
+      }
+    }
+  ]
+}

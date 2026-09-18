@@ -541,7 +541,7 @@
         "name": "example.com",
         "projectId": "prj_7c5891299f64",
         "updatedAt": 0,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -629,7 +629,7 @@
             "name": "example.com",
             "projectId": "prj_7c5891299f64",
             "updatedAt": 0,
-            "verified": true
+            "verified": false
           }
         ]
       },
@@ -1279,7 +1279,7 @@
         "name": "web2.example.com",
         "projectId": "prj_77df676fe2a7",
         "updatedAt": 0,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -1304,7 +1304,7 @@
         "redirect": null,
         "redirectStatusCode": null,
         "updatedAt": 0,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -1350,7 +1350,7 @@
         "redirect": "example.com",
         "redirectStatusCode": 307,
         "updatedAt": 0,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -1991,15 +1991,10 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "canceledAt": 0,
-        "createdAt": 0,
-        "id": "dpl_842605a09b0619a8",
-        "name": "orb",
-        "projectId": "prj_39bb7163b1cb",
-        "readyState": "CANCELED",
-        "type": "LAMBDAS",
-        "url": "orb-a0e8b5.vercel.app"
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
       }
     },
     {
@@ -2061,14 +2056,6 @@
           {
             "date": 0,
             "payload": {
-              "text": "Deployment canceled"
-            },
-            "serial": "0",
-            "type": "canceled"
-          },
-          {
-            "date": 0,
-            "payload": {
               "text": "Deployment ready"
             },
             "serial": "3",
@@ -2113,7 +2100,7 @@
         "id": "dpl_842605a09b0619a8",
         "name": "orb",
         "projectId": "prj_39bb7163b1cb",
-        "readyState": "CANCELED",
+        "readyState": "READY",
         "type": "LAMBDAS",
         "url": "orb-a0e8b5.vercel.app"
       }
@@ -2685,8 +2672,8 @@
             "createdAt": 0,
             "name": "orb",
             "projectId": "prj_39bb7163b1cb",
-            "readyState": "CANCELED",
-            "state": "CANCELED",
+            "readyState": "READY",
+            "state": "READY",
             "type": "LAMBDAS",
             "uid": "dpl_842605a09b0619a8",
             "url": "orb-a0e8b5.vercel.app"

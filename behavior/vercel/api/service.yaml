@@ -96,10 +96,11 @@ resources:
       # of the project, which is the same value by construction -- a domain
       # lives in its project's collection.
       #
-      # The pack answered a domain verified the moment it was added. A real one
-      # is not, and a client that waits for verification waits forever against
-      # the real API and not at all against this -- recorded as a quirk.
-      verified: "true"
+      # The pack verified on add; the vendor's own emulator does not -- a
+      # domain is unverified until the verify route runs. The differential
+      # corpus (test/behavior/vercel/oracle) records the difference and the
+      # oracle wins it.
+      verified: "false"
       createdAt: "int(now) * 1000"
       updatedAt: "int(now) * 1000"
 
@@ -957,18 +958,23 @@ operations:
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
       - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    # No effects: the domain is verified from creation, which is the add's
-    # quirk, so there is nothing for verify to move. It answers the domain.
+    effects:
+      # Verification moves the flag: unverified from creation, verified here.
+      - patch:
+          resource: domain
+          record:
+            verified: "true"
+            updatedAt: "int(now) * 1000"
     output:
-      name: dom.name
-      apexName: dom.apexName
+      name: rec.name
+      apexName: rec.apexName
       projectId: proj.id
-      verified: dom.verified
-      createdAt: dom.createdAt
-      updatedAt: dom.updatedAt
-      gitBranch: "('gitBranch' in dom) ? dom.gitBranch : null"
-      redirect: "('redirect' in dom) ? dom.redirect : null"
-      redirectStatusCode: "('redirectStatusCode' in dom) ? dom.redirectStatusCode : null"
+      verified: rec.verified
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      gitBranch: "('gitBranch' in rec) ? rec.gitBranch : null"
+      redirect: "('redirect' in rec) ? rec.redirect : null"
+      redirectStatusCode: "('redirectStatusCode' in rec) ? rec.redirectStatusCode : null"
 
   CreateCustomEnvironment:
     reads:
@@ -1352,10 +1358,11 @@ operations:
     require:
       - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
       # The oracle refuses unless the deployment is QUEUED or BUILDING, and
-      # its deployments are born READY -- so strictly transcribed the guard
-      # would refuse every cancel. This refuses only a second cancel, which is
-      # the reachable half of the guard.
-      - { cond: "dep.readyState != 'CANCELED'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
+      # both emulators' deployments are born READY, so the guard refuses every
+      # cancel either of them serves. The differential corpus caught the
+      # loosened version of this guard answering 200 where the vendor's
+      # emulator answers 400; the vendor wins.
+      - { cond: "dep.readyState == 'QUEUED' || dep.readyState == 'BUILDING'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
     effects:
       # The event write comes first: every write rebinds `rec`, and the output
       # projects the deployment from it. `canceledAt` is answered at cancel
@@ -1812,11 +1819,12 @@ quirks:
       Answers 201, where the pack answered 200.
   - operation: AddProjectDomain
     note: >
-      A domain is answered verified: true the moment it is added. A real one is
-      not -- verification is a DNS round trip -- so a client that polls until
-      verified never polls here and waits forever against the real API. The
-      pack did this and the document declares `verified` without saying what it
-      starts as, so it is transcribed rather than corrected, and named here.
+      The pack answered a domain verified the moment it was added, and the
+      vendored document declares `verified` without saying what it starts as.
+      The vendor's own emulator answers false until the verify route runs --
+      better evidence than the dead pack -- so a domain is added unverified and
+      VerifyProjectDomain moves the flag. The differential corpus caught the
+      old answer (test/behavior/vercel/oracle, domains-get).
   - operation: CreateDeployment
     note: >
       Creating a deployment for a project that does not exist creates the

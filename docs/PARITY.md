@@ -1408,16 +1408,16 @@ The document is 24 MB and 3,462 operations. `specs/mirror.set` narrows it to the
 
 Authority: the official Vercel REST document, vendored at `specs/vercel/api.json` and pinned in `specs/mirror.lock`, plus an AUTHORED document for Vercel KV at `specs/vercel/kv.json`. Rows are operation -> Mirror evidence, not a live `api.vercel.com` differential.
 
-The counting contract, frozen by `TestVercelCensusDenominators`: the vendored document is the denominator; the narrowing to six path prefixes is a declared property of `specs/mirror.set` (like `digitalocean.v2`'s), never a silent edit; operations outside the narrowing are mock-tier surface, the same tier one hundred and fifty AWS services live at.
+The counting contract, frozen by `TestVercelCensusDenominators`: the vendored document is the denominator; the narrowing to thirteen path prefixes is a declared property of `specs/mirror.set` (like `digitalocean.v2`'s), never a silent edit; operations the narrowing keeps but no bundle rule serves are mock-tier surface, the same tier one hundred and fifty AWS services live at.
 
 | Denominator | Count |
 |---|---:|
 | Vercel REST document operations (vendored) | 417 |
 | Vercel REST document paths (vendored) | 297 |
-| Narrowed `vercel.api` model operations | 26 |
+| Narrowed `vercel.api` model operations | 92 |
 | `vercel.kv` authored-document operations | 1 (`Command`) |
 
-The pack's own characterization golden went with it; two equivalence recordings replace it -- 74 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer. 41 of the 74 are recorded from the pack; the 33 covering the twelve operations the pack never served are authored against the bundle, which the recording itself says in its note.
+The pack's own characterization golden went with it; two equivalence recordings replace it -- 100 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer. 41 of the 100 are recorded from the pack; the 59 covering the operations the pack never served are authored against the bundle, which the recording itself says in its note.
 
 **One pack became two services.** `internal/services/vercel/api` served two products under one registration: the REST API on `api.vercel.com`, and Vercel KV on `kv.vercel-storage.com`, which is Upstash Redis behind a Vercel name. They are `vercel.api` and `vercel.kv` now, and the demux tells them apart by host -- KV first, because its host contains the other's name.
 
@@ -1425,12 +1425,12 @@ KV's document is authored rather than vendored, and is the first such entry in t
 
 **Versioning is restored, and it is a visible break.** `vercelRoute` stripped the leading version segment before matching -- any `v` followed by a digit -- so `/v1/projects`, `/v9/projects` and `/v99/projects` were one route. That is not four transcription slips in the table; it is the table erasing versioning, which made four of its rows name a version the document does not serve. Listing projects is `/v10` where the pack answered `/v9`; project env is `/v10` where it answered `/v9`; project domains is `/v9` where it answered `/v10`; listing deployments is `/v7` where it answered `/v6`. A client written against the emulator's laxity breaks, which is the same shape as Cloudflare's percent-encoded slash: the document is `declared` and the pack's tolerance was `authored`.
 
-Routing is the model's now, which widens the surface rather than narrowing it. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it to the six prefixes the pack served, giving 26 operations over 12,363 shapes -- the largest model in the tree. The bundle serves all 26: the fourteen the pack served, transcribed, and the twelve it did not, written from the document alone.
+Routing is the model's now, which widens the surface rather than narrowing it. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it to thirteen prefixes -- the six the pack served, plus the seven the emulate-widening needed (`/v1/projects`, `/v2/teams`, `/v2/files`, and the `/v2`, `/v3`, `/v6` and `/v12` deployment sub-resources) -- giving 92 operations over 20,329 shapes, still the largest model in the tree. The bundle serves 37: the fourteen the pack served, transcribed, and twenty-three written from the document and the oracle. The other 55 narrowed operations -- feature flags, rolling release, routes, check-runs, SDK keys, project members and the rest that no oracle route exercises -- route from the model and answer as mock-tier.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the emulated Vercel slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the two fault envelopes and the three generic rules this extraction needed) |
-| Vercel REST operations served by the bundle | 26 / 26 (the fourteen the pack served, replayed against its recording; the twelve it did not, written from the document and gated by authored recording steps, bundle behavior, booted HTTP and BDD) |
+| Vercel REST operations served by the bundle | 37 / 92 narrowed (the fourteen the pack served, replayed against its recording; twenty-three written from the document and the oracle, gated by authored recording steps, bundle behavior, booted HTTP and BDD; the other 55 narrowed operations are mock-tier) |
 | Vercel KV commands served | 3 / the Redis command set (SET, GET, DEL; every other verb answers 501 `MirrorNotImplemented`) |
 | Live Vercel probe | none (not required) |
 
@@ -1462,6 +1462,17 @@ Routing is the model's now, which widens the surface rather than narrowing it. T
 | `PATCH /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`UpdateCustomEnvironment`) | Authored recording step replays a description update; bundle behavior test asserts slug and id survive the patch (addressed by slug, the write must still merge against the id-keyed row) |
 | `DELETE /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`RemoveCustomEnvironment`) | Authored recording steps replay the remove answering the removed environment and a double remove 404; booted and BDD DELETE then GET 404. `deleteUnassignedEnvironmentVariables` is accepted and read by nothing |
 | `POST /v10/projects/{projectId}/promote/{deploymentId}` (`RequestPromote`) | Authored recording steps replay the empty 201 and a 404 for each side unknown; booted and BDD promote a real deployment. A promote moves no stored state a client can read back -- recorded as a quirk |
+| `GET /v2/teams` (`GetTeams`) | Authored recording step replays the empty listing -- teams are account fixtures and the vendored document declares no create, so nothing populates them; booted GET over HTTP. Unpaginated, `next`/`prev` null -- recorded as a quirk |
+| `GET /v2/teams/{teamId}` (`GetTeam`) | Authored recording step replays the unknown-team 404/`not_found`; booted GET 404. The happy path is unreachable until a team fixture exists |
+| `PATCH /v2/teams/{teamId}` (`PatchTeam`) | Authored recording step replays the unknown-team 404. Honors the four members the oracle's patch does (name, slug, description, avatar); the owner-only 403 and slug-conflict 409 have no counterpart -- recorded as quirks |
+| `POST /v2/teams/{teamId}/members` (`InviteUserToTeam`) | Authored recording step replays the unknown-team 404. With no user store, any well-formed email is invitable and the uid derives from the address -- recorded as a quirk |
+| `GET /v2/deployments/{id}/aliases` (`ListDeploymentAliases`) | Authored recording steps replay the one-entry listing after a create (CreateDeployment writes the alias row, as the oracle does) and an unknown deployment 404. The projection answers `uid` and `alias` -- the members the document's item shape declares of the four the oracle sends -- recorded as a quirk |
+| `GET /v3/deployments/{idOrUrl}/events` (`GetDeploymentEvents`) | Authored recording steps replay created/building/ready after a create, newest first (the oracle's default direction), the canceled event a cancel appends, and an unknown deployment 404; the response is the document's bare array |
+| `GET /v6/deployments/{id}/files` (`ListDeploymentFiles`) | Authored recording steps replay the root-wrapped tree with the uploaded file's descriptor and an unknown deployment 404. Bare array where the oracle wraps in `{files: [...]}`; the tree is flat -- recorded as quirks |
+| `PATCH /v12/deployments/{id}/cancel` (`CancelDeployment`) | Authored recording steps replay the cancel answering `readyState: CANCELED`, a second cancel 400/`bad_request`, an unknown deployment 404, and a later GetDeployment reading CANCELED back. The oracle's QUEUED/BUILDING-only guard is loosened to the reachable half -- recorded as a quirk |
+| `POST /v2/files` (`UploadFile`) | Authored recording steps replay the digest registration answering the document's empty object (the oracle answers a bare array; the model can serialize only the one oneOf arm) and a missing digest 400/`bad_request` |
+| `GET /v1/projects/{projectId}/promote/aliases` (`ListPromoteAliases`) | Authored recording steps replay the document's `{aliases, pagination}` arm (the oracle's `{status, alias}` shape is one the model cannot serialize) and an unknown project 404 |
+| `PATCH /v1/projects/{idOrName}/protection-bypass` (`UpdateProjectProtectionBypass`) | Authored recording steps replay generate with a caller-chosen secret, an update's note edit, a revoke-with-regenerate under a fresh secret, a plain revoke answering the empty map, and an unknown project 404. The map lives on the project record, which GetProjects now projects around -- recorded as a quirk |
 | `POST /` on `*.kv.vercel-storage.com` (`Command`) | Its own recording: SET, GET, a GET that misses answering `{result: null}` rather than a fault, `get` folding to `GET`, DEL answering 1 then 0, and four malformed commands answering 400. Chaos `TestVercelConcurrentKVSetGet`. An unsupported verb answers 501 `MirrorNotImplemented` with the `x-mirror-not-implemented` header, which distinguishes "mirror has not got to this" from "you sent nonsense" |
 | Vercel faults vs AWS faults | Two envelopes, because they are two documents' answers. The REST API answers `{error: {code, message}}` and KV the bare `{error: "..."}` Upstash answers; neither carries `x-amzn-errortype`. Mutant `vercel-kv-encodes-the-rest-fault` |
 | Routing | `FuzzVercelRoute` drives `httpuri.Match` over the generated model, seeded with both the document's versions and the four the pack answered. `TestVercelRoutesFromItsGeneratedModel` asserts nineteen routes, five operations beyond what the table knew, and that each of the four moved versions is now unserved. `vercel-kv-host-falls-through` covers the host split |
@@ -1476,22 +1487,22 @@ The monorepo emulates fourteen providers; only `packages/@emulators/vercel` is t
 |---|---:|
 | emulate Vercel routes (vendor-authored oracle) | 52 |
 | emulate Vercel test functions | 26 |
-| emulate Vercel routes served by mirror | 20 / 52 |
+| emulate Vercel routes served by mirror | 31 / 52 |
 
 Serve state per emulate route group (method+path from `src/routes/*.ts`):
 
 | emulate route file | Routes | mirror serves | Missing |
 |---|---:|---:|---|
-| `projects.ts` | 7 | 5 | `GET /v1/projects/{projectId}/promote/aliases`, `PATCH /v1/projects/{idOrName}/protection-bypass` |
-| `deployments.ts` | 10 | 4 | `GET /v6/deployments` (mirror answers `/v7` — the version the document declares), `GET /v2/deployments/{id}/aliases`, `GET /v3/deployments/{idOrUrl}/events`, `GET /v6/deployments/{id}/files`, `PATCH /v12/deployments/{id}/cancel`, `POST /v2/files` |
+| `projects.ts` | 7 | 7 | — |
+| `deployments.ts` | 10 | 9 | `GET /v6/deployments` — the vendored document does not declare it at any version, so there is nothing to narrow into the model (mirror answers `/v7`, the version the document declares) |
 | `domains.ts` (project domains) | 6 | 6 | — |
 | `env.ts` | 5 | 4 | `GET /v10/projects/{idOrName}/env/{id}` (get-one; mirror lists and edits) |
-| `user.ts` | 9 | 1 | `PATCH /v2/user`, `GET /registration`, and all six `/v2/teams` routes |
+| `user.ts` | 9 | 5 | `PATCH /v2/user`, `GET /registration`, `POST /v2/teams` and `GET /v2/teams/{teamId}/members` — the last two have no vendored-document counterpart, so there is no model operation to serve them with |
 | `api-keys.ts` | 3 | 0 | the whole token lifecycle |
 | `oauth.ts` | 4 | 0 | authorize/callback/token/userinfo |
 | `blob.ts` | 8 | 0 | Vercel Blob is a separate product mirror does not serve at all (KV is Upstash Redis, not Blob) |
 
-The 32-route gap is the expansion backlog, in order: deployment sub-resources (events/files/aliases/cancel/uploads), teams and user patch, api-keys, the get-one env, promote-aliases and protection-bypass, oauth, then Blob as a new `vercel.blob` service. Every addition lands as B-IR data on `behavior/vercel/` — no Go — and the parity claims here stay traceable to the oracle's route list.
+The 21-route gap is the expansion backlog, in order: the get-one env, teams create and members list and user patch (awaiting vendored-document coverage), api-keys, oauth, then Blob as a new `vercel.blob` service. Every addition lands as B-IR data on `behavior/vercel/` — no Go — and the parity claims here stay traceable to the oracle's route list.
 
 ## SNS baseline
 

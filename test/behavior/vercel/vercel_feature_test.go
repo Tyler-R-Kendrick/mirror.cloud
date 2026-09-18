@@ -190,8 +190,7 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("still there after remove %d %#v", code, body)
 		}
 	})
-	t.Run("Given a deployment When promoted Then 201 and an unknown one is not_found", func(t *testing.T) {
-		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-app2","project":"bdd-app2"}`, "")
+	t.Run("Given a deployment When promoted Then 201 and an unknown one is not_found", func(t *testing.T) {		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-app2","project":"bdd-app2"}`, "")
 		if code != 200 {
 			t.Fatalf("deploy %d %#v", code, dpl)
 		}
@@ -208,6 +207,120 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		errObj, _ := body["error"].(map[string]any)
 		if code != 404 || errObj["code"] != "not_found" || hdr.Get("x-amzn-errortype") != "" {
 			t.Fatalf("promote missing %d %#v %#v", code, hdr, body)
+		}
+	})
+	// Events and files answer bare arrays, which the map-shaped helper cannot
+	// read.
+	callList := func(method, path, body string) (int, []any) {
+		t.Helper()
+		var rdr io.Reader
+		if body != "" {
+			rdr = strings.NewReader(body)
+		}
+		req, err := http.NewRequest(method, ts.URL+path, rdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = "api.vercel.com"
+		req.Header.Set("Authorization", "Bearer test")
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		l := []any{}
+		_ = json.Unmarshal(b, &l)
+		return res.StatusCode, l
+	}
+	t.Run("Given no teams When listed Then the listing is empty and an unknown team is not_found", func(t *testing.T) {
+		// Teams are account fixtures and the vendored document declares no
+		// create, so the listing starts empty.
+		code, body, _ := call(http.MethodGet, "/v2/teams", "", "")
+		if code != 200 || len(body["teams"].([]any)) != 0 {
+			t.Fatalf("teams %d %#v", code, body)
+		}
+		code, body, _ = call(http.MethodGet, "/v2/teams/team_nope", "", "")
+		if code != 404 {
+			t.Fatalf("team %d %#v", code, body)
+		}
+		code, body, _ = call(http.MethodPatch, "/v2/teams/team_nope", `{"name":"x"}`, "")
+		if code != 404 {
+			t.Fatalf("patch team %d %#v", code, body)
+		}
+	})
+	t.Run("Given a deployment with a file When its sub-resources are read Then they answer", func(t *testing.T) {
+		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-sub","project":"bdd-app2","files":[{"file":"index.html","sha":"aa11bb22","size":42}]}`, "")
+		if code != 200 {
+			t.Fatalf("deploy %d %#v", code, dpl)
+		}
+		id := dpl["id"].(string)
+		code, aliases, _ := call(http.MethodGet, "/v2/deployments/"+id+"/aliases", "", "")
+		if code != 200 || len(aliases["aliases"].([]any)) != 1 {
+			t.Fatalf("aliases %d %#v", code, aliases)
+		}
+		code, events := callList(http.MethodGet, "/v3/deployments/"+id+"/events", "")
+		// Newest first, the oracle's default direction: ready, building, created.
+		if code != 200 || len(events) != 3 || events[0].(map[string]any)["type"] != "ready" {
+			t.Fatalf("events %d %#v", code, events)
+		}
+		code, files := callList(http.MethodGet, "/v6/deployments/"+id+"/files", "")
+		root := files[0].(map[string]any)
+		if code != 200 || root["type"] != "directory" || len(root["children"].([]any)) != 1 {
+			t.Fatalf("files %d %#v", code, files)
+		}
+		code, canceled, _ := call(http.MethodPatch, "/v12/deployments/"+id+"/cancel", "", "")
+		if code != 200 || canceled["readyState"] != "CANCELED" {
+			t.Fatalf("cancel %d %#v", code, canceled)
+		}
+		code, again, _ := call(http.MethodPatch, "/v12/deployments/"+id+"/cancel", "", "")
+		if code != 400 {
+			t.Fatalf("second cancel %d %#v", code, again)
+		}
+		code, after, _ := call(http.MethodGet, "/v13/deployments/"+id, "", "")
+		if code != 200 || after["readyState"] != "CANCELED" {
+			t.Fatalf("get after cancel %d %#v", code, after)
+		}
+	})
+	t.Run("Given a file digest When registered Then 200 and a missing digest is bad_request", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/v2/files", strings.NewReader("hello"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = "api.vercel.com"
+		req.Header.Set("Authorization", "Bearer test")
+		req.Header.Set("x-vercel-digest", "00112233445566778899aabbccddeeff")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 200 {
+			t.Fatalf("upload %d", res.StatusCode)
+		}
+		code, body, _ := call(http.MethodPost, "/v2/files", `{"x":1}`, "")
+		if code != 400 {
+			t.Fatalf("upload without digest %d %#v", code, body)
+		}
+	})
+	t.Run("Given a project When promote aliases and protection bypass are read Then they answer", func(t *testing.T) {
+		code, prj, _ := call(http.MethodGet, "/v9/projects/bdd-app2", "", "")
+		if code != 200 {
+			t.Fatalf("get project %d %#v", code, prj)
+		}
+		code, aliases, _ := call(http.MethodGet, "/v1/projects/"+prj["id"].(string)+"/promote/aliases", "", "")
+		if code != 200 || aliases["aliases"] == nil || aliases["pagination"] == nil {
+			t.Fatalf("promote aliases %d %#v", code, aliases)
+		}
+		code, pb, _ := call(http.MethodPatch, "/v1/projects/bdd-app2/protection-bypass", `{"generate":{"secret":"00112233445566778899aabbccddeeff","note":"ci"}}`, "")
+		got, _ := pb["protectionBypass"].(map[string]any)
+		if code != 200 || got["00112233445566778899aabbccddeeff"] == nil {
+			t.Fatalf("protection bypass %d %#v", code, pb)
+		}
+		code, pb, _ = call(http.MethodPatch, "/v1/projects/bdd-app2/protection-bypass", `{"revoke":{"secret":"00112233445566778899aabbccddeeff"}}`, "")
+		if code != 200 || len(pb["protectionBypass"].(map[string]any)) != 0 {
+			t.Fatalf("revoke %d %#v", code, pb)
 		}
 	})
 }

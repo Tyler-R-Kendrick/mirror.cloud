@@ -490,6 +490,31 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 			in[k] = vs[0]
 		}
 	}
+	// Header-bound members arrive by their wire name: UploadFile's digest is
+	// x-vercel-digest and nothing else names it, so an operation whose input
+	// the document puts in a header would otherwise address the zero value.
+	// Content-Length is the exception Go keeps out of Header, so it comes from
+	// the request field instead.
+	if op.Input != "" {
+		if shape, ok := svc.Shapes[op.Input]; ok {
+			for name, m := range shape.Members {
+				if m.Binding.Location != "header" {
+					continue
+				}
+				hdr := m.Binding.Name
+				if hdr == "" {
+					hdr = name
+				}
+				v := r.Header.Get(hdr)
+				if v == "" && hdr == "Content-Length" && r.ContentLength >= 0 {
+					v = strconv.FormatInt(r.ContentLength, 10)
+				}
+				if v != "" {
+					in[name] = v
+				}
+			}
+		}
+	}
 	// A REST operation carries part of its input in the path: DeleteDetector
 	// is `DELETE /detector/{DetectorId}` and nothing else names the detector.
 	// Without this the input arrives empty and the operation addresses the

@@ -2,7 +2,7 @@
   "schema": "trace/1",
   "service": "vercel.api",
   "source": "pack:internal/services/vercel/api",
-  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.\n\nMost steps carry recorded_as, because the pack invented names for operations the document already names: GetUser for GetAuthUser, ListProjects for GetProjects, ListProjectEnv for FilterProjectEnvs, DeleteProjectEnv for RemoveProjectEnv, ListProjectDomains for GetProjectDomains, ListDeployments for GetDeployments. `operation` is what the replay invokes; `recorded_as` is the pack operation the expectation came from.\n\nInput members were renamed the same way, and there is no field to say so, so it is said here. The pack read a project from `id` where the document calls that label `idOrName`; it read an environment variable from `envId` where the document calls it `id`; and it read a deployment from `id` where a get calls it `idOrUrl`. Everything else -- name, framework, key, value, type, target, project -- the pack and the document already agreed on. The recorder that drove the pack and applied both renames went with the pack, because it imported it.\n\nCreateProjectEnv's members arrive splatted rather than under `body`, which is how the REST/JSON codec delivers a structure payload: it unmarshals the body into the input map. That is why a required payload member absent from the input is not a validation failure.\n\nThe KV half of the same pack is recorded separately as vercel.kv, because it was always a different product on a different host.\n\nSteps 41 onward are authored, not recorded: the pack never served the twelve operations they cover (UpdateProject through RequestPromote), so there was nothing to record them from. Their expected outputs are the bundle's own answers, frozen in place -- including the identifiers its deterministic draw sequence produces after the 41 recorded steps -- so a regression in those operations fails here and not only in the behavior tests. The provenance is weaker by construction, and it is stated rather than smoothed over: the recorded steps gate the bundle against the pack, and these gate it against itself.",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.\n\nMost steps carry recorded_as, because the pack invented names for operations the document already names: GetUser for GetAuthUser, ListProjects for GetProjects, ListProjectEnv for FilterProjectEnvs, DeleteProjectEnv for RemoveProjectEnv, ListProjectDomains for GetProjectDomains, ListDeployments for GetDeployments. `operation` is what the replay invokes; `recorded_as` is the pack operation the expectation came from.\n\nInput members were renamed the same way, and there is no field to say so, so it is said here. The pack read a project from `id` where the document calls that label `idOrName`; it read an environment variable from `envId` where the document calls it `id`; and it read a deployment from `id` where a get calls it `idOrUrl`. Everything else -- name, framework, key, value, type, target, project -- the pack and the document already agreed on. The recorder that drove the pack and applied both renames went with the pack, because it imported it.\n\nCreateProjectEnv's members arrive splatted rather than under `body`, which is how the REST/JSON codec delivers a structure payload: it unmarshals the body into the input map. That is why a required payload member absent from the input is not a validation failure.\n\nThe KV half of the same pack is recorded separately as vercel.kv, because it was always a different product on a different host.\n\nSteps 41 onward are authored, not recorded: the pack never served the twelve operations they cover (UpdateProject through RequestPromote), so there was nothing to record them from. Their expected outputs are the bundle's own answers, frozen in place -- including the identifiers its deterministic draw sequence produces after the 41 recorded steps -- so a regression in those operations fails here and not only in the behavior tests. The provenance is weaker by construction, and it is stated rather than smoothed over: the recorded steps gate the bundle against the pack, and these gate it against itself.\n\nSteps 74 onward are authored for the emulate-widening: teams, the deployment sub-resources (aliases, events, files, cancel), upload registration, promote aliases and protection bypass. Like the 41-73 block they freeze the bundle's own answers -- teams included, whose happy paths are unreachable because the vendored document declares no team create, so their steps are the faults.\n",
   "steps": [
     {
       "operation": "GetAuthUser",
@@ -1727,6 +1727,632 @@
           "$fromStep": 70
         },
         "projectId": "prj_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetTeams",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pagination": {
+          "count": 0,
+          "next": null,
+          "prev": null
+        },
+        "teams": []
+      }
+    },
+    {
+      "operation": "GetTeam",
+      "input": {
+        "teamId": "team_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PatchTeam",
+      "input": {
+        "teamId": "team_nope",
+        "name": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "InviteUserToTeam",
+      "input": {
+        "teamId": "team_nope",
+        "body": [
+          {
+            "email": "a@b.c"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProject",
+      "input": {
+        "name": "orb"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accountId": "000000000000",
+        "createdAt": 0,
+        "framework": null,
+        "id": "prj_39bb7163b1cb",
+        "name": "orb",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "name": "orb",
+        "project": "orb",
+        "files": [
+          {
+            "file": "index.html",
+            "sha": "aa11bb22cc33dd44",
+            "size": 42
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "createdAt": 0,
+        "id": "dpl_842605a09b0619a8",
+        "name": "orb",
+        "projectId": "prj_39bb7163b1cb",
+        "readyState": "READY",
+        "type": "LAMBDAS",
+        "url": "orb-a0e8b5.vercel.app"
+      }
+    },
+    {
+      "operation": "ListDeploymentAliases",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 79
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "aliases": [
+          {
+            "uid": "als_842605a09b0619a8",
+            "alias": "orb-a0e8b5.vercel.app"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetDeploymentEvents",
+      "input": {
+        "idOrUrl": {
+          "$fromPath": "id",
+          "$fromStep": 79
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "date": 0,
+            "payload": {
+              "text": "Deployment ready"
+            },
+            "serial": "3",
+            "type": "ready"
+          },
+          {
+            "date": 0,
+            "payload": {
+              "text": "Building"
+            },
+            "serial": "2",
+            "type": "building"
+          },
+          {
+            "date": 0,
+            "payload": {
+              "text": "Deployment created"
+            },
+            "serial": "1",
+            "type": "created"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListDeploymentFiles",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 79
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "children": [
+              {
+                "children": [],
+                "contentType": "application/octet-stream",
+                "mode": 420,
+                "name": "index.html",
+                "type": "file",
+                "uid": "f_aa11bb22cc33dd44"
+              }
+            ],
+            "contentType": null,
+            "mode": 16877,
+            "name": "/",
+            "type": "directory",
+            "uid": "file_9434407c2d"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CancelDeployment",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 79
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "canceledAt": 0,
+        "createdAt": 0,
+        "id": "dpl_842605a09b0619a8",
+        "name": "orb",
+        "projectId": "prj_39bb7163b1cb",
+        "readyState": "CANCELED",
+        "type": "LAMBDAS",
+        "url": "orb-a0e8b5.vercel.app"
+      }
+    },
+    {
+      "operation": "CancelDeployment",
+      "input": {
+        "id": {
+          "$fromPath": "id",
+          "$fromStep": 79
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CancelDeployment",
+      "input": {
+        "id": "dpl_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetDeploymentEvents",
+      "input": {
+        "idOrUrl": {
+          "$fromPath": "id",
+          "$fromStep": 79
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_list": [
+          {
+            "date": 0,
+            "payload": {
+              "text": "Deployment canceled"
+            },
+            "serial": "0",
+            "type": "canceled"
+          },
+          {
+            "date": 0,
+            "payload": {
+              "text": "Deployment ready"
+            },
+            "serial": "3",
+            "type": "ready"
+          },
+          {
+            "date": 0,
+            "payload": {
+              "text": "Building"
+            },
+            "serial": "2",
+            "type": "building"
+          },
+          {
+            "date": 0,
+            "payload": {
+              "text": "Deployment created"
+            },
+            "serial": "1",
+            "type": "created"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "idOrUrl": {
+          "$fromPath": "id",
+          "$fromStep": 79
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "createdAt": 0,
+        "id": "dpl_842605a09b0619a8",
+        "name": "orb",
+        "projectId": "prj_39bb7163b1cb",
+        "readyState": "CANCELED",
+        "type": "LAMBDAS",
+        "url": "orb-a0e8b5.vercel.app"
+      }
+    },
+    {
+      "operation": "UploadFile",
+      "input": {
+        "x-vercel-digest": "00112233445566778899aabbccddeeff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UploadFile",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListPromoteAliases",
+      "input": {
+        "projectId": {
+          "$fromPath": "id",
+          "$fromStep": 78
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "aliases": [
+          {
+            "alias": "orb-a0e8b5.vercel.app",
+            "id": "als_842605a09b0619a8",
+            "status": "PROMOTED"
+          }
+        ],
+        "pagination": {
+          "count": 1,
+          "next": null,
+          "prev": null
+        }
+      }
+    },
+    {
+      "operation": "ListPromoteAliases",
+      "input": {
+        "projectId": "prj_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateProjectProtectionBypass",
+      "input": {
+        "idOrName": "orb",
+        "generate": {
+          "secret": "0123456789abcdeffedcba9876543210",
+          "note": "ci"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "protectionBypass": {
+          "0123456789abcdeffedcba9876543210": {
+            "createdAt": 0,
+            "createdBy": "usr_000000000000",
+            "note": "ci",
+            "scope": "automation-bypass"
+          }
+        }
+      }
+    },
+    {
+      "operation": "UpdateProjectProtectionBypass",
+      "input": {
+        "idOrName": "orb",
+        "update": {
+          "secret": "0123456789abcdeffedcba9876543210",
+          "note": "ci2"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "protectionBypass": {
+          "0123456789abcdeffedcba9876543210": {
+            "createdAt": 0,
+            "createdBy": "usr_000000000000",
+            "isEnvVar": false,
+            "note": "ci2",
+            "scope": "automation-bypass"
+          }
+        }
+      }
+    },
+    {
+      "operation": "UpdateProjectProtectionBypass",
+      "input": {
+        "idOrName": "orb",
+        "revoke": {
+          "secret": "0123456789abcdeffedcba9876543210",
+          "regenerate": true
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "protectionBypass": {
+          "ca25a4232cf64a12": {
+            "createdAt": 0,
+            "createdBy": "usr_000000000000",
+            "isEnvVar": false,
+            "note": "ci2",
+            "scope": "automation-bypass"
+          }
+        }
+      }
+    },
+    {
+      "operation": "UpdateProjectProtectionBypass",
+      "input": {
+        "idOrName": "orb",
+        "revoke": {
+          "secret": "ca25a4232cf64a12"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UpdateProjectProtectionBypass",
+      "input": {
+        "idOrName": "prj_nope",
+        "generate": {}
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDeploymentAliases",
+      "input": {
+        "id": "dpl_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetDeploymentEvents",
+      "input": {
+        "idOrUrl": "dpl_nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDeploymentFiles",
+      "input": {
+        "id": "dpl_nope"
       },
       "identity": {
         "Account": "000000000000",

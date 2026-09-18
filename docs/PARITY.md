@@ -1414,7 +1414,7 @@ The counting contract, frozen by `TestVercelCensusDenominators`: the vendored do
 |---|---:|
 | Vercel REST document operations (vendored) | 417 |
 | Vercel REST document paths (vendored) | 297 |
-| Narrowed `vercel.api` model operations | 92 |
+| Narrowed `vercel.api` model operations | 104 |
 | `vercel.kv` authored-document operations | 1 (`Command`) |
 
 The pack's own characterization golden went with it; two equivalence recordings replace it -- 100 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer. 41 of the 100 are recorded from the pack; the 59 covering the operations the pack never served are authored against the bundle, which the recording itself says in its note.

@@ -87,8 +87,10 @@ jobs:
   #
   # The per-mutant cost cannot come down much: a mutant is a distinct build of
   # the mutated package, so it pays a full compile plus the test it runs. What
-  # can come down is how many one job runs. Four shards, and the suite stops
-  # being the critical path for everything else in `test` as well.
+  # can come down is how many one job runs. The shard count is the lever, and
+  # it moves when a shard crosses the timeout: four were added when one job
+  # outgrew sixty minutes, and this moves it to eight when a shard crossed
+  # thirty.
   #
   # TestShardingIsAPartition proves the split loses no mutant, and the harness
   # fails a shard that selects none -- because a shard that runs nothing still
@@ -98,15 +100,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v7
         with:
           go-version: "1.24"
           cache-dependency-path: test/sdk/go/go.sum
-      - name: mutation shard ${{ matrix.shard }} of 4
-        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=4 2>&1 | tee -a ci-run.log
+      - name: mutation shard ${{ matrix.shard }} of 8
+        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=8 2>&1 | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log

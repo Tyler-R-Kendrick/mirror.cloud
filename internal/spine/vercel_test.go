@@ -194,8 +194,10 @@ func TestBootedServerVercelAPIParityOps(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("domain add %d", code)
 	}
+	// Unverified at add, verified by the verify route -- the vendor's
+	// emulator's behavior, not the deleted pack's.
 	code, dom := do(http.MethodGet, "/v9/projects/app/domains/ex.test", "")
-	if code != 200 || dom["verified"] != true || dom["projectId"] != prj["id"] {
+	if code != 200 || dom["verified"] != false || dom["projectId"] != prj["id"] {
 		t.Fatalf("domain get %d %#v", code, dom)
 	}
 	code, ver := do(http.MethodPost, "/v9/projects/app/domains/ex.test/verify", "")

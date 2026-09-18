@@ -75,7 +75,7 @@ func TestVercelCensusDenominators(t *testing.T) {
 		"| Narrowed `vercel.api` model operations | 92 |",
 		"| emulate Vercel routes (vendor-authored oracle) | 52 |",
 		"| emulate Vercel test functions | 26 |",
-		"| emulate Vercel routes served by mirror | 39 / 52 |",
+		"| emulate Vercel routes served by mirror | 52 / 52 |",
 	} {
 		if !strings.Contains(doc2, needle) {
 			t.Fatalf("PARITY.md is missing the Vercel denominator row %q", needle)

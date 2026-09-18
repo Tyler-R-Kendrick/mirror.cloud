@@ -3,6 +3,7 @@ package engine
 import (
 	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -125,6 +126,23 @@ func runtimeFuncs() []cel.EnvOption {
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
 				sum := sha256.Sum256([]byte(fmt.Sprint(v.Value())))
 				return types.String(hex.EncodeToString(sum[:]))
+			}))),
+
+		// b64urlhex decodes hex and base64url-encodes without padding, so a
+		// digest renders the way PKCE's S256 challenge expects it.
+		cel.Function("b64urlhex", cel.Overload("b64urlhex_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				raw, err := hex.DecodeString(fmt.Sprint(v.Value()))
+				if err != nil {
+					return types.String("")
+				}
+				return types.String(base64.RawURLEncoding.EncodeToString(raw))
+			}))),
+
+		// trim is strings.TrimSpace.
+		cel.Function("trim", cel.Overload("trim_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				return types.String(strings.TrimSpace(fmt.Sprint(v.Value())))
 			}))),
 
 		// coalesce returns the first argument that is neither null nor empty,

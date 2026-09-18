@@ -30,9 +30,11 @@ import (
 // Seven of the eight are now gone, which is what this metric was built to
 // make visible: a request naming no AWS service is placed from the non-AWS
 // models, by the host its specification declares and otherwise by the
-// operation paths it declares. azureRequest remains because Azure's documents
-// declare neither -- no `servers`, and every operation bound to `/` because
-// the surface is addressed by query parameter and header.
+// operation paths it declares. The eighth, azureRequest, went when Azure's
+// authored specifications started declaring their `servers`: every Azure
+// caller addresses blob/queue/table.core.windows.net, so the declared hosts
+// place it and the query-and-header sniff it replaced was covering no caller
+// in the tree.
 //
 // The count stays because the pressure that produced eight has not gone away.
 // The next provider to arrive will be easier to add as a predicate than as a
@@ -54,11 +56,10 @@ var providerGuessSuffixes = []string{"Request", "Service"}
 // or internal/services. Deriving the provider list from the tree rather than
 // writing it down is what keeps this honest in both directions: a provider
 // added to either place is counted without anyone remembering to, and the two
-// sources are unioned because NEITHER alone is complete. azure has no generated
-// model and no entry in specs/mirror.set -- that is exactly what makes
-// TestEveryServedServiceIsDescribedByASpecification red for it -- so a list
-// drawn from specs or from generated models would miss `azureRequest`, which is
-// one of the eight this exists to count.
+// sources are unioned because NEITHER alone is complete. A provider present
+// only in specs/mirror.set, or only as a hand-written pack, is still a
+// provider a guess could be written for, and a list drawn from just one source
+// would miss it.
 //
 // The suffixes keep it narrow. `claimingRequest`, `sdkRequest`,
 // `credentialScopeService` and the five streaming*Request helpers are not

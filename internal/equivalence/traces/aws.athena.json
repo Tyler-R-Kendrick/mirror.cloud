@@ -1,0 +1,158 @@
+{
+  "schema": "trace/1",
+  "service": "aws.athena",
+  "source": "pack:internal/services/aws/athena@b7236d3b",
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The recording covers the pack's expressible surface only: SELECT 1 and unparseable queries. SELECT '<literal>', FROM queries over Glue/S3, and the s3tablescatalog DDL paths are the bundle's shadow reason and are deliberately not recorded. ListQueryExecutions is recorded with a single execution only, because the listing orders by generated id and a two-id recording would gate the draw, not the behavior.",
+  "steps": [
+    {
+      "operation": "ListWorkGroups",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"WorkGroups": null}
+    },
+    {
+      "operation": "CreateWorkGroup",
+      "input": {"Name": "wg1", "Description": "first"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "CreateWorkGroup",
+      "input": {"Name": "wg2"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "GetWorkGroup",
+      "input": {"WorkGroup": "wg1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"WorkGroup": {"Name": "wg1", "State": "ENABLED", "Description": "first"}}
+    },
+    {
+      "operation": "GetWorkGroup",
+      "input": {"WorkGroup": "wg2"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"WorkGroup": {"Name": "wg2", "State": "ENABLED", "Description": ""}}
+    },
+    {
+      "operation": "GetWorkGroup",
+      "input": {"WorkGroup": "absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "InvalidRequestException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "ListWorkGroups",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"WorkGroups": [
+        {"Name": "wg1", "State": "ENABLED", "Description": "first"},
+        {"Name": "wg2", "State": "ENABLED", "Description": ""}
+      ]}
+    },
+    {
+      "operation": "StartQueryExecution",
+      "input": {"QueryString": "SELECT 1", "WorkGroup": "wg1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"QueryExecutionId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+    },
+    {
+      "operation": "GetQueryExecution",
+      "input": {"QueryExecutionId": {"$fromStep": 7, "$fromPath": "QueryExecutionId"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"QueryExecution": {
+        "QueryExecutionId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "Query": "SELECT 1",
+        "Status": {"State": "SUCCEEDED"},
+        "WorkGroup": "wg1"
+      }}
+    },
+    {
+      "operation": "GetQueryResults",
+      "input": {"QueryExecutionId": {"$fromStep": 7, "$fromPath": "QueryExecutionId"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ResultSet": {
+        "Rows": [
+          {"Data": [{"VarCharValue": "_col0"}]},
+          {"Data": [{"VarCharValue": "1"}]}
+        ],
+        "ResultSetMetadata": {"ColumnInfo": [{"Name": "_col0", "Type": "varchar"}]}
+      }}
+    },
+    {
+      "operation": "ListQueryExecutions",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"QueryExecutionIds": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}
+    },
+    {
+      "operation": "ListQueryExecutions",
+      "input": {"WorkGroup": "other"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"QueryExecutionIds": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}
+    },
+    {
+      "operation": "StartQueryExecution",
+      "input": {"QueryString": "BOGUS"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"QueryExecutionId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+    },
+    {
+      "operation": "GetQueryExecution",
+      "input": {"QueryExecutionId": {"$fromStep": 12, "$fromPath": "QueryExecutionId"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"QueryExecution": {
+        "QueryExecutionId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "Query": "BOGUS",
+        "Status": {"State": "SUCCEEDED"},
+        "WorkGroup": ""
+      }}
+    },
+    {
+      "operation": "GetQueryResults",
+      "input": {"QueryExecutionId": {"$fromStep": 12, "$fromPath": "QueryExecutionId"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ResultSet": {
+        "Rows": [{"Data": null}],
+        "ResultSetMetadata": {"ColumnInfo": null}
+      }}
+    },
+    {
+      "operation": "GetQueryExecution",
+      "input": {"QueryExecutionId": "cccccccccccccccccccccccccccccccc"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "InvalidRequestException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "GetQueryResults",
+      "input": {"QueryExecutionId": "cccccccccccccccccccccccccccccccc"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "InvalidRequestException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "StopQueryExecution",
+      "input": {"QueryExecutionId": {"$fromStep": 7, "$fromPath": "QueryExecutionId"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "StopQueryExecution",
+      "input": {"QueryExecutionId": "cccccccccccccccccccccccccccccccc"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "DeleteWorkGroup",
+      "input": {"WorkGroup": "wg1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "DeleteWorkGroup",
+      "input": {"WorkGroup": "wg1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "ListWorkGroups",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"WorkGroups": [
+        {"Name": "wg2", "State": "ENABLED", "Description": ""}
+      ]}
+    }
+  ]
+}

@@ -1,0 +1,874 @@
+schema: bir/1
+service: aws.eks
+
+# Transcribed from the hand-written pack, not established against the real
+# service. EKS-lite: clusters, nodegroups and fargate profiles are flat
+# records that are ACTIVE the moment they are written, updates mint hex ids
+# and (mostly) store them, and only three of the describes fault on a missing
+# record -- the rest answer a bare {name: <storage key>} echo with a 200.
+provenance: authored
+
+# The pack never validated input: a CreateCluster without the model-required
+# roleArn stored an empty string, and every fallback in the pack's first()
+# chains (a capability's `name` fallback, a subscription's generated id when
+# both id and name are absent) is unreachable once the engine enforces the
+# model's required members. Those dead paths are not transcribed.
+
+resources:
+  # One collection is shared by CreateCluster, RegisterCluster and the
+  # cluster-patching operations, addressed by `name` on the core operations
+  # and by clusterName on the extra ones (the pack's first(clusterName, name)).
+  cluster:
+    collection: ekscluster
+    id:
+      input_members: [clusterName, name]
+
+  nodegroup:
+    collection: eksng
+    id:
+      derive: "string(input.clusterName) + '/' + string(input.nodegroupName)"
+
+  fargate:
+    collection: eksfp
+    id:
+      derive: "string(input.clusterName) + '/' + string(input.fargateProfileName)"
+
+  addon:
+    collection: eksaddon
+    id:
+      derive: "string(input.clusterName) + '/' + string(input.addonName)"
+
+  access_entry:
+    collection: eksaccess
+    id:
+      derive: "string(input.clusterName) + '/' + string(input.principalArn)"
+
+  access_policy:
+    collection: eksapol
+    id:
+      derive: "string(input.clusterName) + '/' + string(input.principalArn) + '/' + string(input.policyArn)"
+
+  # Certificate authorities are keyed by the bare generated id -- the
+  # clusterName the operations require is never part of the key, so
+  # ListCertificateAuthorities cannot narrow by it.
+  ca:
+    collection: eksca
+    id:
+      input_members: [id, certificateAuthorityId]
+
+  subscription:
+    collection: ekssub
+    id:
+      input_members: [id, name]
+
+  # Pod identity associations and identity provider configs are addressed by
+  # cluster + '/' + id on every operation, so each use carries an explicit
+  # key and the resources declare no implicit addressing of their own.
+  podid:
+    collection: ekspodid
+
+  idp:
+    collection: eksidp
+
+  capability:
+    collection: ekscap
+    id:
+      derive: "string(input.clusterName) + '/' + string(input.capabilityName)"
+
+  # newUpdate rows: minted by the Update*/Associate*/Disassociate* family.
+  # UpdateClusterConfig answers an update id too but never stores it.
+  update:
+    collection: eksupdate
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [updateId, id]
+
+  insight:
+    collection: eksinsight
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [id]
+
+  # The record IS the tag map: the pack stored json.Marshal(req.Input["tags"])
+  # under the resource ARN, unwrapped.
+  tag:
+    collection: ekstags
+    id:
+      input_members: [resourceArn]
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 404
+    fault: client
+
+operations:
+  # --- clusters --------------------------------------------------------------
+
+  CreateCluster:
+    effects:
+      - create:
+          resource: cluster
+          record:
+            name: "string(input.name)"
+            arn: "'arn:aws:eks:' + identity.region + ':' + identity.account + ':cluster/' + string(input.name)"
+            status: "'ACTIVE'"
+            version: "'version' in input ? string(input.version) : ''"
+            roleArn: "string(input.roleArn)"
+    output:
+      cluster: rec
+
+  DescribeCluster:
+    reads:
+      c: { resource: cluster }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      cluster: c
+
+  ListClusters:
+    list: { resource: cluster, member: clusters, paginate: model }
+    output:
+      clusters: "items.map(x, x.name)"
+
+  DeleteCluster:
+    effects:
+      - delete: { resource: cluster, missing: ignore }
+    output:
+      cluster: "{'name': string(input.name), 'status': 'DELETING'}"
+
+  # The pack read the record and wrote it back unchanged: nothing in the
+  # request is applied, and an unknown cluster conjures a phantom row holding
+  # only its name. The answered update id is minted and forgotten -- it is
+  # never stored, so DescribeUpdate can never find it.
+  UpdateClusterConfig:
+    effects:
+      - generate: { bind: u, kind: hex, bytes: 8 }
+      - put:
+          resource: cluster
+          record:
+            name: "string(input.name)"
+    output:
+      update: "{'id': fx.u, 'status': 'Successful'}"
+
+  RegisterCluster:
+    effects:
+      - create:
+          resource: cluster
+          record:
+            name: "string(input.name)"
+            status: "'ACTIVE'"
+            arn: "'arn:aws:eks:' + identity.region + ':' + identity.account + ':cluster/' + string(input.name)"
+            connectorConfig: input.connectorConfig
+    output:
+      cluster: rec
+
+  DeregisterCluster:
+    effects:
+      - delete: { resource: cluster, missing: ignore }
+    output:
+      cluster: "{'name': string(input.name), 'status': 'DELETING'}"
+
+  DescribeClusterVersions:
+    output:
+      clusterVersions: "[{'clusterVersion': '1.29', 'status': 'STANDARD_SUPPORT'}, {'clusterVersion': '1.30', 'status': 'STANDARD_SUPPORT'}]"
+
+  UpdateClusterVersion:
+    effects:
+      - patch:
+          resource: cluster
+          record:
+            version: "string(input.version)"
+      - create:
+          resource: update
+          record:
+            id: id
+            status: "'Successful'"
+            type: "'VersionUpdate'"
+    output:
+      update: rec
+
+  AssociateEncryptionConfig:
+    effects:
+      - patch:
+          resource: cluster
+          record:
+            encryptionConfig: input.encryptionConfig
+    # The pack answered {cluster: <patched record>}; the output shape declares
+    # only `update`. The bundle answers nothing and the recorded step is
+    # superseded with that reason.
+    output: {}
+
+  # --- nodegroups --------------------------------------------------------------
+
+  CreateNodegroup:
+    effects:
+      - create:
+          resource: nodegroup
+          record:
+            nodegroupName: "string(input.nodegroupName)"
+            clusterName: "string(input.clusterName)"
+            status: "'ACTIVE'"
+            nodegroupArn: "'arn:aws:eks:' + identity.region + ':' + identity.account + ':nodegroup/' + string(input.clusterName) + '/' + string(input.nodegroupName)"
+    output:
+      nodegroup: rec
+
+  DescribeNodegroup:
+    reads:
+      n: { resource: nodegroup }
+    require:
+      - { cond: n_found, error: NotFound }
+    output:
+      nodegroup: n
+
+  ListNodegroups:
+    list:
+      resource: nodegroup
+      member: nodegroups
+      paginate: model
+      filter: "item.clusterName == string(input.clusterName)"
+    output:
+      nodegroups: "items.map(x, x.nodegroupName)"
+
+  DeleteNodegroup:
+    effects:
+      - delete: { resource: nodegroup, missing: ignore }
+    output:
+      nodegroup: "{'status': 'DELETING'}"
+
+  UpdateNodegroupConfig:
+    effects:
+      - patch:
+          resource: nodegroup
+          record:
+            scalingConfig: "'scalingConfig' in input ? input.scalingConfig : null"
+      - create:
+          resource: update
+          record:
+            id: id
+            status: "'Successful'"
+            type: "'UpdateNodegroupConfig'"
+    output:
+      update: rec
+
+  UpdateNodegroupVersion:
+    effects:
+      - patch:
+          resource: nodegroup
+          record:
+            version: "'version' in input ? string(input.version) : ''"
+            scalingConfig: "'scalingConfig' in input ? input.scalingConfig : null"
+      - create:
+          resource: update
+          record:
+            id: id
+            status: "'Successful'"
+            type: "'UpdateNodegroupVersion'"
+    output:
+      update: rec
+
+  # --- fargate profiles --------------------------------------------------------
+
+  CreateFargateProfile:
+    effects:
+      - create:
+          resource: fargate
+          record:
+            fargateProfileName: "string(input.fargateProfileName)"
+            clusterName: "string(input.clusterName)"
+            status: "'ACTIVE'"
+    output:
+      fargateProfile: rec
+
+  DescribeFargateProfile:
+    reads:
+      f: { resource: fargate }
+    require:
+      - { cond: f_found, error: NotFound }
+    output:
+      fargateProfile: f
+
+  ListFargateProfiles:
+    list:
+      resource: fargate
+      member: fargateProfileNames
+      paginate: model
+      filter: "item.clusterName == string(input.clusterName)"
+    output:
+      fargateProfileNames: "items.map(x, x.fargateProfileName)"
+
+  DeleteFargateProfile:
+    effects:
+      - delete: { resource: fargate, missing: ignore }
+    output:
+      fargateProfile: "{'status': 'DELETING'}"
+
+  # --- addons ------------------------------------------------------------------
+
+  # Create and Update are one case in the pack: the record is rebuilt from the
+  # request and written wholesale, so an update drops whatever a previous
+  # request stored.
+  CreateAddon:
+    effects:
+      - create:
+          resource: addon
+          spread: input
+          record:
+            addonName: "string(input.addonName)"
+            clusterName: "string(input.clusterName)"
+            status: "'ACTIVE'"
+            addonVersion: "'addonVersion' in input ? string(input.addonVersion) : ''"
+    output:
+      addon: rec
+
+  UpdateAddon:
+    effects:
+      - create:
+          resource: addon
+          spread: input
+          record:
+            addonName: "string(input.addonName)"
+            clusterName: "string(input.clusterName)"
+            status: "'ACTIVE'"
+            addonVersion: "'addonVersion' in input ? string(input.addonVersion) : ''"
+    # The pack answered {addon: <record>}; the output shape declares only
+    # `update`. Recorded as superseded.
+    output: {}
+
+  # Like every wrapGet describe in this pack, a missing record is not a fault:
+  # the answer is a bare echo keyed by the composite storage key.
+  DescribeAddon:
+    reads:
+      a: { resource: addon }
+    output:
+      addon: "a_found ? a : {'name': id}"
+
+  ListAddons:
+    list:
+      resource: addon
+      member: addons
+      paginate: model
+      filter: "item.clusterName == string(input.clusterName)"
+    output:
+      # The pack's listNames answers the key segment after the LAST '/',
+      # truncating any name that itself contains one.
+      addons: "items.map(x, lastSegment(x.addonName, '/'))"
+
+  DeleteAddon:
+    effects:
+      - delete: { resource: addon, missing: ignore }
+    output:
+      addon: "{'status': 'DELETING'}"
+
+  DescribeAddonVersions:
+    output:
+      addons: "[{'addonName': ('addonName' in input ? string(input.addonName) : ''), 'addonVersions': [{'addonVersion': 'v1'}]}]"
+
+  DescribeAddonConfiguration:
+    output:
+      addonName: "string(input.addonName)"
+      configurationSchema: "'{}'"
+
+  # --- access entries and policies -----------------------------------------------
+
+  CreateAccessEntry:
+    effects:
+      - create:
+          resource: access_entry
+          spread: input
+          record:
+            principalArn: "string(input.principalArn)"
+            clusterName: "string(input.clusterName)"
+            type: "'type' in input ? string(input.type) : ''"
+    output:
+      accessEntry: rec
+
+  # Update is the same rebuild-from-request write, and UpdateAccessEntry does
+  # not declare `type`, so an update wipes a previously stored type to "".
+  UpdateAccessEntry:
+    effects:
+      - create:
+          resource: access_entry
+          spread: input
+          record:
+            principalArn: "string(input.principalArn)"
+            clusterName: "string(input.clusterName)"
+            type: "'type' in input ? string(input.type) : ''"
+    output:
+      accessEntry: rec
+
+  DescribeAccessEntry:
+    reads:
+      a: { resource: access_entry }
+    output:
+      accessEntry: "a_found ? a : {'name': id}"
+
+  ListAccessEntries:
+    list:
+      resource: access_entry
+      member: accessEntries
+      paginate: model
+      filter: "item.clusterName == string(input.clusterName)"
+    output:
+      # Same last-slash truncation: an IAM principal ARN contains '/', so the
+      # pack answers just its final segment ("r" for ...:role/r).
+      accessEntries: "items.map(x, lastSegment(x.principalArn, '/'))"
+
+  DeleteAccessEntry:
+    effects:
+      - delete: { resource: access_entry, missing: ignore }
+    output: {}
+
+  AssociateAccessPolicy:
+    effects:
+      - create: { resource: access_policy, spread: input }
+    output:
+      associatedAccessPolicy: rec
+
+  DisassociateAccessPolicy:
+    effects:
+      - delete: { resource: access_policy, missing: ignore }
+    output: {}
+
+  # The pack ignored the required clusterName and principalArn: every
+  # associated policy in the account and region is listed.
+  ListAssociatedAccessPolicies:
+    list: { resource: access_policy, member: associatedAccessPolicies, paginate: model }
+
+  ListAccessPolicies:
+    output:
+      accessPolicies: "[{'name': 'AmazonEKSAdminPolicy', 'arn': 'arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy'}]"
+
+  # --- certificate authorities -----------------------------------------------------
+
+  CreateCertificateAuthority:
+    effects:
+      - generate: { bind: c, kind: hex, bytes: 8 }
+      - create:
+          resource: ca
+          key: fx.c
+          spread: input
+          record:
+            id: fx.c
+            status: "'PENDING_CERTIFICATE'"
+    output:
+      certificateAuthority: rec
+
+  ActivateCertificateAuthority:
+    effects:
+      - patch:
+          resource: ca
+          record:
+            status: "'ACTIVE'"
+    output:
+      certificateAuthority: rec
+
+  DescribeCertificateAuthority:
+    reads:
+      c: { resource: ca }
+    output:
+      certificateAuthority: "c_found ? c : {'name': id}"
+
+  ListCertificateAuthorities:
+    list: { resource: ca, member: certificateAuthorities, paginate: model }
+
+  DeleteCertificateAuthority:
+    effects:
+      - delete: { resource: ca, missing: ignore }
+    output: {}
+
+  # --- EKS Anywhere subscriptions ----------------------------------------------------
+
+  # Create and Update are one case in the pack; an update rebuilds the record
+  # from the update request alone, dropping the name and term a create stored.
+  CreateEksAnywhereSubscription:
+    effects:
+      - create:
+          resource: subscription
+          spread: input
+          record:
+            id: id
+            status: "'ACTIVE'"
+    output:
+      subscription: rec
+
+  UpdateEksAnywhereSubscription:
+    effects:
+      - create:
+          resource: subscription
+          spread: input
+          record:
+            id: id
+            status: "'ACTIVE'"
+    output:
+      subscription: rec
+
+  DescribeEksAnywhereSubscription:
+    reads:
+      s: { resource: subscription }
+    output:
+      subscription: "s_found ? s : {'name': id}"
+
+  ListEksAnywhereSubscriptions:
+    list: { resource: subscription, member: subscriptions, paginate: model }
+
+  DeleteEksAnywhereSubscription:
+    effects:
+      - delete: { resource: subscription, missing: ignore }
+    output: {}
+
+  # --- pod identity associations -------------------------------------------------------
+
+  CreatePodIdentityAssociation:
+    effects:
+      - generate:
+          bind: a
+          kind: hex
+          bytes: 8
+          when: "!('associationId' in input) || string(input.associationId) == ''"
+      - create:
+          resource: podid
+          key: "string(input.clusterName) + '/' + ('associationId' in input && string(input.associationId) != '' ? string(input.associationId) : fx.a)"
+          spread: input
+          record:
+            associationId: "'associationId' in input && string(input.associationId) != '' ? string(input.associationId) : fx.a"
+            clusterName: "string(input.clusterName)"
+            namespace: "'namespace' in input ? string(input.namespace) : ''"
+            serviceAccount: "'serviceAccount' in input ? string(input.serviceAccount) : ''"
+    output:
+      association: rec
+
+  # Update is the same rebuild: it declares neither namespace nor
+  # serviceAccount, so an update wipes both to "".
+  UpdatePodIdentityAssociation:
+    effects:
+      - generate:
+          bind: a
+          kind: hex
+          bytes: 8
+          when: "!('associationId' in input) || string(input.associationId) == ''"
+      - create:
+          resource: podid
+          key: "string(input.clusterName) + '/' + ('associationId' in input && string(input.associationId) != '' ? string(input.associationId) : fx.a)"
+          spread: input
+          record:
+            associationId: "'associationId' in input && string(input.associationId) != '' ? string(input.associationId) : fx.a"
+            clusterName: "string(input.clusterName)"
+            namespace: "'namespace' in input ? string(input.namespace) : ''"
+            serviceAccount: "'serviceAccount' in input ? string(input.serviceAccount) : ''"
+    output:
+      association: rec
+
+  DescribePodIdentityAssociation:
+    reads:
+      a:
+        resource: podid
+        key: "string(input.clusterName) + '/' + string(input.associationId)"
+    output:
+      association: "a_found ? a : {'name': string(input.clusterName) + '/' + string(input.associationId)}"
+
+  # The pack listed every association in the account and region; the required
+  # clusterName is not consulted.
+  ListPodIdentityAssociations:
+    list: { resource: podid, member: associations, paginate: model }
+
+  DeletePodIdentityAssociation:
+    effects:
+      - delete:
+          resource: podid
+          key: "string(input.clusterName) + '/' + string(input.associationId)"
+          missing: ignore
+    output: {}
+
+  # --- capabilities ----------------------------------------------------------------------
+
+  CreateCapability:
+    effects:
+      - create:
+          resource: capability
+          spread: input
+          record:
+            name: "string(input.capabilityName)"
+            clusterName: "string(input.clusterName)"
+            status: "'ACTIVE'"
+    output:
+      capability: rec
+
+  UpdateCapability:
+    effects:
+      - create:
+          resource: capability
+          spread: input
+          record:
+            name: "string(input.capabilityName)"
+            clusterName: "string(input.clusterName)"
+            status: "'ACTIVE'"
+    # The pack answered {capability: <record>}; the output shape declares only
+    # `update`. Recorded as superseded.
+    output: {}
+
+  DescribeCapability:
+    reads:
+      c: { resource: capability }
+    output:
+      capability: "c_found ? c : {'name': id}"
+
+  ListCapabilities:
+    list: { resource: capability, member: capabilities, paginate: model }
+
+  DeleteCapability:
+    effects:
+      - delete: { resource: capability, missing: ignore }
+    output: {}
+
+  # --- identity provider configs ------------------------------------------------------------
+
+  # The pack read a `name` member the input shape does not declare, so under a
+  # valid request the config is always stored under a generated hex id no
+  # other operation can address.
+  AssociateIdentityProviderConfig:
+    effects:
+      - generate:
+          bind: i
+          kind: hex
+          bytes: 8
+          when: "!('name' in input) || string(input.name) == ''"
+      - create:
+          resource: idp
+          key: "'name' in input && string(input.name) != '' ? string(input.clusterName) + '/' + string(input.name) : string(input.clusterName) + '/' + fx.i"
+          spread: input
+      - create:
+          resource: update
+          record:
+            id: id
+            status: "'Successful'"
+            type: "'AssociateIdentityProviderConfig'"
+    output:
+      update: rec
+
+  # Reads identityProviderConfigName or name, neither of which any identity
+  # provider operation declares (they declare the identityProviderConfig
+  # object), so the key resolves to "<cluster>/" and the describe always
+  # misses and the disassociate deletes nothing.
+  DisassociateIdentityProviderConfig:
+    effects:
+      - delete:
+          resource: idp
+          key: "string(input.clusterName) + '/' + ('identityProviderConfigName' in input && string(input.identityProviderConfigName) != '' ? string(input.identityProviderConfigName) : ('name' in input && string(input.name) != '' ? string(input.name) : ''))"
+          missing: ignore
+      - create:
+          resource: update
+          record:
+            id: id
+            status: "'Successful'"
+            type: "'DisassociateIdentityProviderConfig'"
+    output:
+      update: rec
+
+  DescribeIdentityProviderConfig:
+    reads:
+      p:
+        resource: idp
+        key: "string(input.clusterName) + '/' + ('identityProviderConfigName' in input && string(input.identityProviderConfigName) != '' ? string(input.identityProviderConfigName) : ('name' in input && string(input.name) != '' ? string(input.name) : ''))"
+    output:
+      identityProviderConfig: "p_found ? p : {'name': string(input.clusterName) + '/' + ('identityProviderConfigName' in input && string(input.identityProviderConfigName) != '' ? string(input.identityProviderConfigName) : ('name' in input && string(input.name) != '' ? string(input.name) : ''))}"
+
+  ListIdentityProviderConfigs:
+    list: { resource: idp, member: identityProviderConfigs, paginate: model }
+
+  # --- updates ----------------------------------------------------------------------------------
+
+  DescribeUpdate:
+    reads:
+      u: { resource: update }
+    output:
+      update: "u_found ? u : {'name': id}"
+
+  # The pack ignored the required `name`: every update in the account and
+  # region is listed, whichever cluster is named.
+  ListUpdates:
+    list: { resource: update, member: updateIds, paginate: model }
+    output:
+      updateIds: "items.map(x, x.id)"
+
+  # Cancelling an update that was never stored conjures a record holding only
+  # the status.
+  CancelUpdate:
+    effects:
+      - patch:
+          resource: update
+          record:
+            status: "'Cancelled'"
+    output:
+      update: rec
+
+  # --- insights ---------------------------------------------------------------------------------
+
+  # The stored record's id surfaces in no answer of this operation -- only
+  # ListInsights reveals it.
+  StartInsightsRefresh:
+    effects:
+      - create:
+          resource: insight
+          record:
+            id: id
+            status: "'IN_PROGRESS'"
+            clusterName: "string(input.clusterName)"
+    output:
+      message: "'started'"
+      status: "'IN_PROGRESS'"
+
+  # The pack answered {insightRefresh: [<every insight record>]}; the output
+  # shape declares endedAt, message, startedAt and status, no insightRefresh
+  # member, so the bundle answers nothing and the recorded step is superseded.
+  DescribeInsightsRefresh:
+    output: {}
+
+  DescribeInsight:
+    reads:
+      i: { resource: insight }
+    output:
+      insight: "i_found ? i : {'name': id}"
+
+  ListInsights:
+    list: { resource: insight, member: insights, paginate: model }
+
+  # --- tags ---------------------------------------------------------------------------------
+
+  TagResource:
+    effects:
+      - create:
+          resource: tag
+          spread: input.tags
+    output: {}
+
+  # The tagKeys named in the request are not read: the whole tag map goes away.
+  UntagResource:
+    effects:
+      - delete: { resource: tag, missing: ignore }
+    output: {}
+
+  # An ARN that was never tagged answers an empty map, not a fault.
+  ListTagsForResource:
+    reads:
+      t: { resource: tag }
+    output:
+      tags: "t_found ? t : {}"
+
+quirks:
+  - operation: DescribeCluster
+    note: >
+      DescribeCluster, DescribeNodegroup and DescribeFargateProfile are the
+      only describes that fault on a missing record (ResourceNotFoundException,
+      404). Every other describe in the pack -- DescribeAddon,
+      DescribeAccessEntry, DescribeCapability, DescribeCertificateAuthority,
+      DescribeEksAnywhereSubscription, DescribeIdentityProviderConfig,
+      DescribeInsight, DescribePodIdentityAssociation and DescribeUpdate --
+      answers a 200 with a bare echo {name: <storage key>} for a missing
+      record, where the name is the composite storage key ("cluster/addon"),
+      not the resource's own name. The real service faults on all of these.
+  - operation: UpdateClusterConfig
+    note: >
+      The request is never applied: the pack read the record and wrote it back
+      unchanged, so no configuration member is stored, and naming an unknown
+      cluster conjures a phantom record holding only its name, which
+      ListClusters then answers. The update id it answers is minted and
+      forgotten -- never written to the updates collection, so DescribeUpdate
+      answers {name: <id>} for it.
+  - operation: UpdateAddon
+    note: >
+      Create and Update are one code path in the pack, for addons, access
+      entries, capabilities, subscriptions and pod identity associations: the
+      record is rebuilt from the request and written wholesale, so an update
+      drops whatever an earlier request stored (UpdateAccessEntry wipes a
+      stored type to "", UpdatePodIdentityAssociation wipes namespace and
+      serviceAccount, UpdateEksAnywhereSubscription drops the name and term).
+      UpdateAddon and UpdateCapability answer {addon: ...} / {capability: ...},
+      members their output shapes do not declare (both declare only `update`);
+      the bundle answers nothing there and the recorded steps are superseded.
+  - operation: AssociateEncryptionConfig
+    note: >
+      The pack answered {cluster: <patched record>}; the output shape declares
+      only `update`, so the bundle answers nothing and the recorded step is
+      superseded. Naming an unknown cluster conjures a phantom record holding
+      only the encryptionConfig, which ListClusters answers by its key.
+  - operation: DescribeInsightsRefresh
+    note: >
+      The pack answered {insightRefresh: [<every insight record>]} --
+      insightRefresh is not a member of the output shape (it declares endedAt,
+      message, startedAt and status), so the bundle answers nothing and the
+      recorded step is superseded. The listing also ignored the required
+      clusterName, as does ListInsights.
+  - operation: AssociateIdentityProviderConfig
+    note: >
+      The pack read a `name` member the input shape does not declare, so under
+      a valid request the config is stored under a generated hex id that no
+      other operation can address -- Describe and Disassociate read
+      identityProviderConfigName or name, also undeclared (they declare the
+      identityProviderConfig object), so their keys resolve to "<cluster>/":
+      the describe always misses and answers {name: "<cluster>/"}, and the
+      disassociate deletes nothing but still records an update. A caller
+      sending the undeclared `name` member does get a stable key; transcribed.
+  - operation: CreateCertificateAuthority
+    note: >
+      Certificate authorities are keyed by the bare generated id: the required
+      clusterName is never part of the key, so ListCertificateAuthorities
+      cannot narrow by cluster and a CA is visible account-wide. The pack drew
+      the id unconditionally, ignoring an id the caller sent; the bundle does
+      the same via an explicit key. ActivateCertificateAuthority on an unknown
+      id conjures a record holding only {status: ACTIVE}.
+  - operation: ListUpdates
+    note: >
+      The listing ignores the required cluster `name`: every update in the
+      account and region is answered, whichever cluster is named. The same is
+      true of ListPodIdentityAssociations, ListCapabilities,
+      ListCertificateAuthorities, ListEksAnywhereSubscriptions,
+      ListIdentityProviderConfigs, ListInsights and
+      ListAssociatedAccessPolicies, which ignore their narrowing members and
+      list every record in the collection. Only ListNodegroups,
+      ListFargateProfiles, ListAddons and ListAccessEntries narrow by cluster.
+  - operation: UpdateNodegroupVersion
+    note: >
+      version is not a required member of UpdateNodegroupVersion, and the pack
+      stored whatever first() returned -- "" when the request omitted it.
+      UpdateNodegroupConfig and UpdateNodegroupVersion both conjure a phantom
+      nodegroup record when the cluster/nodegroup pair was never created, and
+      ListNodegroups then answers the trailing key segment for it.
+  - operation: CreateCluster
+    note: >
+      The pack validated nothing: a request missing the model-required
+      roleArn or resourcesVpcConfig stored empty values and succeeded, and a
+      create over an existing name overwrote the record. The engine enforces
+      the model's required members before any rule runs, so those paths are
+      dead. version is optional; an omitted version is stored and answered as
+      the empty string.
+  - operation: TagResource
+    note: >
+      TagResource replaces the whole tag map stored under the resource ARN and
+      UntagResource deletes all of it, ignoring the tagKeys it was given.
+      ListTagsForResource answers an empty map for an ARN that was never
+      tagged rather than faulting. The stored record is the bare tag map
+      itself, not a wrapper holding it.
+  - operation: StartInsightsRefresh
+    note: >
+      The refresh record is stored ({id, status: IN_PROGRESS, clusterName})
+      but the answer carries only {message: "started", status: "IN_PROGRESS"}
+      -- the generated id surfaces only through ListInsights and
+      DescribeInsightsRefresh. DescribeInsight shares the collection, so a
+      "refresh" record is what DescribeInsight answers.
+  - operation: DeleteCluster
+    note: >
+      Every delete in the pack is idempotent. DeleteCluster and
+      DeregisterCluster answer {name, status: DELETING}; DeleteNodegroup,
+      DeleteFargateProfile and DeleteAddon answer only {status: DELETING}
+      without even echoing a name; the remaining deletes answer {}.
+      DeregisterCluster deletes from the same collection as CreateCluster, so
+      a deregistered cluster is gone from ListClusters too.
+  - operation: DescribeAddonVersions
+    note: >
+      Constant answers: DescribeAddonVersions answers one addon with one
+      version "v1" (echoing the request's addonName, "" when omitted),
+      DescribeAddonConfiguration answers the addonName with the schema string
+      "{}", DescribeClusterVersions answers 1.29 and 1.30 in STANDARD_SUPPORT,
+      and ListAccessPolicies answers AmazonEKSAdminPolicy alone, regardless of
+      anything stored.

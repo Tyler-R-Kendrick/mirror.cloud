@@ -777,7 +777,18 @@
       "GetCustomEnvironment",
       "UpdateCustomEnvironment",
       "RemoveCustomEnvironment",
-      "RequestPromote"
+      "RequestPromote",
+      "GetTeams",
+      "GetTeam",
+      "PatchTeam",
+      "InviteUserToTeam",
+      "ListDeploymentAliases",
+      "GetDeploymentEvents",
+      "ListDeploymentFiles",
+      "CancelDeployment",
+      "UploadFile",
+      "ListPromoteAliases",
+      "UpdateProjectProtectionBypass"
     ]
   },
   {

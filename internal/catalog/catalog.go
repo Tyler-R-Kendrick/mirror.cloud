@@ -265,6 +265,17 @@ func Bundle() *model.Bundle {
 		op("UpdateCustomEnvironment", "PATCH", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, false),
 		op("RemoveCustomEnvironment", "DELETE", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, false),
 		op("RequestPromote", "POST", "/v10/projects/{projectId}/promote/{deploymentId}", 201, false),
+		op("GetTeams", "GET", "/v2/teams", 200, true),
+		op("GetTeam", "GET", "/v2/teams/{teamId}", 200, true),
+		op("PatchTeam", "PATCH", "/v2/teams/{teamId}", 200, false),
+		op("InviteUserToTeam", "POST", "/v2/teams/{teamId}/members", 200, false),
+		op("ListDeploymentAliases", "GET", "/v2/deployments/{id}/aliases", 200, true),
+		op("GetDeploymentEvents", "GET", "/v3/deployments/{idOrUrl}/events", 200, true),
+		op("ListDeploymentFiles", "GET", "/v6/deployments/{id}/files", 200, true),
+		op("CancelDeployment", "PATCH", "/v12/deployments/{id}/cancel", 200, false),
+		op("UploadFile", "POST", "/v2/files", 200, false),
+		op("ListPromoteAliases", "GET", "/v1/projects/{projectId}/promote/aliases", 200, true),
+		op("UpdateProjectProtectionBypass", "PATCH", "/v1/projects/{idOrName}/protection-bypass", 200, false),
 	}
 	// Vercel KV is the data plane -- Upstash Redis behind a Vercel host -- and
 	// its whole surface is one operation: POST / with the command as a JSON

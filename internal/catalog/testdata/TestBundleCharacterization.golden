@@ -799,6 +799,19 @@
     ]
   },
   {
+    "ID": "vercel.blob",
+    "Protocol": "restJson1",
+    "Ops": [
+      "UploadBlob",
+      "ListBlobs",
+      "HeadBlob",
+      "DeleteBlobs",
+      "CreateMultipartUpload",
+      "CompleteMultipartUpload",
+      "ServeBlob"
+    ]
+  },
+  {
     "ID": "cloudflare.api",
     "Protocol": "restJson1",
     "Ops": [

@@ -543,6 +543,9 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			w.Header().Add(k, v)
 		}
 	}
+	if svc.ID == "vercel.blob" && op.Name == "ServeBlob" {
+		return encodeVercelBlobContent(w, status, resp)
+	}
 	// `_raw` is the engine's name for an operation whose body is the value
 	// itself -- bir.TopLevelRaw -- and it is answered before any provider
 	// envelope, because an opaque body has nowhere to put one. Cloudflare's KV
@@ -684,7 +687,10 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"odata.error": map[string]any{"code": f.Code, "message": map[string]any{"lang": "en-US", "value": f.Message}}})
 	}
-	if svc.ID == "vercel.api" {
+	// Vercel's REST API and Blob data plane share the {error:{code,message}}
+	// envelope -- emulate's blobErr is the same shape the REST API answers --
+	// while KV below is the product whose errors differ.
+	if svc.ID == "vercel.api" || svc.ID == "vercel.blob" {
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
 	}
@@ -732,6 +738,38 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	w.Header().Set("x-amzn-errortype", f.Code)
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(map[string]any{"message": f.Message, "__type": f.Code})
+}
+
+// encodeVercelBlobContent unfolds ServeBlob's envelope: the wire answer is the
+// stored bytes with ETag/Cache-Control (and, on a full answer, Content-Type and
+// an optional Content-Disposition) as headers, or a header-only 304 when
+// If-None-Match matched. The bundle projects the record's members; the codec
+// places them, the same division of labour as writeAzureBlobHeaders.
+func encodeVercelBlobContent(w http.ResponseWriter, status int, resp *spi.Response) error {
+	out := resp.Output
+	if nm, _ := out["not_modified"].(bool); nm {
+		status = http.StatusNotModified
+	}
+	if s, _ := out["etag"].(string); s != "" {
+		w.Header().Set("ETag", s)
+	}
+	if s, _ := out["cache_control"].(string); s != "" {
+		w.Header().Set("Cache-Control", s)
+	}
+	if status == http.StatusNotModified {
+		w.WriteHeader(status)
+		return nil
+	}
+	if s, _ := out["content_type"].(string); s != "" {
+		w.Header().Set("Content-Type", s)
+	}
+	if s, _ := out["content_disposition"].(string); s != "" {
+		w.Header().Set("Content-Disposition", s)
+	}
+	w.WriteHeader(status)
+	body, _ := out["body"].(string)
+	_, err := io.WriteString(w, body)
+	return err
 }
 
 // rawBody reports the opaque body an operation projected, if it projected one.

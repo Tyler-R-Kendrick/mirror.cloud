@@ -1,0 +1,414 @@
+schema: bir/1
+service: vercel.blob
+
+# Transcribed from the vendor-authored oracle, vercel-labs/emulate at
+# afddfabb28f1 (pinned in specs/vercel/emulate-inventory.json): the eight route
+# registrations of packages/@emulators/vercel/src/routes/blob.ts. Its PUT and
+# GET pairs differ only by a trailing slash, which routing trims, so six
+# operations serve all eight; its GET handler heads when ?url is present and
+# lists otherwise, which the model splits into HeadBlob and ListBlobs routed by
+# the query constraint.
+#
+# Every cell is `authored`: the document it validates against is authored too
+# (see the description inside specs/vercel/blob.json -- Vercel publishes no
+# machine-readable description of this data plane), so the bundle and the
+# document are the same grade of evidence: a reading of the oracle, not of the
+# real service.
+provenance: authored
+
+# A required member absent from the request fails in the model check before any
+# rule here, and Vercel's name for that is bad_request, not ValidationException.
+missing_input_error: BadRequest
+
+resources:
+  # A blob store. The oracle resolves it from the Bearer token --
+  # vercel_blob_rw_<prefix>_<storeId>_<suffix>, underscore-separated fields with
+  # the id fourth and a non-empty suffix fifth -- or, when the token carries no
+  # store, from the x-vercel-blob-store-id header. No Bearer token at all is a
+  # refusal even with the header. Content serving names the store in the path
+  # instead, and that route is public.
+  store:
+    collection: vbstore
+    id:
+      derive: >
+        ('storeId' in input && input.storeId != null && string(input.storeId) != '') ? string(input.storeId)
+        : ((('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : '').startsWith('vercel_blob_rw_')
+          ? ((size(split((('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : ''), '_')) >= 5
+            && split((('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : ''), '_')[3] != ''
+            && split((('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : ''), '_')[4] != '')
+            ? split((('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : ''), '_')[3] : '')
+          : (((('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : '') != ''
+            && 'x-vercel-blob-store-id' in input && input['x-vercel-blob-store-id'] != null) ? string(input['x-vercel-blob-store-id']) : ''))
+
+  # One record per blob, in the store's own collection, so two stores holding
+  # the same pathname never collide. Addressed by the `pathname` query
+  # parameter or path label, or -- on a head -- by the pathname half of the
+  # ?url= reference (a bare pathname, a <base>/blob/<store>/<pathname> URL, or
+  # a hosted <store>.public.blob.vercel-storage.com/<pathname> URL; the store
+  # half is a require, because a reference naming another store must miss).
+  blob:
+    collection: "vblob:{store.id}"
+    parent: store
+    id:
+      derive: >
+        ('pathname' in input && input.pathname != null) ? string(input.pathname)
+        : (('url' in input && input.url != null)
+          ? ((string(input.url).startsWith('http://') || string(input.url).startsWith('https://'))
+            ? ((size(split(split(string(input.url), '?')[0], '/')) >= 6 && split(split(string(input.url), '?')[0], '/')[3] == 'blob')
+              ? join(indices(split(split(string(input.url), '?')[0], '/')).filter(i, i >= 5).map(i, split(split(string(input.url), '?')[0], '/')[i]), '/')
+              : join(indices(split(split(string(input.url), '?')[0], '/')).filter(i, i >= 3).map(i, split(split(string(input.url), '?')[0], '/')[i]), '/'))
+            : string(input.url))
+          : '')
+
+errors:
+  Forbidden:
+    code: forbidden
+    http: 403
+    fault: client
+  BadRequest:
+    code: bad_request
+    http: 400
+    fault: client
+  NotFound:
+    code: not_found
+    http: 404
+    fault: client
+  PreconditionFailed:
+    code: precondition_failed
+    http: 412
+    fault: client
+
+operations:
+  UploadBlob:
+    reads:
+      # existing is the overwrite/If-Match target. With a random suffix the
+      # oracle checks the SUFFIXED pathname, which cannot exist yet, so the
+      # requires below treat sfx_on as not-found rather than reading there.
+      existing: { resource: blob }
+      # The fromUrl copy source, keyed by the reference's pathname half in this
+      # store's collection; a reference naming another store misses via the
+      # from_store require.
+      src:
+        resource: blob
+        key: >
+          ('fromUrl' in input && input.fromUrl != null)
+          ? ((string(input.fromUrl).startsWith('http://') || string(input.fromUrl).startsWith('https://'))
+            ? ((size(split(split(string(input.fromUrl), '?')[0], '/')) >= 6 && split(split(string(input.fromUrl), '?')[0], '/')[3] == 'blob')
+              ? join(indices(split(split(string(input.fromUrl), '?')[0], '/')).filter(i, i >= 5).map(i, split(split(string(input.fromUrl), '?')[0], '/')[i]), '/')
+              : join(indices(split(split(string(input.fromUrl), '?')[0], '/')).filter(i, i >= 3).map(i, split(split(string(input.fromUrl), '?')[0], '/')[i]), '/'))
+            : string(input.fromUrl))
+          : ''
+      st: { resource: store }
+    let:
+      auth_tok: "('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : ''"
+      store_id: "auth_tok.startsWith('vercel_blob_rw_') ? ((size(split(auth_tok, '_')) >= 5 && split(auth_tok, '_')[3] != '' && split(auth_tok, '_')[4] != '') ? split(auth_tok, '_')[3] : '') : (auth_tok != '' && 'x-vercel-blob-store-id' in input && input['x-vercel-blob-store-id'] != null ? string(input['x-vercel-blob-store-id']) : '')"
+      raw_pathname: "('pathname' in input && input.pathname != null) ? string(input.pathname) : ''"
+      sfx_on: "'x-add-random-suffix' in input && input['x-add-random-suffix'] != null && string(input['x-add-random-suffix']) == '1'"
+      access: "('x-vercel-blob-access' in input && input['x-vercel-blob-access'] != null) ? string(input['x-vercel-blob-access']) : 'public'"
+      if_match: "('x-if-match' in input && input['x-if-match'] != null) ? string(input['x-if-match']) : ''"
+      norm_etag: "if_match.startsWith('\"') ? if_match : '\"' + if_match + '\"'"
+      from_url: "('fromUrl' in input && input.fromUrl != null) ? string(input.fromUrl) : ''"
+      from_store: >
+        (from_url.startsWith('http://') || from_url.startsWith('https://'))
+        ? ((size(split(split(from_url, '?')[0], '/')) >= 6 && split(split(from_url, '?')[0], '/')[3] == 'blob')
+          ? split(split(from_url, '?')[0], '/')[4]
+          : ((size(split(lower(split(split(from_url, '?')[0], '/')[2]), '.')) == 5
+            && ['public', 'private'].exists(k, k == split(lower(split(split(from_url, '?')[0], '/')[2]), '.')[1])
+            && split(lower(split(split(from_url, '?')[0], '/')[2]), '.')[2] == 'blob'
+            && split(lower(split(split(from_url, '?')[0], '/')[2]), '.')[3] == 'vercel-storage'
+            && split(lower(split(split(from_url, '?')[0], '/')[2]), '.')[4] == 'com')
+            ? split(split(split(from_url, '?')[0], '/')[2], '.')[0] : ''))
+        : ''
+    require:
+      # In the oracle's order: auth, the pathname checks, access, the ETag
+      # precondition, the overwrite refusal, then the copy source.
+      - { cond: "store_id != ''", error: Forbidden, message: "Access denied" }
+      - { cond: "raw_pathname != ''", error: BadRequest, message: "pathname is required" }
+      - { cond: "!raw_pathname.contains('//')", error: BadRequest, message: "pathname cannot contain //" }
+      - { cond: "access == 'public'", error: BadRequest, message: "Only access: public is supported by the emulator" }
+      - { cond: "if_match == '' || (!sfx_on && existing_found && string(existing.etag) == norm_etag)", error: PreconditionFailed, message: "Precondition failed: ETag mismatch." }
+      # An If-Match that passed is the overwrite permission; the oracle checks
+      # x-allow-overwrite only in the if-match-less branch.
+      - { cond: "if_match != '' || sfx_on || !existing_found || ('x-allow-overwrite' in input && input['x-allow-overwrite'] != null && string(input['x-allow-overwrite']) == '1')", error: BadRequest, message: "This blob already exists, use allowOverwrite: true to overwrite it" }
+      - { cond: "from_url == '' || (from_store == '' || from_store == store_id)", error: NotFound, message: "The requested blob does not exist" }
+      - { cond: "from_url == '' || src_found", error: NotFound, message: "The requested blob does not exist" }
+    effects:
+      # The oracle draws eight lowercase alphanumerics; hex draws eight from a
+      # subset of that alphabet. Inserted before the extension when the
+      # basename's last dot is not its first character, appended otherwise.
+      - generate: { bind: sfx, kind: hex, bytes: 4, when: sfx_on }
+      - put:
+          resource: blob
+          key: >
+            sfx_on ? substr(raw_pathname, 0, blen(raw_pathname) - blen(lastSegment(raw_pathname, '/')))
+            + ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != '')
+              ? join(indices(split(lastSegment(raw_pathname, '/'), '.')).filter(i, i < size(split(lastSegment(raw_pathname, '/'), '.')) - 1).map(i, split(lastSegment(raw_pathname, '/'), '.')[i]), '.') + '-' + fx.sfx + '.' + split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]
+              : lastSegment(raw_pathname, '/') + '-' + fx.sfx)
+            : raw_pathname
+          record:
+            pathname: >
+              sfx_on ? substr(raw_pathname, 0, blen(raw_pathname) - blen(lastSegment(raw_pathname, '/')))
+              + ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != '')
+                ? join(indices(split(lastSegment(raw_pathname, '/'), '.')).filter(i, i < size(split(lastSegment(raw_pathname, '/'), '.')) - 1).map(i, split(lastSegment(raw_pathname, '/'), '.')[i]), '.') + '-' + fx.sfx + '.' + split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]
+                : lastSegment(raw_pathname, '/') + '-' + fx.sfx)
+              : raw_pathname
+            store_id: store_id
+            body: "from_url != '' ? string(src.body) : (('body' in input && input.body != null) ? string(input.body) : '')"
+            size: "blen(from_url != '' ? string(src.body) : (('body' in input && input.body != null) ? string(input.body) : ''))"
+            etag: "'\"' + sha256hex(from_url != '' ? string(src.body) : (('body' in input && input.body != null) ? string(input.body) : '')) + '\"'"
+            # The suffix sits before the extension, so the inferred type reads
+            # the requested pathname either way.
+            content_type: >
+              ('x-content-type' in input && input['x-content-type'] != null && string(input['x-content-type']) != '') ? string(input['x-content-type'])
+              : ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != ''
+                  && lower(split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]) in {'avif': 'image/avif', 'css': 'text/css', 'csv': 'text/csv', 'gif': 'image/gif', 'gz': 'application/gzip', 'html': 'text/html', 'ico': 'image/x-icon', 'jpeg': 'image/jpeg', 'jpg': 'image/jpeg', 'js': 'text/javascript', 'json': 'application/json', 'md': 'text/markdown', 'mp3': 'audio/mpeg', 'mp4': 'video/mp4', 'pdf': 'application/pdf', 'png': 'image/png', 'svg': 'image/svg+xml', 'txt': 'text/plain', 'wasm': 'application/wasm', 'webm': 'video/webm', 'webp': 'image/webp', 'woff': 'font/woff', 'woff2': 'font/woff2', 'xml': 'application/xml', 'zip': 'application/zip'})
+                ? {'avif': 'image/avif', 'css': 'text/css', 'csv': 'text/csv', 'gif': 'image/gif', 'gz': 'application/gzip', 'html': 'text/html', 'ico': 'image/x-icon', 'jpeg': 'image/jpeg', 'jpg': 'image/jpeg', 'js': 'text/javascript', 'json': 'application/json', 'md': 'text/markdown', 'mp3': 'audio/mpeg', 'mp4': 'video/mp4', 'pdf': 'application/pdf', 'png': 'image/png', 'svg': 'image/svg+xml', 'txt': 'text/plain', 'wasm': 'application/wasm', 'webm': 'video/webm', 'webp': 'image/webp', 'woff': 'font/woff', 'woff2': 'font/woff2', 'xml': 'application/xml', 'zip': 'application/zip'}[lower(split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1])]
+                : 'application/octet-stream')
+            content_disposition: >
+              'attachment; filename="' + join(split(sfx_on
+                ? ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != '')
+                  ? join(indices(split(lastSegment(raw_pathname, '/'), '.')).filter(i, i < size(split(lastSegment(raw_pathname, '/'), '.')) - 1).map(i, split(lastSegment(raw_pathname, '/'), '.')[i]), '.') + '-' + fx.sfx + '.' + split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]
+                  : lastSegment(raw_pathname, '/') + '-' + fx.sfx)
+                : lastSegment(raw_pathname, '/'), '"'), '') + '"'
+            cache_control: "'public, max-age=' + string(('x-cache-control-max-age' in input && input['x-cache-control-max-age'] != null && string(input['x-cache-control-max-age']).matches('^-?[0-9]+$')) ? int(string(input['x-cache-control-max-age'])) : 2592000)"
+            uploaded_at: iso8601ms(now)
+    output:
+      pathname: >
+        sfx_on ? substr(raw_pathname, 0, blen(raw_pathname) - blen(lastSegment(raw_pathname, '/')))
+        + ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != '')
+          ? join(indices(split(lastSegment(raw_pathname, '/'), '.')).filter(i, i < size(split(lastSegment(raw_pathname, '/'), '.')) - 1).map(i, split(lastSegment(raw_pathname, '/'), '.')[i]), '.') + '-' + fx.sfx + '.' + split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]
+          : lastSegment(raw_pathname, '/') + '-' + fx.sfx)
+        : raw_pathname
+      url: >
+        endpoint + '/blob/' + store_id + '/' + (sfx_on ? substr(raw_pathname, 0, blen(raw_pathname) - blen(lastSegment(raw_pathname, '/')))
+        + ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != '')
+          ? join(indices(split(lastSegment(raw_pathname, '/'), '.')).filter(i, i < size(split(lastSegment(raw_pathname, '/'), '.')) - 1).map(i, split(lastSegment(raw_pathname, '/'), '.')[i]), '.') + '-' + fx.sfx + '.' + split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]
+          : lastSegment(raw_pathname, '/') + '-' + fx.sfx)
+        : raw_pathname)
+      downloadUrl: >
+        endpoint + '/blob/' + store_id + '/' + (sfx_on ? substr(raw_pathname, 0, blen(raw_pathname) - blen(lastSegment(raw_pathname, '/')))
+        + ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != '')
+          ? join(indices(split(lastSegment(raw_pathname, '/'), '.')).filter(i, i < size(split(lastSegment(raw_pathname, '/'), '.')) - 1).map(i, split(lastSegment(raw_pathname, '/'), '.')[i]), '.') + '-' + fx.sfx + '.' + split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]
+          : lastSegment(raw_pathname, '/') + '-' + fx.sfx)
+        : raw_pathname) + '?download=1'
+      contentType: >
+        ('x-content-type' in input && input['x-content-type'] != null && string(input['x-content-type']) != '') ? string(input['x-content-type'])
+        : ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != ''
+            && lower(split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]) in {'avif': 'image/avif', 'css': 'text/css', 'csv': 'text/csv', 'gif': 'image/gif', 'gz': 'application/gzip', 'html': 'text/html', 'ico': 'image/x-icon', 'jpeg': 'image/jpeg', 'jpg': 'image/jpeg', 'js': 'text/javascript', 'json': 'application/json', 'md': 'text/markdown', 'mp3': 'audio/mpeg', 'mp4': 'video/mp4', 'pdf': 'application/pdf', 'png': 'image/png', 'svg': 'image/svg+xml', 'txt': 'text/plain', 'wasm': 'application/wasm', 'webm': 'video/webm', 'webp': 'image/webp', 'woff': 'font/woff', 'woff2': 'font/woff2', 'xml': 'application/xml', 'zip': 'application/zip'})
+          ? {'avif': 'image/avif', 'css': 'text/css', 'csv': 'text/csv', 'gif': 'image/gif', 'gz': 'application/gzip', 'html': 'text/html', 'ico': 'image/x-icon', 'jpeg': 'image/jpeg', 'jpg': 'image/jpeg', 'js': 'text/javascript', 'json': 'application/json', 'md': 'text/markdown', 'mp3': 'audio/mpeg', 'mp4': 'video/mp4', 'pdf': 'application/pdf', 'png': 'image/png', 'svg': 'image/svg+xml', 'txt': 'text/plain', 'wasm': 'application/wasm', 'webm': 'video/webm', 'webp': 'image/webp', 'woff': 'font/woff', 'woff2': 'font/woff2', 'xml': 'application/xml', 'zip': 'application/zip'}[lower(split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1])]
+          : 'application/octet-stream')
+      contentDisposition: >
+        'attachment; filename="' + join(split(sfx_on
+          ? ((size(split(lastSegment(raw_pathname, '/'), '.')) > 1 && split(lastSegment(raw_pathname, '/'), '.')[0] != '')
+            ? join(indices(split(lastSegment(raw_pathname, '/'), '.')).filter(i, i < size(split(lastSegment(raw_pathname, '/'), '.')) - 1).map(i, split(lastSegment(raw_pathname, '/'), '.')[i]), '.') + '-' + fx.sfx + '.' + split(lastSegment(raw_pathname, '/'), '.')[size(split(lastSegment(raw_pathname, '/'), '.')) - 1]
+            : lastSegment(raw_pathname, '/') + '-' + fx.sfx)
+          : lastSegment(raw_pathname, '/'), '"'), '') + '"'
+      etag: "'\"' + sha256hex(from_url != '' ? string(src.body) : (('body' in input && input.body != null) ? string(input.body) : '')) + '\"'"
+
+  HeadBlob:
+    reads:
+      st: { resource: store }
+      rec: { resource: blob }
+    let:
+      auth_tok: "('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : ''"
+      store_id: "auth_tok.startsWith('vercel_blob_rw_') ? ((size(split(auth_tok, '_')) >= 5 && split(auth_tok, '_')[3] != '' && split(auth_tok, '_')[4] != '') ? split(auth_tok, '_')[3] : '') : (auth_tok != '' && 'x-vercel-blob-store-id' in input && input['x-vercel-blob-store-id'] != null ? string(input['x-vercel-blob-store-id']) : '')"
+      ref_store: >
+        (('url' in input && input.url != null) && (string(input.url).startsWith('http://') || string(input.url).startsWith('https://')))
+        ? ((size(split(split(string(input.url), '?')[0], '/')) >= 6 && split(split(string(input.url), '?')[0], '/')[3] == 'blob')
+          ? split(split(string(input.url), '?')[0], '/')[4]
+          : ((size(split(lower(split(split(string(input.url), '?')[0], '/')[2]), '.')) == 5
+            && ['public', 'private'].exists(k, k == split(lower(split(split(string(input.url), '?')[0], '/')[2]), '.')[1])
+            && split(lower(split(split(string(input.url), '?')[0], '/')[2]), '.')[2] == 'blob'
+            && split(lower(split(split(string(input.url), '?')[0], '/')[2]), '.')[3] == 'vercel-storage'
+            && split(lower(split(split(string(input.url), '?')[0], '/')[2]), '.')[4] == 'com')
+            ? split(split(split(string(input.url), '?')[0], '/')[2], '.')[0] : ''))
+        : ''
+    require:
+      - { cond: "store_id != ''", error: Forbidden, message: "Access denied" }
+      # A reference that names another store is a miss in this one, even when
+      # the same pathname exists here.
+      - { cond: "ref_store == '' || ref_store == store_id", error: NotFound, message: "The requested blob does not exist" }
+      - { cond: rec_found, error: NotFound, message: "The requested blob does not exist" }
+    output:
+      url: "endpoint + '/blob/' + store_id + '/' + string(rec.pathname)"
+      downloadUrl: "endpoint + '/blob/' + store_id + '/' + string(rec.pathname) + '?download=1'"
+      pathname: string(rec.pathname)
+      size: int(rec.size)
+      contentType: string(rec.content_type)
+      contentDisposition: string(rec.content_disposition)
+      cacheControl: string(rec.cache_control)
+      uploadedAt: string(rec.uploaded_at)
+      etag: string(rec.etag)
+
+  ListBlobs:
+    reads:
+      st: { resource: store }
+    let:
+      auth_tok: "('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : ''"
+      store_id: "auth_tok.startsWith('vercel_blob_rw_') ? ((size(split(auth_tok, '_')) >= 5 && split(auth_tok, '_')[3] != '' && split(auth_tok, '_')[4] != '') ? split(auth_tok, '_')[3] : '') : (auth_tok != '' && 'x-vercel-blob-store-id' in input && input['x-vercel-blob-store-id'] != null ? string(input['x-vercel-blob-store-id']) : '')"
+      pfx: "('prefix' in input && input.prefix != null) ? string(input.prefix) : ''"
+      lim: "('limit' in input && input.limit != null && string(input.limit).matches('^[0-9]+$') && int(string(input.limit)) > 0) ? int(string(input.limit)) : 1000"
+      cur: "('cursor' in input && input.cursor != null) ? string(input.cursor) : ''"
+      folded: "'mode' in input && input.mode != null && string(input.mode) == 'folded'"
+    require:
+      - { cond: "store_id != ''", error: Forbidden, message: "Access denied" }
+    # Sorted by pathname like the oracle; the cursor, the page cut and the
+    # folded folders are output expressions because lets run before the select.
+    # Folders gather from the pre-cursor items, like the oracle.
+    select:
+      binding: all
+      resource: blob
+      order_by: "string(item.pathname)"
+      filter: "string(item.pathname).startsWith(pfx)"
+    output:
+      blobs: >
+        indices(cur == '' ? (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all) : (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all).filter(b, string(b.pathname) > cur)).filter(i,
+          i < lim).map(i, (cur == '' ? (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all) : (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all).filter(b, string(b.pathname) > cur))[i]).map(b,
+          {'url': endpoint + '/blob/' + store_id + '/' + string(b.pathname),
+           'downloadUrl': endpoint + '/blob/' + store_id + '/' + string(b.pathname) + '?download=1',
+           'pathname': string(b.pathname),
+           'size': int(b.size),
+           'uploadedAt': string(b.uploaded_at),
+           'etag': string(b.etag)})
+      hasMore: >
+        size(cur == '' ? (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all) : (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all).filter(b, string(b.pathname) > cur)) > lim
+      cursor: >
+        (size(cur == '' ? (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all) : (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all).filter(b, string(b.pathname) > cur)) > lim
+        && lim > 0)
+        ? dyn(string((cur == '' ? (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all) : (folded ? all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) == 1) : all).filter(b, string(b.pathname) > cur))[lim - 1].pathname))
+        : dyn(null)
+      folders: >
+        folded
+        ? dyn(indices(all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) > 1).map(b, pfx + split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')[0] + '/')).filter(i,
+            i == 0 || all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) > 1).map(b, pfx + split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')[0] + '/')[i] != all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) > 1).map(b, pfx + split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')[0] + '/')[i - 1]).map(i,
+            all.filter(b, size(split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')) > 1).map(b, pfx + split(substr(string(b.pathname), blen(pfx), blen(string(b.pathname))), '/')[0] + '/')[i]))
+        : dyn(null)
+
+  DeleteBlobs:
+    reads:
+      st: { resource: store }
+    let:
+      auth_tok: "('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2 && lower(split(string(input.authorization), ' ')[0]) == 'bearer') ? split(string(input.authorization), ' ')[1] : ''"
+      store_id: "auth_tok.startsWith('vercel_blob_rw_') ? ((size(split(auth_tok, '_')) >= 5 && split(auth_tok, '_')[3] != '' && split(auth_tok, '_')[4] != '') ? split(auth_tok, '_')[3] : '') : (auth_tok != '' && 'x-vercel-blob-store-id' in input && input['x-vercel-blob-store-id'] != null ? string(input['x-vercel-blob-store-id']) : '')"
+      urls: "('urls' in input && input.urls != null) ? input.urls.filter(u, type(u) == string) : []"
+      if_match: "('x-if-match' in input && input['x-if-match'] != null) ? string(input['x-if-match']) : ''"
+      norm_etag: "if_match.startsWith('\"') ? if_match : '\"' + if_match + '\"'"
+    require:
+      - { cond: "store_id != ''", error: Forbidden, message: "Access denied" }
+      # This one names the select's binding, so it is evaluated after it:
+      # the oracle refuses the whole call when an If-Match meets a targeted
+      # blob whose ETag differs.
+      - { cond: "if_match == '' || !matched.exists(m, string(m.etag) != norm_etag)", error: PreconditionFailed, message: "Precondition failed: ETag mismatch." }
+    select:
+      binding: matched
+      resource: blob
+      # Each entry resolves like the oracle's resolveBlobRef: a bare pathname,
+      # a <base>/blob/<store>/<pathname> URL, or a hosted
+      # <store>.public.blob.vercel-storage.com/<pathname> URL. A reference
+      # naming another store can never equal this store's key prefix, which is
+      # the oracle's cross-store refusal.
+      filter: >
+        urls.exists(u,
+          ((u.startsWith('http://') || u.startsWith('https://'))
+            ? ((size(split(split(u, '?')[0], '/')) >= 6 && split(split(u, '?')[0], '/')[3] == 'blob')
+              ? split(split(u, '?')[0], '/')[4] + '/' + join(indices(split(split(u, '?')[0], '/')).filter(i, i >= 5).map(i, split(split(u, '?')[0], '/')[i]), '/')
+              : (((size(split(lower(split(split(u, '?')[0], '/')[2]), '.')) == 5
+                  && ['public', 'private'].exists(k, k == split(lower(split(split(u, '?')[0], '/')[2]), '.')[1])
+                  && split(lower(split(split(u, '?')[0], '/')[2]), '.')[2] == 'blob'
+                  && split(lower(split(split(u, '?')[0], '/')[2]), '.')[3] == 'vercel-storage'
+                  && split(lower(split(split(u, '?')[0], '/')[2]), '.')[4] == 'com')
+                  ? split(split(split(u, '?')[0], '/')[2], '.')[0] : store_id)
+                + '/' + join(indices(split(split(u, '?')[0], '/')).filter(i, i >= 3).map(i, split(split(u, '?')[0], '/')[i]), '/')))
+            : store_id + '/' + u)
+          == store_id + '/' + string(item.pathname))
+    effects:
+      - delete:
+          resource: blob
+          where: >
+            urls.exists(u,
+              ((u.startsWith('http://') || u.startsWith('https://'))
+                ? ((size(split(split(u, '?')[0], '/')) >= 6 && split(split(u, '?')[0], '/')[3] == 'blob')
+                  ? split(split(u, '?')[0], '/')[4] + '/' + join(indices(split(split(u, '?')[0], '/')).filter(i, i >= 5).map(i, split(split(u, '?')[0], '/')[i]), '/')
+                  : (((size(split(lower(split(split(u, '?')[0], '/')[2]), '.')) == 5
+                      && ['public', 'private'].exists(k, k == split(lower(split(split(u, '?')[0], '/')[2]), '.')[1])
+                      && split(lower(split(split(u, '?')[0], '/')[2]), '.')[2] == 'blob'
+                      && split(lower(split(split(u, '?')[0], '/')[2]), '.')[3] == 'vercel-storage'
+                      && split(lower(split(split(u, '?')[0], '/')[2]), '.')[4] == 'com')
+                      ? split(split(split(u, '?')[0], '/')[2], '.')[0] : store_id)
+                    + '/' + join(indices(split(split(u, '?')[0], '/')).filter(i, i >= 3).map(i, split(split(u, '?')[0], '/')[i]), '/')))
+                : store_id + '/' + u)
+              == store_id + '/' + string(item.pathname))
+    output:
+      # The oracle answers JSON null whatever happened.
+      _raw: "'null'"
+
+  # The oracle's two multipart routes are stubs: every call, authenticated or
+  # not, answers the same 400.
+  CreateMultipartUpload:
+    require:
+      - { cond: "false", error: BadRequest, message: "Multipart uploads are not supported by the emulator yet" }
+
+  CompleteMultipartUpload:
+    require:
+      - { cond: "false", error: BadRequest, message: "Multipart uploads are not supported by the emulator yet" }
+
+  ServeBlob:
+    reads:
+      st: { resource: store }
+      rec: { resource: blob }
+    require:
+      - { cond: rec_found, error: NotFound, message: "The requested blob does not exist" }
+    let:
+      inm: "('if-none-match' in input && input['if-none-match'] != null) ? string(input['if-none-match']) : ''"
+    output:
+      # The envelope the codec unfolds: ETag and Cache-Control ride every
+      # answer including the 304, Content-Type and the body do not, and
+      # Content-Disposition is the ?download=1 spelling.
+      not_modified: "inm != '' && inm == string(rec.etag)"
+      etag: string(rec.etag)
+      cache_control: string(rec.cache_control)
+      content_type: string(rec.content_type)
+      content_disposition: "('download' in input && input.download != null && string(input.download) == '1') ? string(rec.content_disposition) : ''"
+      body: string(rec.body)
+
+quirks:
+  - operation: UploadBlob
+    note: >
+      The overwrite refusal is 400 bad_request, because that is what the oracle
+      answers ("This blob already exists, use allowOverwrite: true to overwrite
+      it"); the real service's 409 is not what is being emulated. The random
+      suffix is drawn from hex digits, a subset of the oracle's [a-z0-9]
+      alphabet, so `^[a-z0-9]{8}$` holds but the distribution is narrower.
+      x-cache-control-max-age is honored only when the whole header value is
+      digits; the oracle's parseInt also accepts leading digits of a suffix
+      like "60x", which here falls back to the default max-age. Path segments
+      are not percent-encoded in the URLs mirror hands out, where the oracle
+      runs encodeURIComponent per segment; pathnames that need encoding are the
+      divergence. A copy source naming another store by mirror URL 404s, but a
+      hosted-URL reference whose store differs only by host case is not
+      case-folded like the oracle's regex.
+  - operation: DeleteBlobs
+    note: >
+      The oracle walks the url list in order and deletes as it goes, so an
+      x-if-match mismatch on a later entry leaves the earlier ones deleted;
+      here the mismatch refuses the whole call before anything is deleted.
+      The 200 answer is the literal body `null`, the oracle's c.json(null).
+  - operation: ListBlobs
+    note: >
+      cursor and folders answer null where the oracle omits the member: the
+      engine projects every declared output member, and a member the model does
+      not declare cannot be named. A null cursor reads the same as an absent
+      one to the SDK.
+  - operation: ServeBlob
+    note: >
+      The response schema is an envelope, not a wire shape: the wire answer is
+      the raw bytes with ETag/Cache-Control/Content-Type headers, which the
+      restjson codec unfolds the way writeAzureBlobHeaders does for Azure. The
+      304 carries ETag and Cache-Control like the oracle.
+  - operation: CreateMultipartUpload
+    note: >
+      Multipart is the oracle's own stub: POST and PUT /api/blob/mpu answer 400
+      bad_request "Multipart uploads are not supported by the emulator yet"
+      whether or not the call authenticates, and this does the same. When the
+      oracle grows real multipart, these two routes get real semantics and this
+      note goes away.

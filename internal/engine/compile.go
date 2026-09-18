@@ -312,6 +312,31 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.String(strings.Join(parts, fmt.Sprint(sep.Value())))
 			}))),
 
+		// split is strings.Split: CEL's core has no tokenization, and a Bearer
+		// header's token, a blob token's underscore-separated fields and a
+		// pathname's extension are all read by splitting.
+		cel.Function("split", cel.Overload("split_2", []*cel.Type{str, str}, dyn,
+			cel.BinaryBinding(func(s, sep ref.Val) ref.Val {
+				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))
+				out := make([]any, len(parts))
+				for i, p := range parts {
+					out[i] = p
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
+		// iso8601ms renders a timestamp the way JavaScript's toISOString does:
+		// always with milliseconds. CEL's string(timestamp) drops a zero
+		// fraction, and Vercel Blob's uploadedAt carries it either way.
+		cel.Function("iso8601ms", cel.Overload("iso8601ms_1", []*cel.Type{cel.TimestampType}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				t, ok := v.(types.Timestamp)
+				if !ok {
+					return types.String(fmt.Sprint(v.Value()))
+				}
+				return types.String(t.Time.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
+			}))),
+
 		cel.Function("tagmatch", cel.Overload("tagmatch_3", []*cel.Type{str, dyn, str}, cel.BoolType,
 			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
 				expr := fmt.Sprint(args[0].Value())

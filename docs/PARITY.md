@@ -1487,7 +1487,7 @@ The monorepo emulates fourteen providers; only `packages/@emulators/vercel` is t
 |---|---:|
 | emulate Vercel routes (vendor-authored oracle) | 52 |
 | emulate Vercel test functions | 26 |
-| emulate Vercel routes served by mirror | 31 / 52 |
+| emulate Vercel routes served by mirror | 39 / 52 |
 
 Serve state per emulate route group (method+path from `src/routes/*.ts`):
 
@@ -1500,9 +1500,9 @@ Serve state per emulate route group (method+path from `src/routes/*.ts`):
 | `user.ts` | 9 | 5 | `PATCH /v2/user`, `GET /registration`, `POST /v2/teams` and `GET /v2/teams/{teamId}/members` — the last two have no vendored-document counterpart, so there is no model operation to serve them with |
 | `api-keys.ts` | 3 | 0 | the whole token lifecycle |
 | `oauth.ts` | 4 | 0 | authorize/callback/token/userinfo |
-| `blob.ts` | 8 | 0 | Vercel Blob is a separate product mirror does not serve at all (KV is Upstash Redis, not Blob) |
+| `blob.ts` | 8 | 8 | `vercel.blob` serves the whole data plane: upload (overwrite/ETag/suffix rules), list (folded/cursor/prefix), head, delete, content serving with 304 and `?download=1`; mpu answers the oracle's own 400 refusal |
 
-The 21-route gap is the expansion backlog, in order: the get-one env, teams create and members list and user patch (awaiting vendored-document coverage), api-keys, oauth, then Blob as a new `vercel.blob` service. Every addition lands as B-IR data on `behavior/vercel/` — no Go — and the parity claims here stay traceable to the oracle's route list.
+The 21-route gap is the expansion backlog, in order: the get-one env, teams create and members list and user patch (awaiting vendored-document coverage), api-keys, oauth; Blob landed as `vercel.blob`. Every addition lands as B-IR data on `behavior/vercel/` — no Go — and the parity claims here stay traceable to the oracle's route list.
 
 ## SNS baseline
 

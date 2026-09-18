@@ -284,6 +284,18 @@ func Bundle() *model.Bundle {
 	vercelkv := []model.Operation{
 		op("Command", "POST", "/", 200, false),
 	}
+	// Vercel Blob's document is authored (specs/vercel/blob.json) from the
+	// vendor's own emulator: management rides blob.vercel-storage.com and
+	// content serves from a per-store subdomain of it.
+	vercelblob := []model.Operation{
+		op("UploadBlob", "PUT", "/api/blob", 200, false),
+		op("ListBlobs", "GET", "/api/blob", 200, true),
+		op("HeadBlob", "GET", "/api/blob?url", 200, true),
+		op("DeleteBlobs", "POST", "/api/blob/delete", 200, false),
+		op("CreateMultipartUpload", "POST", "/api/blob/mpu", 400, false),
+		op("CompleteMultipartUpload", "PUT", "/api/blob/mpu", 400, false),
+		op("ServeBlob", "GET", "/blob/{storeId}/{pathname}", 200, true),
+	}
 	// Cloudflare is served from behavior/cloudflare/api now, under the id its
 	// document produces -- cloudflare.api -- and the names that document
 	// declares, rather than the six the deleted pack invented. adoptGenerated
@@ -1727,6 +1739,7 @@ func Bundle() *model.Bundle {
 			svc("gcp.storage", "storage", model.ProtoGCPRESTSON, "", "", "", mk(gcs)),
 			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", vercel),
 			svc("vercel.kv", "vercel", model.ProtoRESTJSON1, "", "", "", vercelkv),
+			svc("vercel.blob", "vercel", model.ProtoRESTJSON1, "", "", "", vercelblob),
 			svc("cloudflare.api", "cloudflare", model.ProtoRESTJSON1, "", "", "", cloudflare),
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
 			azureSvc,

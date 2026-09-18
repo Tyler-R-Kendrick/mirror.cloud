@@ -1,0 +1,596 @@
+{
+  "schema": "trace/1",
+  "service": "vercel.blob",
+  "source": "authored:behavior/vercel/blob@afddfabb-oracle-read",
+  "note": "Authored against the bundle, which is itself transcribed from the vendor-authored oracle (vercel-labs/emulate @afddfabb28f1, packages/@emulators/vercel/src/routes/blob.ts) \u2014 there is no hand-written pack to record. The oracle's answers to this exact corpus were captured live over HTTP on 2026-09-18 and match what is recorded here, including the etag being the quoted sha256 of the body and upload answering no size/uploadedAt. The token's store id is the fourth underscore-separated field, so vercel_blob_rw_st1_abc names store st1.",
+  "steps": [
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "pathname": "hello.txt",
+        "body": "hi blob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "forbidden",
+        "http_status": 403,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "body": "hi blob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "bad//path.txt",
+        "body": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "hello.txt",
+        "body": "hi blob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "contentDisposition": "attachment; filename=\"hello.txt\"",
+        "contentType": "text/plain",
+        "downloadUrl": "http://127.0.0.1:4566/blob/st1/hello.txt?download=1",
+        "etag": "\"e8c5f69ccb07a6ff1b88903f6b6c1a731e31c6e637e0403621f4080d7d03bc63\"",
+        "pathname": "hello.txt",
+        "url": "http://127.0.0.1:4566/blob/st1/hello.txt"
+      }
+    },
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "hello.txt",
+        "body": "again v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "hello.txt",
+        "body": "again v2",
+        "x-allow-overwrite": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "contentDisposition": "attachment; filename=\"hello.txt\"",
+        "contentType": "text/plain",
+        "downloadUrl": "http://127.0.0.1:4566/blob/st1/hello.txt?download=1",
+        "etag": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\"",
+        "pathname": "hello.txt",
+        "url": "http://127.0.0.1:4566/blob/st1/hello.txt"
+      }
+    },
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "hello.txt",
+        "body": "again v2",
+        "x-if-match": "\"deadbeef00\""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "precondition_failed",
+        "http_status": 412,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "hello.txt",
+        "body": "again v2",
+        "x-if-match": "ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "contentDisposition": "attachment; filename=\"hello.txt\"",
+        "contentType": "text/plain",
+        "downloadUrl": "http://127.0.0.1:4566/blob/st1/hello.txt?download=1",
+        "etag": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\"",
+        "pathname": "hello.txt",
+        "url": "http://127.0.0.1:4566/blob/st1/hello.txt"
+      }
+    },
+    {
+      "operation": "UploadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "dir/photo.png",
+        "body": "png-bytes"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "contentDisposition": "attachment; filename=\"photo.png\"",
+        "contentType": "image/png",
+        "downloadUrl": "http://127.0.0.1:4566/blob/st1/dir/photo.png?download=1",
+        "etag": "\"ea80334363eed145dfeee51ebae7dc3f1cd7d0c7879f8bfd2070c061d3c33f56\"",
+        "pathname": "dir/photo.png",
+        "url": "http://127.0.0.1:4566/blob/st1/dir/photo.png"
+      }
+    },
+    {
+      "operation": "HeadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "url": "hello.txt"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cacheControl": "public, max-age=2592000",
+        "contentDisposition": "attachment; filename=\"hello.txt\"",
+        "contentType": "text/plain",
+        "downloadUrl": "http://127.0.0.1:4566/blob/st1/hello.txt?download=1",
+        "etag": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\"",
+        "pathname": "hello.txt",
+        "size": 8,
+        "uploadedAt": "1970-01-01T00:00:00.000Z",
+        "url": "http://127.0.0.1:4566/blob/st1/hello.txt"
+      }
+    },
+    {
+      "operation": "HeadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "url": "http://127.0.0.1:4566/blob/st1/dir/photo.png"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cacheControl": "public, max-age=2592000",
+        "contentDisposition": "attachment; filename=\"photo.png\"",
+        "contentType": "image/png",
+        "downloadUrl": "http://127.0.0.1:4566/blob/st1/dir/photo.png?download=1",
+        "etag": "\"ea80334363eed145dfeee51ebae7dc3f1cd7d0c7879f8bfd2070c061d3c33f56\"",
+        "pathname": "dir/photo.png",
+        "size": 9,
+        "uploadedAt": "1970-01-01T00:00:00.000Z",
+        "url": "http://127.0.0.1:4566/blob/st1/dir/photo.png"
+      }
+    },
+    {
+      "operation": "HeadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "url": "ghost.txt"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "HeadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_other9_abc",
+        "url": "hello.txt"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListBlobs",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "blobs": [
+          {
+            "downloadUrl": "http://127.0.0.1:4566/blob/st1/dir/photo.png?download=1",
+            "etag": "\"ea80334363eed145dfeee51ebae7dc3f1cd7d0c7879f8bfd2070c061d3c33f56\"",
+            "pathname": "dir/photo.png",
+            "size": 9,
+            "uploadedAt": "1970-01-01T00:00:00.000Z",
+            "url": "http://127.0.0.1:4566/blob/st1/dir/photo.png"
+          },
+          {
+            "downloadUrl": "http://127.0.0.1:4566/blob/st1/hello.txt?download=1",
+            "etag": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\"",
+            "pathname": "hello.txt",
+            "size": 8,
+            "uploadedAt": "1970-01-01T00:00:00.000Z",
+            "url": "http://127.0.0.1:4566/blob/st1/hello.txt"
+          }
+        ],
+        "cursor": null,
+        "folders": null,
+        "hasMore": false
+      }
+    },
+    {
+      "operation": "ListBlobs",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "mode": "folded"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "blobs": [
+          {
+            "downloadUrl": "http://127.0.0.1:4566/blob/st1/hello.txt?download=1",
+            "etag": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\"",
+            "pathname": "hello.txt",
+            "size": 8,
+            "uploadedAt": "1970-01-01T00:00:00.000Z",
+            "url": "http://127.0.0.1:4566/blob/st1/hello.txt"
+          }
+        ],
+        "cursor": null,
+        "folders": [
+          "dir/"
+        ],
+        "hasMore": false
+      }
+    },
+    {
+      "operation": "ListBlobs",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "prefix": "dir/"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "blobs": [
+          {
+            "downloadUrl": "http://127.0.0.1:4566/blob/st1/dir/photo.png?download=1",
+            "etag": "\"ea80334363eed145dfeee51ebae7dc3f1cd7d0c7879f8bfd2070c061d3c33f56\"",
+            "pathname": "dir/photo.png",
+            "size": 9,
+            "uploadedAt": "1970-01-01T00:00:00.000Z",
+            "url": "http://127.0.0.1:4566/blob/st1/dir/photo.png"
+          }
+        ],
+        "cursor": null,
+        "folders": null,
+        "hasMore": false
+      }
+    },
+    {
+      "operation": "ServeBlob",
+      "input": {
+        "storeId": "st1",
+        "pathname": "hello.txt"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": "again v2",
+        "cache_control": "public, max-age=2592000",
+        "content_disposition": "",
+        "content_type": "text/plain",
+        "etag": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\"",
+        "not_modified": false
+      }
+    },
+    {
+      "operation": "ServeBlob",
+      "input": {
+        "storeId": "st1",
+        "pathname": "hello.txt",
+        "download": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": "again v2",
+        "cache_control": "public, max-age=2592000",
+        "content_disposition": "attachment; filename=\"hello.txt\"",
+        "content_type": "text/plain",
+        "etag": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\"",
+        "not_modified": false
+      }
+    },
+    {
+      "operation": "ServeBlob",
+      "input": {
+        "storeId": "st1",
+        "pathname": "hello.txt",
+        "if-none-match": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": "again v2",
+        "cache_control": "public, max-age=2592000",
+        "content_disposition": "",
+        "content_type": "text/plain",
+        "etag": "\"ec3899528eb5182911b3fc2459942d5a06d3a871e644c9b392f370aff9075ae1\"",
+        "not_modified": true
+      }
+    },
+    {
+      "operation": "ServeBlob",
+      "input": {
+        "storeId": "st1",
+        "pathname": "ghost.txt"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateMultipartUpload",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "big.bin"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CompleteMultipartUpload",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "pathname": "big.bin"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteBlobs",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "urls": [
+          "hello.txt"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_raw": "null"
+      }
+    },
+    {
+      "operation": "HeadBlob",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc",
+        "url": "hello.txt"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListBlobs",
+      "input": {
+        "authorization": "Bearer vercel_blob_rw_st1_abc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "blobs": [
+          {
+            "downloadUrl": "http://127.0.0.1:4566/blob/st1/dir/photo.png?download=1",
+            "etag": "\"ea80334363eed145dfeee51ebae7dc3f1cd7d0c7879f8bfd2070c061d3c33f56\"",
+            "pathname": "dir/photo.png",
+            "size": 9,
+            "uploadedAt": "1970-01-01T00:00:00.000Z",
+            "url": "http://127.0.0.1:4566/blob/st1/dir/photo.png"
+          }
+        ],
+        "cursor": null,
+        "folders": null,
+        "hasMore": false
+      }
+    },
+    {
+      "operation": "DeleteBlobs",
+      "input": {
+        "urls": [
+          "dir/photo.png"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "forbidden",
+        "http_status": 403,
+        "fault": "client"
+      }
+    }
+  ]
+}

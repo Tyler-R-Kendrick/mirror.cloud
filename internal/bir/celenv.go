@@ -122,6 +122,14 @@ func celFuncs() []cel.EnvOption {
 		// join concatenates a list of values with a separator. PutBlockList
 		// folds staged blocks in request order; CEL has no list join.
 		binaryDyn("join", dyn, str, str),
+		// split is strings.Split, CEL has no tokenization at all. A Bearer
+		// header's token, a blob token's underscore-separated fields and a
+		// pathname's extension all need it.
+		binaryDyn("split", str, str, dyn),
+		// iso8601ms renders a timestamp the way JavaScript's toISOString does
+		// -- always with milliseconds. CEL's string(timestamp) drops the
+		// fraction when it is zero, and Vercel Blob's uploadedAt carries it.
+		unaryDyn("iso8601ms", cel.TimestampType, str),
 		// tagmatch evaluates an Azure tag-condition expression (x-ms-if-tags,
 		// FilterBlobs where) against a tag map and container name; tagkeys
 		// lists the keys an expression references.

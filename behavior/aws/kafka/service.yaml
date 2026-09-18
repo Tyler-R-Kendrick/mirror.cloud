@@ -1,0 +1,155 @@
+schema: bir/1
+service: aws.kafka
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No cluster ever exists: one is ACTIVE the moment it is created, the
+# bootstrap brokers are always localhost, and there is exactly one node.
+provenance: authored
+
+# The pack answered an absent ClusterArn with NotFoundException: its first()
+# helper folds an absent member to the empty string, the store holds no empty
+# key, and the miss is that fault. The engine's model check now rejects the
+# absence first, so that is also the missing-input answer.
+missing_input_error: NotFound
+
+# Complete and gated, but not yet serving: the pack is also an in-process
+# message bus. aws.firehose imports it and calls the Go-only Publish and
+# Messages methods -- Publish stores a topic record in the mskrecords
+# collection and posts to the deps.Bus topic "kafka" that a firehose delivery
+# stream subscribes to, and Messages answers a Go caller with the stored
+# records at or after a timestamp from a key-prefix scan. Neither is an SPI
+# operation: one is a bus publish with a side effect in another service's
+# subscription, the other a stream answer to a Go caller, and B-IR has no
+# surface for either. The bundle takes over when aws.firehose no longer
+# imports the pack; the seven served operations are transcribed and gated
+# below.
+shadow: >
+  aws.firehose calls the pack's Go-only Publish and Messages methods --
+  Publish posts to the deps.Bus topic "kafka" that firehose subscribes to and
+  Messages is a stream answer to a Go caller over the mskrecords collection --
+  and none of that is an SPI operation a bundle can serve. Everything else the
+  pack does is transcribed and gated below.
+
+resources:
+  # Addressed by its full ARN everywhere but creation. The generated half of a
+  # new ARN lives in fx, which only effects can see, so the creating effect
+  # names the key and the resource only knows how to be read.
+  cluster:
+    collection: msk
+    id:
+      input_members: [ClusterArn]
+    record: {}
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateCluster:
+    effects:
+      - generate: { bind: cid, kind: hex, bytes: 8 }
+      - put:
+          resource: cluster
+          key: &clusterArn >-
+            'arn:aws:kafka:' + identity.region + ':' + identity.account
+            + ':cluster/' + string(input.ClusterName) + '/' + fx.cid
+          record:
+            ClusterName: "string(input.ClusterName)"
+            ClusterArn: *clusterArn
+            State: "'ACTIVE'"
+            BrokerNodeGroupInfo: input.BrokerNodeGroupInfo
+    output:
+      ClusterArn: rec.ClusterArn
+      ClusterName: rec.ClusterName
+      State: rec.State
+
+  DescribeCluster:
+    reads:
+      c: { resource: cluster }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      ClusterInfo: c
+
+  ListClusters:
+    list: { resource: cluster, member: ClusterInfoList, paginate: model }
+
+  # Deleting is unconditional: an unknown ARN deletes cleanly and still
+  # answers DELETING. The pack also deleted the cluster's topic messages from
+  # mskrecords; that collection is written only by the Go-only Publish, so the
+  # cleanup is unobservable through the served surface and stays with the
+  # pack -- see shadow.
+  DeleteCluster:
+    effects:
+      - delete: { resource: cluster, missing: ignore }
+    output:
+      ClusterArn: "string(input.ClusterArn)"
+      State: "'DELETING'"
+
+  # Static answers: the brokers are localhost whether or not the cluster
+  # exists, and there is always exactly one node.
+  GetBootstrapBrokers:
+    output:
+      BootstrapBrokerString: "'localhost:9092'"
+      BootstrapBrokerStringTls: "'localhost:9094'"
+
+  ListNodes:
+    output:
+      NodeInfoList: "[{'BrokerNodeInfo': {'BrokerId': '1', 'Endpoints': ['localhost:9092']}}]"
+
+  # Nothing is updated: the answer is the asked ARN and an operation ARN that
+  # names no stored operation.
+  UpdateBrokerCount:
+    output:
+      ClusterArn: "string(input.ClusterArn)"
+      ClusterOperationArn: "string(input.ClusterArn) + '/op'"
+
+quirks:
+  - operation: CreateCluster
+    note: >
+      The model requires BrokerNodeGroupInfo, ClusterName, KafkaVersion and
+      NumberOfBrokerNodes; only BrokerNodeGroupInfo is stored, verbatim as
+      sent, so a cluster has no version and no broker count. The engine now
+      rejects a request that omits them, which the pack accepted (an absent
+      BrokerNodeGroupInfo was stored as null). ClientAuthentication,
+      ConfigurationInfo, EncryptionInfo and every other declared member are
+      accepted and discarded. Creating twice under one name makes two clusters
+      with different ARNs, where the real service answers
+      ConflictException; the cluster is ACTIVE at once, where the real
+      service creates one CREATING.
+  - operation: DescribeCluster
+    note: >
+      ClusterInfo is the four-member record CreateCluster stored --
+      ClusterName, ClusterArn, State and BrokerNodeGroupInfo -- not the
+      declared ClusterInfo shape, so there is no CreationTime, no
+      CurrentVersion, no EncryptionInfo and no ZookeeperConnectString. An
+      unknown ARN faults NotFoundException at 400, not 404.
+  - operation: DeleteCluster
+    note: >
+      Deleting never faults and changes nothing observable beyond removing
+      the record: an unknown ARN answers DELETING too, CurrentVersion is
+      accepted and ignored, and the state goes straight to DELETING with no
+      record left to observe it on. The pack also deleted the cluster's
+      mskrecords messages; the producing path is the Go-only Publish, so the
+      cleanup is not transcribed -- see shadow.
+  - operation: GetBootstrapBrokers
+    note: >
+      The answer is always localhost:9092 and localhost:9094, whatever the
+      cluster and whether it exists; the other eleven broker-string members
+      the model declares are never set. ClusterArn is required and ignored --
+      the pack answered with it absent, which the engine now rejects.
+      ListNodes is the same shape of stub: always one node, BrokerId "1",
+      Endpoints ["localhost:9092"], and MaxResults/NextToken ignored.
+  - operation: UpdateBrokerCount
+    note: >
+      Nothing is updated and the cluster is not checked to exist: the answer
+      echoes the asked ClusterArn and invents ClusterOperationArn as
+      ClusterArn + "/op", which addresses no stored operation. CurrentVersion
+      and TargetNumberOfBrokerNodes are required and ignored, so the broker
+      count never changes.
+  - operation: ListClusters
+    note: >
+      ClusterNameFilter, MaxResults and NextToken are accepted and ignored:
+      every cluster in the account and region is listed, in one page.

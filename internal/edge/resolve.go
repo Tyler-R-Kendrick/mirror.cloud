@@ -348,8 +348,9 @@ func (s *Server) serviceByPath(r *http.Request) *model.Service {
 		// in a path its operations own. Its one distinctive path shape,
 		// `/{container}/{blob}`, is every two-segment path in the bundle, so
 		// its models would claim half of them and tie with the rest. Its
-		// requests are placed by the declared hosts and by the one predicate
-		// the demux still keeps for exactly this.
+		// requests are placed by the declared hosts alone; a host-less request
+		// carrying `restype=container` is left for the rest of the demux rather
+		// than claimed by a query sniff.
 		if awsProvider(svc.ID) || azureProvider(svc.ID) {
 			continue
 		}

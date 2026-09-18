@@ -522,17 +522,15 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		if svc := s.serviceByPath(r); svc != nil {
 			return svc
 		}
-		// Azure is the one provider no model can place. Its documents declare
-		// no `servers`, and its operations are addressed by query parameter
-		// and by header rather than by path -- `restype=container`, an
-		// `x-ms-blob-type` -- so the model carries `/` for all eight and there
-		// is nothing to match. It stays a predicate until azure.blobs is
-		// extracted to a bundle whose paths a receiver can read, and it is
-		// counted as the guess it is. One predicate names all three services:
-		// the host says queue or table before anything says blob.
-		if id := azureRequest(r); id != "" {
-			return s.bundle.ServiceByID(id)
-		}
+		// Azure is placed by the first resolver alone: its authored
+		// specifications declare blob/queue/table.core.windows.net as
+		// `servers`, and every caller addresses one of those hosts. Its
+		// paths stay unmatchable -- every operation is bound to `/` and
+		// addressed by query and header -- so serviceByPath skips it, and a
+		// request carrying `restype=container` but no Azure host is not
+		// answered as Azure. That is deliberate: claiming it was the one
+		// substring guess left, and `restype=container` on some other
+		// provider's host is not this surface's to take.
 	}
 	if byModel != nil {
 		return byModel
@@ -584,27 +582,6 @@ func awsAddressed(r *http.Request) bool {
 		host = host[:i]
 	}
 	return strings.HasSuffix(host, ".amazonaws.com") || strings.HasSuffix(host, ".api.aws")
-}
-
-func azureRequest(r *http.Request) string {
-	host := strings.ToLower(r.Host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
-	if strings.Contains(host, "queue.core.windows.net") {
-		return "azure.queue"
-	}
-	if strings.Contains(host, "table.core.windows.net") {
-		return "azure.table"
-	}
-	if strings.Contains(host, "blob.core.windows.net") || strings.Contains(host, "azure") {
-		return "azure.blobs"
-	}
-	q := r.URL.Query()
-	if q.Get("restype") == "container" || q.Get("comp") == "list" || r.Header.Get("x-ms-blob-type") != "" {
-		return "azure.blobs"
-	}
-	return ""
 }
 
 func sqsQueuePath(path string) bool {

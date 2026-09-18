@@ -9,19 +9,21 @@ import (
 // TestDemuxGuessesAreTheOnesC34Names pins what the metric counts against what
 // is left of the eight branches the critique enumerated.
 //
-// Seven of the eight are gone. A request that names no AWS service is placed
+// All eight are gone. A request that names no AWS service is placed
 // from the non-AWS models -- by the host its specification declares, and
 // otherwise by the operation paths it declares -- and internal/edge measures
 // that every one of the 838 declared provider paths resolves to exactly one
-// service. The seven predicates named below are therefore asserted ABSENT: if
+// service. The eight predicates named below are therefore asserted ABSENT: if
 // one comes back, something has stopped resolving from the model and the
 // substring guess was reinstated to cover it.
 //
-// azureRequest is the one that stays, and it stays for a reason the model can
-// state: Azure's documents declare no `servers` and its operations are
-// addressed by query parameter and header rather than by path, so its model
-// carries `/` for all eight operations and there is nothing to match. It goes
-// when azure.blobs is extracted to a bundle a receiver can read paths from.
+// azureRequest was the last to go. Its stated reason for staying was that
+// Azure's documents declared no `servers`; the authored specifications now
+// declare blob/queue/table.core.windows.net, and every caller in the tree
+// addresses one of those hosts. The fallback it also carried -- claiming any
+// host-less request with `restype=container`, `comp=list` or an
+// `x-ms-blob-type` header -- dated from the hand-written pack's era, when
+// there was no declared host to match; nothing sends one any more.
 //
 // The list matters more than the number. A count alone lets one provider's
 // guess be deleted while another's is added, which is the shape of the drift
@@ -42,17 +44,13 @@ func TestDemuxGuessesAreTheOnesC34Names(t *testing.T) {
 	for _, name := range names {
 		got[name] = true
 	}
-	// The one branch that remains, which the metric must still see.
-	if !got["azureRequest"] {
-		t.Errorf("azureRequest is a provider guess in internal/edge but is not counted; have %v", names)
-	}
-	// The seven C34 enumerated that model resolution replaced. Each of these
+	// The eight C34 enumerated that model resolution replaced. Each of these
 	// took an AWS service or answered a request the vendor refuses --
 	// `vercelService` reached vercel.api for `/v9/projects`, a version Vercel's
 	// document does not declare -- so a reappearance is a regression, not a
 	// restoration.
 	for _, gone := range []string{
-		"cloudflareRequest", "digitaloceanRequest", "flyRequest",
+		"azureRequest", "cloudflareRequest", "digitaloceanRequest", "flyRequest",
 		"hetznerRequest", "hostingerRequest", "railwayRequest", "vercelService",
 	} {
 		if got[gone] {

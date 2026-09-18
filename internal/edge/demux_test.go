@@ -84,7 +84,6 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		{http.MethodGet, "", "localhost", "/api/dns/v1/zones/ex.test", "hostinger.api"},
 		{http.MethodGet, "", "api.hostinger.com", "/api/domains/v1/portfolio", "hostinger.api"},
 		{http.MethodPut, "", "acct.blob.core.windows.net", "/ctr?restype=container", "azure.blobs"},
-		{http.MethodGet, "", "localhost", "/ctr?restype=container", "azure.blobs"},
 		{http.MethodGet, "", "localhost", "/v2/droplets", "digitalocean.v2"},
 		{http.MethodGet, "", "api.digitalocean.com", "/v2/domains", "digitalocean.v2"},
 		{http.MethodGet, "", "localhost", "/v1/servers", "hetzner.v1"},

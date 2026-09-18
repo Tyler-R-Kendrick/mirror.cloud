@@ -373,6 +373,7 @@ func Bundle() *model.Bundle {
 		op("GetPageRangesDiff", "GET", "/{container}/{blob}?comp=pagelist", 200, true),
 	}
 	azureSvc := svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", azureOps)
+	azureSvc.Hosts = []string{"blob.core.windows.net"}
 	azureSvc.OperationByName("CreateContainer").Output = "Container"
 	azureSvc.OperationByName("GetContainer").Output = "Container"
 	azureSvc.OperationByName("ListContainers").Output = "ContainerList"
@@ -519,6 +520,7 @@ func Bundle() *model.Bundle {
 		op("GetServiceStats", "GET", "/?restype=service&comp=stats", 200, true),
 	}
 	queueSvc := svc("azure.queue", "queue", model.ProtoRESTXML, "", "", "", queueOps)
+	queueSvc.Hosts = []string{"queue.core.windows.net"}
 	queueSvc.OperationByName("CreateQueue").Output = "Queue"
 	queueSvc.OperationByName("ListQueues").Output = "QueueList"
 	queueSvc.OperationByName("PutMessage").Output = "Message"
@@ -570,6 +572,7 @@ func Bundle() *model.Bundle {
 		op("SubmitBatch", "POST", "/$batch", 202, false),
 	}
 	tableSvc := svc("azure.table", "table", model.ProtoRESTJSON1, "", "", "", tableOps)
+	tableSvc.Hosts = []string{"table.core.windows.net"}
 	tableSvc.OperationByName("CreateTable").Output = "Table"
 	tableSvc.OperationByName("ListTables").Output = "TableList"
 	tableSvc.OperationByName("InsertEntity").Output = "EntityResult"

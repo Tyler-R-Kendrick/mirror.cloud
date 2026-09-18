@@ -56,8 +56,6 @@
   ],
   "routing_mismatches": 0,
   "routing_mismatch_services": null,
-  "demux_guesses": 1,
-  "demux_guess_names": [
-    "azureRequest"
-  ]
+  "demux_guesses": 0,
+  "demux_guess_names": []
 }

@@ -1,0 +1,2061 @@
+{
+  "schema": "trace/1",
+  "service": "aws.route53",
+  "source": "pack:internal/services/aws/route53@b7236d3b",
+  "steps": [
+    {
+      "operation": "ListHostedZones",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZones": null
+      }
+    },
+    {
+      "operation": "GetHostedZone",
+      "input": {
+        "Id": "/hostedzone/Z0000MISSING"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchHostedZone",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateHostedZone",
+      "input": {
+        "CallerReference": "ref-1",
+        "Name": "example.com."
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Id": "/change/Z7C589129",
+          "Status": "INSYNC"
+        },
+        "HostedZone": {
+          "CallerReference": "ref-1",
+          "Id": "/hostedzone/Z7C589129",
+          "Name": "example.com."
+        }
+      }
+    },
+    {
+      "operation": "GetHostedZone",
+      "input": {
+        "Id": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZone": {
+          "CallerReference": "ref-1",
+          "Id": "/hostedzone/Z7C589129",
+          "Name": "example.com."
+        }
+      }
+    },
+    {
+      "operation": "ListHostedZones",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZones": [
+          {
+            "CallerReference": "ref-1",
+            "Id": "/hostedzone/Z7C589129",
+            "Name": "example.com."
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ChangeResourceRecordSets",
+      "input": {
+        "ChangeBatch": {
+          "Changes": [
+            {
+              "Action": "UPSERT",
+              "ResourceRecordSet": {
+                "Name": "www.example.com",
+                "ResourceRecords": [
+                  {
+                    "Value": "1.2.3.4"
+                  },
+                  {
+                    "Value": "5.6.7.8"
+                  }
+                ],
+                "TTL": "300",
+                "Type": "A"
+              }
+            }
+          ]
+        },
+        "HostedZoneId": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        },
+        "_body": "<ChangeResourceRecordSetsRequest><ChangeBatch><Changes><Change><Action>UPSERT</Action><ResourceRecordSet><Name>www.example.com</Name><Type>A</Type><TTL>300</TTL><ResourceRecords><ResourceRecord><Value>1.2.3.4</Value></ResourceRecord><ResourceRecord><Value>5.6.7.8</Value></ResourceRecord></ResourceRecords></ResourceRecordSet></Change></Changes></ChangeBatch></ChangeResourceRecordSetsRequest>"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Id": "/change/5f59f223",
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "ListResourceRecordSets",
+      "input": {
+        "HostedZoneId": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceRecordSets": [
+          {
+            "Name": "www.example.com",
+            "ResourceRecords": [
+              {
+                "Value": "1.2.3.4"
+              },
+              {
+                "Value": "5.6.7.8"
+              }
+            ],
+            "TTL": "300",
+            "Type": "A"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ChangeResourceRecordSets",
+      "input": {
+        "ChangeBatch": {
+          "Changes": [
+            {
+              "Action": "UPSERT",
+              "ResourceRecordSet": {
+                "Name": "www2.example.com",
+                "ResourceRecords": [
+                  {
+                    "Value": "2001:db8::1"
+                  }
+                ],
+                "TTL": "60",
+                "Type": "AAAA"
+              }
+            }
+          ]
+        },
+        "HostedZoneId": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        },
+        "_body": "<ChangeResourceRecordSetsRequest><ChangeBatch><Changes><Change><Action>UPSERT</Action><ResourceRecordSet><Name>www2.example.com</Name><Type>AAAA</Type><TTL>60</TTL><ResourceRecords><ResourceRecord><Value>2001:db8::1</Value></ResourceRecord></ResourceRecords></ResourceRecordSet></Change></Changes></ChangeBatch></ChangeResourceRecordSetsRequest>"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Id": "/change/9c8e2cb0",
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "ChangeResourceRecordSets",
+      "input": {
+        "ChangeBatch": {
+          "Changes": [
+            {
+              "Action": "DELETE",
+              "ResourceRecordSet": {
+                "Name": "www.example.com",
+                "ResourceRecords": [],
+                "Type": "A"
+              }
+            }
+          ]
+        },
+        "HostedZoneId": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        },
+        "_body": "<ChangeResourceRecordSetsRequest><ChangeBatch><Changes><Change><Action>DELETE</Action><ResourceRecordSet><Name>www.example.com</Name><Type>A</Type><ResourceRecords></ResourceRecords></ResourceRecordSet></Change></Changes></ChangeBatch></ChangeResourceRecordSetsRequest>"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Id": "/change/33f6fc5d",
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "ListResourceRecordSets",
+      "input": {
+        "HostedZoneId": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceRecordSets": [
+          {
+            "Name": "www2.example.com",
+            "ResourceRecords": [
+              {
+                "Value": "2001:db8::1"
+              }
+            ],
+            "TTL": "60",
+            "Type": "AAAA"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "TestDNSAnswer",
+      "input": {
+        "HostedZoneId": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        },
+        "RecordName": "www2.example.com",
+        "RecordType": "AAAA"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RecordData": [
+          "127.0.0.1"
+        ],
+        "RecordName": "www2.example.com",
+        "RecordType": "AAAA",
+        "ResponseCode": "NOERROR"
+      }
+    },
+    {
+      "operation": "GetHostedZoneCount",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZoneCount": 1
+      }
+    },
+    {
+      "operation": "UpdateHostedZoneComment",
+      "input": {
+        "Comment": "hello",
+        "Id": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZone": {
+          "CallerReference": "ref-1",
+          "Comment": "hello",
+          "Id": "/hostedzone/Z7C589129",
+          "Name": "example.com."
+        }
+      }
+    },
+    {
+      "operation": "GetHostedZone",
+      "input": {
+        "Id": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZone": {
+          "CallerReference": "ref-1",
+          "Comment": "hello",
+          "Id": "/hostedzone/Z7C589129",
+          "Name": "example.com."
+        }
+      }
+    },
+    {
+      "operation": "UpdateHostedZoneFeatures",
+      "input": {
+        "HostedZoneId": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZone": {
+          "CallerReference": "ref-1",
+          "Comment": "hello",
+          "Id": "/hostedzone/Z7C589129",
+          "Name": "example.com."
+        }
+      },
+      "superseded": "the pack answered the HostedZone record; UpdateHostedZoneFeaturesResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "DeleteHostedZone",
+      "input": {
+        "Id": "/hostedzone/ZGHOST000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Id": "/change/ZGHOST000",
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "ListHostedZonesByName",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZones": [
+          {
+            "CallerReference": "ref-1",
+            "Comment": "hello",
+            "Id": "/hostedzone/Z7C589129",
+            "Name": "example.com."
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteHostedZone",
+      "input": {
+        "Id": {
+          "$fromPath": "HostedZone.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Id": "/change/Z7C589129",
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "ListHostedZones",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HostedZones": null
+      }
+    },
+    {
+      "operation": "CreateHealthCheck",
+      "input": {
+        "CallerReference": "c1",
+        "HealthCheckConfig": {
+          "FullyQualifiedDomainName": "a.example.com",
+          "Type": "HTTP"
+        },
+        "HealthCheckId": "hc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheck": {
+          "CallerReference": "c1",
+          "HealthCheckConfig": {
+            "FullyQualifiedDomainName": "a.example.com",
+            "Type": "HTTP"
+          },
+          "HealthCheckId": "hc1",
+          "Id": "hc1"
+        }
+      }
+    },
+    {
+      "operation": "GetHealthCheck",
+      "input": {
+        "HealthCheckId": "hc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheck": {
+          "CallerReference": "c1",
+          "HealthCheckConfig": {
+            "FullyQualifiedDomainName": "a.example.com",
+            "Type": "HTTP"
+          },
+          "HealthCheckId": "hc1",
+          "Id": "hc1"
+        }
+      }
+    },
+    {
+      "operation": "CreateHealthCheck",
+      "input": {
+        "CallerReference": "c2",
+        "HealthCheckConfig": {
+          "Type": "HTTPS"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheck": {
+          "CallerReference": "c2",
+          "HealthCheckConfig": {
+            "Type": "HTTPS"
+          },
+          "Id": "83d4958a"
+        }
+      }
+    },
+    {
+      "operation": "ListHealthChecks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthChecks": [
+          {
+            "CallerReference": "c2",
+            "HealthCheckConfig": {
+              "Type": "HTTPS"
+            },
+            "Id": "83d4958a"
+          },
+          {
+            "CallerReference": "c1",
+            "HealthCheckConfig": {
+              "FullyQualifiedDomainName": "a.example.com",
+              "Type": "HTTP"
+            },
+            "HealthCheckId": "hc1",
+            "Id": "hc1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetHealthCheckCount",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheckCount": 2
+      }
+    },
+    {
+      "operation": "GetHealthCheckStatus",
+      "input": {
+        "HealthCheckId": "hc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheckObservations": [
+          {
+            "StatusReport": {
+              "Status": "Success"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetHealthCheckLastFailureReason",
+      "input": {
+        "HealthCheckId": "hc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheckObservations": []
+      }
+    },
+    {
+      "operation": "UpdateHealthCheck",
+      "input": {
+        "HealthCheckId": "hc1",
+        "Name": "renamed.example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheck": {
+          "HealthCheckConfig": {
+            "FullyQualifiedDomainName": "renamed.example.com",
+            "Type": "HTTP"
+          },
+          "HealthCheckId": "hc1",
+          "Id": "hc1",
+          "Name": "renamed.example.com"
+        }
+      }
+    },
+    {
+      "operation": "GetHealthCheck",
+      "input": {
+        "HealthCheckId": "hc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheck": {
+          "HealthCheckConfig": {
+            "FullyQualifiedDomainName": "renamed.example.com",
+            "Type": "HTTP"
+          },
+          "HealthCheckId": "hc1",
+          "Id": "hc1",
+          "Name": "renamed.example.com"
+        }
+      }
+    },
+    {
+      "operation": "DeleteHealthCheck",
+      "input": {
+        "HealthCheckId": "hc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetHealthCheck",
+      "input": {
+        "HealthCheckId": "hc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HealthCheck": {}
+      }
+    },
+    {
+      "operation": "DeleteHealthCheck",
+      "input": {
+        "HealthCheckId": "hc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateTrafficPolicy",
+      "input": {
+        "Document": "{}",
+        "Name": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicy": {
+          "Document": "{}",
+          "Id": "100aa4e6",
+          "Name": "p1",
+          "Version": 1
+        }
+      }
+    },
+    {
+      "operation": "GetTrafficPolicy",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        },
+        "Version": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicy": {
+          "Document": "{}",
+          "Id": "100aa4e6",
+          "Name": "p1",
+          "Version": 1
+        }
+      }
+    },
+    {
+      "operation": "CreateTrafficPolicyVersion",
+      "input": {
+        "Document": "{\"v\":2}",
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicy": {
+          "Document": "{\"v\":2}",
+          "Id": "100aa4e6",
+          "Name": "p1",
+          "Version": 2
+        }
+      }
+    },
+    {
+      "operation": "GetTrafficPolicy",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        },
+        "Version": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicy": {
+          "Document": "{\"v\":2}",
+          "Id": "100aa4e6",
+          "Name": "p1",
+          "Version": 2
+        }
+      }
+    },
+    {
+      "operation": "ListTrafficPolicyVersions",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicies": [
+          {
+            "Document": "{\"v\":2}",
+            "Id": "100aa4e6",
+            "Name": "p1",
+            "Version": 2
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTrafficPolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicySummaries": [
+          {
+            "Document": "{\"v\":2}",
+            "Id": "100aa4e6",
+            "Name": "p1",
+            "Version": 2
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateTrafficPolicyComment",
+      "input": {
+        "Comment": "c",
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        },
+        "Version": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicy": {
+          "Comment": "c",
+          "Document": "",
+          "Id": "100aa4e6",
+          "Name": "",
+          "Version": 2
+        }
+      }
+    },
+    {
+      "operation": "GetTrafficPolicy",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        },
+        "Version": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicy": {
+          "Comment": "c",
+          "Document": "",
+          "Id": "100aa4e6",
+          "Name": "",
+          "Version": 2
+        }
+      }
+    },
+    {
+      "operation": "DeleteTrafficPolicy",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        },
+        "Version": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTrafficPolicy",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        },
+        "Version": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicy": {}
+      }
+    },
+    {
+      "operation": "DeleteTrafficPolicy",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicy.Id",
+          "$fromStep": 31
+        },
+        "Version": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateTrafficPolicyInstance",
+      "input": {
+        "HostedZoneId": "Z1",
+        "Name": "i1",
+        "TTL": 60,
+        "TrafficPolicyId": "p1",
+        "TrafficPolicyVersion": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicyInstance": {
+          "HostedZoneId": "Z1",
+          "Id": "3ed10eca",
+          "Name": "i1",
+          "State": "Applied",
+          "TrafficPolicyId": "p1"
+        }
+      }
+    },
+    {
+      "operation": "GetTrafficPolicyInstance",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicyInstance.Id",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicyInstance": {
+          "HostedZoneId": "Z1",
+          "Id": "3ed10eca",
+          "Name": "i1",
+          "State": "Applied",
+          "TrafficPolicyId": "p1"
+        }
+      }
+    },
+    {
+      "operation": "ListTrafficPolicyInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicyInstances": [
+          {
+            "HostedZoneId": "Z1",
+            "Id": "3ed10eca",
+            "Name": "i1",
+            "State": "Applied",
+            "TrafficPolicyId": "p1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTrafficPolicyInstancesByHostedZone",
+      "input": {
+        "HostedZoneId": "Z1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicyInstances": [
+          {
+            "HostedZoneId": "Z1",
+            "Id": "3ed10eca",
+            "Name": "i1",
+            "State": "Applied",
+            "TrafficPolicyId": "p1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTrafficPolicyInstancesByPolicy",
+      "input": {
+        "TrafficPolicyId": "p1",
+        "TrafficPolicyVersion": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicyInstances": [
+          {
+            "HostedZoneId": "Z1",
+            "Id": "3ed10eca",
+            "Name": "i1",
+            "State": "Applied",
+            "TrafficPolicyId": "p1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetTrafficPolicyInstanceCount",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicyInstanceCount": 1
+      }
+    },
+    {
+      "operation": "UpdateTrafficPolicyInstance",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicyInstance.Id",
+          "$fromStep": 42
+        },
+        "TTL": 120,
+        "TrafficPolicyId": "p1",
+        "TrafficPolicyVersion": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficPolicyInstance": {
+          "HostedZoneId": "",
+          "Id": "3ed10eca",
+          "Name": "",
+          "State": "Applied",
+          "TrafficPolicyId": "p1"
+        }
+      }
+    },
+    {
+      "operation": "DeleteTrafficPolicyInstance",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicyInstance.Id",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteTrafficPolicyInstance",
+      "input": {
+        "Id": {
+          "$fromPath": "TrafficPolicyInstance.Id",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateQueryLoggingConfig",
+      "input": {
+        "CloudWatchLogsLogGroupArn": "arn:aws:logs:us-east-1:000000000000:log-group:q",
+        "HostedZoneId": "Z1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueryLoggingConfig": {
+          "CloudWatchLogsLogGroupArn": "arn:aws:logs:us-east-1:000000000000:log-group:q",
+          "HostedZoneId": "Z1",
+          "Id": "4da7b6a4"
+        }
+      }
+    },
+    {
+      "operation": "GetQueryLoggingConfig",
+      "input": {
+        "Id": {
+          "$fromPath": "QueryLoggingConfig.Id",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueryLoggingConfig": {
+          "CloudWatchLogsLogGroupArn": "arn:aws:logs:us-east-1:000000000000:log-group:q",
+          "HostedZoneId": "Z1",
+          "Id": "4da7b6a4"
+        }
+      }
+    },
+    {
+      "operation": "ListQueryLoggingConfigs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueryLoggingConfigs": [
+          {
+            "CloudWatchLogsLogGroupArn": "arn:aws:logs:us-east-1:000000000000:log-group:q",
+            "HostedZoneId": "Z1",
+            "Id": "4da7b6a4"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteQueryLoggingConfig",
+      "input": {
+        "Id": {
+          "$fromPath": "QueryLoggingConfig.Id",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateCidrCollection",
+      "input": {
+        "CallerReference": "r1",
+        "Name": "cc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Collection": {
+          "CallerReference": "r1",
+          "Id": "e7175ec1",
+          "Name": "cc1"
+        }
+      }
+    },
+    {
+      "operation": "ListCidrCollections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CidrCollections": [
+          {
+            "CallerReference": "r1",
+            "Id": "e7175ec1",
+            "Name": "cc1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListCidrBlocks",
+      "input": {
+        "CollectionId": {
+          "$fromPath": "Collection.Id",
+          "$fromStep": 55
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CidrBlocks": [
+          {
+            "CallerReference": "r1",
+            "Id": "e7175ec1",
+            "Name": "cc1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListCidrLocations",
+      "input": {
+        "CollectionId": {
+          "$fromPath": "Collection.Id",
+          "$fromStep": 55
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CidrLocations": [
+          {
+            "CallerReference": "r1",
+            "Id": "e7175ec1",
+            "Name": "cc1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ChangeCidrCollection",
+      "input": {
+        "Changes": [
+          {
+            "Action": "PUT",
+            "CidrBlocks": [
+              "10.0.0.0/24"
+            ],
+            "LocationName": "us-east-1"
+          }
+        ],
+        "Id": {
+          "$fromPath": "Collection.Id",
+          "$fromStep": 55
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Collection": {
+          "Changes": [
+            {
+              "Action": "PUT",
+              "CidrBlocks": [
+                "10.0.0.0/24"
+              ],
+              "LocationName": "us-east-1"
+            }
+          ],
+          "Id": "e7175ec1",
+          "Name": ""
+        }
+      },
+      "superseded": "the pack answered the whole Collection record; ChangeCidrCollectionResponse declares only Id, and the bundle answers the declared member"
+    },
+    {
+      "operation": "DeleteCidrCollection",
+      "input": {
+        "Id": {
+          "$fromPath": "Collection.Id",
+          "$fromStep": 55
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateReusableDelegationSet",
+      "input": {
+        "CallerReference": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationSet": {
+          "Id": "77df676f",
+          "NameServers": [
+            "ns-1.mirror.local",
+            "ns-2.mirror.local"
+          ]
+        }
+      }
+    },
+    {
+      "operation": "GetReusableDelegationSet",
+      "input": {
+        "Id": {
+          "$fromPath": "DelegationSet.Id",
+          "$fromStep": 61
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationSet": {
+          "Id": "77df676f",
+          "NameServers": [
+            "ns-1.mirror.local",
+            "ns-2.mirror.local"
+          ]
+        }
+      }
+    },
+    {
+      "operation": "ListReusableDelegationSets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationSets": [
+          {
+            "Id": "77df676f",
+            "NameServers": [
+              "ns-1.mirror.local",
+              "ns-2.mirror.local"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteReusableDelegationSet",
+      "input": {
+        "Id": {
+          "$fromPath": "DelegationSet.Id",
+          "$fromStep": 61
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateKeySigningKey",
+      "input": {
+        "CallerReference": "r",
+        "HostedZoneId": "Z1",
+        "KeyManagementServiceArn": "arn:aws:kms:us-east-1:000000000000:key/k",
+        "Name": "k1",
+        "Status": "INACTIVE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        },
+        "KeySigningKey": {
+          "HostedZoneId": "Z1",
+          "Name": "k1",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DeactivateKeySigningKey",
+      "input": {
+        "HostedZoneId": "Z1",
+        "Name": "k1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        },
+        "KeySigningKey": {
+          "HostedZoneId": "Z1",
+          "Name": "k1",
+          "Status": "INACTIVE"
+        }
+      },
+      "superseded": "the pack answered the KeySigningKey record; DeactivateKeySigningKeyResponse declares only ChangeInfo, which the bundle answers"
+    },
+    {
+      "operation": "ActivateKeySigningKey",
+      "input": {
+        "HostedZoneId": "Z1",
+        "Name": "k1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        },
+        "KeySigningKey": {
+          "HostedZoneId": "Z1",
+          "Name": "k1",
+          "Status": "ACTIVE"
+        }
+      },
+      "superseded": "the pack answered the KeySigningKey record; ActivateKeySigningKeyResponse declares only ChangeInfo, which the bundle answers"
+    },
+    {
+      "operation": "DeleteKeySigningKey",
+      "input": {
+        "HostedZoneId": "Z1",
+        "Name": "k1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "GetDNSSEC",
+      "input": {
+        "HostedZoneId": "Z9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": {
+          "ServeSignature": "DISABLED"
+        }
+      }
+    },
+    {
+      "operation": "EnableHostedZoneDNSSEC",
+      "input": {
+        "HostedZoneId": "Z1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "GetDNSSEC",
+      "input": {
+        "HostedZoneId": "Z1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": {
+          "ServeSignature": "ENABLED"
+        }
+      }
+    },
+    {
+      "operation": "DisableHostedZoneDNSSEC",
+      "input": {
+        "HostedZoneId": "Z1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "GetDNSSEC",
+      "input": {
+        "HostedZoneId": "Z1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": {
+          "ServeSignature": "DISABLED"
+        }
+      }
+    },
+    {
+      "operation": "AssociateVPCWithHostedZone",
+      "input": {
+        "HostedZoneId": "Z1",
+        "VPC": {
+          "VPCId": "vpc-1"
+        },
+        "VPCId": "vpc-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "CreateVPCAssociationAuthorization",
+      "input": {
+        "HostedZoneId": "Z1",
+        "VPC": {
+          "VPCId": "vpc-2"
+        },
+        "VPCId": "vpc-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        }
+      },
+      "superseded": "the pack answered ChangeInfo; CreateVPCAssociationAuthorizationResponse declares HostedZoneId and VPC, which the bundle answers"
+    },
+    {
+      "operation": "ListVPCAssociationAuthorizations",
+      "input": {
+        "HostedZoneId": "Z1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "VPCs": [
+          {
+            "HostedZoneId": "Z1",
+            "VPCId": "vpc-1"
+          },
+          {
+            "HostedZoneId": "Z1",
+            "VPCId": "vpc-2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListHostedZonesByVPC",
+      "input": {
+        "VPCId": "vpc-1",
+        "VPCRegion": "us-east-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "VPCs": [
+          {
+            "HostedZoneId": "Z1",
+            "VPCId": "vpc-1"
+          },
+          {
+            "HostedZoneId": "Z1",
+            "VPCId": "vpc-2"
+          }
+        ]
+      },
+      "superseded": "the pack listed associations under VPCs; ListHostedZonesByVPCResponse declares HostedZoneSummaries, which the bundle answers"
+    },
+    {
+      "operation": "DisassociateVPCFromHostedZone",
+      "input": {
+        "HostedZoneId": "Z1",
+        "VPC": {
+          "VPCId": "vpc-1"
+        },
+        "VPCId": "vpc-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "DeleteVPCAssociationAuthorization",
+      "input": {
+        "HostedZoneId": "Z1",
+        "VPC": {
+          "VPCId": "vpc-2"
+        },
+        "VPCId": "vpc-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Status": "INSYNC"
+        }
+      },
+      "superseded": "the pack answered ChangeInfo; DeleteVPCAssociationAuthorizationResponse declares no members, so the bundle answers nothing"
+    },
+    {
+      "operation": "ListVPCAssociationAuthorizations",
+      "input": {
+        "HostedZoneId": "Z1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "VPCs": null
+      }
+    },
+    {
+      "operation": "ChangeTagsForResource",
+      "input": {
+        "AddTags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ],
+        "ResourceId": "hc1",
+        "ResourceType": "healthcheck"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceId": "hc1",
+        "ResourceType": "healthcheck"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceTagSet": {
+          "AddTags": [
+            {
+              "Key": "k",
+              "Value": "v"
+            }
+          ],
+          "ResourceId": "hc1",
+          "ResourceType": "healthcheck"
+        }
+      }
+    },
+    {
+      "operation": "ListTagsForResources",
+      "input": {
+        "ResourceIds": [
+          "hc1"
+        ],
+        "ResourceType": "healthcheck"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceTagSets": [
+          {
+            "AddTags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ],
+            "ResourceId": "hc1",
+            "ResourceType": "healthcheck"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceId": "ghost",
+        "ResourceType": "hostedzone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceTagSet": {}
+      }
+    },
+    {
+      "operation": "GetChange",
+      "input": {
+        "Id": "/change/abc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeInfo": {
+          "Id": "/change/abc",
+          "Status": "INSYNC"
+        }
+      }
+    },
+    {
+      "operation": "GetCheckerIpRanges",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CheckerIpRanges": [
+          "127.0.0.1/32"
+        ]
+      }
+    },
+    {
+      "operation": "GetGeoLocation",
+      "input": {
+        "CountryCode": "US"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GeoLocationDetails": {
+          "CountryCode": "US"
+        }
+      }
+    },
+    {
+      "operation": "ListGeoLocations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GeoLocationDetailsList": [
+          {
+            "CountryCode": "US"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetAccountLimit",
+      "input": {
+        "Type": "MAX_HEALTH_CHECKS_BY_OWNER"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Count": 0,
+        "Limit": {
+          "Type": "MAX_HEALTH_CHECKS_BY_OWNER",
+          "Value": 500
+        }
+      }
+    },
+    {
+      "operation": "GetHostedZoneLimit",
+      "input": {
+        "HostedZoneId": "Z1",
+        "Type": "MAX_RRSETS_BY_ZONE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Count": 0,
+        "Limit": {
+          "Type": "MAX_RRSETS_BY_ZONE",
+          "Value": 500
+        }
+      }
+    },
+    {
+      "operation": "GetReusableDelegationSetLimit",
+      "input": {
+        "DelegationSetId": "d1",
+        "Type": "MAX_ZONES_BY_REUSABLE_DELEGATION_SET"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Count": 0,
+        "Limit": {
+          "Type": "MAX_ZONES_BY_REUSABLE_DELEGATION_SET",
+          "Value": 500
+        }
+      }
+    }
+  ],
+  "note": "Recorded from the hand-written pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered a member the output shape does not declare (the HostedZone on UpdateHostedZoneFeatures, the Collection on ChangeCidrCollection, KeySigningKey on Activate/Deactivate, ChangeInfo on the VPC authorization pair, VPCs on ListHostedZonesByVPC), the bundle answers the declared shape and the step is superseded with that reason. ChangeResourceRecordSets steps carry the raw XML body under `_body` (the only input the pack parses for record sets) alongside the declared ChangeBatch the bundle reads."
+}

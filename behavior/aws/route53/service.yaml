@@ -1,0 +1,918 @@
+schema: bir/1
+service: aws.route53
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No DNS exists: a hosted zone is a flat record, a record set is a
+# row keyed name|type, and every change is INSYNC the moment it is accepted.
+# Sixty of the seventy-one operations are control-plane stubs over one record
+# collection each; nothing is ever resolved, propagated or checked against a
+# real nameserver.
+provenance: authored
+
+# The pack validated nothing: a request missing a member the model declares
+# required was accepted and processed with empty values (reads faulted
+# NoSuchHostedZone on the empty key, deletes deleted the empty key and
+# succeeded). The engine enforces required members before any rule runs, so
+# those paths are dead; the recording carries only requests the model accepts.
+
+resources:
+  zone:
+    collection: hz
+    id:
+      # The pack's zoneID: Id first (the name its own path parser set), then
+      # HostedZoneId, always reduced to the last '/'-separated segment so
+      # "/hostedzone/Z1" and "Z1" name the same zone.
+      derive: >-
+        'Id' in input && string(input.Id) != ''
+        ? lastSegment(string(input.Id), '/')
+        : ('HostedZoneId' in input ? lastSegment(string(input.HostedZoneId), '/') : '')
+
+  # Record sets live in one collection per zone, keyed Name|Type.
+  rrset:
+    collection: "rr:{zone.id}"
+    parent: zone
+
+  healthcheck:
+    collection: r53hc
+    id:
+      input_members: [HealthCheckId, Id]
+
+  trafficpolicy:
+    collection: r53tp
+    id:
+      input_members: [Id]
+
+  # One row per policy version, keyed <policy id>:<version>, written alongside
+  # the policy row by CreateTrafficPolicyVersion and never updated again.
+  trafficpolicyversion:
+    collection: r53tpver
+
+  trafficpolicyinstance:
+    collection: r53tpi
+    id:
+      input_members: [Id]
+
+  querylog:
+    collection: r53ql
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [Id]
+
+  cidrcollection:
+    collection: r53cidr
+    id:
+      input_members: [Id]
+
+  delegationset:
+    collection: r53ds
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [Id]
+
+  # Keyed <HostedZoneId>/<Name>; there is no get or list for these.
+  keysigningkey:
+    collection: r53ksk
+
+  # One bare status string per hosted zone; the pack stored the raw bytes
+  # "ENABLED"/"DISABLED", the bundle stores them as a record member -- the
+  # answers are identical either way.
+  dnssec:
+    collection: r53dnssec
+    id:
+      input_members: [HostedZoneId, Id]
+
+  vpcassociation:
+    collection: r53vpc
+
+  # The whole ChangeTagsForResource request, stored under the resource id.
+  tags:
+    collection: r53tags
+    id:
+      input_members: [ResourceId]
+
+errors:
+  NoSuchHostedZone:
+    code: NoSuchHostedZone
+    http: 404
+    fault: client
+
+operations:
+  # --- hosted zones ----------------------------------------------------------
+
+  CreateHostedZone:
+    effects:
+      - generate: { bind: z, kind: hex, bytes: 8 }
+      - create:
+          resource: zone
+          # The id is "Z" followed by upper-case hex.
+          key: "'Z' + upper(fx.z)"
+          record:
+            Id: "'/hostedzone/' + id"
+            Name: "string(input.Name)"
+            CallerReference: "string(input.CallerReference)"
+    output:
+      HostedZone: rec
+      ChangeInfo: "{'Id': '/change/' + id, 'Status': 'INSYNC'}"
+
+  GetHostedZone:
+    reads:
+      z: { resource: zone }
+    require:
+      - { cond: z_found, error: NoSuchHostedZone }
+    output:
+      HostedZone: z
+
+  ListHostedZones:
+    list: { resource: zone, member: HostedZones, paginate: model }
+
+  # The only fault in the whole pack is GetHostedZone on a missing zone.
+  # Deleting one is idempotent, and the zone's record sets survive it in their
+  # own collection.
+  DeleteHostedZone:
+    effects:
+      - delete: { resource: zone, missing: ignore }
+    output:
+      ChangeInfo: "{'Id': '/change/' + lastSegment(string(input.Id), '/'), 'Status': 'INSYNC'}"
+
+  # The pack reads the zone from an `Id` member its own HTTP path parser set;
+  # the model declares HostedZoneId on this operation instead, so a
+  # model-shaped request writes the empty zone's collection -- see quirks.
+  ChangeResourceRecordSets:
+    reads:
+      z:
+        resource: zone
+        key: "'Id' in input && string(input.Id) != '' ? lastSegment(string(input.Id), '/') : ''"
+    effects:
+      - generate: { bind: ch, kind: hex, bytes: 8 }
+      - put:
+          resource: rrset
+          for_each: input.ChangeBatch.Changes
+          when: "lower(string(item.Action)) != 'delete'"
+          key: "string(item.ResourceRecordSet.Name) + '|' + string(item.ResourceRecordSet.Type)"
+          record:
+            Name: "string(item.ResourceRecordSet.Name)"
+            Type: "string(item.ResourceRecordSet.Type)"
+            # The pack parsed the XML body itself and stored TTL as the raw
+            # string; the bundle keeps whatever the request carried, which the
+            # recording holds as the same string.
+            TTL: "'TTL' in item.ResourceRecordSet ? item.ResourceRecordSet.TTL : ''"
+            ResourceRecords: "'ResourceRecords' in item.ResourceRecordSet ? item.ResourceRecordSet.ResourceRecords : null"
+      - delete:
+          resource: rrset
+          where: >-
+            input.ChangeBatch.Changes.exists(c,
+              lower(string(c.Action)) == 'delete'
+              && string(item.Name) + '|' + string(item.Type)
+                 == string(c.ResourceRecordSet.Name) + '|' + string(c.ResourceRecordSet.Type))
+    output:
+      ChangeInfo: "{'Id': '/change/' + fx.ch, 'Status': 'INSYNC'}"
+
+  ListResourceRecordSets:
+    reads:
+      z:
+        resource: zone
+        key: "'Id' in input && string(input.Id) != '' ? lastSegment(string(input.Id), '/') : ''"
+    list:
+      resource: rrset
+      member: ResourceRecordSets
+      paginate: model
+
+  # --- health checks -----------------------------------------------------------
+
+  # Create and Update are one case in the pack: the record is rebuilt from the
+  # request and written wholesale, so an update drops every member the request
+  # did not carry. The whole request is spread underneath; the id is the
+  # caller's HealthCheckId when one is sent (a member Create does not declare)
+  # and generated otherwise.
+  CreateHealthCheck:
+    effects:
+      - generate:
+          bind: h
+          kind: hex
+          bytes: 8
+          when: "!('HealthCheckId' in input) || string(input.HealthCheckId) == ''"
+      - create:
+          resource: healthcheck
+          key: "('HealthCheckId' in input && string(input.HealthCheckId) != '') ? string(input.HealthCheckId) : string(fx.h)"
+          spread: input
+          record:
+            Id: id
+            HealthCheckConfig: >-
+              'HealthCheckConfig' in input
+              ? input.HealthCheckConfig
+              : {'Type': 'HTTP', 'FullyQualifiedDomainName':
+                  ('Name' in input && string(input.Name) != '') ? string(input.Name)
+                  : ('FullyQualifiedDomainName' in input ? string(input.FullyQualifiedDomainName) : '')}
+    output:
+      HealthCheck: rec
+
+  UpdateHealthCheck:
+    effects:
+      - generate:
+          bind: h
+          kind: hex
+          bytes: 8
+          when: "!('HealthCheckId' in input) || string(input.HealthCheckId) == ''"
+      - create:
+          resource: healthcheck
+          key: "('HealthCheckId' in input && string(input.HealthCheckId) != '') ? string(input.HealthCheckId) : string(fx.h)"
+          spread: input
+          record:
+            Id: id
+            HealthCheckConfig: >-
+              'HealthCheckConfig' in input
+              ? input.HealthCheckConfig
+              : {'Type': 'HTTP', 'FullyQualifiedDomainName':
+                  ('Name' in input && string(input.Name) != '') ? string(input.Name)
+                  : ('FullyQualifiedDomainName' in input ? string(input.FullyQualifiedDomainName) : '')}
+    output:
+      HealthCheck: rec
+
+  # An absent health check reads as an empty answer, not a fault -- here and
+  # on every other Get in this service.
+  GetHealthCheck:
+    reads:
+      h: { resource: healthcheck }
+    output:
+      HealthCheck: h
+
+  ListHealthChecks:
+    list: { resource: healthcheck, member: HealthChecks, paginate: model }
+
+  DeleteHealthCheck:
+    effects:
+      - delete: { resource: healthcheck, missing: ignore }
+    output: {}
+
+  GetHealthCheckStatus:
+    output:
+      HealthCheckObservations: "[{'StatusReport': {'Status': 'Success'}}]"
+
+  GetHealthCheckLastFailureReason:
+    output:
+      HealthCheckObservations: "[]"
+
+  GetHealthCheckCount:
+    select: { binding: hs, resource: healthcheck }
+    output:
+      HealthCheckCount: "size(hs)"
+
+  # --- traffic policies --------------------------------------------------------
+
+  # Create and UpdateTrafficPolicyComment are one case in the pack: rebuilt
+  # from the request, spread underneath, id forced. Update declares Id (so no
+  # draw); Create does not, so it always draws. A member the request did not
+  # carry falls back to "" / 1 -- an update without Name guts the stored name.
+  CreateTrafficPolicy:
+    effects:
+      - generate:
+          bind: g
+          kind: hex
+          bytes: 8
+          when: "!('Id' in input) || string(input.Id) == ''"
+      - create:
+          resource: trafficpolicy
+          key: "('Id' in input && string(input.Id) != '') ? string(input.Id) : string(fx.g)"
+          spread: input
+          record:
+            Id: id
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Document: "'Document' in input ? string(input.Document) : ''"
+            Version: "'Version' in input ? input.Version : 1"
+    output:
+      TrafficPolicy: rec
+
+  UpdateTrafficPolicyComment:
+    effects:
+      - generate:
+          bind: g
+          kind: hex
+          bytes: 8
+          when: "!('Id' in input) || string(input.Id) == ''"
+      - create:
+          resource: trafficpolicy
+          key: "('Id' in input && string(input.Id) != '') ? string(input.Id) : string(fx.g)"
+          spread: input
+          record:
+            Id: id
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Document: "'Document' in input ? string(input.Document) : ''"
+            Version: "'Version' in input ? input.Version : 1"
+    output:
+      TrafficPolicy: rec
+
+  # Reads the policy, bumps its stored Version (1 when absent or unknown),
+  # replaces Document, and writes the same row to both the policy collection
+  # and a per-version one keyed <id>:<version>. An unknown id conjures a bare
+  # {Id, Version: 1, Document} record -- no NoSuchTrafficPolicy exists here.
+  CreateTrafficPolicyVersion:
+    reads:
+      t: { resource: trafficpolicy }
+    let:
+      n: "t_found && 'Version' in t ? int(t.Version) + 1 : 1"
+    effects:
+      - put:
+          resource: trafficpolicy
+          record:
+            Id: "string(input.Id)"
+            Version: n
+            Document: "string(input.Document)"
+      - put:
+          resource: trafficpolicyversion
+          key: "string(input.Id) + ':' + string(n)"
+          record:
+            Id: "string(input.Id)"
+            # The pack writes the whole amended policy record to the version
+            # row; the bundle copies the members it carries.
+            Name: "t_found && 'Name' in t ? t.Name : null"
+            Version: n
+            Document: "string(input.Document)"
+    output:
+      TrafficPolicy: rec
+
+  GetTrafficPolicy:
+    reads:
+      t: { resource: trafficpolicy }
+    output:
+      TrafficPolicy: t
+
+  ListTrafficPolicies:
+    list: { resource: trafficpolicy, member: TrafficPolicySummaries, paginate: model }
+
+  ListTrafficPolicyVersions:
+    list: { resource: trafficpolicyversion, member: TrafficPolicies, paginate: model }
+
+  DeleteTrafficPolicy:
+    effects:
+      - delete: { resource: trafficpolicy, missing: ignore }
+    output: {}
+
+  # --- traffic policy instances ------------------------------------------------
+
+  # Create and Update are one case in the pack, and the record is exactly five
+  # members: no spread, so an update without HostedZoneId or Name wipes them.
+  CreateTrafficPolicyInstance:
+    effects:
+      - generate:
+          bind: g
+          kind: hex
+          bytes: 8
+          when: "!('Id' in input) || string(input.Id) == ''"
+      - create:
+          resource: trafficpolicyinstance
+          key: "('Id' in input && string(input.Id) != '') ? string(input.Id) : string(fx.g)"
+          record:
+            Id: id
+            HostedZoneId: "'HostedZoneId' in input ? string(input.HostedZoneId) : ''"
+            Name: "'Name' in input ? string(input.Name) : ''"
+            TrafficPolicyId: "'TrafficPolicyId' in input ? string(input.TrafficPolicyId) : ''"
+            State: "'Applied'"
+    output:
+      TrafficPolicyInstance: rec
+
+  UpdateTrafficPolicyInstance:
+    effects:
+      - generate:
+          bind: g
+          kind: hex
+          bytes: 8
+          when: "!('Id' in input) || string(input.Id) == ''"
+      - create:
+          resource: trafficpolicyinstance
+          key: "('Id' in input && string(input.Id) != '') ? string(input.Id) : string(fx.g)"
+          record:
+            Id: id
+            HostedZoneId: "'HostedZoneId' in input ? string(input.HostedZoneId) : ''"
+            Name: "'Name' in input ? string(input.Name) : ''"
+            TrafficPolicyId: "'TrafficPolicyId' in input ? string(input.TrafficPolicyId) : ''"
+            State: "'Applied'"
+    output:
+      TrafficPolicyInstance: rec
+
+  GetTrafficPolicyInstance:
+    reads:
+      t: { resource: trafficpolicyinstance }
+    output:
+      TrafficPolicyInstance: t
+
+  # The pack never filtered these: all three answer the whole collection.
+  ListTrafficPolicyInstances:
+    list: { resource: trafficpolicyinstance, member: TrafficPolicyInstances, paginate: model }
+
+  ListTrafficPolicyInstancesByHostedZone:
+    list: { resource: trafficpolicyinstance, member: TrafficPolicyInstances, paginate: model }
+
+  ListTrafficPolicyInstancesByPolicy:
+    list: { resource: trafficpolicyinstance, member: TrafficPolicyInstances, paginate: model }
+
+  DeleteTrafficPolicyInstance:
+    effects:
+      - delete: { resource: trafficpolicyinstance, missing: ignore }
+    output: {}
+
+  GetTrafficPolicyInstanceCount:
+    select: { binding: ts, resource: trafficpolicyinstance }
+    output:
+      TrafficPolicyInstanceCount: "size(ts)"
+
+  # --- query logging configs -----------------------------------------------------
+
+  CreateQueryLoggingConfig:
+    effects:
+      - create:
+          resource: querylog
+          record:
+            Id: id
+            HostedZoneId: "string(input.HostedZoneId)"
+            CloudWatchLogsLogGroupArn: "string(input.CloudWatchLogsLogGroupArn)"
+    output:
+      QueryLoggingConfig: rec
+
+  GetQueryLoggingConfig:
+    reads:
+      q: { resource: querylog }
+    output:
+      QueryLoggingConfig: q
+
+  ListQueryLoggingConfigs:
+    list: { resource: querylog, member: QueryLoggingConfigs, paginate: model }
+
+  DeleteQueryLoggingConfig:
+    effects:
+      - delete: { resource: querylog, missing: ignore }
+    output: {}
+
+  # --- CIDR collections ------------------------------------------------------------
+
+  # Create and Change are one case in the pack: rebuilt from the request,
+  # spread underneath, id forced -- a Change without Name guts the stored name.
+  CreateCidrCollection:
+    effects:
+      - generate:
+          bind: g
+          kind: hex
+          bytes: 8
+          when: "!('Id' in input) || string(input.Id) == ''"
+      - create:
+          resource: cidrcollection
+          key: "('Id' in input && string(input.Id) != '') ? string(input.Id) : string(fx.g)"
+          spread: input
+          record:
+            Id: id
+            Name: "'Name' in input ? string(input.Name) : ''"
+    output:
+      Collection: rec
+
+  # Change answers only the id in the model; the pack answered the whole
+  # Collection record. The bundle answers the declared shape and the recorded
+  # step is superseded with that reason.
+  ChangeCidrCollection:
+    effects:
+      - generate:
+          bind: g
+          kind: hex
+          bytes: 8
+          when: "!('Id' in input) || string(input.Id) == ''"
+      - create:
+          resource: cidrcollection
+          key: "('Id' in input && string(input.Id) != '') ? string(input.Id) : string(fx.g)"
+          spread: input
+          record:
+            Id: id
+            Name: "'Name' in input ? string(input.Name) : ''"
+    output:
+      Id: id
+
+  ListCidrCollections:
+    list: { resource: cidrcollection, member: CidrCollections, paginate: model }
+
+  # The pack listed the same collection records under all three members, and
+  # ignored CollectionId entirely.
+  ListCidrBlocks:
+    list: { resource: cidrcollection, member: CidrBlocks, paginate: model }
+
+  ListCidrLocations:
+    list: { resource: cidrcollection, member: CidrLocations, paginate: model }
+
+  DeleteCidrCollection:
+    effects:
+      - delete: { resource: cidrcollection, missing: ignore }
+    output: {}
+
+  # --- reusable delegation sets ------------------------------------------------------
+
+  CreateReusableDelegationSet:
+    effects:
+      - create:
+          resource: delegationset
+          record:
+            Id: id
+            NameServers: "['ns-1.mirror.local', 'ns-2.mirror.local']"
+    output:
+      DelegationSet: rec
+
+  GetReusableDelegationSet:
+    reads:
+      d: { resource: delegationset }
+    output:
+      DelegationSet: d
+
+  ListReusableDelegationSets:
+    list: { resource: delegationset, member: DelegationSets, paginate: model }
+
+  DeleteReusableDelegationSet:
+    effects:
+      - delete: { resource: delegationset, missing: ignore }
+    output: {}
+
+  # --- key signing keys ---------------------------------------------------------------
+
+  # Create, Activate and Deactivate are one case in the pack; the status comes
+  # from the operation name, not the request (Create with Status: INACTIVE in
+  # the request still stores ACTIVE).
+  CreateKeySigningKey:
+    effects:
+      - create:
+          resource: keysigningkey
+          key: "string(input.HostedZoneId) + '/' + string(input.Name)"
+          record:
+            Name: "string(input.Name)"
+            Status: "'ACTIVE'"
+            HostedZoneId: "string(input.HostedZoneId)"
+    output:
+      KeySigningKey: rec
+      ChangeInfo: "{'Status': 'INSYNC'}"
+
+  # The pack answered the KeySigningKey record on Activate and Deactivate too;
+  # those response shapes declare only ChangeInfo, so the bundle drops it and
+  # the recorded steps are superseded with that reason.
+  ActivateKeySigningKey:
+    effects:
+      - create:
+          resource: keysigningkey
+          key: "string(input.HostedZoneId) + '/' + string(input.Name)"
+          record:
+            Name: "string(input.Name)"
+            Status: "'ACTIVE'"
+            HostedZoneId: "string(input.HostedZoneId)"
+    output:
+      ChangeInfo: "{'Status': 'INSYNC'}"
+
+  DeactivateKeySigningKey:
+    effects:
+      - create:
+          resource: keysigningkey
+          key: "string(input.HostedZoneId) + '/' + string(input.Name)"
+          record:
+            Name: "string(input.Name)"
+            Status: "'INACTIVE'"
+            HostedZoneId: "string(input.HostedZoneId)"
+    output:
+      ChangeInfo: "{'Status': 'INSYNC'}"
+
+  DeleteKeySigningKey:
+    effects:
+      - delete:
+          resource: keysigningkey
+          key: "string(input.HostedZoneId) + '/' + string(input.Name)"
+          missing: ignore
+    output:
+      ChangeInfo: "{'Status': 'INSYNC'}"
+
+  # --- DNSSEC --------------------------------------------------------------------------
+
+  EnableHostedZoneDNSSEC:
+    effects:
+      - put:
+          resource: dnssec
+          record: { ServeSignature: "'ENABLED'" }
+    output:
+      ChangeInfo: "{'Status': 'INSYNC'}"
+
+  DisableHostedZoneDNSSEC:
+    effects:
+      - put:
+          resource: dnssec
+          record: { ServeSignature: "'DISABLED'" }
+    output:
+      ChangeInfo: "{'Status': 'INSYNC'}"
+
+  # A zone that was never touched answers DISABLED, not a fault.
+  GetDNSSEC:
+    reads:
+      d: { resource: dnssec }
+    output:
+      Status: "{'ServeSignature': d_found ? string(d.ServeSignature) : 'DISABLED'}"
+
+  # --- VPC associations -------------------------------------------------------------------
+
+  # The pack reads flat HostedZoneId and VPCId members; the model declares a
+  # VPC structure instead, so a model-shaped request without the undeclared
+  # flat VPCId writes the key "<zone>/" -- see quirks.
+  AssociateVPCWithHostedZone:
+    effects:
+      - create:
+          resource: vpcassociation
+          key: >-
+            (('HostedZoneId' in input && string(input.HostedZoneId) != '') ? string(input.HostedZoneId)
+             : ('Id' in input ? string(input.Id) : ''))
+            + '/' + ('VPCId' in input ? string(input.VPCId) : '')
+          record:
+            HostedZoneId: "('HostedZoneId' in input && string(input.HostedZoneId) != '') ? string(input.HostedZoneId) : ('Id' in input ? string(input.Id) : '')"
+            VPCId: "'VPCId' in input ? string(input.VPCId) : ''"
+    output:
+      ChangeInfo: "{'Status': 'INSYNC'}"
+
+  CreateVPCAssociationAuthorization:
+    effects:
+      - create:
+          resource: vpcassociation
+          key: >-
+            (('HostedZoneId' in input && string(input.HostedZoneId) != '') ? string(input.HostedZoneId)
+             : ('Id' in input ? string(input.Id) : ''))
+            + '/' + ('VPCId' in input ? string(input.VPCId) : '')
+          record:
+            HostedZoneId: "('HostedZoneId' in input && string(input.HostedZoneId) != '') ? string(input.HostedZoneId) : ('Id' in input ? string(input.Id) : '')"
+            VPCId: "'VPCId' in input ? string(input.VPCId) : ''"
+    # The pack answered ChangeInfo; the response shape declares HostedZoneId
+    # and VPC, so the bundle answers the declared members and the recorded
+    # step is superseded with that reason.
+    output:
+      HostedZoneId: rec.HostedZoneId
+      VPC: "{'VPCId': rec.VPCId}"
+
+  DisassociateVPCFromHostedZone:
+    effects:
+      - delete:
+          resource: vpcassociation
+          key: >-
+            (('HostedZoneId' in input && string(input.HostedZoneId) != '') ? string(input.HostedZoneId)
+             : ('Id' in input ? string(input.Id) : ''))
+            + '/' + ('VPCId' in input ? string(input.VPCId) : '')
+          missing: ignore
+    output:
+      ChangeInfo: "{'Status': 'INSYNC'}"
+
+  # The delete's response shape declares no members at all; the pack answered
+  # ChangeInfo anyway, so the recorded step is superseded.
+  DeleteVPCAssociationAuthorization:
+    effects:
+      - delete:
+          resource: vpcassociation
+          key: >-
+            (('HostedZoneId' in input && string(input.HostedZoneId) != '') ? string(input.HostedZoneId)
+             : ('Id' in input ? string(input.Id) : ''))
+            + '/' + ('VPCId' in input ? string(input.VPCId) : '')
+          missing: ignore
+    output: {}
+
+  ListVPCAssociationAuthorizations:
+    list: { resource: vpcassociation, member: VPCs, paginate: model }
+
+  # The pack answered this listing under VPCs, which
+  # ListHostedZonesByVPCResponse does not declare (it declares
+  # HostedZoneSummaries); the bundle answers the declared member and the
+  # recorded step is superseded with that reason.
+  ListHostedZonesByVPC:
+    list: { resource: vpcassociation, member: HostedZoneSummaries, paginate: model }
+
+  # --- tags --------------------------------------------------------------------------------
+
+  # The pack stored the entire request under the resource id, AddTags and
+  # RemoveTagKeys alike, and ListTagsForResource answers it back verbatim.
+  ChangeTagsForResource:
+    effects:
+      - create: { resource: tags, spread: input }
+    output: {}
+
+  ListTagsForResource:
+    reads:
+      t: { resource: tags }
+    output:
+      ResourceTagSet: t
+
+  ListTagsForResources:
+    list: { resource: tags, member: ResourceTagSets, paginate: model }
+
+  # --- constants, counts and the zone comment ----------------------------------------------
+
+  GetChange:
+    output:
+      ChangeInfo: "{'Id': string(input.Id), 'Status': 'INSYNC'}"
+
+  GetCheckerIpRanges:
+    output:
+      CheckerIpRanges: "['127.0.0.1/32']"
+
+  GetGeoLocation:
+    output:
+      GeoLocationDetails: "{'CountryCode': 'CountryCode' in input ? string(input.CountryCode) : ''}"
+
+  ListGeoLocations:
+    output:
+      GeoLocationDetailsList: "[{'CountryCode': 'US'}]"
+
+  # Every limit is 500 and every count 0, whatever the type or the account holds.
+  GetAccountLimit:
+    output:
+      Limit: "{'Type': string(input.Type), 'Value': 500}"
+      Count: "0"
+
+  GetHostedZoneLimit:
+    output:
+      Limit: "{'Type': string(input.Type), 'Value': 500}"
+      Count: "0"
+
+  GetReusableDelegationSetLimit:
+    output:
+      Limit: "{'Type': string(input.Type), 'Value': 500}"
+      Count: "0"
+
+  GetHostedZoneCount:
+    select: { binding: zs, resource: zone }
+    output:
+      HostedZoneCount: "size(zs)"
+
+  # The pack delegated to ListHostedZones verbatim; the declared DNSName /
+  # HostedZoneId echo and the pagination members are never set by either side.
+  ListHostedZonesByName:
+    list: { resource: zone, member: HostedZones, paginate: model }
+
+  # The pack loads the zone (conjuring {Id: id} when absent), sets Comment
+  # only when one was sent, and writes it back. Two guarded puts reproduce
+  # that without clobbering the stored members of an existing zone.
+  UpdateHostedZoneComment:
+    reads:
+      z: { resource: zone }
+    let:
+      newc: "'Comment' in input && string(input.Comment) != ''"
+    effects:
+      - put:
+          resource: zone
+          when: "!z_found"
+          record: { Id: id }
+      - put:
+          resource: zone
+          when: newc
+          record: { Comment: "string(input.Comment)" }
+    output:
+      HostedZone: >-
+        z_found
+        ? (newc ? merge(z, {'Comment': string(input.Comment)}) : z)
+        : (newc ? {'Id': id, 'Comment': string(input.Comment)} : {'Id': id})
+
+  # Same body as UpdateHostedZoneComment in the pack, but the model declares
+  # no output members for this operation; the pack answered the HostedZone
+  # anyway, so the recorded step is superseded.
+  UpdateHostedZoneFeatures:
+    reads:
+      z: { resource: zone }
+    let:
+      newc: "'Comment' in input && string(input.Comment) != ''"
+    effects:
+      - put:
+          resource: zone
+          when: "!z_found"
+          record: { Id: id }
+      - put:
+          resource: zone
+          when: newc
+          record: { Comment: "string(input.Comment)" }
+    output: {}
+
+  # ponytail: the pack answered from in-memory RR sets, else 127.0.0.1; not a
+  # recursive resolver. It scanned every zone's rrset collection for a
+  # name+type match -- a fan-out over per-zone collections B-IR cannot
+  # express -- so the bundle reads the one record keyed name|type in the zone
+  # the request names, which under the engine's codec (Id is never populated
+  # on the rrset write path, see quirks) finds the same records the pack's
+  # scan would: none that were written through a model-shaped request.
+  TestDNSAnswer:
+    reads:
+      z: { resource: zone }
+      rr:
+        resource: rrset
+        key: "string(input.RecordName) + '|' + string(input.RecordType)"
+    output:
+      RecordData: "rr_found && 'ResourceRecords' in rr && rr.ResourceRecords != null ? rr.ResourceRecords.map(r, string(r.Value)) : ['127.0.0.1']"
+      ResponseCode: "'NOERROR'"
+      RecordName: "string(input.RecordName)"
+      RecordType: "string(input.RecordType) != '' ? string(input.RecordType) : 'A'"
+
+quirks:
+  - operation: ChangeResourceRecordSets
+    note: >
+      The pack parses the raw XML request body (`_body`) itself and stores TTL
+      as the raw string; the engine's codec presents the parsed ChangeBatch
+      member instead, so the bundle stores the structured value and the
+      recording holds the two in agreement. The zone is read from an `Id`
+      member the pack's own HTTP path parser set; the model declares
+      HostedZoneId on this operation and on ListResourceRecordSets, so under
+      the engine's codec `Id` is never populated and every change lands in the
+      collection of the empty zone id -- the transcription keeps that, and the
+      pack's own HTTP serving (which did populate `Id`) is the only path that
+      ever scoped record sets to a real zone. Deleting a zone does not delete
+      its record sets. Within one request the pack applies changes in order;
+      the bundle applies all non-DELETE changes first and then deletes, so a
+      batch that deletes and re-upserts the same name|type in one request
+      lands differently (ponytail ceiling: one conditional write per element
+      is all the effect vocabulary has).
+  - operation: TestDNSAnswer
+    note: >
+      Answers from the stored record sets when one matches the name and type,
+      else a constant 127.0.0.1 with NOERROR -- never NXDOMAIN, never a real
+      lookup. The pack scanned every hosted zone's collection and ignored the
+      HostedZoneId member entirely; the bundle reads the zone the request
+      names, which finds nothing written through a model-shaped request (the
+      writes land on the empty zone's collection, see ChangeResourceRecordSets),
+      matching the pack over the recorded sequence. An empty RecordType
+      defaults to A. RecordData is a bare list of value strings.
+  - operation: CreateHostedZone
+    note: >
+      The zone id is "Z" plus upper-case hex; the record's Id member is the
+      "/hostedzone/<id>" path form while ChangeInfo.Id is "/change/<id>" with
+      the same zone id (not a change id of its own). Create answers 201 with
+      no Location, DelegationSet or VPC members, all of which the model
+      declares. The zone is stored the moment it is created; there is no
+      PENDING state, every change is INSYNC.
+  - operation: GetHostedZone
+    note: >
+      The only fault in the pack: a missing zone is NoSuchHostedZone/404.
+      Every other read in the service -- GetHealthCheck, GetTrafficPolicy,
+      GetQueryLoggingConfig, GetReusableDelegationSet, ListTagsForResource,
+      GetDNSSEC -- answers an empty record (or a DISABLED status) for an id
+      that was never created, and every delete succeeds whether or not the
+      record existed.
+  - operation: CreateKeySigningKey
+    note: >
+      Create, Activate and Deactivate share one body: the stored Status comes
+      from the operation name, so a CreateKeySigningKey request carrying
+      Status: INACTIVE (which the model requires) still stores ACTIVE. There
+      is no read or list for key signing keys; only the create answer and a
+      delete that always succeeds.
+  - operation: AssociateVPCWithHostedZone
+    note: >
+      The association is keyed and stored from flat HostedZoneId and VPCId
+      members; the model declares a VPC structure ({VPCId, VPCRegion})
+      instead of a flat VPCId, so a model-shaped request that sends only the
+      declared members stores the key "<zone>/" with an empty VPCId. The four
+      associate/disassociate operations share this addressing.
+  - operation: UpdateHostedZoneComment
+    note: >
+      Updating a zone that does not exist conjures a bare record {Id: <id>}
+      (plus Comment when one was sent) which GetHostedZone then answers
+      instead of faulting. An empty Comment member leaves the record
+      unchanged. UpdateHostedZoneFeatures shares the same body but the model
+      declares no output members for it; the pack answered the HostedZone
+      record anyway, so that recorded step is superseded.
+  - operation: ListHostedZonesByVPC
+    note: >
+      The pack answered under VPCs, which ListHostedZonesByVPCResponse does
+      not declare (it declares HostedZoneSummaries); the bundle answers the
+      declared member and the recorded step is superseded. Neither side
+      filters by the VPC named in the request.
+  - operation: CreateTrafficPolicy
+    note: >
+      CreateTrafficPolicy and UpdateTrafficPolicyComment share one body: the
+      record is rebuilt from the request and written wholesale, so an update
+      carrying only the declared members guts the stored Name and Document to
+      "". CreateTrafficPolicyInstance/UpdateTrafficPolicyInstance and
+      CreateCidrCollection/ChangeCidrCollection behave the same way (the
+      instance one keeps no spread at all, so an update wipes HostedZoneId and
+      Name). CreateHealthCheck/UpdateHealthCheck also rebuild, spreading the
+      request underneath a synthesized HealthCheckConfig of type HTTP.
+  - operation: CreateTrafficPolicyVersion
+    note: >
+      Versioning an id that was never created conjures a bare {Id, Version: 1,
+      Document} policy rather than faulting, and the same row is written to a
+      second collection keyed <id>:<version> that ListTrafficPolicyVersions
+      answers and nothing ever deletes -- DeleteTrafficPolicy removes only the
+      policy row.
+  - operation: ListCidrBlocks
+    note: >
+      ListCidrBlocks and ListCidrLocations list the CIDR *collection* records
+      verbatim (ignoring CollectionId) under their own member names, so both
+      answer the same rows ListCidrCollections does.
+  - operation: GetAccountLimit
+    note: >
+      Every limit -- account, hosted zone, delegation set -- answers Type
+      echoed, Value 500, Count 0. GetChange echoes whatever Id it was given
+      with Status INSYNC, GetCheckerIpRanges answers the loopback /32,
+      ListGeoLocations a single US entry, and GetHealthCheckStatus a constant
+      Success observation for any id, real or not.
+  - operation: ChangeTagsForResource
+    note: >
+      The whole request -- ResourceType, ResourceId, AddTags, RemoveTagKeys --
+      is stored verbatim under the resource id and answered back by
+      ListTagsForResource as the ResourceTagSet; tags are never merged,
+      filtered or removed.
+  - operation: GetHealthCheck
+    note: >
+      The pack never validated input: where the engine now rejects a request
+      missing a required member with ValidationException, the pack fell
+      through -- reads hit the empty key and answered empty (or NoSuchHostedZone
+      for GetHostedZone), deletes deleted the empty key and succeeded, creates
+      stored empty-valued members. Those paths are unreachable under model
+      validation and are not transcribed. The pack answered 201 on every
+      create and update; the trace records bodies only, so the status is not
+      gated.

@@ -1,0 +1,2311 @@
+{
+  "schema": "trace/1",
+  "service": "aws.eks",
+  "source": "pack:internal/services/aws/eks@b7236d3b",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered a member the operation's own output shape does not declare (UpdateAddon's addon, UpdateCapability's capability, AssociateEncryptionConfig's cluster, DescribeInsightsRefresh's insightRefresh), the bundle answers the declared shape and the step is superseded with that reason.",
+  "steps": [
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": null
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "name": "c1",
+        "resourcesVpcConfig": {
+          "subnetIds": [
+            "subnet-1"
+          ]
+        },
+        "roleArn": "arn:aws:iam::000000000000:role/eks",
+        "version": "1.30"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "arn": "arn:aws:eks:us-east-1:000000000000:cluster/c1",
+          "name": "c1",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "version": "1.30"
+        }
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "name": "c2",
+        "resourcesVpcConfig": {
+          "subnetIds": [
+            "subnet-2"
+          ]
+        },
+        "roleArn": "arn:aws:iam::000000000000:role/eks",
+        "version": "1.30"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "arn": "arn:aws:eks:us-east-1:000000000000:cluster/c2",
+          "name": "c2",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "version": "1.30"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "name": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "arn": "arn:aws:eks:us-east-1:000000000000:cluster/c1",
+          "name": "c1",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "version": "1.30"
+        }
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": [
+          "c1",
+          "c2"
+        ]
+      }
+    },
+    {
+      "operation": "UpdateClusterConfig",
+      "input": {
+        "name": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000006",
+          "status": "Successful"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "name": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "arn": "arn:aws:eks:us-east-1:000000000000:cluster/c1",
+          "name": "c1",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "version": "1.30"
+        }
+      }
+    },
+    {
+      "operation": "DescribeNodegroup",
+      "input": {
+        "clusterName": "c1",
+        "nodegroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateNodegroup",
+      "input": {
+        "clusterName": "c1",
+        "nodeRole": "arn:aws:iam::000000000000:role/eks",
+        "nodegroupName": "ng1",
+        "subnets": [
+          "subnet-1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroup": {
+          "clusterName": "c1",
+          "nodegroupArn": "arn:aws:eks:us-east-1:000000000000:nodegroup/c1/ng1",
+          "nodegroupName": "ng1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeNodegroup",
+      "input": {
+        "clusterName": "c1",
+        "nodegroupName": "ng1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroup": {
+          "clusterName": "c1",
+          "nodegroupArn": "arn:aws:eks:us-east-1:000000000000:nodegroup/c1/ng1",
+          "nodegroupName": "ng1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListNodegroups",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroups": [
+          "ng1"
+        ]
+      }
+    },
+    {
+      "operation": "ListNodegroups",
+      "input": {
+        "clusterName": "c2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroups": null
+      }
+    },
+    {
+      "operation": "UpdateNodegroupVersion",
+      "input": {
+        "clusterName": "c1",
+        "nodegroupName": "ng1",
+        "version": "1.30"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000003",
+          "status": "Successful",
+          "type": "UpdateNodegroupVersion"
+        }
+      }
+    },
+    {
+      "operation": "DescribeNodegroup",
+      "input": {
+        "clusterName": "c1",
+        "nodegroupName": "ng1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroup": {
+          "clusterName": "c1",
+          "nodegroupArn": "arn:aws:eks:us-east-1:000000000000:nodegroup/c1/ng1",
+          "nodegroupName": "ng1",
+          "status": "ACTIVE",
+          "version": "1.30"
+        }
+      }
+    },
+    {
+      "operation": "UpdateNodegroupConfig",
+      "input": {
+        "clusterName": "c1",
+        "nodegroupName": "ng1",
+        "scalingConfig": {
+          "desiredSize": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000004",
+          "status": "Successful",
+          "type": "UpdateNodegroupConfig"
+        }
+      }
+    },
+    {
+      "operation": "DescribeNodegroup",
+      "input": {
+        "clusterName": "c1",
+        "nodegroupName": "ng1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroup": {
+          "clusterName": "c1",
+          "nodegroupArn": "arn:aws:eks:us-east-1:000000000000:nodegroup/c1/ng1",
+          "nodegroupName": "ng1",
+          "status": "ACTIVE",
+          "version": "1.30",
+          "scalingConfig": {
+            "desiredSize": 2
+          }
+        }
+      }
+    },
+    {
+      "operation": "DeleteNodegroup",
+      "input": {
+        "clusterName": "c1",
+        "nodegroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroup": {
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "DescribeFargateProfile",
+      "input": {
+        "clusterName": "c1",
+        "fargateProfileName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateFargateProfile",
+      "input": {
+        "clusterName": "c1",
+        "fargateProfileName": "fp1",
+        "podExecutionRoleArn": "arn:aws:iam::000000000000:role/eks"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "fargateProfile": {
+          "clusterName": "c1",
+          "fargateProfileName": "fp1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeFargateProfile",
+      "input": {
+        "clusterName": "c1",
+        "fargateProfileName": "fp1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "fargateProfile": {
+          "clusterName": "c1",
+          "fargateProfileName": "fp1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListFargateProfiles",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "fargateProfileNames": [
+          "fp1"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteFargateProfile",
+      "input": {
+        "clusterName": "c1",
+        "fargateProfileName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "fargateProfile": {
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "resourceArn": "arn:aws:eks:us-east-1:000000000000:cluster/c1",
+        "tags": {
+          "env": "prod"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": "arn:aws:eks:us-east-1:000000000000:cluster/c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": {
+          "env": "prod"
+        }
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": "arn:aws:eks:us-east-1:000000000000:cluster/ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": {}
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "resourceArn": "arn:aws:eks:us-east-1:000000000000:cluster/c1",
+        "tagKeys": [
+          "env"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": "arn:aws:eks:us-east-1:000000000000:cluster/c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": {}
+      }
+    },
+    {
+      "operation": "CreateAddon",
+      "input": {
+        "addonName": "vpc-cni",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addon": {
+          "addonName": "vpc-cni",
+          "addonVersion": "",
+          "clusterName": "c1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeAddon",
+      "input": {
+        "addonName": "vpc-cni",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addon": {
+          "addonName": "vpc-cni",
+          "addonVersion": "",
+          "clusterName": "c1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeAddon",
+      "input": {
+        "addonName": "ghost",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addon": {
+          "name": "c1/ghost"
+        }
+      }
+    },
+    {
+      "operation": "ListAddons",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addons": [
+          "vpc-cni"
+        ]
+      }
+    },
+    {
+      "operation": "UpdateAddon",
+      "input": {
+        "addonName": "vpc-cni",
+        "addonVersion": "v1.18.1",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addon": {
+          "addonName": "vpc-cni",
+          "addonVersion": "v1.18.1",
+          "clusterName": "c1",
+          "status": "ACTIVE"
+        }
+      },
+      "superseded": "the pack answered {addon: <record>}; UpdateAddonResponse declares only `update`, which the pack never set, so the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeAddon",
+      "input": {
+        "addonName": "vpc-cni",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addon": {
+          "addonName": "vpc-cni",
+          "addonVersion": "v1.18.1",
+          "clusterName": "c1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeAddonVersions",
+      "input": {
+        "addonName": "vpc-cni"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addons": [
+          {
+            "addonName": "vpc-cni",
+            "addonVersions": [
+              {
+                "addonVersion": "v1"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAddonConfiguration",
+      "input": {
+        "addonName": "vpc-cni",
+        "addonVersion": "v1.18.1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addonName": "vpc-cni",
+        "configurationSchema": "{}"
+      }
+    },
+    {
+      "operation": "DeleteAddon",
+      "input": {
+        "addonName": "ghost",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addon": {
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "CreateAccessEntry",
+      "input": {
+        "clusterName": "c1",
+        "principalArn": "arn:aws:iam::000000000000:role/r",
+        "type": "STANDARD"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accessEntry": {
+          "clusterName": "c1",
+          "principalArn": "arn:aws:iam::000000000000:role/r",
+          "type": "STANDARD"
+        }
+      }
+    },
+    {
+      "operation": "DescribeAccessEntry",
+      "input": {
+        "clusterName": "c1",
+        "principalArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accessEntry": {
+          "clusterName": "c1",
+          "principalArn": "arn:aws:iam::000000000000:role/r",
+          "type": "STANDARD"
+        }
+      }
+    },
+    {
+      "operation": "DescribeAccessEntry",
+      "input": {
+        "clusterName": "c1",
+        "principalArn": "arn:aws:iam::000000000000:role/ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accessEntry": {
+          "name": "c1/arn:aws:iam::000000000000:role/ghost"
+        }
+      }
+    },
+    {
+      "operation": "UpdateAccessEntry",
+      "input": {
+        "clusterName": "c1",
+        "principalArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accessEntry": {
+          "clusterName": "c1",
+          "principalArn": "arn:aws:iam::000000000000:role/r",
+          "type": ""
+        }
+      }
+    },
+    {
+      "operation": "DescribeAccessEntry",
+      "input": {
+        "clusterName": "c1",
+        "principalArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accessEntry": {
+          "clusterName": "c1",
+          "principalArn": "arn:aws:iam::000000000000:role/r",
+          "type": ""
+        }
+      }
+    },
+    {
+      "operation": "ListAccessEntries",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accessEntries": [
+          "r"
+        ]
+      }
+    },
+    {
+      "operation": "AssociateAccessPolicy",
+      "input": {
+        "accessScope": {
+          "type": "cluster"
+        },
+        "clusterName": "c1",
+        "policyArn": "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy",
+        "principalArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "associatedAccessPolicy": {
+          "accessScope": {
+            "type": "cluster"
+          },
+          "clusterName": "c1",
+          "policyArn": "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy",
+          "principalArn": "arn:aws:iam::000000000000:role/r"
+        }
+      }
+    },
+    {
+      "operation": "ListAssociatedAccessPolicies",
+      "input": {
+        "clusterName": "c1",
+        "principalArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "associatedAccessPolicies": [
+          {
+            "accessScope": {
+              "type": "cluster"
+            },
+            "clusterName": "c1",
+            "policyArn": "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy",
+            "principalArn": "arn:aws:iam::000000000000:role/r"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DisassociateAccessPolicy",
+      "input": {
+        "clusterName": "c1",
+        "policyArn": "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy",
+        "principalArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListAssociatedAccessPolicies",
+      "input": {
+        "clusterName": "c1",
+        "principalArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "associatedAccessPolicies": null
+      }
+    },
+    {
+      "operation": "ListAccessPolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accessPolicies": [
+          {
+            "arn": "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy",
+            "name": "AmazonEKSAdminPolicy"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAccessEntry",
+      "input": {
+        "clusterName": "c1",
+        "principalArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "CreateCertificateAuthority",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificateAuthority": {
+          "clusterName": "c1",
+          "id": "aa00000000000007",
+          "status": "PENDING_CERTIFICATE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCertificateAuthority",
+      "input": {
+        "certificateAuthorityId": {
+          "$fromStep": 49,
+          "$fromPath": "certificateAuthority.id"
+        },
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificateAuthority": {
+          "clusterName": "c1",
+          "id": "aa00000000000007",
+          "status": "PENDING_CERTIFICATE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCertificateAuthority",
+      "input": {
+        "certificateAuthorityId": "ghostca00",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificateAuthority": {
+          "name": "ghostca00"
+        }
+      }
+    },
+    {
+      "operation": "ActivateCertificateAuthority",
+      "input": {
+        "certificateAuthorityId": {
+          "$fromStep": 49,
+          "$fromPath": "certificateAuthority.id"
+        },
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificateAuthority": {
+          "clusterName": "c1",
+          "id": "aa00000000000007",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListCertificateAuthorities",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificateAuthorities": [
+          {
+            "clusterName": "c1",
+            "id": "aa00000000000007",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCertificateAuthority",
+      "input": {
+        "certificateAuthorityId": "ghostca00",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "CreateEksAnywhereSubscription",
+      "input": {
+        "name": "s1",
+        "term": {
+          "length": 1,
+          "unit": "MONTHS"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscription": {
+          "id": "s1",
+          "name": "s1",
+          "status": "ACTIVE",
+          "term": {
+            "length": 1,
+            "unit": "MONTHS"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribeEksAnywhereSubscription",
+      "input": {
+        "id": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscription": {
+          "id": "s1",
+          "name": "s1",
+          "status": "ACTIVE",
+          "term": {
+            "length": 1,
+            "unit": "MONTHS"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribeEksAnywhereSubscription",
+      "input": {
+        "id": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscription": {
+          "name": "ghost"
+        }
+      }
+    },
+    {
+      "operation": "UpdateEksAnywhereSubscription",
+      "input": {
+        "autoRenew": true,
+        "id": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscription": {
+          "autoRenew": true,
+          "id": "s1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListEksAnywhereSubscriptions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscriptions": [
+          {
+            "autoRenew": true,
+            "id": "s1",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteEksAnywhereSubscription",
+      "input": {
+        "id": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "CreatePodIdentityAssociation",
+      "input": {
+        "clusterName": "c1",
+        "namespace": "default",
+        "roleArn": "arn:aws:iam::000000000000:role/eks",
+        "serviceAccount": "sa"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "association": {
+          "associationId": "aa00000000000008",
+          "clusterName": "c1",
+          "namespace": "default",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "serviceAccount": "sa"
+        }
+      }
+    },
+    {
+      "operation": "DescribePodIdentityAssociation",
+      "input": {
+        "associationId": {
+          "$fromStep": 61,
+          "$fromPath": "association.associationId"
+        },
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "association": {
+          "associationId": "aa00000000000008",
+          "clusterName": "c1",
+          "namespace": "default",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "serviceAccount": "sa"
+        }
+      }
+    },
+    {
+      "operation": "DescribePodIdentityAssociation",
+      "input": {
+        "associationId": "ghost",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "association": {
+          "name": "c1/ghost"
+        }
+      }
+    },
+    {
+      "operation": "ListPodIdentityAssociations",
+      "input": {
+        "clusterName": "c2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "associations": [
+          {
+            "associationId": "aa00000000000008",
+            "clusterName": "c1",
+            "namespace": "default",
+            "roleArn": "arn:aws:iam::000000000000:role/eks",
+            "serviceAccount": "sa"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdatePodIdentityAssociation",
+      "input": {
+        "associationId": {
+          "$fromStep": 61,
+          "$fromPath": "association.associationId"
+        },
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "association": {
+          "associationId": "aa00000000000008",
+          "clusterName": "c1",
+          "namespace": "",
+          "serviceAccount": ""
+        }
+      }
+    },
+    {
+      "operation": "DeletePodIdentityAssociation",
+      "input": {
+        "associationId": "ghost",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "CreateCapability",
+      "input": {
+        "capabilityName": "cap1",
+        "clusterName": "c1",
+        "deletePropagationPolicy": "RETAIN",
+        "roleArn": "arn:aws:iam::000000000000:role/eks",
+        "type": "ACK"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capability": {
+          "capabilityName": "cap1",
+          "clusterName": "c1",
+          "deletePropagationPolicy": "RETAIN",
+          "name": "cap1",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "type": "ACK"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCapability",
+      "input": {
+        "capabilityName": "cap1",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capability": {
+          "capabilityName": "cap1",
+          "clusterName": "c1",
+          "deletePropagationPolicy": "RETAIN",
+          "name": "cap1",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "type": "ACK"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCapability",
+      "input": {
+        "capabilityName": "ghost",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capability": {
+          "name": "c1/ghost"
+        }
+      }
+    },
+    {
+      "operation": "UpdateCapability",
+      "input": {
+        "capabilityName": "cap1",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capability": {
+          "capabilityName": "cap1",
+          "clusterName": "c1",
+          "name": "cap1",
+          "status": "ACTIVE"
+        }
+      },
+      "superseded": "the pack answered {capability: <record>}; UpdateCapabilityResponse declares only `update`, which the pack never set, so the bundle answers nothing"
+    },
+    {
+      "operation": "ListCapabilities",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capabilities": [
+          {
+            "capabilityName": "cap1",
+            "clusterName": "c1",
+            "name": "cap1",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCapability",
+      "input": {
+        "capabilityName": "ghost",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "AssociateEncryptionConfig",
+      "input": {
+        "clusterName": "c1",
+        "encryptionConfig": [
+          {
+            "provider": {
+              "keyArn": "arn:aws:kms:us-east-1:000000000000:key/k1"
+            },
+            "resources": [
+              "secrets"
+            ]
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "arn": "arn:aws:eks:us-east-1:000000000000:cluster/c1",
+          "name": "c1",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "version": "1.30",
+          "encryptionConfig": [
+            {
+              "provider": {
+                "keyArn": "arn:aws:kms:us-east-1:000000000000:key/k1"
+              },
+              "resources": [
+                "secrets"
+              ]
+            }
+          ]
+        }
+      },
+      "superseded": "the pack answered {cluster: <patched record>}; AssociateEncryptionConfigResponse declares only `update`, which the pack never set, so the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "name": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "arn": "arn:aws:eks:us-east-1:000000000000:cluster/c1",
+          "name": "c1",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "version": "1.30",
+          "encryptionConfig": [
+            {
+              "provider": {
+                "keyArn": "arn:aws:kms:us-east-1:000000000000:key/k1"
+              },
+              "resources": [
+                "secrets"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "AssociateIdentityProviderConfig",
+      "input": {
+        "clusterName": "c1",
+        "oidc": {
+          "issuerUrl": "https://oidc.example.com"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000001",
+          "status": "Successful",
+          "type": "AssociateIdentityProviderConfig"
+        }
+      }
+    },
+    {
+      "operation": "DescribeIdentityProviderConfig",
+      "input": {
+        "clusterName": "c1",
+        "identityProviderConfig": {
+          "name": "idp1",
+          "type": "oidc"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "identityProviderConfig": {
+          "name": "c1/"
+        }
+      }
+    },
+    {
+      "operation": "ListIdentityProviderConfigs",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "identityProviderConfigs": [
+          {
+            "clusterName": "c1",
+            "oidc": {
+              "issuerUrl": "https://oidc.example.com"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DisassociateIdentityProviderConfig",
+      "input": {
+        "clusterName": "c1",
+        "identityProviderConfig": {
+          "name": "idp1",
+          "type": "oidc"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000002",
+          "status": "Successful",
+          "type": "DisassociateIdentityProviderConfig"
+        }
+      }
+    },
+    {
+      "operation": "RegisterCluster",
+      "input": {
+        "connectorConfig": {
+          "roleArn": "arn:aws:iam::000000000000:role/conn"
+        },
+        "name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "arn": "arn:aws:eks:us-east-1:000000000000:cluster/r1",
+          "connectorConfig": {
+            "roleArn": "arn:aws:iam::000000000000:role/conn"
+          },
+          "name": "r1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": [
+          "c1",
+          "c2",
+          "r1"
+        ]
+      }
+    },
+    {
+      "operation": "DeregisterCluster",
+      "input": {
+        "name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "name": "r1",
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "DescribeClusterVersions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusterVersions": [
+          {
+            "clusterVersion": "1.29",
+            "status": "STANDARD_SUPPORT"
+          },
+          {
+            "clusterVersion": "1.30",
+            "status": "STANDARD_SUPPORT"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateClusterVersion",
+      "input": {
+        "name": "c2",
+        "version": "1.31"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000005",
+          "status": "Successful",
+          "type": "VersionUpdate"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "name": "c2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "arn": "arn:aws:eks:us-east-1:000000000000:cluster/c2",
+          "name": "c2",
+          "roleArn": "arn:aws:iam::000000000000:role/eks",
+          "status": "ACTIVE",
+          "version": "1.31"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUpdate",
+      "input": {
+        "name": "c2",
+        "updateId": {
+          "$fromStep": 83,
+          "$fromPath": "update.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000005",
+          "status": "Successful",
+          "type": "VersionUpdate"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUpdate",
+      "input": {
+        "name": "c2",
+        "updateId": "ghostup0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "name": "ghostup0"
+        }
+      }
+    },
+    {
+      "operation": "ListUpdates",
+      "input": {
+        "name": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "updateIds": [
+          "aa00000000000001",
+          "aa00000000000002",
+          "aa00000000000003",
+          "aa00000000000004",
+          "aa00000000000005"
+        ]
+      }
+    },
+    {
+      "operation": "CancelUpdate",
+      "input": {
+        "name": "c2",
+        "updateId": {
+          "$fromStep": 83,
+          "$fromPath": "update.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000005",
+          "status": "Cancelled",
+          "type": "VersionUpdate"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUpdate",
+      "input": {
+        "name": "c2",
+        "updateId": {
+          "$fromStep": 83,
+          "$fromPath": "update.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "update": {
+          "id": "aa00000000000005",
+          "status": "Cancelled",
+          "type": "VersionUpdate"
+        }
+      }
+    },
+    {
+      "operation": "StartInsightsRefresh",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "message": "started",
+        "status": "IN_PROGRESS"
+      }
+    },
+    {
+      "operation": "DescribeInsightsRefresh",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "insightRefresh": [
+          {
+            "clusterName": "c1",
+            "id": "aa00000000000009",
+            "status": "IN_PROGRESS"
+          }
+        ]
+      },
+      "superseded": "the pack answered {insightRefresh: [...]}; DescribeInsightsRefreshResponse declares endedAt, message, startedAt and status -- no insightRefresh member -- so the bundle answers nothing"
+    },
+    {
+      "operation": "ListInsights",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "insights": [
+          {
+            "clusterName": "c1",
+            "id": "aa00000000000009",
+            "status": "IN_PROGRESS"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeInsight",
+      "input": {
+        "clusterName": "c1",
+        "id": {
+          "$fromStep": 92,
+          "$fromPath": "insights.0.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "insight": {
+          "clusterName": "c1",
+          "id": "aa00000000000009",
+          "status": "IN_PROGRESS"
+        }
+      }
+    },
+    {
+      "operation": "DescribeInsight",
+      "input": {
+        "clusterName": "c1",
+        "id": "ghostins"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "insight": {
+          "name": "ghostins"
+        }
+      }
+    },
+    {
+      "operation": "DeleteNodegroup",
+      "input": {
+        "clusterName": "c1",
+        "nodegroupName": "ng1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroup": {
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "ListNodegroups",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nodegroups": null
+      }
+    },
+    {
+      "operation": "DeleteFargateProfile",
+      "input": {
+        "clusterName": "c1",
+        "fargateProfileName": "fp1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "fargateProfile": {
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "DeleteAddon",
+      "input": {
+        "addonName": "vpc-cni",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addon": {
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "ListAddons",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "addons": null
+      }
+    },
+    {
+      "operation": "DeleteEksAnywhereSubscription",
+      "input": {
+        "id": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListEksAnywhereSubscriptions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscriptions": null
+      }
+    },
+    {
+      "operation": "DeletePodIdentityAssociation",
+      "input": {
+        "associationId": {
+          "$fromStep": 61,
+          "$fromPath": "association.associationId"
+        },
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteCapability",
+      "input": {
+        "capabilityName": "cap1",
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteCertificateAuthority",
+      "input": {
+        "certificateAuthorityId": {
+          "$fromStep": 49,
+          "$fromPath": "certificateAuthority.id"
+        },
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListCertificateAuthorities",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "certificateAuthorities": null
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "name": "ghost",
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "name": "c2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "name": "c2",
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "name": "c2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "name": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "name": "c1",
+          "status": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": null
+      }
+    }
+  ]
+}

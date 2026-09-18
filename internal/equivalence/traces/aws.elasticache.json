@@ -1,0 +1,2412 @@
+{
+  "schema": "trace/1",
+  "service": "aws.elasticache",
+  "source": "pack:internal/services/aws/elasticache@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered a wrapper member the model does not declare (User, UserGroup, CacheParameterGroup) or a member the output shape does not carry (Parameters on DescribeEngineDefaultParameters), the bundle answers the declared shape and the step is superseded with that reason.",
+  "steps": [
+    {
+      "operation": "DescribeCacheClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheClusters": null
+      }
+    },
+    {
+      "operation": "CreateCacheCluster",
+      "input": {
+        "CacheClusterId": "c1",
+        "CacheNodeType": "cache.t3.micro",
+        "Engine": "redis"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheCluster": {
+          "CacheClusterId": "c1",
+          "CacheClusterStatus": "available",
+          "CacheNodeType": "cache.t3.micro",
+          "Engine": "redis"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCacheClusters",
+      "input": {
+        "CacheClusterId": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheClusters": [
+          {
+            "CacheClusterId": "c1",
+            "CacheClusterStatus": "available",
+            "CacheNodeType": "cache.t3.micro",
+            "Engine": "redis"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCacheClusters",
+      "input": {
+        "CacheClusterId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyCacheCluster",
+      "input": {
+        "CacheClusterId": "c1",
+        "EngineVersion": "7.0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheCluster": {
+          "CacheClusterId": "c1",
+          "CacheClusterStatus": "available",
+          "CacheNodeType": "cache.t3.micro",
+          "Engine": "redis",
+          "EngineVersion": "7.0"
+        }
+      }
+    },
+    {
+      "operation": "RebootCacheCluster",
+      "input": {
+        "CacheClusterId": "c1",
+        "CacheNodeIdsToReboot": [
+          "1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheCluster": {
+          "CacheClusterId": "c1",
+          "CacheClusterStatus": "rebooting",
+          "CacheNodeType": "cache.t3.micro",
+          "Engine": "redis",
+          "EngineVersion": "7.0"
+        }
+      }
+    },
+    {
+      "operation": "CreateCacheCluster",
+      "input": {
+        "CacheClusterId": "c2",
+        "Engine": "memcached"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheCluster": {
+          "CacheClusterId": "c2",
+          "CacheClusterStatus": "available",
+          "CacheNodeType": "",
+          "Engine": "memcached"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCacheClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheClusters": [
+          {
+            "CacheClusterId": "c1",
+            "CacheClusterStatus": "rebooting",
+            "CacheNodeType": "cache.t3.micro",
+            "Engine": "redis",
+            "EngineVersion": "7.0"
+          },
+          {
+            "CacheClusterId": "c2",
+            "CacheClusterStatus": "available",
+            "CacheNodeType": "",
+            "Engine": "memcached"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCacheCluster",
+      "input": {
+        "CacheClusterId": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheCluster": {
+          "CacheClusterId": "c1",
+          "CacheClusterStatus": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DeleteCacheCluster",
+      "input": {
+        "CacheClusterId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheCluster": {
+          "CacheClusterId": "ghost",
+          "CacheClusterStatus": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCacheClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheClusters": [
+          {
+            "CacheClusterId": "c2",
+            "CacheClusterStatus": "available",
+            "CacheNodeType": "",
+            "Engine": "memcached"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateReplicationGroup",
+      "input": {
+        "ReplicationGroupDescription": "d",
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationGroups",
+      "input": {
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroups": [
+          {
+            "ReplicationGroupId": "r1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeReplicationGroups",
+      "input": {
+        "ReplicationGroupId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyReplicationGroup",
+      "input": {
+        "EngineVersion": "7.1",
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "EngineVersion": "7.1",
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "IncreaseReplicaCount",
+      "input": {
+        "ApplyImmediately": true,
+        "NewReplicaCount": 2,
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "EngineVersion": "7.1",
+          "LastAction": "IncreaseReplicaCount",
+          "Replicas": 2,
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DecreaseReplicaCount",
+      "input": {
+        "ApplyImmediately": true,
+        "NewReplicaCount": 1,
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "EngineVersion": "7.1",
+          "LastAction": "DecreaseReplicaCount",
+          "Replicas": 1,
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "ModifyReplicationGroupShardConfiguration",
+      "input": {
+        "ApplyImmediately": true,
+        "NodeGroupCount": 2,
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "ApplyImmediately": true,
+          "EngineVersion": "7.1",
+          "LastAction": "DecreaseReplicaCount",
+          "NodeGroupCount": 2,
+          "Replicas": 1,
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "StartMigration",
+      "input": {
+        "CustomerNodeEndpointList": [
+          {
+            "Address": "h",
+            "Port": 6379
+          }
+        ],
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "ApplyImmediately": true,
+          "EngineVersion": "7.1",
+          "LastAction": "DecreaseReplicaCount",
+          "Migration": "StartMigration",
+          "NodeGroupCount": 2,
+          "Replicas": 1,
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "CompleteMigration",
+      "input": {
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "ApplyImmediately": true,
+          "EngineVersion": "7.1",
+          "LastAction": "DecreaseReplicaCount",
+          "Migration": "CompleteMigration",
+          "NodeGroupCount": 2,
+          "Replicas": 1,
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "TestMigration",
+      "input": {
+        "CustomerNodeEndpointList": [
+          {
+            "Address": "h",
+            "Port": 6379
+          }
+        ],
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "ApplyImmediately": true,
+          "EngineVersion": "7.1",
+          "LastAction": "DecreaseReplicaCount",
+          "Migration": "TestMigration",
+          "NodeGroupCount": 2,
+          "Replicas": 1,
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "TestFailover",
+      "input": {
+        "NodeGroupId": "ng1",
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "ApplyImmediately": true,
+          "EngineVersion": "7.1",
+          "LastAction": "DecreaseReplicaCount",
+          "Migration": "TestFailover",
+          "NodeGroupCount": 2,
+          "Replicas": 1,
+          "ReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroups": [
+          {
+            "ApplyImmediately": true,
+            "EngineVersion": "7.1",
+            "LastAction": "DecreaseReplicaCount",
+            "Migration": "TestFailover",
+            "NodeGroupCount": 2,
+            "Replicas": 1,
+            "ReplicationGroupId": "r1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteReplicationGroup",
+      "input": {
+        "ReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "ReplicationGroupId": "r1",
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DeleteReplicationGroup",
+      "input": {
+        "ReplicationGroupId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroup": {
+          "ReplicationGroupId": "ghost",
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationGroups": null
+      }
+    },
+    {
+      "operation": "CreateCacheSubnetGroup",
+      "input": {
+        "CacheSubnetGroupDescription": "d",
+        "CacheSubnetGroupName": "sn1",
+        "SubnetIds": [
+          "s1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheSubnetGroup": {
+          "CacheSubnetGroupName": "sn1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCacheSubnetGroups",
+      "input": {
+        "CacheSubnetGroupName": "sn1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheSubnetGroups": [
+          {
+            "CacheSubnetGroupName": "sn1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCacheSubnetGroups",
+      "input": {
+        "CacheSubnetGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyCacheSubnetGroup",
+      "input": {
+        "CacheSubnetGroupDescription": "d2",
+        "CacheSubnetGroupName": "sn1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheSubnetGroup": {
+          "CacheSubnetGroupDescription": "d2",
+          "CacheSubnetGroupName": "sn1"
+        }
+      }
+    },
+    {
+      "operation": "DeleteCacheSubnetGroup",
+      "input": {
+        "CacheSubnetGroupName": "sn1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteCacheSubnetGroup",
+      "input": {
+        "CacheSubnetGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeCacheSubnetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheSubnetGroups": null
+      }
+    },
+    {
+      "operation": "CreateSnapshot",
+      "input": {
+        "SnapshotName": "snap0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Snapshot": {
+          "CacheClusterId": "",
+          "SnapshotName": "snap0"
+        }
+      }
+    },
+    {
+      "operation": "CreateSnapshot",
+      "input": {
+        "CacheClusterId": "c2",
+        "SnapshotName": "snap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Snapshot": {
+          "CacheClusterId": "c2",
+          "SnapshotName": "snap1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeSnapshots",
+      "input": {
+        "SnapshotName": "snap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Snapshots": [
+          {
+            "CacheClusterId": "c2",
+            "SnapshotName": "snap1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeSnapshots",
+      "input": {
+        "SnapshotName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CopySnapshot",
+      "input": {
+        "SourceSnapshotName": "snap1",
+        "TargetSnapshotName": "snap2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Snapshot": {
+          "CacheClusterId": "c2",
+          "SnapshotName": "snap2"
+        }
+      }
+    },
+    {
+      "operation": "CopySnapshot",
+      "input": {
+        "SourceSnapshotName": "ghost",
+        "TargetSnapshotName": "snap3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Snapshot": {
+          "SnapshotName": "snap3"
+        }
+      }
+    },
+    {
+      "operation": "DescribeSnapshots",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Snapshots": [
+          {
+            "CacheClusterId": "",
+            "SnapshotName": "snap0"
+          },
+          {
+            "CacheClusterId": "c2",
+            "SnapshotName": "snap1"
+          },
+          {
+            "CacheClusterId": "c2",
+            "SnapshotName": "snap2"
+          },
+          {
+            "SnapshotName": "snap3"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteSnapshot",
+      "input": {
+        "SnapshotName": "snap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteSnapshot",
+      "input": {
+        "SnapshotName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AddTagsToResource",
+      "input": {
+        "ResourceName": "arn:ec:c1",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceName": "arn:ec:c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceName": "arn:ec:ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": []
+      }
+    },
+    {
+      "operation": "RemoveTagsFromResource",
+      "input": {
+        "ResourceName": "arn:ec:c1",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceName": "arn:ec:c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": []
+      }
+    },
+    {
+      "operation": "RemoveTagsFromResource",
+      "input": {
+        "ResourceName": "arn:ec:ghost",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "AccessString": "on ~* +@all",
+        "Engine": "redis",
+        "UserId": "u1",
+        "UserName": "un1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "AccessString": "on ~* +@all",
+          "Engine": "redis",
+          "Status": "active",
+          "UserId": "u1",
+          "UserName": "un1"
+        }
+      },
+      "superseded": "the pack wrapped its answer in a User member, but the operation's output shape is User itself -- flat, with no such member; the bundle answers the declared flat members"
+    },
+    {
+      "operation": "DescribeUsers",
+      "input": {
+        "UserId": "u1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "AccessString": "on ~* +@all",
+            "Engine": "redis",
+            "Status": "active",
+            "UserId": "u1",
+            "UserName": "un1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeUsers",
+      "input": {
+        "UserId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyUser",
+      "input": {
+        "Engine": "valkey",
+        "UserId": "u1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Engine": "valkey",
+          "Status": "active",
+          "UserId": "u1"
+        }
+      },
+      "superseded": "the pack wrapped its answer in a User member, but the operation's output shape is User itself -- flat, with no such member; the bundle answers the declared flat members"
+    },
+    {
+      "operation": "DescribeUsers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "Engine": "valkey",
+            "Status": "active",
+            "UserId": "u1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "UserId": "u1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": "deleting",
+        "UserId": "u1"
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "UserId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": "deleting",
+        "UserId": "ghost"
+      }
+    },
+    {
+      "operation": "DescribeUsers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": null
+      }
+    },
+    {
+      "operation": "CreateUserGroup",
+      "input": {
+        "Engine": "redis",
+        "UserGroupId": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserGroup": {
+          "Engine": "redis",
+          "Status": "active",
+          "UserGroupId": "g1"
+        }
+      },
+      "superseded": "the pack wrapped its answer in a UserGroup member, but the operation's output shape is UserGroup itself -- flat, with no such member; the bundle answers the declared flat members"
+    },
+    {
+      "operation": "DescribeUserGroups",
+      "input": {
+        "UserGroupId": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserGroups": [
+          {
+            "Engine": "redis",
+            "Status": "active",
+            "UserGroupId": "g1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeUserGroups",
+      "input": {
+        "UserGroupId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyUserGroup",
+      "input": {
+        "UserGroupId": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserGroup": {
+          "Status": "active",
+          "UserGroupId": "g1"
+        }
+      },
+      "superseded": "the pack wrapped its answer in a UserGroup member, but the operation's output shape is UserGroup itself -- flat, with no such member; the bundle answers the declared flat members"
+    },
+    {
+      "operation": "DescribeUserGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserGroups": [
+          {
+            "Status": "active",
+            "UserGroupId": "g1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUserGroup",
+      "input": {
+        "UserGroupId": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteUserGroup",
+      "input": {
+        "UserGroupId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateServerlessCache",
+      "input": {
+        "Engine": "redis",
+        "ServerlessCacheName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCache": {
+          "Engine": "redis",
+          "ServerlessCacheName": "s1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeServerlessCaches",
+      "input": {
+        "ServerlessCacheName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCaches": [
+          {
+            "Engine": "redis",
+            "ServerlessCacheName": "s1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeServerlessCaches",
+      "input": {
+        "ServerlessCacheName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyServerlessCache",
+      "input": {
+        "Description": "d",
+        "ServerlessCacheName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCache": {
+          "Description": "d",
+          "ServerlessCacheName": "s1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeServerlessCaches",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCaches": [
+          {
+            "Description": "d",
+            "ServerlessCacheName": "s1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteServerlessCache",
+      "input": {
+        "ServerlessCacheName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCache": {
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DeleteServerlessCache",
+      "input": {
+        "ServerlessCacheName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCache": {
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "CreateServerlessCacheSnapshot",
+      "input": {
+        "ServerlessCacheName": "s1",
+        "ServerlessCacheSnapshotName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCacheSnapshot": {
+          "ServerlessCacheName": "s1",
+          "ServerlessCacheSnapshotName": "ss1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeServerlessCacheSnapshots",
+      "input": {
+        "ServerlessCacheSnapshotName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCacheSnapshots": [
+          {
+            "ServerlessCacheName": "s1",
+            "ServerlessCacheSnapshotName": "ss1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeServerlessCacheSnapshots",
+      "input": {
+        "ServerlessCacheSnapshotName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CopyServerlessCacheSnapshot",
+      "input": {
+        "SourceServerlessCacheSnapshotName": "ss1",
+        "TargetServerlessCacheSnapshotName": "ss2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCacheSnapshot": {
+          "ServerlessCacheName": "s1",
+          "ServerlessCacheSnapshotName": "ss2",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "CopyServerlessCacheSnapshot",
+      "input": {
+        "SourceServerlessCacheSnapshotName": "ghost",
+        "TargetServerlessCacheSnapshotName": "ss3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCacheSnapshot": {
+          "ServerlessCacheSnapshotName": "ss3",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeServerlessCacheSnapshots",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCacheSnapshots": [
+          {
+            "ServerlessCacheName": "s1",
+            "ServerlessCacheSnapshotName": "ss1",
+            "Status": "available"
+          },
+          {
+            "ServerlessCacheName": "s1",
+            "ServerlessCacheSnapshotName": "ss2",
+            "Status": "available"
+          },
+          {
+            "ServerlessCacheSnapshotName": "ss3",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ExportServerlessCacheSnapshot",
+      "input": {
+        "S3BucketName": "b",
+        "ServerlessCacheSnapshotName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerlessCacheSnapshot": {
+          "Status": "exporting"
+        }
+      }
+    },
+    {
+      "operation": "DeleteServerlessCacheSnapshot",
+      "input": {
+        "ServerlessCacheSnapshotName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteServerlessCacheSnapshot",
+      "input": {
+        "ServerlessCacheSnapshotName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateGlobalReplicationGroup",
+      "input": {
+        "GlobalReplicationGroupIdSuffix": "x1",
+        "PrimaryReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroup": {
+          "GlobalReplicationGroupIdSuffix": "x1",
+          "PrimaryReplicationGroupId": "r1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeGlobalReplicationGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroups": [
+          {
+            "GlobalReplicationGroupIdSuffix": "x1",
+            "PrimaryReplicationGroupId": "r1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeGlobalReplicationGroups",
+      "input": {
+        "GlobalReplicationGroupId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyGlobalReplicationGroup",
+      "input": {
+        "ApplyImmediately": true,
+        "GlobalReplicationGroupId": "mg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroup": {
+          "ApplyImmediately": true,
+          "GlobalReplicationGroupId": "mg1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "IncreaseNodeGroupsInGlobalReplicationGroup",
+      "input": {
+        "ApplyImmediately": true,
+        "GlobalReplicationGroupId": "mg1",
+        "NodeGroupCount": 3
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroup": {
+          "ApplyImmediately": true,
+          "GlobalReplicationGroupId": "mg1",
+          "LastAction": "IncreaseNodeGroupsInGlobalReplicationGroup",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DecreaseNodeGroupsInGlobalReplicationGroup",
+      "input": {
+        "ApplyImmediately": true,
+        "GlobalReplicationGroupId": "mg1",
+        "NodeGroupCount": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroup": {
+          "ApplyImmediately": true,
+          "GlobalReplicationGroupId": "mg1",
+          "LastAction": "DecreaseNodeGroupsInGlobalReplicationGroup",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "RebalanceSlotsInGlobalReplicationGroup",
+      "input": {
+        "ApplyImmediately": true,
+        "GlobalReplicationGroupId": "mg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroup": {
+          "ApplyImmediately": true,
+          "GlobalReplicationGroupId": "mg1",
+          "LastAction": "RebalanceSlotsInGlobalReplicationGroup",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "FailoverGlobalReplicationGroup",
+      "input": {
+        "GlobalReplicationGroupId": "mg1",
+        "PrimaryRegion": "us-east-1",
+        "PrimaryReplicationGroupId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroup": {
+          "ApplyImmediately": true,
+          "GlobalReplicationGroupId": "mg1",
+          "LastAction": "FailoverGlobalReplicationGroup",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeGlobalReplicationGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroups": [
+          {
+            "GlobalReplicationGroupIdSuffix": "x1",
+            "PrimaryReplicationGroupId": "r1",
+            "Status": "available"
+          },
+          {
+            "ApplyImmediately": true,
+            "GlobalReplicationGroupId": "mg1",
+            "LastAction": "FailoverGlobalReplicationGroup",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DisassociateGlobalReplicationGroup",
+      "input": {
+        "GlobalReplicationGroupId": "mg1",
+        "ReplicationGroupId": "r1",
+        "ReplicationGroupRegion": "us-east-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteGlobalReplicationGroup",
+      "input": {
+        "GlobalReplicationGroupId": "ghost",
+        "RetainPrimaryReplicationGroup": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeGlobalReplicationGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalReplicationGroups": [
+          {
+            "GlobalReplicationGroupIdSuffix": "x1",
+            "PrimaryReplicationGroupId": "r1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateCacheParameterGroup",
+      "input": {
+        "CacheParameterGroupFamily": "redis7",
+        "CacheParameterGroupName": "pg1",
+        "Description": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheParameterGroup": {
+          "CacheParameterGroupFamily": "redis7",
+          "CacheParameterGroupName": "pg1",
+          "Description": "d"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCacheParameterGroups",
+      "input": {
+        "CacheParameterGroupName": "pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheParameterGroups": [
+          {
+            "CacheParameterGroupFamily": "redis7",
+            "CacheParameterGroupName": "pg1",
+            "Description": "d"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCacheParameterGroups",
+      "input": {
+        "CacheParameterGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyCacheParameterGroup",
+      "input": {
+        "CacheParameterGroupName": "pg1",
+        "ParameterNameValues": [
+          {
+            "ParameterName": "a",
+            "ParameterValue": "b"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheParameterGroup": {
+          "CacheParameterGroupName": "pg1",
+          "ParameterNameValues": [
+            {
+              "ParameterName": "a",
+              "ParameterValue": "b"
+            }
+          ]
+        }
+      },
+      "superseded": "the pack wrapped its answer in a CacheParameterGroup member the CacheParameterGroupNameMessage shape does not declare; the bundle answers the declared CacheParameterGroupName"
+    },
+    {
+      "operation": "DescribeCacheParameterGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheParameterGroups": [
+          {
+            "CacheParameterGroupName": "pg1",
+            "ParameterNameValues": [
+              {
+                "ParameterName": "a",
+                "ParameterValue": "b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ResetCacheParameterGroup",
+      "input": {
+        "CacheParameterGroupName": "pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheParameterGroup": {
+          "CacheParameterGroupName": "pg1"
+        }
+      },
+      "superseded": "the pack wrapped its answer in a CacheParameterGroup member the CacheParameterGroupNameMessage shape does not declare; the bundle answers the declared CacheParameterGroupName"
+    },
+    {
+      "operation": "DescribeCacheParameterGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheParameterGroups": [
+          {
+            "CacheParameterGroupName": "pg1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCacheParameterGroup",
+      "input": {
+        "CacheParameterGroupName": "pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteCacheParameterGroup",
+      "input": {
+        "CacheParameterGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateCacheSecurityGroup",
+      "input": {
+        "CacheSecurityGroupName": "sg1",
+        "Description": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheSecurityGroup": {
+          "CacheSecurityGroupName": "sg1",
+          "Description": "d"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCacheSecurityGroups",
+      "input": {
+        "CacheSecurityGroupName": "sg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheSecurityGroups": [
+          {
+            "CacheSecurityGroupName": "sg1",
+            "Description": "d"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCacheSecurityGroups",
+      "input": {
+        "CacheSecurityGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AuthorizeCacheSecurityGroupIngress",
+      "input": {
+        "CacheSecurityGroupName": "sg1",
+        "EC2SecurityGroupName": "e1",
+        "EC2SecurityGroupOwnerId": "o1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheSecurityGroup": {
+          "CacheSecurityGroupName": "sg1",
+          "Description": "d",
+          "EC2SecurityGroupName": "e1",
+          "LastAction": "AuthorizeCacheSecurityGroupIngress"
+        }
+      }
+    },
+    {
+      "operation": "RevokeCacheSecurityGroupIngress",
+      "input": {
+        "CacheSecurityGroupName": "sg1",
+        "EC2SecurityGroupName": "e1",
+        "EC2SecurityGroupOwnerId": "o1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheSecurityGroup": {
+          "CacheSecurityGroupName": "sg1",
+          "Description": "d",
+          "EC2SecurityGroupName": "e1",
+          "LastAction": "RevokeCacheSecurityGroupIngress"
+        }
+      }
+    },
+    {
+      "operation": "DeleteCacheSecurityGroup",
+      "input": {
+        "CacheSecurityGroupName": "sg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteCacheSecurityGroup",
+      "input": {
+        "CacheSecurityGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "BatchApplyUpdateAction",
+      "input": {
+        "ServiceUpdateName": "su1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProcessedUpdateActions": [],
+        "UnprocessedUpdateActions": []
+      }
+    },
+    {
+      "operation": "BatchStopUpdateAction",
+      "input": {
+        "ServiceUpdateName": "su1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProcessedUpdateActions": [],
+        "UnprocessedUpdateActions": []
+      }
+    },
+    {
+      "operation": "DescribeUpdateActions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UpdateActions": [
+          {
+            "Action": "BatchApplyUpdateAction",
+            "ServiceUpdateName": "su1"
+          },
+          {
+            "Action": "BatchStopUpdateAction",
+            "ServiceUpdateName": "su1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeServiceUpdates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceUpdates": []
+      }
+    },
+    {
+      "operation": "DescribeCacheEngineVersions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CacheEngineVersions": [
+          {
+            "Engine": "redis",
+            "EngineVersion": "7.0"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeEvents",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Events": []
+      }
+    },
+    {
+      "operation": "DescribeCacheParameters",
+      "input": {
+        "CacheParameterGroupName": "pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameters": [
+          {
+            "ParameterName": "maxmemory-policy",
+            "ParameterValue": "volatile-lru"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeEngineDefaultParameters",
+      "input": {
+        "CacheParameterGroupFamily": "redis7"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameters": [
+          {
+            "ParameterName": "maxmemory-policy",
+            "ParameterValue": "volatile-lru"
+          }
+        ]
+      },
+      "superseded": "the pack answered a Parameters member that DescribeEngineDefaultParametersResult does not declare (it declares only EngineDefaults); the bundle answers nothing"
+    },
+    {
+      "operation": "ListAllowedNodeTypeModifications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScaleDownModifications": [
+          "cache.t3.micro"
+        ],
+        "ScaleUpModifications": [
+          "cache.t3.small"
+        ]
+      }
+    },
+    {
+      "operation": "PurchaseReservedCacheNodesOffering",
+      "input": {
+        "ReservedCacheNodesOfferingId": "off-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReservedCacheNode": {
+          "ReservedCacheNodeId": "5f59f223",
+          "ReservedCacheNodesOfferingId": "off-1",
+          "State": "payment-pending"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReservedCacheNodes",
+      "input": {
+        "ReservedCacheNodeId": {
+          "$fromPath": "ReservedCacheNode.ReservedCacheNodeId",
+          "$fromStep": 116
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReservedCacheNodes": [
+          {
+            "ReservedCacheNodeId": "5f59f223",
+            "ReservedCacheNodesOfferingId": "off-1",
+            "State": "payment-pending"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeReservedCacheNodes",
+      "input": {
+        "ReservedCacheNodeId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "CacheClusterNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeReservedCacheNodes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReservedCacheNodes": [
+          {
+            "ReservedCacheNodeId": "5f59f223",
+            "ReservedCacheNodesOfferingId": "off-1",
+            "State": "payment-pending"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeReservedCacheNodesOfferings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReservedCacheNodesOfferings": [
+          {
+            "CacheNodeType": "cache.t3.micro",
+            "Duration": 31536000,
+            "ReservedCacheNodesOfferingId": "off-1"
+          }
+        ]
+      },
+      "superseded_members": {
+        "ReservedCacheNodesOfferings[0].Duration": "a recording round-trips through JSON, where the pack's int 31536000 loads back as a float; the member compares 3.1536e+07 against 31536000 on every replay, pack or bundle, so the number is excused rather than misrecorded"
+      }
+    }
+  ]
+}

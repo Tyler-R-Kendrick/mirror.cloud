@@ -1,0 +1,475 @@
+{
+  "schema": "trace/1",
+  "service": "aws.cloudfront",
+  "source": "pack:internal/services/aws/cloudfront@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The pack answered members its response shapes do not declare -- Id, DomainName and Status beside Distribution, Id and Status beside Invalidation, and flat Items/Quantity bodies for the two lists where the model wraps the page in DistributionList and InvalidationList -- so every such step is superseded, and the bundle answers the declared members. GetDistributionConfig and UpdateDistribution declare only what the pack answered, so they gate fully except the DomainName and ARN, which embed the generated distribution id no fixed recording can name.",
+  "steps": [
+    {
+      "operation": "ListDistributions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsTruncated": false,
+        "Items": null,
+        "Quantity": 0
+      },
+      "superseded": "the pack answered flat Items/Quantity/IsTruncated members; ListDistributionsResult declares the page wrapped in DistributionList, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "GetDistribution",
+      "input": {
+        "Id": "e0000000000000ff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchDistribution",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetDistributionConfig",
+      "input": {
+        "Id": "e0000000000000ff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchDistribution",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDistribution",
+      "input": {
+        "CallerReference": "ref-1",
+        "DomainName": "bucket.s3.amazonaws.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Distribution": {
+          "ARN": "arn:aws:cloudfront::000000000000:distribution/ea00000000000001",
+          "CallerReference": "ref-1",
+          "DomainName": "ea00000000000001.cloudfront.net",
+          "Id": "ea00000000000001",
+          "OriginDomainName": "bucket.s3.amazonaws.com",
+          "Status": "Deployed"
+        },
+        "DomainName": "ea00000000000001.cloudfront.net",
+        "ETag": "ea00000000000001",
+        "Id": "ea00000000000001",
+        "Status": "Deployed"
+      },
+      "superseded": "the pack answered Id, DomainName and Status at the top level; CreateDistributionResult declares Distribution, ETag and Location, and the bundle answers the record under Distribution and the ETag"
+    },
+    {
+      "operation": "GetDistribution",
+      "input": {
+        "Id": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Distribution": {
+          "ARN": "arn:aws:cloudfront::000000000000:distribution/ea00000000000001",
+          "CallerReference": "ref-1",
+          "DomainName": "ea00000000000001.cloudfront.net",
+          "Id": "ea00000000000001",
+          "OriginDomainName": "bucket.s3.amazonaws.com",
+          "Status": "Deployed"
+        },
+        "ETag": "ea00000000000001",
+        "Id": "ea00000000000001",
+        "Status": "Deployed"
+      },
+      "superseded": "the pack answered Id and Status at the top level; GetDistributionResult declares only Distribution and ETag, and the bundle answers the declared members"
+    },
+    {
+      "operation": "GetDistributionConfig",
+      "input": {
+        "Id": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DistributionConfig": {
+          "ARN": "arn:aws:cloudfront::000000000000:distribution/ea00000000000001",
+          "CallerReference": "ref-1",
+          "DomainName": "ea00000000000001.cloudfront.net",
+          "Id": "ea00000000000001",
+          "OriginDomainName": "bucket.s3.amazonaws.com",
+          "Status": "Deployed"
+        },
+        "ETag": "ea00000000000001"
+      },
+      "superseded_members": {
+        "DistributionConfig.ARN": "the ARN embeds the generated distribution id, which no fixed recording can name; every other member of this step is still compared",
+        "DistributionConfig.DomainName": "the domain name embeds the generated distribution id, which no fixed recording can name; every other member of this step is still compared"
+      }
+    },
+    {
+      "operation": "UpdateDistribution",
+      "input": {
+        "Id": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Distribution": {
+          "ARN": "arn:aws:cloudfront::000000000000:distribution/ea00000000000001",
+          "CallerReference": "ref-1",
+          "DomainName": "ea00000000000001.cloudfront.net",
+          "Id": "ea00000000000001",
+          "OriginDomainName": "bucket.s3.amazonaws.com",
+          "Status": "Deployed"
+        },
+        "ETag": "ea00000000000001"
+      },
+      "superseded_members": {
+        "Distribution.ARN": "the ARN embeds the generated distribution id, which no fixed recording can name; every other member of this step is still compared",
+        "Distribution.DomainName": "the domain name embeds the generated distribution id, which no fixed recording can name; every other member of this step is still compared"
+      }
+    },
+    {
+      "operation": "CreateInvalidation",
+      "input": {
+        "DistributionId": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        },
+        "InvalidationBatch": {
+          "CallerReference": "inv-1",
+          "Paths": {
+            "Items": [
+              "/*"
+            ],
+            "Quantity": 1
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "ia00000000000001",
+        "Invalidation": {
+          "DistributionId": "ea00000000000001",
+          "Id": "ia00000000000001",
+          "Status": "Completed"
+        },
+        "Status": "Completed"
+      },
+      "superseded": "the pack answered Id and Status at the top level; CreateInvalidationResult declares Invalidation and Location, and the bundle answers the declared members"
+    },
+    {
+      "operation": "GetInvalidation",
+      "input": {
+        "DistributionId": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        },
+        "Id": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        },
+        "InvalidationId": {
+          "$fromStep": 7,
+          "$fromPath": "Invalidation.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "ia00000000000001",
+        "Invalidation": {
+          "DistributionId": "ea00000000000001",
+          "Id": "ia00000000000001",
+          "Status": "Completed"
+        },
+        "Status": "Completed"
+      },
+      "superseded": "the pack answered Id and Status at the top level; GetInvalidationResult declares only Invalidation, and the bundle answers the declared members. The input carries the pack's own InvalidationId member name beside the declared ones: with the model's spelling alone the pack resolves the distribution id from Id first, which here is the invalidation's id, and faults -- the next step gates that"
+    },
+    {
+      "operation": "GetInvalidation",
+      "input": {
+        "DistributionId": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        },
+        "Id": {
+          "$fromStep": 7,
+          "$fromPath": "Invalidation.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchInvalidation",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetInvalidation",
+      "input": {
+        "DistributionId": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        },
+        "Id": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        },
+        "InvalidationId": "i0000000000000ff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchInvalidation",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListInvalidations",
+      "input": {
+        "DistributionId": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "DistributionId": "ea00000000000001",
+            "Id": "ia00000000000001",
+            "Status": "Completed"
+          }
+        ],
+        "Quantity": 1
+      },
+      "superseded": "the pack answered flat Items/Quantity members; ListInvalidationsResult declares the page wrapped in InvalidationList, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "CreateInvalidation",
+      "input": {
+        "DistributionId": "e0000000000000ff",
+        "InvalidationBatch": {
+          "CallerReference": "inv-2",
+          "Paths": {
+            "Items": [
+              "/index.html"
+            ],
+            "Quantity": 1
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "ia00000000000002",
+        "Invalidation": {
+          "DistributionId": "e0000000000000ff",
+          "Id": "ia00000000000002",
+          "Status": "Completed"
+        },
+        "Status": "Completed"
+      },
+      "superseded": "the pack answered Id and Status at the top level; CreateInvalidationResult declares Invalidation and Location, and the bundle answers the declared members. The distribution was never created: the pack does not check, and this step gates that an invalidation for an absent distribution still succeeds"
+    },
+    {
+      "operation": "ListDistributions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsTruncated": false,
+        "Items": [
+          {
+            "ARN": "arn:aws:cloudfront::000000000000:distribution/ea00000000000001",
+            "CallerReference": "ref-1",
+            "DomainName": "ea00000000000001.cloudfront.net",
+            "Id": "ea00000000000001",
+            "OriginDomainName": "bucket.s3.amazonaws.com",
+            "Status": "Deployed"
+          }
+        ],
+        "Quantity": 1
+      },
+      "superseded": "the pack answered flat Items/Quantity/IsTruncated members; ListDistributionsResult declares the page wrapped in DistributionList, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "DeleteDistribution",
+      "input": {
+        "Id": "e0000000000000ee"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDistribution",
+      "input": {
+        "Id": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDistribution",
+      "input": {
+        "Id": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchDistribution",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateDistribution",
+      "input": {
+        "Id": {
+          "$fromStep": 3,
+          "$fromPath": "ETag"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchDistribution",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDistributions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsTruncated": false,
+        "Items": null,
+        "Quantity": 0
+      },
+      "superseded": "the pack answered flat Items/Quantity/IsTruncated members; ListDistributionsResult declares the page wrapped in DistributionList, and the bundle answers the declared shape"
+    }
+  ]
+}

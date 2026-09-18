@@ -1,0 +1,196 @@
+schema: bir/1
+service: aws.tagging
+
+# Transcribed from the hand-written pack, not established against the real
+# service. The pack is one flat tag map per resource ARN in a single
+# collection, a sentinel "_report" record beside it, and three aggregations
+# computed over the whole account and region at read time. Nothing here ever
+# faults.
+provenance: authored
+
+resources:
+  # One record per resource ARN. The pack's record was the bare tag map; here
+  # the map sits under Tags so the ARN travels with the record (a listing does
+  # not see store keys). TagResources merges into Tags, UntagResources
+  # subtracts from it, and both create the record when the ARN was never
+  # tagged -- which is why an untagged-into-existence ARN shows up in
+  # GetResources with no tags.
+  tag:
+    collection: rtags
+
+  # One record per tag key currently in use anywhere in the account and
+  # region. The pack computed GetTagKeys at read time as the sorted union of
+  # keys across all records; the collection is key-sorted, so listing it is
+  # the same answer, and UntagResources restores a key it deleted when an ARN
+  # outside the request still carries it.
+  tagkey:
+    collection: rtagkeys
+
+  # The pack wrote the literal bytes "RUNNING" under "_report" in the same
+  # collection as the tag maps, so the sentinel leaks into GetResources as a
+  # resource named "_report" whose tags do not parse. The record lives in the
+  # same collection here for the same reason; the projection names it.
+  report:
+    collection: rtags
+    singleton: _report
+    record:
+      Status: "'RUNNING'"
+
+operations:
+  TagResources:
+    select:
+      binding: cur
+      resource: tag
+      filter: "'Tags' in item && 'ARN' in item && input.ResourceARNList.exists(a, a == item.ARN)"
+    effects:
+      - put:
+          resource: tag
+          for_each: input.ResourceARNList
+          key: item
+          record:
+            ARN: item
+            Tags: "merge(cur.filter(r, r.ARN == item).size() > 0 ? cur.filter(r, r.ARN == item)[0].Tags : {}, input.Tags)"
+      - put:
+          resource: tagkey
+          for_each: "input.Tags.map(k, k)"
+          key: item
+          record:
+            Key: item
+    output:
+      FailedResourcesMap: "{}"
+
+  UntagResources:
+    select:
+      binding: cur
+      resource: tag
+      filter: "'Tags' in item && 'ARN' in item"
+    effects:
+      - delete:
+          resource: tagkey
+          where: "input.TagKeys.exists(k, k == item.Key)"
+      # A key survives its untagging when an ARN outside the request still
+      # carries it; the pack saw that at read time, so the key's record is
+      # put back here. The pre-untag selection is the right evidence: an ARN
+      # in the request loses exactly the named keys.
+      - put:
+          resource: tagkey
+          for_each: "input.TagKeys.filter(k, cur.exists(r, k in r.Tags && !input.ResourceARNList.exists(a, a == r.ARN)))"
+          key: item
+          record:
+            Key: item
+      - put:
+          resource: tag
+          for_each: input.ResourceARNList
+          key: item
+          record:
+            ARN: item
+            Tags: "without(cur.filter(r, r.ARN == item).size() > 0 ? cur.filter(r, r.ARN == item)[0].Tags : {}, input.TagKeys)"
+    output:
+      FailedResourcesMap: "{}"
+
+  # The pack ignored every filter and pagination member the operation
+  # declares -- ResourceARNList, TagFilters, ResourceTypeFilters, the lot --
+  # and listed the whole collection, sentinel record included.
+  GetResources:
+    list:
+      resource: tag
+      member: ResourceTagMappingList
+      paginate: model
+    output:
+      ResourceTagMappingList: >
+        items.map(r, {
+          'ResourceARN': 'ARN' in r ? r.ARN : '_report',
+          'Tags': 'Tags' in r ? r.Tags.map(k, {'Key': k, 'Value': r.Tags[k]}) : []
+        })
+
+  GetTagKeys:
+    list:
+      resource: tagkey
+      member: TagKeys
+      paginate: model
+    output:
+      TagKeys: "items.map(k, k.Key)"
+
+  # The pack answered in store order with duplicates removed, first
+  # occurrence winning -- no sort. CEL has no dedup, so the first-occurrence
+  # filter is spelled out over indices; and a let evaluates before select
+  # binds, so the values expression is inlined rather than named.
+  GetTagValues:
+    select:
+      binding: cur
+      resource: tag
+      filter: "'Tags' in item"
+    output:
+      TagValues: >
+        indices(cur.filter(r, input.Key in r.Tags).map(r, string(r.Tags[input.Key])))
+          .filter(i, !indices(cur.filter(r, input.Key in r.Tags).map(r, string(r.Tags[input.Key])))
+            .exists(j, j < i
+              && cur.filter(r, input.Key in r.Tags).map(r, string(r.Tags[input.Key]))[j]
+                == cur.filter(r, input.Key in r.Tags).map(r, string(r.Tags[input.Key]))[i]))
+          .map(i, cur.filter(r, input.Key in r.Tags).map(r, string(r.Tags[input.Key]))[i])
+
+  GetComplianceSummary:
+    output:
+      SummaryList: "[]"
+
+  StartReportCreation:
+    effects:
+      - put: { resource: report }
+    output: {}
+
+  DescribeReportCreation:
+    reads:
+      r: { resource: report }
+    output:
+      Status: "r_found ? string(r.Status) : 'FAILED'"
+
+  ListRequiredTags:
+    output:
+      RequiredTags: "[]"
+
+quirks:
+  - operation: TagResources
+    note: >
+      FailedResourcesMap is always empty: tagging an ARN that names nothing
+      anywhere succeeds and creates the resource's record, where the real
+      service reports the ARN in FailedResourcesMap. Tagging merges into the
+      existing map, so two calls accumulate; the model requires
+      ResourceARNList and Tags and the engine rejects a request without them,
+      which the pack accepted as an empty write. UntagResources is the same
+      shape with the same quirks, and it too creates an empty record for an
+      ARN that was never tagged -- the record then appears in GetResources
+      with no tags.
+  - operation: GetResources
+    note: >
+      Every filter member the model declares -- ResourceARNList, TagFilters,
+      ResourceTypeFilters, ExcludeCompliantResources, IncludeComplianceDetails
+      and the pagination pair -- is ignored: the answer is always every record
+      in the account and region. After StartReportCreation the internal
+      "_report" record leaks into the listing as a resource named "_report"
+      with no tags, because the pack stored the report sentinel in the same
+      collection as the tag maps. The order of tags within one resource was
+      map-iteration order in the pack and is unspecified here; the recording
+      observes only single-tag resources for that reason.
+  - operation: GetTagKeys
+    note: >
+      Keys are the sorted union across every tagged resource in the account
+      and region, computed at read time in the pack and kept as one record
+      per live key here; the pack skipped the "_report" sentinel explicitly
+      and nothing else. GetTagValues is the same union for one key but NOT
+      sorted -- it answers in store order, first occurrence of each value
+      winning -- and it never skipped the sentinel, whose value simply never
+      parses as a tag map.
+  - operation: StartReportCreation
+    note: >
+      A report is RUNNING the moment it starts and stays RUNNING forever:
+      nothing completes or fails it, and starting one over another just
+      rewrites RUNNING. The model requires S3Bucket; the pack ignored it
+      entirely, and the engine now rejects a request that omits it.
+      DescribeReportCreation answers FAILED when no report was ever started,
+      with none of the ErrorMessage, S3Location or StartDate members the
+      output shape declares.
+  - operation: GetComplianceSummary
+    note: >
+      Always an empty SummaryList -- nothing is ever compliant or
+      non-compliant -- and ListRequiredTags always answers an empty
+      RequiredTags. Neither operation looks at its input at all.

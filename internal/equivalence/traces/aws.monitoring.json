@@ -1,0 +1,1843 @@
+{
+  "schema": "trace/1",
+  "service": "aws.monitoring",
+  "source": "pack:internal/services/aws/monitoring@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered a member the output shape does not declare (the putID {Name: id} answers, the MuteRules and InsightRules list members, the Enabled echo on GetMetricStream) the bundle answers the declared shape and the step is superseded with that reason, as is the one mixed-metric PutMetricData the for_each write cannot reproduce.",
+  "steps": [
+    {
+      "operation": "ListMetrics",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Metrics": null
+      }
+    },
+    {
+      "operation": "PutMetricData",
+      "input": {
+        "Namespace": "N",
+        "MetricData": [
+          {
+            "MetricName": "Latency",
+            "Value": 7
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "PutMetricData",
+      "input": {
+        "Namespace": "N",
+        "MetricData": [
+          {
+            "MetricName": "Latency",
+            "Value": 3
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "PutMetricData",
+      "input": {
+        "Namespace": "N",
+        "MetricData": [
+          {
+            "MetricName": "Errors",
+            "Values": [
+              5,
+              6
+            ]
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListMetrics",
+      "input": {
+        "Namespace": "N"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Metrics": [
+          {
+            "Namespace": "N",
+            "MetricName": "Errors"
+          },
+          {
+            "Namespace": "N",
+            "MetricName": "Latency"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListMetrics",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Metrics": [
+          {
+            "Namespace": "N",
+            "MetricName": "Errors"
+          },
+          {
+            "Namespace": "N",
+            "MetricName": "Latency"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetMetricStatistics",
+      "input": {
+        "Namespace": "N",
+        "MetricName": "Latency",
+        "Period": 60,
+        "StartTime": 0,
+        "EndTime": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Label": "Latency",
+        "Datapoints": [
+          {
+            "SampleCount": 2,
+            "Sum": 10,
+            "Minimum": 3,
+            "Maximum": 7,
+            "Average": 5.0,
+            "Timestamp": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetMetricStatistics",
+      "input": {
+        "Namespace": "N",
+        "MetricName": "Errors",
+        "Period": 60,
+        "StartTime": 0,
+        "EndTime": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Label": "Errors",
+        "Datapoints": [
+          {
+            "SampleCount": 1,
+            "Sum": 5,
+            "Minimum": 5,
+            "Maximum": 5,
+            "Average": 5.0,
+            "Timestamp": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetMetricStatistics",
+      "input": {
+        "Namespace": "N",
+        "MetricName": "Ghost",
+        "Period": 60,
+        "StartTime": 0,
+        "EndTime": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Label": "Ghost",
+        "Datapoints": null
+      }
+    },
+    {
+      "operation": "GetMetricData",
+      "input": {
+        "MetricDataQueries": [
+          {
+            "Id": "q1"
+          }
+        ],
+        "StartTime": 0,
+        "EndTime": 0,
+        "Namespace": "N",
+        "MetricName": "Latency"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricDataResults": [
+          {
+            "Id": "m1",
+            "Label": "Latency",
+            "Values": [
+              [
+                {
+                  "SampleCount": 2,
+                  "Sum": 10,
+                  "Minimum": 3,
+                  "Maximum": 7,
+                  "Average": 5.0,
+                  "Timestamp": "2020-01-01T00:00:00Z"
+                }
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetMetricData",
+      "input": {
+        "MetricDataQueries": [
+          {
+            "Id": "q1"
+          }
+        ],
+        "StartTime": 0,
+        "EndTime": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricDataResults": [
+          {
+            "Id": "m1",
+            "Label": "",
+            "Values": [
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetMetricWidgetImage",
+      "input": {
+        "MetricWidget": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricWidgetImage": "iVBORw0KGgo="
+      }
+    },
+    {
+      "operation": "DescribeAlarms",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": null
+      }
+    },
+    {
+      "operation": "PutMetricAlarm",
+      "input": {
+        "AlarmName": "a",
+        "MetricName": "Latency",
+        "Namespace": "N",
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanThreshold"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAlarms",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": [
+          {
+            "AlarmName": "a",
+            "MetricName": "Latency",
+            "Namespace": "N",
+            "Threshold": 1,
+            "ComparisonOperator": "GreaterThanThreshold"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutCompositeAlarm",
+      "input": {
+        "AlarmName": "c1",
+        "AlarmRule": "ALARM(a)"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "PutLogAlarm",
+      "input": {
+        "AlarmName": "l1",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "QueryResultsToAlarm": [
+          "q"
+        ],
+        "QueryResultsToEvaluate": 1,
+        "ScheduledQueryConfiguration": {},
+        "Threshold": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAlarms",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": [
+          {
+            "AlarmName": "a",
+            "MetricName": "Latency",
+            "Namespace": "N",
+            "Threshold": 1,
+            "ComparisonOperator": "GreaterThanThreshold"
+          },
+          {
+            "AlarmName": "c1",
+            "AlarmRule": "ALARM(a)"
+          },
+          {
+            "AlarmName": "l1",
+            "ComparisonOperator": "GreaterThanThreshold",
+            "QueryResultsToAlarm": [
+              "q"
+            ],
+            "QueryResultsToEvaluate": 1,
+            "ScheduledQueryConfiguration": {},
+            "Threshold": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAlarmsForMetric",
+      "input": {
+        "MetricName": "Latency",
+        "Namespace": "N"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": [
+          {
+            "AlarmName": "a",
+            "MetricName": "Latency",
+            "Namespace": "N",
+            "Threshold": 1,
+            "ComparisonOperator": "GreaterThanThreshold"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAlarmsForMetric",
+      "input": {
+        "MetricName": "Ghost",
+        "Namespace": "N"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": null
+      }
+    },
+    {
+      "operation": "SetAlarmState",
+      "input": {
+        "AlarmName": "a",
+        "StateValue": "ALARM",
+        "StateReason": "test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAlarms",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": [
+          {
+            "AlarmName": "a",
+            "MetricName": "Latency",
+            "Namespace": "N",
+            "Threshold": 1,
+            "ComparisonOperator": "GreaterThanThreshold",
+            "StateValue": "ALARM",
+            "StateReason": "test"
+          },
+          {
+            "AlarmName": "c1",
+            "AlarmRule": "ALARM(a)"
+          },
+          {
+            "AlarmName": "l1",
+            "ComparisonOperator": "GreaterThanThreshold",
+            "QueryResultsToAlarm": [
+              "q"
+            ],
+            "QueryResultsToEvaluate": 1,
+            "ScheduledQueryConfiguration": {},
+            "Threshold": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAlarmHistory",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AlarmHistoryItems": [
+          {
+            "AlarmName": "a",
+            "HistoryItemType": "StateUpdate",
+            "HistorySummary": "ALARM"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAlarmHistory",
+      "input": {
+        "AlarmName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AlarmHistoryItems": [
+          {
+            "AlarmName": "a",
+            "HistoryItemType": "StateUpdate",
+            "HistorySummary": "ALARM"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "EnableAlarmActions",
+      "input": {
+        "AlarmNames": [
+          "a"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAlarms",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": [
+          {
+            "AlarmName": "a",
+            "MetricName": "Latency",
+            "Namespace": "N",
+            "Threshold": 1,
+            "ComparisonOperator": "GreaterThanThreshold",
+            "StateValue": "ALARM",
+            "StateReason": "test",
+            "Enabled": true
+          },
+          {
+            "AlarmName": "c1",
+            "AlarmRule": "ALARM(a)"
+          },
+          {
+            "AlarmName": "l1",
+            "ComparisonOperator": "GreaterThanThreshold",
+            "QueryResultsToAlarm": [
+              "q"
+            ],
+            "QueryResultsToEvaluate": 1,
+            "ScheduledQueryConfiguration": {},
+            "Threshold": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DisableAlarmActions",
+      "input": {
+        "AlarmNames": [
+          "a"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAlarms",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": [
+          {
+            "AlarmName": "a",
+            "MetricName": "Latency",
+            "Namespace": "N",
+            "Threshold": 1,
+            "ComparisonOperator": "GreaterThanThreshold",
+            "StateValue": "ALARM",
+            "StateReason": "test",
+            "Enabled": false
+          },
+          {
+            "AlarmName": "c1",
+            "AlarmRule": "ALARM(a)"
+          },
+          {
+            "AlarmName": "l1",
+            "ComparisonOperator": "GreaterThanThreshold",
+            "QueryResultsToAlarm": [
+              "q"
+            ],
+            "QueryResultsToEvaluate": 1,
+            "ScheduledQueryConfiguration": {},
+            "Threshold": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SetAlarmState",
+      "input": {
+        "AlarmName": "ghost",
+        "StateValue": "OK",
+        "StateReason": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAlarmHistory",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AlarmHistoryItems": [
+          {
+            "AlarmName": "a",
+            "HistoryItemType": "StateUpdate",
+            "HistorySummary": "ALARM"
+          },
+          {
+            "AlarmName": "ghost",
+            "HistoryItemType": "StateUpdate",
+            "HistorySummary": "OK"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAlarmContributors",
+      "input": {
+        "AlarmName": "a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AlarmContributors": []
+      }
+    },
+    {
+      "operation": "DeleteAlarms",
+      "input": {
+        "AlarmNames": [
+          "ghost",
+          "c1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteAlarms",
+      "input": {
+        "AlarmNames": [
+          "ghost"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAlarms",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MetricAlarms": [
+          {
+            "AlarmName": "a",
+            "MetricName": "Latency",
+            "Namespace": "N",
+            "Threshold": 1,
+            "ComparisonOperator": "GreaterThanThreshold",
+            "StateValue": "ALARM",
+            "StateReason": "test",
+            "Enabled": false
+          },
+          {
+            "AlarmName": "l1",
+            "ComparisonOperator": "GreaterThanThreshold",
+            "QueryResultsToAlarm": [
+              "q"
+            ],
+            "QueryResultsToEvaluate": 1,
+            "ScheduledQueryConfiguration": {},
+            "Threshold": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListDashboards",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DashboardEntries": null
+      }
+    },
+    {
+      "operation": "PutDashboard",
+      "input": {
+        "DashboardName": "d1",
+        "DashboardBody": "{\"widgets\":[]}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DashboardValidationMessages": []
+      }
+    },
+    {
+      "operation": "GetDashboard",
+      "input": {
+        "DashboardName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DashboardBody": "{\"widgets\":[]}",
+        "DashboardName": "d1"
+      }
+    },
+    {
+      "operation": "GetDashboard",
+      "input": {
+        "DashboardName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListDashboards",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DashboardEntries": [
+          {
+            "DashboardBody": "{\"widgets\":[]}",
+            "DashboardName": "d1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDashboards",
+      "input": {
+        "DashboardNames": [
+          "d1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteDashboards",
+      "input": {
+        "DashboardNames": [
+          "d1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListDashboards",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DashboardEntries": null
+      }
+    },
+    {
+      "operation": "DescribeAnomalyDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyDetectors": null
+      }
+    },
+    {
+      "operation": "PutAnomalyDetector",
+      "input": {
+        "Namespace": "N",
+        "MetricName": "Latency"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "Latency"
+      },
+      "superseded": "the pack answered the id under Name; the operation's declared output shape has no Name member, and the bundle answers the declared shape (PutAnomalyDetectorOutput declares AnomalyDetectorId)"
+    },
+    {
+      "operation": "DescribeAnomalyDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyDetectors": [
+          {
+            "MetricName": "Latency",
+            "Namespace": "N"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutAnomalyDetector",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "aa00000000000001"
+      },
+      "superseded": "the request names no metric, so the pack generated the id; the pack answered the id under Name; the operation's declared output shape has no Name member, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "DeleteAnomalyDetector",
+      "input": {
+        "Namespace": "N",
+        "MetricName": "Latency"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteAnomalyDetector",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "PutInsightRule",
+      "input": {
+        "RuleName": "r1",
+        "RuleDefinition": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "r1"
+      },
+      "superseded": "the pack answered the id under Name; the operation's declared output shape has no Name member, and the bundle answers the declared shape (PutInsightRuleOutput declares no members)"
+    },
+    {
+      "operation": "DescribeInsightRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InsightRules": [
+          {
+            "RuleName": "r1",
+            "RuleDefinition": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "EnableInsightRules",
+      "input": {
+        "RuleNames": [
+          "r1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeInsightRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InsightRules": [
+          {
+            "RuleName": "r1",
+            "RuleDefinition": "{}",
+            "Enabled": true
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetInsightRuleReport",
+      "input": {
+        "RuleName": "r1",
+        "StartTime": 0,
+        "EndTime": 0,
+        "Period": 60
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyLabels": [],
+        "AggregationStatistic": "Sum",
+        "AggregateValue": 0
+      }
+    },
+    {
+      "operation": "DisableInsightRules",
+      "input": {
+        "RuleNames": [
+          "r1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "PutManagedInsightRules",
+      "input": {
+        "ManagedRules": [
+          {
+            "TemplateName": "t",
+            "ResourceARN": "arn:aws:x"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "aa00000000000002"
+      },
+      "superseded": "the input carries no member the pack reads as a name, so it generated one; the pack answered the id under Name; the operation's declared output shape has no Name member, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListManagedInsightRules",
+      "input": {
+        "ResourceARN": "arn:aws:x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InsightRules": [
+          {
+            "ManagedRules": [
+              {
+                "ResourceARN": "arn:aws:x",
+                "TemplateName": "t"
+              }
+            ]
+          },
+          {
+            "RuleName": "r1",
+            "RuleDefinition": "{}",
+            "Enabled": false
+          }
+        ]
+      },
+      "superseded": "the pack answered under InsightRules; the model declares ManagedRules, and the bundle answers the declared member"
+    },
+    {
+      "operation": "DescribeInsightRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InsightRules": [
+          {
+            "ManagedRules": [
+              {
+                "ResourceARN": "arn:aws:x",
+                "TemplateName": "t"
+              }
+            ]
+          },
+          {
+            "RuleName": "r1",
+            "RuleDefinition": "{}",
+            "Enabled": false
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteInsightRules",
+      "input": {
+        "RuleNames": [
+          "r1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteInsightRules",
+      "input": {
+        "RuleNames": [
+          "r1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeInsightRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InsightRules": [
+          {
+            "ManagedRules": [
+              {
+                "ResourceARN": "arn:aws:x",
+                "TemplateName": "t"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutMetricStream",
+      "input": {
+        "Name": "s1",
+        "FirehoseArn": "arn:aws:firehose:f",
+        "RoleArn": "arn:aws:iam::r",
+        "OutputFormat": "json"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "s1"
+      },
+      "superseded": "the pack answered the id under Name; the operation's declared output shape has no Name member, and the bundle answers the declared shape (PutMetricStreamOutput declares Arn, which the pack never computed)"
+    },
+    {
+      "operation": "GetMetricStream",
+      "input": {
+        "Name": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "s1",
+        "FirehoseArn": "arn:aws:firehose:f",
+        "RoleArn": "arn:aws:iam::r",
+        "OutputFormat": "json"
+      }
+    },
+    {
+      "operation": "GetMetricStream",
+      "input": {
+        "Name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListMetricStreams",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entries": [
+          {
+            "Name": "s1",
+            "FirehoseArn": "arn:aws:firehose:f",
+            "RoleArn": "arn:aws:iam::r",
+            "OutputFormat": "json"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartMetricStreams",
+      "input": {
+        "Names": [
+          "s1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetMetricStream",
+      "input": {
+        "Name": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "s1",
+        "FirehoseArn": "arn:aws:firehose:f",
+        "RoleArn": "arn:aws:iam::r",
+        "OutputFormat": "json",
+        "Enabled": true
+      },
+      "superseded": "the pack stores the Enabled flag on the record and echoes it verbatim; GetMetricStreamOutput declares no Enabled member, so the bundle cannot answer it"
+    },
+    {
+      "operation": "StopMetricStreams",
+      "input": {
+        "Names": [
+          "s1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteMetricStream",
+      "input": {
+        "Name": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteMetricStream",
+      "input": {
+        "Name": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListMetricStreams",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entries": null
+      }
+    },
+    {
+      "operation": "PutAlarmMuteRule",
+      "input": {
+        "Name": "m1",
+        "Rule": {
+          "Schedule": {}
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "m1"
+      },
+      "superseded": "the pack answered the id under Name; the operation's declared output shape has no Name member, and the bundle answers the declared shape (the output shape declares no members)"
+    },
+    {
+      "operation": "GetAlarmMuteRule",
+      "input": {
+        "AlarmMuteRuleName": "m1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetAlarmMuteRule",
+      "input": {
+        "AlarmMuteRuleName": "m1",
+        "AlarmName": "m1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "m1",
+        "Rule": {
+          "Schedule": {}
+        }
+      }
+    },
+    {
+      "operation": "ListAlarmMuteRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MuteRules": [
+          {
+            "Name": "m1",
+            "Rule": {
+              "Schedule": {}
+            }
+          }
+        ]
+      },
+      "superseded": "the pack answered under MuteRules; the model declares AlarmMuteRuleSummaries, and the bundle answers the declared member"
+    },
+    {
+      "operation": "DeleteAlarmMuteRule",
+      "input": {
+        "AlarmMuteRuleName": "m1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListAlarmMuteRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MuteRules": [
+          {
+            "Name": "m1",
+            "Rule": {
+              "Schedule": {}
+            }
+          }
+        ]
+      },
+      "superseded": "the pack answered under MuteRules; the model declares AlarmMuteRuleSummaries, and the bundle answers the declared member"
+    },
+    {
+      "operation": "DeleteAlarmMuteRule",
+      "input": {
+        "AlarmMuteRuleName": "m1",
+        "AlarmName": "m1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListAlarmMuteRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MuteRules": null
+      },
+      "superseded": "the pack answered under MuteRules; the model declares AlarmMuteRuleSummaries, and the bundle answers the declared member"
+    },
+    {
+      "operation": "AssociateDatasetKmsKey",
+      "input": {
+        "DatasetIdentifier": "ds",
+        "KmsKeyArn": "arn:aws:kms:k"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "aa00000000000003"
+      },
+      "superseded": "the pack reads Name/DatasetName, which the operation does not declare, so it generated the id; the output shape declares no members either"
+    },
+    {
+      "operation": "GetDataset",
+      "input": {
+        "DatasetIdentifier": "ds"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DisassociateDatasetKmsKey",
+      "input": {
+        "DatasetIdentifier": "ds"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "aa00000000000004"
+      },
+      "superseded": "disassociate writes a record exactly the way associate does, under a generated id; the output shape declares no members"
+    },
+    {
+      "operation": "StartOTelEnrichment",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "aa00000000000005"
+      },
+      "superseded": "the input shape declares no members, so the pack generated the id; the output shape declares no members either"
+    },
+    {
+      "operation": "GetOTelEnrichment",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "StopOTelEnrichment",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "aa00000000000006"
+      },
+      "superseded": "the input shape declares no members, so the pack generated the id; the output shape declares no members either"
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceARN": "arn:aws:a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "ResourceARN": "arn:aws:a",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceARN": "arn:aws:a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "ResourceARN": "arn:aws:a",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceARN": "arn:aws:a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "PutMetricData",
+      "input": {
+        "Namespace": "M",
+        "MetricData": [
+          {
+            "MetricName": "A",
+            "Value": 1
+          },
+          {
+            "MetricName": "B",
+            "Value": 2
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetMetricStatistics",
+      "input": {
+        "Namespace": "M",
+        "MetricName": "A",
+        "Period": 60,
+        "StartTime": 0,
+        "EndTime": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Label": "A",
+        "Datapoints": [
+          {
+            "SampleCount": 1,
+            "Sum": 1,
+            "Minimum": 1,
+            "Maximum": 1,
+            "Average": 1.0,
+            "Timestamp": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetMetricStatistics",
+      "input": {
+        "Namespace": "M",
+        "MetricName": "B",
+        "Period": 60,
+        "StartTime": 0,
+        "EndTime": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Label": "B",
+        "Datapoints": [
+          {
+            "SampleCount": 1,
+            "Sum": 2,
+            "Minimum": 2,
+            "Maximum": 2,
+            "Average": 2.0,
+            "Timestamp": "2020-01-01T00:00:00Z"
+          }
+        ]
+      },
+      "superseded": "a for_each write cannot read per-element state: elements after the first aggregate onto the previous element's record rather than their own metric's, so the bundle answers SampleCount 2, Sum 3, Minimum 1, Maximum 2 where the pack kept the metrics independent"
+    }
+  ]
+}

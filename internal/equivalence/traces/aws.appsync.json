@@ -1,0 +1,744 @@
+{
+  "schema": "trace/1",
+  "service": "aws.appsync",
+  "source": "pack:internal/services/aws/appsync@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. An api's arn and uris embed the generated api id, and the unifier substitutes token-shaped strings only, so those two members are recorded with the placeholder and excused wherever they appear; every later step addresses the api by reference, and the id itself is still unified. The pack's GraphQL query operation has no counterpart in the model and is not recorded. The pack listed data sources with the stored apiId, which DataSource does not declare; the bundle projects the declared members and that member alone is superseded per item.",
+  "steps": [
+    {
+      "operation": "ListGraphqlApis",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "graphqlApis": null
+      }
+    },
+    {
+      "operation": "GetGraphqlApi",
+      "input": {
+        "apiId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetGraphqlApi",
+      "input": {
+        "apiId": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateGraphqlApi",
+      "input": {
+        "name": "api1",
+        "authenticationType": "API_KEY"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "graphqlApi": {
+          "apiId": "aa00000000000001",
+          "name": "api1",
+          "authenticationType": "API_KEY",
+          "uris": {
+            "GRAPHQL": "http://appsync.localhost/aa00000000000001/graphql"
+          },
+          "arn": "arn:aws:appsync:us-east-1:000000000000:apis/aa00000000000001"
+        }
+      },
+      "superseded_members": {
+        "graphqlApi.arn": "embeds the generated api id; the unifier substitutes token-shaped strings only, so each side's own value stands -- the id itself is still unified, and every later step addresses the api by reference",
+        "graphqlApi.uris.GRAPHQL": "embeds the generated api id; the unifier substitutes token-shaped strings only, so each side's own value stands -- the id itself is still unified, and every later step addresses the api by reference"
+      }
+    },
+    {
+      "operation": "GetGraphqlApi",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "graphqlApi": {
+          "apiId": "aa00000000000001",
+          "name": "api1",
+          "authenticationType": "API_KEY",
+          "uris": {
+            "GRAPHQL": "http://appsync.localhost/aa00000000000001/graphql"
+          },
+          "arn": "arn:aws:appsync:us-east-1:000000000000:apis/aa00000000000001"
+        }
+      },
+      "superseded_members": {
+        "graphqlApi.arn": "embeds the generated api id; the unifier substitutes token-shaped strings only",
+        "graphqlApi.uris.GRAPHQL": "embeds the generated api id; the unifier substitutes token-shaped strings only"
+      }
+    },
+    {
+      "operation": "CreateGraphqlApi",
+      "input": {
+        "name": "api2",
+        "authenticationType": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "graphqlApi": {
+          "apiId": "aa00000000000002",
+          "name": "api2",
+          "authenticationType": "API_KEY",
+          "uris": {
+            "GRAPHQL": "http://appsync.localhost/aa00000000000002/graphql"
+          },
+          "arn": "arn:aws:appsync:us-east-1:000000000000:apis/aa00000000000002"
+        }
+      },
+      "superseded_members": {
+        "graphqlApi.arn": "embeds the generated api id; the unifier substitutes token-shaped strings only",
+        "graphqlApi.uris.GRAPHQL": "embeds the generated api id; the unifier substitutes token-shaped strings only"
+      }
+    },
+    {
+      "operation": "ListGraphqlApis",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "graphqlApis": [
+          {
+            "apiId": "aa00000000000002",
+            "name": "api2",
+            "authenticationType": "API_KEY",
+            "uris": {
+              "GRAPHQL": "http://appsync.localhost/aa00000000000002/graphql"
+            },
+            "arn": "arn:aws:appsync:us-east-1:000000000000:apis/aa00000000000002"
+          },
+          {
+            "apiId": "aa00000000000001",
+            "name": "api1",
+            "authenticationType": "API_KEY",
+            "uris": {
+              "GRAPHQL": "http://appsync.localhost/aa00000000000001/graphql"
+            },
+            "arn": "arn:aws:appsync:us-east-1:000000000000:apis/aa00000000000001"
+          }
+        ]
+      },
+      "superseded_members": {
+        "graphqlApis[0].arn": "embeds the generated api id; the unifier substitutes token-shaped strings only",
+        "graphqlApis[0].uris.GRAPHQL": "embeds the generated api id; the unifier substitutes token-shaped strings only",
+        "graphqlApis[1].arn": "embeds the generated api id; the unifier substitutes token-shaped strings only",
+        "graphqlApis[1].uris.GRAPHQL": "embeds the generated api id; the unifier substitutes token-shaped strings only"
+      }
+    },
+    {
+      "operation": "UpdateGraphqlApi",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "name": "api1b",
+        "authenticationType": "AWS_IAM"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "graphqlApi": {
+          "apiId": "aa00000000000001",
+          "name": "api1b",
+          "authenticationType": "API_KEY",
+          "uris": {
+            "GRAPHQL": "http://appsync.localhost/aa00000000000001/graphql"
+          },
+          "arn": "arn:aws:appsync:us-east-1:000000000000:apis/aa00000000000001"
+        }
+      },
+      "superseded_members": {
+        "graphqlApi.arn": "embeds the generated api id; the unifier substitutes token-shaped strings only",
+        "graphqlApi.uris.GRAPHQL": "embeds the generated api id; the unifier substitutes token-shaped strings only"
+      }
+    },
+    {
+      "operation": "GetGraphqlApi",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "graphqlApi": {
+          "apiId": "aa00000000000001",
+          "name": "api1b",
+          "authenticationType": "API_KEY",
+          "uris": {
+            "GRAPHQL": "http://appsync.localhost/aa00000000000001/graphql"
+          },
+          "arn": "arn:aws:appsync:us-east-1:000000000000:apis/aa00000000000001"
+        }
+      },
+      "superseded_members": {
+        "graphqlApi.arn": "embeds the generated api id; the unifier substitutes token-shaped strings only",
+        "graphqlApi.uris.GRAPHQL": "embeds the generated api id; the unifier substitutes token-shaped strings only"
+      }
+    },
+    {
+      "operation": "CreateApiKey",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "description": "k1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apiKey": {
+          "id": "bb00000000000001",
+          "description": "k1",
+          "expires": 0
+        }
+      }
+    },
+    {
+      "operation": "CreateApiKey",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apiKey": {
+          "id": "bb00000000000002",
+          "description": "",
+          "expires": 0
+        }
+      }
+    },
+    {
+      "operation": "ListApiKeys",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apiKeys": [
+          {
+            "id": "bb00000000000002",
+            "description": "",
+            "expires": 0
+          },
+          {
+            "id": "bb00000000000001",
+            "description": "k1",
+            "expires": 0
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListApiKeys",
+      "input": {
+        "apiId": "never"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apiKeys": null
+      }
+    },
+    {
+      "operation": "DeleteApiKey",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "id": {
+          "$fromStep": 9,
+          "$fromPath": "apiKey.id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteApiKey",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "id": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListApiKeys",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apiKeys": [
+          {
+            "id": "bb00000000000002",
+            "description": "",
+            "expires": 0
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetSchemaCreationStatus",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "status": "PROCESSING"
+      }
+    },
+    {
+      "operation": "StartSchemaCreation",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "definition": "type Query { hello: String }"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "status": "SUCCESS"
+      }
+    },
+    {
+      "operation": "GetSchemaCreationStatus",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "status": "SUCCESS"
+      }
+    },
+    {
+      "operation": "GetSchemaCreationStatus",
+      "input": {
+        "apiId": "never"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "status": "PROCESSING"
+      }
+    },
+    {
+      "operation": "CreateDataSource",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "name": "ds1",
+        "type": "AMAZON_DYNAMODB"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "dataSource": {
+          "name": "ds1",
+          "type": "AMAZON_DYNAMODB",
+          "apiId": "aa00000000000001"
+        }
+      }
+    },
+    {
+      "operation": "GetDataSource",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "name": "ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "dataSource": {
+          "name": "ds1",
+          "type": "AMAZON_DYNAMODB",
+          "apiId": "aa00000000000001"
+        }
+      }
+    },
+    {
+      "operation": "GetDataSource",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDataSource",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "name": "ds2",
+        "type": "NONE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "dataSource": {
+          "name": "ds2",
+          "type": "NONE",
+          "apiId": "aa00000000000001"
+        }
+      }
+    },
+    {
+      "operation": "ListDataSources",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "dataSources": [
+          {
+            "name": "ds1",
+            "type": "AMAZON_DYNAMODB",
+            "apiId": "aa00000000000001"
+          },
+          {
+            "name": "ds2",
+            "type": "NONE",
+            "apiId": "aa00000000000001"
+          }
+        ]
+      },
+      "superseded": "the pack listed the stored records, which carry the api id; DataSource does not declare apiId, so the bundle projects the declared members -- name, type, row count and order are not gated on this step"
+    },
+    {
+      "operation": "DeleteDataSource",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "name": "ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDataSource",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        },
+        "name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDataSources",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "dataSources": [
+          {
+            "name": "ds2",
+            "type": "NONE",
+            "apiId": "aa00000000000001"
+          }
+        ]
+      },
+      "superseded": "the pack listed the stored record, which carries the api id; DataSource does not declare apiId, so the bundle projects the declared members"
+    },
+    {
+      "operation": "DeleteGraphqlApi",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteGraphqlApi",
+      "input": {
+        "apiId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetGraphqlApi",
+      "input": {
+        "apiId": {
+          "$fromStep": 3,
+          "$fromPath": "graphqlApi.apiId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListGraphqlApis",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "graphqlApis": [
+          {
+            "apiId": "aa00000000000002",
+            "name": "api2",
+            "authenticationType": "API_KEY",
+            "uris": {
+              "GRAPHQL": "http://appsync.localhost/aa00000000000002/graphql"
+            },
+            "arn": "arn:aws:appsync:us-east-1:000000000000:apis/aa00000000000002"
+          }
+        ]
+      },
+      "superseded_members": {
+        "graphqlApis[0].arn": "embeds the generated api id; the unifier substitutes token-shaped strings only",
+        "graphqlApis[0].uris.GRAPHQL": "embeds the generated api id; the unifier substitutes token-shaped strings only"
+      }
+    }
+  ]
+}

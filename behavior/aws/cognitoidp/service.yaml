@@ -1,0 +1,439 @@
+schema: bir/1
+service: aws.cognito-idp
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Password auth only: SRP, custom and refresh flows are refused, any
+# confirmation code confirms, and the pool a client belongs to is the whole
+# routing there is.
+provenance: authored
+
+# The pack never rejected an absent required member -- first() answered "" and
+# the behavior fell out of that. The engine now rejects them, in the service's
+# own vocabulary for a bad parameter.
+missing_input_error: InvalidParameter
+
+resources:
+  pool:
+    collection: cup
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [UserPoolId]
+    record:
+      Id: id
+      Name: "string(input.PoolName)"
+      Arn: "'arn:aws:cognito-idp:' + identity.region + ':' + identity.account + ':userpool/' + identity.region + '_' + id"
+
+  # The pack keyed a user by username inside a per-pool collection; one
+  # collection with a composite pool/username key is the same containment.
+  # Pool rides on the record so ListUsers can hold one pool's users out of
+  # another's -- the member the pack got from the collection name. Every
+  # answer projects it away; the pack never stored it.
+  user:
+    collection: cu
+    id:
+      input_members: [Username]
+
+  client:
+    collection: cucl
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [ClientId]
+    record:
+      ClientId: id
+      UserPoolId: "string(input.UserPoolId)"
+      ClientName: "string(input.ClientName)"
+
+  session:
+    collection: cutok
+    id:
+      input_members: [AccessToken]
+
+  # The pack's cusess:<pool> index: username -> latest access token. It is
+  # what makes sign-out and user delete drop exactly one session, and its
+  # overwrite-on-auth is why signing out an older token revokes the newer one.
+  session_index:
+    collection: cusess
+    id:
+      input_members: [Username]
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+  UserNotFound:
+    code: UserNotFoundException
+    http: 400
+    fault: client
+  InvalidParameter:
+    code: InvalidParameterException
+    http: 400
+    fault: client
+  NotAuthorized:
+    code: NotAuthorizedException
+    http: 400
+    fault: client
+  UserNotConfirmed:
+    code: UserNotConfirmedException
+    http: 400
+    fault: client
+
+operations:
+  CreateUserPool:
+    effects:
+      - create: { resource: pool }
+    output:
+      UserPool: rec
+
+  # The pack strips everything through the last underscore off UserPoolId, so
+  # both the bare id and the region_id form address the same pool.
+  DescribeUserPool:
+    reads:
+      p: { resource: pool, key: "lastSegment(string(input.UserPoolId), '_')" }
+    require:
+      - { cond: p_found, error: NotFound }
+    output:
+      UserPool: p
+
+  # UserPoolDescriptionType declares Id and Name and no Arn; the pack listed
+  # the whole record, Arn included. The declared shape outranks it.
+  ListUserPools:
+    list: { resource: pool, member: UserPools, paginate: model }
+    output:
+      UserPools: "items.map(p, {'Id': p.Id, 'Name': p.Name})"
+
+  DeleteUserPool:
+    effects:
+      - delete: { resource: pool, key: "lastSegment(string(input.UserPoolId), '_')", missing: ignore }
+    output: {}
+
+  # The pack's Put replaces the record wholesale -- a re-created user loses a
+  # password it had -- so the delete clears what a bare put would merge onto.
+  AdminCreateUser:
+    effects:
+      - delete: { resource: user, key: "lastSegment(string(input.UserPoolId), '_') + '/' + string(input.Username)", missing: ignore }
+      - put:
+          resource: user
+          key: "lastSegment(string(input.UserPoolId), '_') + '/' + string(input.Username)"
+          record:
+            Username: "string(input.Username)"
+            Pool: "lastSegment(string(input.UserPoolId), '_')"
+            UserStatus: "'FORCE_CHANGE_PASSWORD'"
+            Enabled: true
+    output:
+      User: "{'Username': rec.Username, 'UserStatus': rec.UserStatus, 'Enabled': rec.Enabled}"
+
+  # The pack answered the stored record flat. Password is not declared on
+  # AdminGetUserResponse, so it is projected away when the record carries one.
+  AdminGetUser:
+    reads:
+      u: { resource: user, key: "lastSegment(string(input.UserPoolId), '_') + '/' + string(input.Username)" }
+    require:
+      - { cond: u_found, error: UserNotFound }
+    output:
+      Username: "u.Username"
+      UserStatus: "u.UserStatus"
+      Enabled: "u.Enabled"
+
+  ListUsers:
+    list:
+      resource: user
+      member: Users
+      paginate: model
+      filter: "item.Pool == lastSegment(string(input.UserPoolId), '_')"
+    output:
+      Users: "items.map(u, {'Username': u.Username, 'UserStatus': u.UserStatus, 'Enabled': u.Enabled})"
+
+  AdminDeleteUser:
+    reads:
+      si: { resource: session_index, key: "lastSegment(string(input.UserPoolId), '_') + '/' + string(input.Username)" }
+    effects:
+      - delete: { resource: session, key: "string(si.Token)", when: "si_found", missing: ignore }
+      - delete: { resource: session_index, key: "lastSegment(string(input.UserPoolId), '_') + '/' + string(input.Username)", missing: ignore }
+      - delete: { resource: user, key: "lastSegment(string(input.UserPoolId), '_') + '/' + string(input.Username)", missing: ignore }
+    output: {}
+
+  # The pack merged onto the stored record (unmarshal, set, marshal), which a
+  # put already does: the rest of the record survives.
+  AdminSetUserPassword:
+    reads:
+      u: { resource: user, key: "lastSegment(string(input.UserPoolId), '_') + '/' + string(input.Username)" }
+    require:
+      - { cond: u_found, error: UserNotFound }
+    effects:
+      - put:
+          resource: user
+          key: "lastSegment(string(input.UserPoolId), '_') + '/' + string(input.Username)"
+          record:
+            Password: "string(input.Password)"
+            UserStatus: "'CONFIRMED'"
+    output: {}
+
+  CreateUserPoolClient:
+    effects:
+      - create: { resource: client }
+    output:
+      UserPoolClient: rec
+
+  # The pack looks the client up by ClientId alone; the UserPoolId the model
+  # requires is never consulted, so the wrong pool answers the same.
+  DescribeUserPoolClient:
+    reads:
+      c: { resource: client }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      UserPoolClient: c
+
+  ListUserPoolClients:
+    list:
+      resource: client
+      member: UserPoolClients
+      paginate: model
+      filter: "lastSegment(string(item.UserPoolId), '_') == lastSegment(string(input.UserPoolId), '_')"
+
+  DeleteUserPoolClient:
+    effects:
+      - delete: { resource: client, missing: ignore }
+    output: {}
+
+  SignUp:
+    reads:
+      c: { resource: client }
+    require:
+      - { cond: "string(input.ClientId) != ''", error: InvalidParameter }
+      - { cond: c_found, error: NotFound }
+    effects:
+      - generate: { bind: sub, kind: hex, bytes: 8 }
+      - delete: { resource: user, key: "lastSegment(string(c.UserPoolId), '_') + '/' + string(input.Username)", missing: ignore }
+      - put:
+          resource: user
+          key: "lastSegment(string(c.UserPoolId), '_') + '/' + string(input.Username)"
+          record:
+            Username: "string(input.Username)"
+            Password: "'Password' in input ? string(input.Password) : ''"
+            Pool: "lastSegment(string(c.UserPoolId), '_')"
+            UserStatus: "'UNCONFIRMED'"
+            Enabled: true
+    output:
+      UserConfirmed: "false"
+      UserSub: "fx.sub"
+
+  # Any ConfirmationCode confirms; the pack never looked at it.
+  ConfirmSignUp:
+    reads:
+      c: { resource: client }
+      u: { resource: user, key: "c_found ? lastSegment(string(c.UserPoolId), '_') + '/' + string(input.Username) : ''" }
+    require:
+      - { cond: "string(input.ClientId) != ''", error: InvalidParameter }
+      - { cond: c_found, error: NotFound }
+      - { cond: u_found, error: UserNotFound }
+    effects:
+      - put:
+          resource: user
+          key: "lastSegment(string(c.UserPoolId), '_') + '/' + string(input.Username)"
+          record:
+            UserStatus: "'CONFIRMED'"
+    output: {}
+
+  # The pack's access and id tokens are HMAC-SHA256 JWTs signed with a
+  # seed-derived key; B-IR's closed effect vocabulary has no signer, so the
+  # bundle hashes the same triple they are a pure function of instead -- the
+  # JWT claims are a fixed iat, a jti derived per pool/user, the pool, the
+  # client and the username, so one (pool, client, user) always mints the SAME
+  # token, and the hash preserves exactly that equality pattern. The signed
+  # format itself is what the recording supersedes.
+  InitiateAuth:
+    reads:
+      c: { resource: client }
+      u:
+        resource: user
+        key: >
+          ('UserPoolId' in input && string(input.UserPoolId) != ''
+            ? lastSegment(string(input.UserPoolId), '_')
+            : (c_found ? lastSegment(string(c.UserPoolId), '_') : ''))
+          + '/' +
+          ('AuthParameters' in input && 'USERNAME' in input.AuthParameters
+            ? string(input.AuthParameters.USERNAME) : '')
+    let:
+      pool: "'UserPoolId' in input && string(input.UserPoolId) != '' ? lastSegment(string(input.UserPoolId), '_') : (c_found ? lastSegment(string(c.UserPoolId), '_') : '')"
+      uname: "'AuthParameters' in input && 'USERNAME' in input.AuthParameters ? string(input.AuthParameters.USERNAME) : ''"
+      access: "sha256hex('access/' + pool + '/' + string(input.ClientId) + '/' + uname)"
+      idtoken: "sha256hex('id/' + pool + '/' + string(input.ClientId) + '/' + uname)"
+    require:
+      - { cond: "string(input.AuthFlow) == '' || string(input.AuthFlow) in ['USER_PASSWORD_AUTH', 'ADMIN_USER_PASSWORD_AUTH', 'ADMIN_NO_SRP_AUTH']", error: InvalidParameter }
+      - { cond: "('UserPoolId' in input && string(input.UserPoolId) != '') || string(input.ClientId) != ''", error: InvalidParameter }
+      - { cond: "('UserPoolId' in input && string(input.UserPoolId) != '') || c_found", error: NotFound }
+      - { cond: u_found, error: UserNotFound }
+      - { cond: "string(u.UserStatus) != 'UNCONFIRMED'", error: UserNotConfirmed }
+      - cond: >
+          ('Password' in u ? string(u.Password) : '') != ''
+          && ('Password' in u ? string(u.Password) : '')
+            == ('AuthParameters' in input && 'PASSWORD' in input.AuthParameters
+                  ? string(input.AuthParameters.PASSWORD) : '')
+        error: NotAuthorized
+    effects:
+      - generate: { bind: refresh, kind: hex, bytes: 16 }
+      - put:
+          resource: session
+          key: "access"
+          record:
+            Username: "uname"
+            Pool: "pool"
+            RefreshToken: "fx.refresh"
+      - put:
+          resource: session_index
+          key: "pool + '/' + uname"
+          record:
+            Token: "access"
+    output:
+      AuthenticationResult: "{'AccessToken': access, 'IdToken': idtoken, 'RefreshToken': fx.refresh, 'ExpiresIn': 3600, 'TokenType': 'Bearer'}"
+
+  # Identical to InitiateAuth -- the pack ran both through one helper. The
+  # model requires UserPoolId here, so the client lookup below it is reachable
+  # only with an empty-but-present UserPoolId, and a ClientId naming no client
+  # is never noticed.
+  AdminInitiateAuth:
+    reads:
+      c: { resource: client }
+      u:
+        resource: user
+        key: >
+          ('UserPoolId' in input && string(input.UserPoolId) != ''
+            ? lastSegment(string(input.UserPoolId), '_')
+            : (c_found ? lastSegment(string(c.UserPoolId), '_') : ''))
+          + '/' +
+          ('AuthParameters' in input && 'USERNAME' in input.AuthParameters
+            ? string(input.AuthParameters.USERNAME) : '')
+    let:
+      pool: "'UserPoolId' in input && string(input.UserPoolId) != '' ? lastSegment(string(input.UserPoolId), '_') : (c_found ? lastSegment(string(c.UserPoolId), '_') : '')"
+      uname: "'AuthParameters' in input && 'USERNAME' in input.AuthParameters ? string(input.AuthParameters.USERNAME) : ''"
+      access: "sha256hex('access/' + pool + '/' + string(input.ClientId) + '/' + uname)"
+      idtoken: "sha256hex('id/' + pool + '/' + string(input.ClientId) + '/' + uname)"
+    require:
+      - { cond: "string(input.AuthFlow) == '' || string(input.AuthFlow) in ['USER_PASSWORD_AUTH', 'ADMIN_USER_PASSWORD_AUTH', 'ADMIN_NO_SRP_AUTH']", error: InvalidParameter }
+      - { cond: "('UserPoolId' in input && string(input.UserPoolId) != '') || string(input.ClientId) != ''", error: InvalidParameter }
+      - { cond: "('UserPoolId' in input && string(input.UserPoolId) != '') || c_found", error: NotFound }
+      - { cond: u_found, error: UserNotFound }
+      - { cond: "string(u.UserStatus) != 'UNCONFIRMED'", error: UserNotConfirmed }
+      - cond: >
+          ('Password' in u ? string(u.Password) : '') != ''
+          && ('Password' in u ? string(u.Password) : '')
+            == ('AuthParameters' in input && 'PASSWORD' in input.AuthParameters
+                  ? string(input.AuthParameters.PASSWORD) : '')
+        error: NotAuthorized
+    effects:
+      - generate: { bind: refresh, kind: hex, bytes: 16 }
+      - put:
+          resource: session
+          key: "access"
+          record:
+            Username: "uname"
+            Pool: "pool"
+            RefreshToken: "fx.refresh"
+      - put:
+          resource: session_index
+          key: "pool + '/' + uname"
+          record:
+            Token: "access"
+    output:
+      AuthenticationResult: "{'AccessToken': access, 'IdToken': idtoken, 'RefreshToken': fx.refresh, 'ExpiresIn': 3600, 'TokenType': 'Bearer'}"
+
+  # GetUserResponse declares Username of the members the pack answered; the
+  # flat record's UserStatus, Enabled and Password are projected away.
+  GetUser:
+    reads:
+      s: { resource: session }
+      u: { resource: user, key: "s_found ? string(s.Pool) + '/' + string(s.Username) : ''" }
+    require:
+      - { cond: s_found, error: NotAuthorized }
+      - { cond: u_found, error: UserNotFound }
+    output:
+      Username: "u.Username"
+
+  # The pack revokes through the session index: the token the request carries
+  # reads the index, and the index's entry -- the user's LATEST token -- is
+  # what gets deleted. Signing out with an older token revokes the newer one
+  # and leaves the older one valid.
+  GlobalSignOut:
+    reads:
+      s: { resource: session }
+      si: { resource: session_index, key: "s_found ? string(s.Pool) + '/' + string(s.Username) : ''" }
+    effects:
+      - delete: { resource: session, key: "string(si.Token)", when: "si_found", missing: ignore }
+      - delete: { resource: session_index, key: "s_found ? string(s.Pool) + '/' + string(s.Username) : ''", when: "s_found", missing: ignore }
+    output: {}
+
+quirks:
+  - operation: DescribeUserPool
+    note: >
+      UserPoolId is stripped through its last underscore before lookup, so
+      both the bare id the pack issued and the region_id form address the same
+      pool -- as does anything else ending in _<id>. The real service keys on
+      the full region_id form. The same strip applies to every operation that
+      takes a UserPoolId.
+  - operation: AdminCreateUser
+    note: >
+      The pool is never checked to exist: creating a user into a pool that was
+      never made succeeds, and the user lists under that pool id afterwards.
+      Re-creating an existing username replaces the record wholesale, dropping
+      a password it carried, where the real service answers
+      UsernameExistsException.
+  - operation: DescribeUserPoolClient
+    note: >
+      The lookup is by ClientId alone; the UserPoolId the model requires is
+      accepted and ignored, so naming the wrong pool answers the client all
+      the same.
+  - operation: ConfirmSignUp
+    note: >
+      ConfirmationCode is required by the model and never read: any code
+      confirms, and an UNCONFIRMED user's password is already what SignUp
+      stored.
+  - operation: InitiateAuth
+    note: >
+      Only USER_PASSWORD_AUTH and the two ADMIN_* password flows are accepted;
+      SRP, custom and refresh-token flows fault InvalidParameterException
+      (ponytail in the pack, transcribed). The pack's access and id tokens are
+      HMAC-SHA256 JWTs with a fixed iat and a jti derived per pool and user,
+      so they are a pure function of (pool, client, user): re-authenticating
+      the same user through the same client answers the SAME token. B-IR's
+      closed effect vocabulary has no signer, so the bundle hashes that triple
+      instead -- the equality pattern is preserved, the signed-JWT format is
+      not, and the recording supersedes the two token members. The pack also
+      honored an undeclared top-level UserPoolId, skipping the client lookup;
+      the transcription keeps that, though the wire shape never carries it.
+  - operation: AdminInitiateAuth
+    note: >
+      Because UserPoolId is required and present, the pack's client lookup is
+      skipped and a ClientId naming no client is never noticed -- the token
+      claims alone carry it. The same JWT caveat as InitiateAuth applies.
+  - operation: GetUser
+    note: >
+      The pack answered the whole stored record flat; GetUserResponse declares
+      only Username of those members, so UserStatus, Enabled and Password were
+      members no SDK could read and are projected away. A token whose user was
+      deleted out from under it (AdminDeleteUser found no session index entry)
+      still resolves its session and faults UserNotFoundException rather than
+      NotAuthorizedException.
+  - operation: GlobalSignOut
+    note: >
+      Sign-out revokes through the session index, which holds only the user's
+      latest token. Because tokens are a pure function of (pool, client,
+      user), a second client mints a second live token for the same user, and
+      signing out with the OLDER token deletes the NEWER session while the
+      token the caller held stays valid -- GetUser still answers it, until the
+      user is deleted, when the orphaned session faults UserNotFoundException
+      rather than NotAuthorizedException. Signing out with an unknown token
+      succeeds quietly.
+  - operation: DeleteUserPool
+    note: >
+      Deleting a pool deletes only the pool record: its users and clients
+      survive in their own collections and still list under the deleted pool's
+      id. Deleting a pool that does not exist succeeds.
+  - operation: ListUserPools
+    note: >
+      The pack ignored MaxResults and NextToken and never paginated; the
+      engine binds both from the model's pagination trait, so a MaxResults
+      below the pool count now pages. The listing's items are projected to
+      UserPoolDescriptionType's members; the pack listed the stored Arn, which
+      the item shape does not declare.

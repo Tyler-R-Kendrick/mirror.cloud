@@ -857,6 +857,7 @@ func Bundle() *model.Bundle {
 		"GetAlarmMuteRule", "GetDashboard", "GetDataset", "GetInsightRuleReport",
 		"GetMetricData", "GetMetricStream", "GetMetricWidgetImage", "GetOTelEnrichment",
 		"ListAlarmMuteRules", "ListDashboards", "ListManagedInsightRules", "ListMetricStreams",
+		"ListTagsForResource", "TagResource", "UntagResource",
 		"PutAlarmMuteRule", "PutAnomalyDetector", "PutCompositeAlarm", "PutDashboard",
 		"PutInsightRule", "PutLogAlarm", "PutManagedInsightRules", "PutMetricStream",
 		"SetAlarmState", "StartMetricStreams", "StartOTelEnrichment", "StopMetricStreams",
@@ -1666,7 +1667,7 @@ func Bundle() *model.Bundle {
 		"CreateNamespace", "ListNamespaces",
 		"CreateTable", "GetTable", "ListTables", "DeleteTable", "RenameTable", "GetTableMetadataLocation", "UpdateTableMetadataLocation",
 	}
-	synthetics := []string{"CreateCanary", "GetCanary", "ListCanaries", "DeleteCanary", "StartCanary", "StopCanary"}
+	synthetics := []string{"CreateCanary", "GetCanary", "ListCanaries", "DeleteCanary", "StartCanary", "StopCanary", "DescribeCanaries"}
 	apprunner := []string{"CreateService", "DescribeService", "ListServices", "DeleteService", "PauseService", "ResumeService"}
 	proton := []string{"CreateEnvironment", "GetEnvironment", "ListEnvironments", "DeleteEnvironment", "CreateService", "GetService"}
 	resiliencehub := []string{"CreateApp", "DescribeApp", "ListApps", "DeleteApp", "CreateResiliencyPolicy", "ListResiliencyPolicies"}
@@ -1752,6 +1753,12 @@ func Bundle() *model.Bundle {
 			svc("aws.cloudfront", "cloudfront", model.ProtoRESTXML, "", "2020-05-31", "http://cloudfront.amazonaws.com/doc/2020-05-31/", mk(cloudfront)),
 			svc("aws.scheduler", "scheduler", model.ProtoAWSJSON10, "Scheduler", "", "", mk(scheduler)),
 			svc("aws.es", "es", model.ProtoRESTJSON1, "AmazonOpenSearchService", "", "", mk(es)),
+			// The vendored 2021-01-01 OpenSearch specification generated under
+			// aws.es (its endpoint prefix), while the service is served as
+			// aws.opensearch; specboot's servedAs joins the two. The operation
+			// list is the same one, including the four data-plane operations
+			// the specification does not carry.
+			svc("aws.opensearch", "es", model.ProtoRESTJSON1, "AmazonOpenSearchService", "", "", mk(es)),
 			svc("aws.glue", "glue", model.ProtoAWSJSON11, "AWSGlue", "", "", mk(glue)),
 			svc("aws.athena", "athena", model.ProtoAWSJSON11, "AmazonAthena", "", "", mk(athena)),
 			svc("aws.cloudtrail", "cloudtrail", model.ProtoAWSJSON11, "CloudTrail_20131101", "", "", mk(cloudtrail)),

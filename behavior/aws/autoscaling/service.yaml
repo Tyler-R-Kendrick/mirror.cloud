@@ -1,0 +1,814 @@
+schema: bir/1
+service: aws.autoscaling
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No instance ever runs: a group is a flat record of the last write,
+# attaching an instance edits that record, and every account limit, adjustment
+# type and forecast is a constant.
+provenance: authored
+
+# The pack never faults: a request missing a member the model declares
+# required was accepted and stored with a null or empty value. The engine
+# enforces the model's required members before any rule runs, so those
+# requests now answer ValidationException; the pack's empty-name writes are
+# unreachable and are not transcribed.
+
+resources:
+  group:
+    collection: asg
+    id:
+      input_members: [AutoScalingGroupName]
+    # Only the name is safe to recompute on every write; the sizes and the
+    # launch configuration belong to Create/Update alone, and the attachments
+    # belong to the attach/detach operations. Everything else the pack stored
+    # on a group is written by the operations below, at effect level.
+    record:
+      AutoScalingGroupName: id
+
+  launchconfig:
+    collection: lc
+    id:
+      input_members: [LaunchConfigurationName]
+    record:
+      LaunchConfigurationName: id
+      ImageId: "'ImageId' in input ? string(input.ImageId) : ''"
+      InstanceType: "'InstanceType' in input ? string(input.InstanceType) : ''"
+
+  # The pack kept one row per account and region, keyed "tags", holding the
+  # whole last CreateOrUpdateTags request.
+  tags:
+    collection: asgtags
+    singleton: tags
+
+  policy:
+    collection: asgpol
+    id:
+      derive: "('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '') + '/' + ('PolicyName' in input ? string(input.PolicyName) : '')"
+
+  scheduled:
+    collection: asgsched
+    id:
+      derive: "('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '') + '/' + ('ScheduledActionName' in input ? string(input.ScheduledActionName) : '')"
+
+  lifecycle:
+    collection: asglife
+    id:
+      derive: "('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '') + '/' + ('LifecycleHookName' in input ? string(input.LifecycleHookName) : '')"
+
+  notification:
+    collection: asgnote
+    id:
+      input_members: [AutoScalingGroupName]
+
+  warmpool:
+    collection: asgwarm
+    id:
+      input_members: [AutoScalingGroupName]
+
+  refresh:
+    collection: asgref
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [InstanceRefreshId]
+    # Only the id is recomputed on every write: Cancel and Rollback patch the
+    # status and must preserve the stored group, which the pack did.
+    record:
+      InstanceRefreshId: id
+
+  activity:
+    collection: asgact
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      ActivityId: id
+      StatusCode: "'Successful'"
+      AutoScalingGroupName: "'AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : ''"
+
+  # DescribeAutoScalingInstances flattens the Instances member of every group
+  # record. CEL has no flatten, so each attach also writes one row per
+  # instance id and the describe lists those, projected back to the bare ids
+  # the pack answered.
+  instance:
+    collection: asginst
+
+operations:
+  # Create and Update are one case in the pack: the record is built fresh and
+  # Put wholesale, so members set by an earlier attach or patch are dropped.
+  # `create` is the blind write that reproduces that; `put` would merge.
+  CreateAutoScalingGroup:
+    effects:
+      - create:
+          resource: group
+          record:
+            MinSize: "'MinSize' in input ? input.MinSize : null"
+            MaxSize: "'MaxSize' in input ? input.MaxSize : null"
+            DesiredCapacity: "'DesiredCapacity' in input ? input.DesiredCapacity : null"
+            LaunchConfigurationName: "'LaunchConfigurationName' in input ? string(input.LaunchConfigurationName) : ''"
+    output: {}
+
+  UpdateAutoScalingGroup:
+    effects:
+      - create:
+          resource: group
+          record:
+            MinSize: "'MinSize' in input ? input.MinSize : null"
+            MaxSize: "'MaxSize' in input ? input.MaxSize : null"
+            DesiredCapacity: "'DesiredCapacity' in input ? input.DesiredCapacity : null"
+            LaunchConfigurationName: "'LaunchConfigurationName' in input ? string(input.LaunchConfigurationName) : ''"
+    output: {}
+
+  # The pack narrows by the flattened AutoScalingGroupNames.member.1 first,
+  # then by a singular AutoScalingGroupName the model does not declare; the
+  # rest of the declared list is never read.
+  DescribeAutoScalingGroups:
+    list:
+      resource: group
+      member: AutoScalingGroups
+      paginate: model
+      key: "'AutoScalingGroupNames.member.1' in input && string(input['AutoScalingGroupNames.member.1']) != '' ? string(input['AutoScalingGroupNames.member.1']) : ('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '')"
+
+  DeleteAutoScalingGroup:
+    effects:
+      - delete: { resource: group, missing: ignore }
+    output: {}
+
+  # Setting the desired capacity of a group that does not exist creates it,
+  # holding nothing but the name and the capacity.
+  SetDesiredCapacity:
+    effects:
+      - patch:
+          resource: group
+          record:
+            DesiredCapacity: input.DesiredCapacity
+    output: {}
+
+  # The answered activity is minted and forgotten: nothing is stored, no
+  # instance is removed, and the group's desired capacity does not move.
+  TerminateInstanceInAutoScalingGroup:
+    effects:
+      - generate: { bind: act, kind: hex, bytes: 8 }
+    output:
+      Activity: "{'ActivityId': fx.act, 'StatusCode': 'Successful'}"
+
+  CreateLaunchConfiguration:
+    effects:
+      - put: { resource: launchconfig }
+    output: {}
+
+  # The pack ignores LaunchConfigurationNames entirely: naming one
+  # configuration lists them all.
+  DescribeLaunchConfigurations:
+    list: { resource: launchconfig, member: LaunchConfigurations, paginate: model }
+
+  DeleteLaunchConfiguration:
+    effects:
+      - delete: { resource: launchconfig, missing: ignore }
+    output: {}
+
+  CreateOrUpdateTags:
+    effects:
+      - create: { resource: tags, spread: input }
+    output: {}
+
+  DescribeTags:
+    reads:
+      t: { resource: tags }
+    output:
+      Tags: "t_found && 'Tags' in t ? t.Tags : []"
+
+  # The tags named in the request are not read: the one row goes away whole.
+  DeleteTags:
+    effects:
+      - delete: { resource: tags, missing: ignore }
+    output: {}
+
+  # The pack built the record from four forced members and then let the
+  # request overwrite them (`for k, v := range req.Input`). Declared members
+  # win over the spread here instead, which only differs for a caller who
+  # sends PolicyARN or a non-string PolicyName.
+  PutScalingPolicy:
+    effects:
+      - create:
+          resource: policy
+          spread: input
+          record:
+            PolicyName: "'PolicyName' in input ? string(input.PolicyName) : ''"
+            AutoScalingGroupName: "'AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : ''"
+            PolicyType: "'PolicyType' in input ? string(input.PolicyType) : ''"
+            PolicyARN: "'arn:aws:autoscaling:' + identity.region + ':' + identity.account + ':policy:' + ('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '') + ':policyName/' + ('PolicyName' in input ? string(input.PolicyName) : '')"
+    output:
+      PolicyARN: rec.PolicyARN
+
+  DescribePolicies:
+    list:
+      resource: policy
+      member: ScalingPolicies
+      paginate: model
+      filter: "item.AutoScalingGroupName == ('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '')"
+
+  # DeletePolicy declares only PolicyName required; without a group the pack
+  # deleted "/name", which never exists, so the policy survives.
+  DeletePolicy:
+    effects:
+      - delete: { resource: policy, missing: ignore }
+    output: {}
+
+  # The policy named is not checked to exist; an activity is recorded either
+  # way, addressed to whatever group the request carried (possibly none).
+  ExecutePolicy:
+    effects:
+      - create:
+          resource: activity
+          record:
+            Description: "'ExecutePolicy'"
+    output: {}
+
+  # Put and Batch are one case in the pack: Batch reads the singular
+  # ScheduledActionName its input does not declare, so the name is always
+  # generated and the request's ScheduledUpdateGroupActions list is stored as
+  # a member of one record.
+  PutScheduledUpdateGroupAction:
+    effects:
+      - generate:
+          bind: san
+          kind: hex
+          bytes: 8
+          when: "!('ScheduledActionName' in input) || string(input.ScheduledActionName) == ''"
+      - create:
+          resource: scheduled
+          key: "('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '') + '/' + ('ScheduledActionName' in input && string(input.ScheduledActionName) != '' ? string(input.ScheduledActionName) : fx.san)"
+          spread: input
+          record:
+            ScheduledActionName: "'ScheduledActionName' in input && string(input.ScheduledActionName) != '' ? string(input.ScheduledActionName) : fx.san"
+            AutoScalingGroupName: "'AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : ''"
+    output: {}
+
+  BatchPutScheduledUpdateGroupAction:
+    effects:
+      - generate:
+          bind: san
+          kind: hex
+          bytes: 8
+          when: "!('ScheduledActionName' in input) || string(input.ScheduledActionName) == ''"
+      - create:
+          resource: scheduled
+          key: "('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '') + '/' + ('ScheduledActionName' in input && string(input.ScheduledActionName) != '' ? string(input.ScheduledActionName) : fx.san)"
+          spread: input
+          record:
+            ScheduledActionName: "'ScheduledActionName' in input && string(input.ScheduledActionName) != '' ? string(input.ScheduledActionName) : fx.san"
+            AutoScalingGroupName: "'AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : ''"
+    output: {}
+
+  DescribeScheduledActions:
+    list:
+      resource: scheduled
+      member: ScheduledUpdateGroupActions
+      paginate: model
+      filter: "item.AutoScalingGroupName == ('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '')"
+
+  DeleteScheduledAction:
+    effects:
+      - delete: { resource: scheduled, missing: ignore }
+    output: {}
+
+  # BatchDelete reads the singular ScheduledActionName its input does not
+  # declare, so it deletes "<group>/" -- a key nothing is ever written under.
+  BatchDeleteScheduledAction:
+    effects:
+      - delete: { resource: scheduled, missing: ignore }
+    output: {}
+
+  PutLifecycleHook:
+    effects:
+      - create:
+          resource: lifecycle
+          spread: input
+          record:
+            LifecycleHookName: "'LifecycleHookName' in input ? string(input.LifecycleHookName) : ''"
+            AutoScalingGroupName: "'AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : ''"
+            LifecycleTransition: "'LifecycleTransition' in input ? string(input.LifecycleTransition) : ''"
+    output: {}
+
+  DescribeLifecycleHooks:
+    list:
+      resource: lifecycle
+      member: LifecycleHooks
+      paginate: model
+      filter: "item.AutoScalingGroupName == ('AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : '')"
+
+  DeleteLifecycleHook:
+    effects:
+      - delete: { resource: lifecycle, missing: ignore }
+    output: {}
+
+  CompleteLifecycleAction:
+    output: {}
+
+  RecordLifecycleActionHeartbeat:
+    output: {}
+
+  PutNotificationConfiguration:
+    effects:
+      - create: { resource: notification, spread: input }
+    output: {}
+
+  # One configuration per group; the listing ignores AutoScalingGroupNames.
+  DescribeNotificationConfigurations:
+    list: { resource: notification, member: NotificationConfigurations, paginate: model }
+
+  # The TopicARN the model requires is not read: the group's row goes away.
+  DeleteNotificationConfiguration:
+    effects:
+      - delete: { resource: notification, missing: ignore }
+    output: {}
+
+  PutWarmPool:
+    effects:
+      - create: { resource: warmpool, spread: input }
+    output: {}
+
+  # When nothing was put the pack answered a zeroed WarmPoolConfiguration and
+  # no instances. When something was, it answered the stored request flat at
+  # the top level -- not under WarmPoolConfiguration -- which the declared
+  # shape cannot carry; that answer is superseded in the recording.
+  DescribeWarmPool:
+    reads:
+      w: { resource: warmpool }
+    output:
+      WarmPoolConfiguration: "w_found ? w : {'MinSize': 0}"
+      Instances: "w_found && 'Instances' in w ? w.Instances : []"
+
+  DeleteWarmPool:
+    effects:
+      - delete: { resource: warmpool, missing: ignore }
+    output: {}
+
+  StartInstanceRefresh:
+    effects:
+      - create:
+          resource: refresh
+          record:
+            AutoScalingGroupName: "'AutoScalingGroupName' in input ? string(input.AutoScalingGroupName) : ''"
+            Status: "'InProgress'"
+    output:
+      InstanceRefreshId: id
+
+  # The pack lists every refresh in the account and region: the required
+  # AutoScalingGroupName and any InstanceRefreshIds are not consulted.
+  DescribeInstanceRefreshes:
+    list: { resource: refresh, member: InstanceRefreshes, paginate: model }
+
+  # Without an InstanceRefreshId the pack takes the first refresh in key
+  # order; with none at all it writes a phantom record under the empty key.
+  CancelInstanceRefresh:
+    select:
+      binding: refs
+      resource: refresh
+    effects:
+      - patch:
+          resource: refresh
+          key: "'InstanceRefreshId' in input && string(input.InstanceRefreshId) != '' ? string(input.InstanceRefreshId) : (refs.size() > 0 ? string(refs[0].InstanceRefreshId) : '')"
+          record:
+            Status: "'Cancelled'"
+    output:
+      InstanceRefreshId: id
+
+  RollbackInstanceRefresh:
+    select:
+      binding: refs
+      resource: refresh
+    effects:
+      - patch:
+          resource: refresh
+          key: "'InstanceRefreshId' in input && string(input.InstanceRefreshId) != '' ? string(input.InstanceRefreshId) : (refs.size() > 0 ? string(refs[0].InstanceRefreshId) : '')"
+          record:
+            Status: "'RollbackInProgress'"
+    output:
+      InstanceRefreshId: id
+
+  # The attach/detach family shares the pack's patchASGList: read the group
+  # (or a fresh one holding only the name), append or remove the listed
+  # values, write it back. Several of them answer an Activities list their
+  # output shape does not declare; the bundle answers nothing there and the
+  # recorded member is superseded.
+  AttachInstances:
+    reads:
+      a: { resource: group }
+    let:
+      added: "'InstanceIds' in input && input.InstanceIds.size() > 0 ? input.InstanceIds : ('InstanceIds.member.1' in input && string(input['InstanceIds.member.1']) != '' ? [string(input['InstanceIds.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            Instances: "(a_found && 'Instances' in a ? a.Instances : []) + added"
+      - create:
+          resource: instance
+          for_each: added
+          key: "string(item)"
+          record:
+            InstanceId: "string(item)"
+    output: {}
+
+  DetachInstances:
+    reads:
+      a: { resource: group }
+    let:
+      removed: "'InstanceIds' in input && input.InstanceIds.size() > 0 ? input.InstanceIds : ('InstanceIds.member.1' in input && string(input['InstanceIds.member.1']) != '' ? [string(input['InstanceIds.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            Instances: "(a_found && 'Instances' in a ? a.Instances : []).filter(x, !(x in removed))"
+      - delete:
+          resource: instance
+          where: "item.InstanceId in removed"
+      - generate: { bind: act, kind: hex, bytes: 8 }
+    output:
+      Activities: "[{'ActivityId': fx.act, 'StatusCode': 'Successful'}]"
+
+  EnterStandby:
+    reads:
+      a: { resource: group }
+    let:
+      added: "'InstanceIds' in input && input.InstanceIds.size() > 0 ? input.InstanceIds : ('InstanceIds.member.1' in input && string(input['InstanceIds.member.1']) != '' ? [string(input['InstanceIds.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            Instances: "(a_found && 'Instances' in a ? a.Instances : []) + added"
+            InstanceState: "'Standby'"
+      - create:
+          resource: instance
+          for_each: added
+          key: "string(item)"
+          record:
+            InstanceId: "string(item)"
+      - generate: { bind: act, kind: hex, bytes: 8 }
+    output:
+      Activities: "[{'ActivityId': fx.act, 'StatusCode': 'Successful'}]"
+
+  ExitStandby:
+    reads:
+      a: { resource: group }
+    let:
+      added: "'InstanceIds' in input && input.InstanceIds.size() > 0 ? input.InstanceIds : ('InstanceIds.member.1' in input && string(input['InstanceIds.member.1']) != '' ? [string(input['InstanceIds.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            Instances: "(a_found && 'Instances' in a ? a.Instances : []) + added"
+            InstanceState: "'InService'"
+      - create:
+          resource: instance
+          for_each: added
+          key: "string(item)"
+          record:
+            InstanceId: "string(item)"
+      - generate: { bind: act, kind: hex, bytes: 8 }
+    output:
+      Activities: "[{'ActivityId': fx.act, 'StatusCode': 'Successful'}]"
+
+  # The pack forces ProtectedFromScaleIn to true; the request's own value is
+  # never read.
+  SetInstanceProtection:
+    reads:
+      a: { resource: group }
+    let:
+      added: "'InstanceIds' in input && input.InstanceIds.size() > 0 ? input.InstanceIds : ('InstanceIds.member.1' in input && string(input['InstanceIds.member.1']) != '' ? [string(input['InstanceIds.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            Instances: "(a_found && 'Instances' in a ? a.Instances : []) + added"
+            InstanceState: "'InService'"
+            ProtectedFromScaleIn: "true"
+      - create:
+          resource: instance
+          for_each: added
+          key: "string(item)"
+          record:
+            InstanceId: "string(item)"
+    output: {}
+
+  # SetInstanceHealth declares no AutoScalingGroupName, so the pack addressed
+  # the group by the empty string: every call writes one shared phantom row.
+  SetInstanceHealth:
+    addressing:
+      group: "the pack reads AutoScalingGroupName, which SetInstanceHealth does not declare; the lookup yields the empty key and every call writes to one shared phantom row"
+    reads:
+      a: { resource: group }
+    let:
+      added: "'InstanceIds' in input && input.InstanceIds.size() > 0 ? input.InstanceIds : ('InstanceIds.member.1' in input && string(input['InstanceIds.member.1']) != '' ? [string(input['InstanceIds.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            Instances: "(a_found && 'Instances' in a ? a.Instances : []) + added"
+            InstanceState: "'HealthStatus' in input && string(input.HealthStatus) != '' ? string(input.HealthStatus) : 'Healthy'"
+      - create:
+          resource: instance
+          for_each: added
+          key: "string(item)"
+          record:
+            InstanceId: "string(item)"
+    output: {}
+
+  AttachLoadBalancers:
+    reads:
+      a: { resource: group }
+    let:
+      added: "'LoadBalancerNames' in input && input.LoadBalancerNames.size() > 0 ? input.LoadBalancerNames : ('LoadBalancerNames.member.1' in input && string(input['LoadBalancerNames.member.1']) != '' ? [string(input['LoadBalancerNames.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            LoadBalancerNames: "(a_found && 'LoadBalancerNames' in a ? a.LoadBalancerNames : []) + added"
+    output: {}
+
+  DetachLoadBalancers:
+    reads:
+      a: { resource: group }
+    let:
+      removed: "'LoadBalancerNames' in input && input.LoadBalancerNames.size() > 0 ? input.LoadBalancerNames : ('LoadBalancerNames.member.1' in input && string(input['LoadBalancerNames.member.1']) != '' ? [string(input['LoadBalancerNames.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            LoadBalancerNames: "(a_found && 'LoadBalancerNames' in a ? a.LoadBalancerNames : []).filter(x, !(x in removed))"
+    output: {}
+
+  DescribeLoadBalancers:
+    reads:
+      a: { resource: group }
+    output:
+      LoadBalancers: "a_found && 'LoadBalancerNames' in a ? a.LoadBalancerNames : null"
+
+  AttachLoadBalancerTargetGroups:
+    reads:
+      a: { resource: group }
+    let:
+      added: "'TargetGroupARNs' in input && input.TargetGroupARNs.size() > 0 ? input.TargetGroupARNs : ('TargetGroupARNs.member.1' in input && string(input['TargetGroupARNs.member.1']) != '' ? [string(input['TargetGroupARNs.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            TargetGroupARNs: "(a_found && 'TargetGroupARNs' in a ? a.TargetGroupARNs : []) + added"
+    output: {}
+
+  DetachLoadBalancerTargetGroups:
+    reads:
+      a: { resource: group }
+    let:
+      removed: "'TargetGroupARNs' in input && input.TargetGroupARNs.size() > 0 ? input.TargetGroupARNs : ('TargetGroupARNs.member.1' in input && string(input['TargetGroupARNs.member.1']) != '' ? [string(input['TargetGroupARNs.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            TargetGroupARNs: "(a_found && 'TargetGroupARNs' in a ? a.TargetGroupARNs : []).filter(x, !(x in removed))"
+    output: {}
+
+  DescribeLoadBalancerTargetGroups:
+    reads:
+      a: { resource: group }
+    output:
+      LoadBalancerTargetGroups: "a_found && 'TargetGroupARNs' in a ? a.TargetGroupARNs : null"
+
+  AttachTrafficSources:
+    reads:
+      a: { resource: group }
+    let:
+      added: "'TrafficSources' in input && input.TrafficSources.size() > 0 ? input.TrafficSources : ('TrafficSources.member.1' in input && string(input['TrafficSources.member.1']) != '' ? [string(input['TrafficSources.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            TrafficSources: "(a_found && 'TrafficSources' in a ? a.TrafficSources : []) + added"
+    output: {}
+
+  # The pack compared values by stringification, so detaching any one
+  # map-valued traffic source removes every map-valued entry; the bundle
+  # compares by value, which agrees on the string entries these lists carry.
+  DetachTrafficSources:
+    reads:
+      a: { resource: group }
+    let:
+      removed: "'TrafficSources' in input && input.TrafficSources.size() > 0 ? input.TrafficSources : ('TrafficSources.member.1' in input && string(input['TrafficSources.member.1']) != '' ? [string(input['TrafficSources.member.1'])] : [])"
+    effects:
+      - patch:
+          resource: group
+          record:
+            TrafficSources: "(a_found && 'TrafficSources' in a ? a.TrafficSources : []).filter(x, !(x in removed))"
+    output: {}
+
+  DescribeTrafficSources:
+    reads:
+      a: { resource: group }
+    output:
+      TrafficSources: "a_found && 'TrafficSources' in a ? a.TrafficSources : null"
+
+  EnableMetricsCollection:
+    effects:
+      - patch:
+          resource: group
+          record:
+            MetricsCollection: "'Enabled'"
+    output: {}
+
+  DisableMetricsCollection:
+    effects:
+      - patch:
+          resource: group
+          record:
+            MetricsCollection: "'Disabled'"
+    output: {}
+
+  SuspendProcesses:
+    effects:
+      - patch:
+          resource: group
+          record:
+            ProcessState: "'Suspended'"
+    output: {}
+
+  ResumeProcesses:
+    effects:
+      - patch:
+          resource: group
+          record:
+            ProcessState: "'Resumed'"
+    output: {}
+
+  # The group named is not checked to exist; the activity is recorded and
+  # answered either way. LaunchInstancesResult declares no Activities member,
+  # so the answer is superseded in the recording.
+  LaunchInstances:
+    effects:
+      - create:
+          resource: activity
+          record:
+            Description: "'LaunchInstances'"
+    output: {}
+
+  DescribeScalingActivities:
+    list: { resource: activity, member: Activities, paginate: model }
+
+  DescribeAutoScalingInstances:
+    list:
+      resource: instance
+      member: AutoScalingInstances
+      paginate: model
+    output:
+      AutoScalingInstances: "items.map(x, x.InstanceId)"
+
+  DescribeAccountLimits:
+    output:
+      MaxNumberOfAutoScalingGroups: "200"
+      MaxNumberOfLaunchConfigurations: "200"
+      NumberOfAutoScalingGroups: "0"
+      NumberOfLaunchConfigurations: "0"
+
+  DescribeAdjustmentTypes:
+    output:
+      AdjustmentTypes: "[{'AdjustmentType': 'ChangeInCapacity'}, {'AdjustmentType': 'ExactCapacity'}, {'AdjustmentType': 'PercentChangeInCapacity'}]"
+
+  DescribeAutoScalingNotificationTypes:
+    output:
+      AutoScalingNotificationTypes: "['autoscaling:EC2_INSTANCE_LAUNCH', 'autoscaling:EC2_INSTANCE_TERMINATE']"
+
+  DescribeLifecycleHookTypes:
+    output:
+      LifecycleHookTypes: "['autoscaling:EC2_INSTANCE_LAUNCHING', 'autoscaling:EC2_INSTANCE_TERMINATING']"
+
+  DescribeMetricCollectionTypes:
+    output:
+      Metrics: "[{'Metric': 'GroupMinSize'}]"
+      Granularities: "[{'Granularity': '1Minute'}]"
+
+  DescribeScalingProcessTypes:
+    output:
+      Processes: "[{'ProcessName': 'Launch'}, {'ProcessName': 'Terminate'}]"
+
+  DescribeTerminationPolicyTypes:
+    output:
+      TerminationPolicyTypes: "['OldestInstance', 'NewestInstance', 'Default']"
+
+  # ponytail: no real forecast; empty timestamps, as the pack had it.
+  GetPredictiveScalingForecast:
+    output:
+      LoadForecast: "[]"
+      CapacityForecast: "[]"
+
+quirks:
+  - operation: CreateAutoScalingGroup
+    note: >
+      The pack answered no fault to any request: a Create without the
+      model-required MinSize or MaxSize succeeded and stored a null, an update
+      to a group that does not exist created it, and every delete of an absent
+      record succeeded. The engine enforces the model's required members
+      before any rule runs (ValidationException), so the pack's empty-name
+      rows are unreachable now. Create and Update are the same code path: the
+      record is built fresh and written wholesale, so an Update drops whatever
+      an earlier AttachInstances or EnableMetricsCollection had added.
+  - operation: DescribeAutoScalingGroups
+    note: >
+      The narrowing read is the flattened query key AutoScalingGroupNames.member.1,
+      falling back to a singular AutoScalingGroupName the model does not
+      declare; a request carrying the declared AutoScalingGroupNames list as a
+      decoded value is not narrowed by it, and elements past the first are
+      never read. A named group that does not exist is an empty list, not a
+      fault.
+  - operation: SetDesiredCapacity
+    note: >
+      Setting the desired capacity of a group that does not exist creates it:
+      a record holding the name and the capacity and nothing else, which
+      DescribeAutoScalingGroups then lists. TerminateInstanceInAutoScalingGroup
+      is the reverse shape: it mints an activity id, stores nothing, and no
+      instance is removed from anything.
+  - operation: DescribeLaunchConfigurations
+    note: >
+      LaunchConfigurationNames is not read: describing one configuration by
+      name lists every configuration in the account and region.
+  - operation: CreateOrUpdateTags
+    note: >
+      All tags live in one row per account and region: CreateOrUpdateTags
+      replaces that row with the request, whatever groups the tags name, and
+      DeleteTags deletes the row without reading which tags were named.
+      DescribeTags answers the stored request's Tags member.
+  - operation: PutScalingPolicy
+    note: >
+      The pack forced PolicyName, AutoScalingGroupName, PolicyType and
+      PolicyARN and then let the request overwrite them, so a caller sending
+      PolicyARN stored and answered their own ARN; the bundle's declared
+      members win over the spread instead. DeletePolicy declares only
+      PolicyName required and the pack deleted "<group>/<name>", so deleting
+      without a group removes "/name" -- a key nothing is written under --
+      and the policy survives.
+  - operation: BatchPutScheduledUpdateGroupAction
+    note: >
+      Batch shares the singular Put's code path: it reads ScheduledActionName,
+      which its input does not declare, so the name is always generated, the
+      ScheduledUpdateGroupActions list is stored as one member of one record,
+      and nothing fails per entry. BatchDeleteScheduledAction likewise reads
+      the singular name and deletes "<group>/", removing nothing.
+      PutScheduledUpdateGroupAction with a present-but-empty name generates
+      one, which the pack did too; only an absent name is now rejected, by
+      model validation.
+  - operation: DescribeInstanceRefreshes
+    note: >
+      The listing ignores the required AutoScalingGroupName and any
+      InstanceRefreshIds: every refresh in the account and region is answered.
+      CancelInstanceRefresh and RollbackInstanceRefresh without an id take the
+      first refresh in key order, and with none at all they write a phantom
+      record under the empty key and answer an empty InstanceRefreshId.
+  - operation: DescribeWarmPool
+    note: >
+      After a Put, the describe answers the stored request's members flat at
+      the top level -- AutoScalingGroupName, MinSize, PoolState -- not the
+      declared WarmPoolConfiguration and Instances. That answer cannot be
+      produced from data the loader accepts, so the recording supersedes it;
+      the never-put answer (a zeroed WarmPoolConfiguration, no instances) is
+      transcribed exactly.
+  - operation: AttachInstances
+    note: >
+      The attach/detach/standby/protection/health family writes through to the
+      group record, creating it holding only the name when absent. Several of
+      them answer an Activities list their output shape does not declare
+      (AttachInstances, both load-balancer attaches and detaches, both traffic
+      source operations, SetInstanceHealth and SetInstanceProtection); the
+      codec drops those, the bundle answers nothing, and the recorded members
+      are superseded. Detaching compares by value here; the pack compared by
+      stringification, which removed every map-valued traffic source when any
+      one was detached.
+  - operation: SetInstanceHealth
+    note: >
+      The operation declares no AutoScalingGroupName, so the pack's group
+      lookup always resolved the empty string: every SetInstanceHealth writes
+      one shared phantom group record under the empty key, which
+      DescribeAutoScalingGroups then lists. Transcribed under `addressing`
+      with that reason.
+  - operation: SetInstanceProtection
+    note: >
+      ProtectedFromScaleIn is stored as true whatever the request carries;
+      the required input member is never read. InstanceState is set to
+      InService at the same time, which the real operation does not do.
+  - operation: DescribeAutoScalingInstances
+    note: >
+      The pack flattened the Instances member of every group record, in group
+      key order then attach order, duplicates included. CEL has no flatten, so
+      the bundle keeps one row per attached instance id and projects the ids:
+      attaching the same id twice answers it once here, and the order follows
+      the instance id rather than the attach order.
+  - operation: LaunchInstances
+    note: >
+      Neither the group nor the policy these operations name is checked to
+      exist. LaunchInstances answers an Activities member that
+      LaunchInstancesResult does not declare -- superseded in the recording --
+      while the activity it records is real and DescribeScalingActivities
+      lists it. ExecutePolicy is the same shape with an empty answer.
+  - operation: DescribeAccountLimits
+    note: >
+      Every limit and taxonomy describe answers constants: 200 groups and
+      launch configurations, zero of either in use (however many exist), three
+      adjustment types, two notification types, two lifecycle hook types, one
+      metric with one granularity, two scaling processes, three termination
+      policies, and an empty predictive-scaling forecast.

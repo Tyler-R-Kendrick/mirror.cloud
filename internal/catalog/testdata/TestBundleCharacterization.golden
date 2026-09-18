@@ -1619,6 +1619,9 @@
       "ListDashboards",
       "ListManagedInsightRules",
       "ListMetricStreams",
+      "ListTagsForResource",
+      "TagResource",
+      "UntagResource",
       "PutAlarmMuteRule",
       "PutAnomalyDetector",
       "PutCompositeAlarm",
@@ -2696,6 +2699,26 @@
   },
   {
     "ID": "aws.es",
+    "Protocol": "restJson1",
+    "Ops": [
+      "CreateDomain",
+      "DescribeDomain",
+      "DescribeDomains",
+      "ListDomainNames",
+      "DeleteDomain",
+      "UpdateDomainConfig",
+      "DescribeDomainConfig",
+      "AddTags",
+      "ListTags",
+      "RemoveTags",
+      "IndexDocument",
+      "GetDocument",
+      "DeleteDocument",
+      "Search"
+    ]
+  },
+  {
+    "ID": "aws.opensearch",
     "Protocol": "restJson1",
     "Ops": [
       "CreateDomain",
@@ -4302,7 +4325,8 @@
       "ListCanaries",
       "DeleteCanary",
       "StartCanary",
-      "StopCanary"
+      "StopCanary",
+      "DescribeCanaries"
     ]
   },
   {

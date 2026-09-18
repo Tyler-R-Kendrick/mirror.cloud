@@ -1,0 +1,517 @@
+{
+  "schema": "trace/1",
+  "service": "aws.swf",
+  "source": "pack:internal/services/aws/swf@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered flat members the model does not declare (typeInfo.domain, executionInfo.runId, and friends), the bundle answers the declared nesting and the recorded members are superseded with that reason.",
+  "steps": [
+    {
+      "operation": "ListDomains",
+      "input": {
+        "registrationStatus": "REGISTERED"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domainInfos": null
+      }
+    },
+    {
+      "operation": "RegisterDomain",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UnknownResourceFault",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "RegisterDomain",
+      "input": {
+        "name": "d1",
+        "description": "first",
+        "workflowExecutionRetentionPeriodInDays": "7"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "RegisterDomain",
+      "input": {
+        "name": "d2",
+        "workflowExecutionRetentionPeriodInDays": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "name": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domainInfo": {
+          "description": "first",
+          "name": "d1",
+          "status": "REGISTERED"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UnknownResourceFault",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDomains",
+      "input": {
+        "registrationStatus": "REGISTERED"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domainInfos": [
+          {
+            "description": "first",
+            "name": "d1",
+            "status": "REGISTERED"
+          },
+          {
+            "description": "",
+            "name": "d2",
+            "status": "REGISTERED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeprecateDomain",
+      "input": {
+        "name": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "RegisterWorkflowType",
+      "input": {
+        "domain": "d1",
+        "name": "wf1",
+        "version": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeWorkflowType",
+      "input": {
+        "domain": "d1",
+        "workflowType": {
+          "name": "wf1",
+          "version": "v1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "typeInfo": {
+          "domain": "d1",
+          "name": "wf1",
+          "status": "REGISTERED",
+          "version": "v1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeWorkflowType",
+      "input": {
+        "domain": "d1",
+        "workflowType": {
+          "name": "ghost",
+          "version": "v9"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "typeInfo": {
+          "name": "ghost",
+          "version": "v9"
+        }
+      }
+    },
+    {
+      "operation": "ListWorkflowTypes",
+      "input": {
+        "domain": "d1",
+        "registrationStatus": "REGISTERED"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "typeInfos": [
+          {
+            "domain": "d1",
+            "name": "wf1",
+            "status": "REGISTERED",
+            "version": "v1"
+          }
+        ]
+      },
+      "superseded": "the pack listed the flat records; the model declares WorkflowTypeInfo with name and version nested under workflowType, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "RegisterActivityType",
+      "input": {
+        "domain": "d1",
+        "name": "act1",
+        "version": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeActivityType",
+      "input": {
+        "domain": "d1",
+        "activityType": {
+          "name": "act1",
+          "version": "v1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "typeInfo": {
+          "domain": "d1",
+          "name": "act1",
+          "status": "REGISTERED",
+          "version": "v1"
+        }
+      }
+    },
+    {
+      "operation": "ListActivityTypes",
+      "input": {
+        "domain": "d1",
+        "registrationStatus": "REGISTERED"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "typeInfos": [
+          {
+            "domain": "d1",
+            "name": "act1",
+            "status": "REGISTERED",
+            "version": "v1"
+          }
+        ]
+      },
+      "superseded": "the pack listed the flat records; the model declares ActivityTypeInfo with name and version nested under activityType, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "StartWorkflowExecution",
+      "input": {
+        "domain": "d1",
+        "workflowId": "w1",
+        "workflowType": {
+          "name": "wf1",
+          "version": "v1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "runId": "aa00000000000001"
+      }
+    },
+    {
+      "operation": "DescribeWorkflowExecution",
+      "input": {
+        "domain": "d1",
+        "execution": {
+          "workflowId": "w1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "executionInfo": {
+          "domain": "d1",
+          "executionStatus": "OPEN",
+          "runId": "aa00000000000001",
+          "workflowId": "w1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeWorkflowExecution",
+      "input": {
+        "domain": "d1",
+        "execution": {
+          "workflowId": "ghost"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UnknownResourceFault",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListOpenWorkflowExecutions",
+      "input": {
+        "domain": "d1",
+        "startTimeFilter": {
+          "oldestDate": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "executionInfos": [
+          {
+            "domain": "d1",
+            "executionStatus": "OPEN",
+            "runId": "aa00000000000001",
+            "workflowId": "w1"
+          }
+        ]
+      },
+      "superseded": "the pack listed the flat records; the model declares WorkflowExecutionInfo with workflowId and runId nested under execution, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "PollForActivityTask",
+      "input": {
+        "domain": "d1",
+        "taskList": {
+          "name": "t"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "TerminateWorkflowExecution",
+      "input": {
+        "domain": "d1",
+        "workflowId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "TerminateWorkflowExecution",
+      "input": {
+        "domain": "d1",
+        "workflowId": "w1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeWorkflowExecution",
+      "input": {
+        "domain": "d1",
+        "execution": {
+          "workflowId": "w1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UnknownResourceFault",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListOpenWorkflowExecutions",
+      "input": {
+        "domain": "d1",
+        "startTimeFilter": {
+          "oldestDate": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "executionInfos": null
+      }
+    },
+    {
+      "operation": "DeprecateDomain",
+      "input": {
+        "name": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "name": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UnknownResourceFault",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

@@ -1,0 +1,1217 @@
+{
+  "schema": "trace/1",
+  "service": "aws.cognito-idp",
+  "source": "pack:internal/services/aws/cognitoidp@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateUserPool",
+      "input": {
+        "PoolName": "pool-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPool": {
+          "Id": "aa00000000000001",
+          "Name": "pool-one",
+          "Arn": "arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_aa00000000000001"
+        }
+      },
+      "superseded_members": {
+        "UserPool.Arn": "embeds the generated pool id; the unifier substitutes token-shaped strings only, so each side's own value stands -- the id itself is unified, and every later step addresses the pool by reference"
+      }
+    },
+    {
+      "operation": "DescribeUserPool",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPool": {
+          "Id": "aa00000000000001",
+          "Name": "pool-one",
+          "Arn": "arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_aa00000000000001"
+        }
+      },
+      "superseded_members": {
+        "UserPool.Arn": "embeds the generated pool id; the unifier substitutes token-shaped strings only, so each side's own value stands -- the id itself is unified, and every later step addresses the pool by reference"
+      }
+    },
+    {
+      "operation": "DescribeUserPool",
+      "input": {
+        "UserPoolId": "no-such-pool"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUserPools",
+      "input": {
+        "MaxResults": 10
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPools": [
+          {
+            "Id": "aa00000000000001",
+            "Name": "pool-one",
+            "Arn": "arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_aa00000000000001"
+          }
+        ]
+      },
+      "superseded_members": {
+        "UserPools[0].Arn": "UserPoolDescriptionType declares Id and Name and no Arn, so the Arn the pack listed from its stored record was a member no SDK could read -- and it embeds the generated pool id besides, which the unifier cannot rewrite inside a larger string. The bundle projects the declared members; Id and Name are still compared"
+      }
+    },
+    {
+      "operation": "CreateUserPool",
+      "input": {
+        "PoolName": "pool-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPool": {
+          "Id": "aa00000000000002",
+          "Name": "pool-two",
+          "Arn": "arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_aa00000000000002"
+        }
+      },
+      "superseded_members": {
+        "UserPool.Arn": "embeds the generated pool id; the unifier substitutes token-shaped strings only, so each side's own value stands -- the id itself is unified, and every later step addresses the pool by reference"
+      }
+    },
+    {
+      "operation": "AdminCreateUser",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "alice"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Enabled": true,
+          "UserStatus": "FORCE_CHANGE_PASSWORD",
+          "Username": "alice"
+        }
+      }
+    },
+    {
+      "operation": "AdminCreateUser",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 4,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "carol"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Enabled": true,
+          "UserStatus": "FORCE_CHANGE_PASSWORD",
+          "Username": "carol"
+        }
+      }
+    },
+    {
+      "operation": "AdminGetUser",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "alice"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Enabled": true,
+        "UserStatus": "FORCE_CHANGE_PASSWORD",
+        "Username": "alice"
+      }
+    },
+    {
+      "operation": "AdminGetUser",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UserNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "Enabled": true,
+            "UserStatus": "FORCE_CHANGE_PASSWORD",
+            "Username": "alice"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AdminSetUserPassword",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "ghost",
+        "Password": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UserNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AdminSetUserPassword",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "alice",
+        "Password": "p@ss123"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AdminGetUser",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "alice"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Enabled": true,
+        "UserStatus": "CONFIRMED",
+        "Username": "alice",
+        "Password": "p@ss123"
+      },
+      "superseded": "AdminGetUserResponse declares no Password; the pack answered the stored record, which AdminSetUserPassword had given one, so Password was a member no SDK could read. The bundle projects the declared members; an earlier step gates them on a user without a password"
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "Enabled": true,
+            "UserStatus": "CONFIRMED",
+            "Username": "alice",
+            "Password": "p@ss123"
+          }
+        ]
+      },
+      "superseded": "UserType declares no Password; the pack listed the stored record, which carries one once a password is set. The bundle projects the declared members; an earlier step gates a listed user without a password"
+    },
+    {
+      "operation": "CreateUserPoolClient",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "ClientName": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPoolClient": {
+          "ClientId": "bb00000000000001",
+          "UserPoolId": "aa00000000000001",
+          "ClientName": "web"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUserPoolClient",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPoolClient": {
+          "ClientId": "bb00000000000001",
+          "UserPoolId": "aa00000000000001",
+          "ClientName": "web"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUserPoolClient",
+      "input": {
+        "UserPoolId": "wrongpool",
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPoolClient": {
+          "ClientId": "bb00000000000001",
+          "UserPoolId": "aa00000000000001",
+          "ClientName": "web"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUserPoolClient",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "ClientId": "no-such-client"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUserPoolClients",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPoolClients": [
+          {
+            "ClientId": "bb00000000000001",
+            "UserPoolId": "aa00000000000001",
+            "ClientName": "web"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListUserPoolClients",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 4,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPoolClients": null
+      }
+    },
+    {
+      "operation": "SignUp",
+      "input": {
+        "ClientId": "",
+        "Username": "x",
+        "Password": "y"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameterException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SignUp",
+      "input": {
+        "ClientId": "no-such-client",
+        "Username": "x",
+        "Password": "y"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SignUp",
+      "input": {
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "Username": "bob",
+        "Password": "s3cret"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserConfirmed": false,
+        "UserSub": "dd00000000000001"
+      }
+    },
+    {
+      "operation": "InitiateAuth",
+      "input": {
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "AuthFlow": "USER_PASSWORD_AUTH",
+        "AuthParameters": {
+          "USERNAME": "bob",
+          "PASSWORD": "s3cret"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UserNotConfirmedException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ConfirmSignUp",
+      "input": {
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "Username": "bob",
+        "ConfirmationCode": "000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ConfirmSignUp",
+      "input": {
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "Username": "ghost",
+        "ConfirmationCode": "000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UserNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "InitiateAuth",
+      "input": {
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "AuthFlow": "CUSTOM_AUTH",
+        "AuthParameters": {
+          "USERNAME": "bob",
+          "PASSWORD": "s3cret"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameterException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "InitiateAuth",
+      "input": {
+        "ClientId": "no-such-client",
+        "AuthFlow": "USER_PASSWORD_AUTH",
+        "AuthParameters": {
+          "USERNAME": "bob",
+          "PASSWORD": "s3cret"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "InitiateAuth",
+      "input": {
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "AuthFlow": "USER_PASSWORD_AUTH",
+        "AuthParameters": {
+          "USERNAME": "ghost",
+          "PASSWORD": "x"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UserNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "InitiateAuth",
+      "input": {
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "AuthFlow": "USER_PASSWORD_AUTH",
+        "AuthParameters": {
+          "USERNAME": "bob",
+          "PASSWORD": "wrong"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotAuthorizedException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "InitiateAuth",
+      "input": {
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "AuthFlow": "USER_PASSWORD_AUTH",
+        "AuthParameters": {
+          "USERNAME": "bob",
+          "PASSWORD": "s3cret"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AuthenticationResult": {
+          "AccessToken": "jwt-access-placeholder-1",
+          "IdToken": "jwt-id-placeholder-1",
+          "RefreshToken": "ee00000000000001",
+          "ExpiresIn": 3600,
+          "TokenType": "Bearer"
+        }
+      },
+      "superseded_members": {
+        "AuthenticationResult.AccessToken": "the pack's access and id tokens are HMAC-SHA256 JWTs -- a pure function of pool, client and user -- which B-IR's closed effect vocabulary cannot sign, so the bundle hashes the same triple and answers opaque tokens with the same equality pattern. The refresh token, expiry and token type are still compared, and every later use of the session addresses it by reference",
+        "AuthenticationResult.IdToken": "the pack's access and id tokens are HMAC-SHA256 JWTs -- a pure function of pool, client and user -- which B-IR's closed effect vocabulary cannot sign, so the bundle hashes the same triple and answers opaque tokens with the same equality pattern. The refresh token, expiry and token type are still compared, and every later use of the session addresses it by reference"
+      }
+    },
+    {
+      "operation": "AdminInitiateAuth",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "ClientId": "garbage-client",
+        "AuthFlow": "ADMIN_USER_PASSWORD_AUTH",
+        "AuthParameters": {
+          "USERNAME": "alice",
+          "PASSWORD": "p@ss123"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AuthenticationResult": {
+          "AccessToken": "jwt-access-placeholder-2",
+          "IdToken": "jwt-id-placeholder-2",
+          "RefreshToken": "ee00000000000002",
+          "ExpiresIn": 3600,
+          "TokenType": "Bearer"
+        }
+      },
+      "superseded_members": {
+        "AuthenticationResult.AccessToken": "the pack's access and id tokens are HMAC-SHA256 JWTs -- a pure function of pool, client and user -- which B-IR's closed effect vocabulary cannot sign, so the bundle hashes the same triple and answers opaque tokens with the same equality pattern. The refresh token, expiry and token type are still compared, and every later use of the session addresses it by reference",
+        "AuthenticationResult.IdToken": "the pack's access and id tokens are HMAC-SHA256 JWTs -- a pure function of pool, client and user -- which B-IR's closed effect vocabulary cannot sign, so the bundle hashes the same triple and answers opaque tokens with the same equality pattern. The refresh token, expiry and token type are still compared, and every later use of the session addresses it by reference"
+      }
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "AccessToken": {
+          "$fromStep": 31,
+          "$fromPath": "AuthenticationResult.AccessToken"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Enabled": true,
+        "UserStatus": "CONFIRMED",
+        "Username": "alice",
+        "Password": "p@ss123"
+      },
+      "superseded": "GetUserResponse declares only Username of the members the pack answered flat from the stored record; UserStatus, Enabled and Password were members no SDK could read and the bundle projects them away. The success itself is still gated"
+    },
+    {
+      "operation": "CreateUserPoolClient",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "ClientName": "mobile"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPoolClient": {
+          "ClientId": "bb00000000000002",
+          "UserPoolId": "aa00000000000001",
+          "ClientName": "mobile"
+        }
+      }
+    },
+    {
+      "operation": "InitiateAuth",
+      "input": {
+        "ClientId": {
+          "$fromStep": 33,
+          "$fromPath": "UserPoolClient.ClientId"
+        },
+        "AuthFlow": "USER_PASSWORD_AUTH",
+        "AuthParameters": {
+          "USERNAME": "bob",
+          "PASSWORD": "s3cret"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AuthenticationResult": {
+          "AccessToken": "jwt-access-placeholder-4",
+          "IdToken": "jwt-id-placeholder-4",
+          "RefreshToken": "ee00000000000003",
+          "ExpiresIn": 3600,
+          "TokenType": "Bearer"
+        }
+      },
+      "superseded_members": {
+        "AuthenticationResult.AccessToken": "the pack's access and id tokens are HMAC-SHA256 JWTs -- a pure function of pool, client and user -- which B-IR's closed effect vocabulary cannot sign, so the bundle hashes the same triple and answers opaque tokens with the same equality pattern. The refresh token, expiry and token type are still compared, and every later use of the session addresses it by reference",
+        "AuthenticationResult.IdToken": "the pack's access and id tokens are HMAC-SHA256 JWTs -- a pure function of pool, client and user -- which B-IR's closed effect vocabulary cannot sign, so the bundle hashes the same triple and answers opaque tokens with the same equality pattern. The refresh token, expiry and token type are still compared, and every later use of the session addresses it by reference"
+      }
+    },
+    {
+      "operation": "GlobalSignOut",
+      "input": {
+        "AccessToken": {
+          "$fromStep": 30,
+          "$fromPath": "AuthenticationResult.AccessToken"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "AccessToken": {
+          "$fromStep": 34,
+          "$fromPath": "AuthenticationResult.AccessToken"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotAuthorizedException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "AccessToken": {
+          "$fromStep": 30,
+          "$fromPath": "AuthenticationResult.AccessToken"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Enabled": true,
+        "UserStatus": "CONFIRMED",
+        "Username": "bob",
+        "Password": "s3cret"
+      },
+      "superseded": "GetUserResponse declares only Username of the members the pack answered flat from the stored record; UserStatus, Enabled and Password were members no SDK could read and the bundle projects them away. The success itself is still gated"
+    },
+    {
+      "operation": "GlobalSignOut",
+      "input": {
+        "AccessToken": "no-such-token"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AdminDeleteUser",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AdminDeleteUser",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "AccessToken": {
+          "$fromStep": 30,
+          "$fromPath": "AuthenticationResult.AccessToken"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UserNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AdminGetUser",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "Username": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "UserNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 4,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "Enabled": true,
+            "UserStatus": "FORCE_CHANGE_PASSWORD",
+            "Username": "carol"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AdminCreateUser",
+      "input": {
+        "UserPoolId": "pool-never-created",
+        "Username": "mallory"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Enabled": true,
+          "UserStatus": "FORCE_CHANGE_PASSWORD",
+          "Username": "mallory"
+        }
+      }
+    },
+    {
+      "operation": "DeleteUserPoolClient",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeUserPoolClient",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteUserPoolClient",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 0,
+          "$fromPath": "UserPool.Id"
+        },
+        "ClientId": {
+          "$fromStep": 14,
+          "$fromPath": "UserPoolClient.ClientId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteUserPool",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 4,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeUserPool",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 4,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 4,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "Enabled": true,
+            "UserStatus": "FORCE_CHANGE_PASSWORD",
+            "Username": "carol"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListUserPools",
+      "input": {
+        "MaxResults": 10
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserPools": [
+          {
+            "Id": "aa00000000000001",
+            "Name": "pool-one",
+            "Arn": "arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_aa00000000000001"
+          }
+        ]
+      },
+      "superseded_members": {
+        "UserPools[0].Arn": "UserPoolDescriptionType declares Id and Name and no Arn, so the Arn the pack listed from its stored record was a member no SDK could read -- and it embeds the generated pool id besides, which the unifier cannot rewrite inside a larger string. The bundle projects the declared members; Id and Name are still compared"
+      }
+    },
+    {
+      "operation": "DeleteUserPool",
+      "input": {
+        "UserPoolId": {
+          "$fromStep": 4,
+          "$fromPath": "UserPool.Id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

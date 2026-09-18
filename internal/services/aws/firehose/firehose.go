@@ -34,7 +34,7 @@ import (
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
@@ -4303,7 +4303,7 @@ func (p *Pack) logDeliveryError(ctx context.Context, req *spi.Request, configura
 		return
 	}
 	payload, _ := json.Marshal(map[string]any{"deliveryStreamName": stream, "errorMessage": message})
-	_, _ = logs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "PutLogEvents", Input: map[string]any{
+	_, _ = bundled.Handler("aws.logs", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "PutLogEvents", Input: map[string]any{
 		"logGroupName": first(options, "LogGroupName"), "logStreamName": first(options, "LogStreamName"),
 		"logEvents": []any{map[string]any{"message": string(payload), "timestamp": now.UnixMilli()}},
 	}})

@@ -1,0 +1,1617 @@
+{
+  "schema": "trace/1",
+  "service": "aws.acm",
+  "source": "pack:internal/services/aws/acm@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The pack's certificate lifecycle operations answered a Certificate member the shapes do not declare, and its ACME operations answered flat off-model member names; those steps are superseded with the reason and the bundle answers the declared shape. ACME inputs carry both the pack's member name and the model's, each a reference to the side that answers it, so the one recording replays against both; where an input is spread into a stored record it is a literal instead, because a reference resolves per side and would store a nil on one of them.",
+  "steps": [
+    {
+      "operation": "ListCertificates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateSummaryList": null
+      }
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "RequestCertificate",
+      "input": {
+        "DomainName": "example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129"
+      }
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+          "DomainName": "example.com",
+          "Status": "ISSUED",
+          "Type": "AMAZON_ISSUED"
+        }
+      }
+    },
+    {
+      "operation": "GetCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        "CertificateChain": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+      }
+    },
+    {
+      "operation": "GetCertificate",
+      "input": {
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddTagsToCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        },
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTagsForCertificate",
+      "input": {
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "RemoveTagsFromCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        },
+        "Tags": [
+          {
+            "Key": "k"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        },
+        "Tags": [
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        },
+        "TagKeys": [
+          "k2"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "RenewCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+          "DomainName": "example.com",
+          "Renewed": true,
+          "Status": "ISSUED",
+          "Type": "AMAZON_ISSUED"
+        },
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129"
+      },
+      "superseded": "the pack answered {CertificateArn, Certificate} where the model declares no (or only CertificateArn) output members; the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+          "DomainName": "example.com",
+          "Renewed": true,
+          "Status": "ISSUED",
+          "Type": "AMAZON_ISSUED"
+        }
+      }
+    },
+    {
+      "operation": "RevokeCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        },
+        "RevocationReason": "UNSPECIFIED"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+          "DomainName": "example.com",
+          "Renewed": true,
+          "RevocationReason": "UNSPECIFIED",
+          "Status": "REVOKED",
+          "Type": "AMAZON_ISSUED"
+        },
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129"
+      },
+      "superseded": "the pack answered {CertificateArn, Certificate} where the model declares no (or only CertificateArn) output members; the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+          "DomainName": "example.com",
+          "Renewed": true,
+          "RevocationReason": "UNSPECIFIED",
+          "Status": "REVOKED",
+          "Type": "AMAZON_ISSUED"
+        }
+      }
+    },
+    {
+      "operation": "RevokeCertificate",
+      "input": {
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/absent",
+        "RevocationReason": "UNSPECIFIED"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ResendValidationEmail",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        },
+        "Domain": "example.com",
+        "ValidationDomain": "example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+          "DomainName": "example.com",
+          "Renewed": true,
+          "RevocationReason": "UNSPECIFIED",
+          "Status": "REVOKED",
+          "Type": "AMAZON_ISSUED",
+          "ValidationEmailSent": true
+        },
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129"
+      },
+      "superseded": "the pack answered {CertificateArn, Certificate} where the model declares no (or only CertificateArn) output members; the bundle answers the declared shape"
+    },
+    {
+      "operation": "UpdateCertificateOptions",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        },
+        "Options": {
+          "CertificateTransparencyLoggingPreference": "DISABLED"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+          "DomainName": "example.com",
+          "Options": {
+            "CertificateTransparencyLoggingPreference": "DISABLED"
+          },
+          "Renewed": true,
+          "RevocationReason": "UNSPECIFIED",
+          "Status": "REVOKED",
+          "Type": "AMAZON_ISSUED",
+          "ValidationEmailSent": true
+        },
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129"
+      },
+      "superseded": "the pack answered {CertificateArn, Certificate} where the model declares no (or only CertificateArn) output members; the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+          "DomainName": "example.com",
+          "Options": {
+            "CertificateTransparencyLoggingPreference": "DISABLED"
+          },
+          "Renewed": true,
+          "RevocationReason": "UNSPECIFIED",
+          "Status": "REVOKED",
+          "Type": "AMAZON_ISSUED",
+          "ValidationEmailSent": true
+        }
+      }
+    },
+    {
+      "operation": "ListCertificates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateSummaryList": [
+          {
+            "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+            "DomainName": "example.com",
+            "Status": "REVOKED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SearchCertificates",
+      "input": {
+        "DomainName": "example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateSummaryList": [
+          {
+            "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/7c589129",
+            "DomainName": "example.com",
+            "Status": "REVOKED"
+          }
+        ]
+      },
+      "superseded": "the pack answered CertificateSummaryList where the model declares Results of CertificateSearchResult; the bundle answers the declared member"
+    },
+    {
+      "operation": "SearchCertificates",
+      "input": {
+        "DomainName": "nobody.example"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateSummaryList": null
+      }
+    },
+    {
+      "operation": "ListCertificateDomainValidations",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainValidations": [
+          {
+            "DomainName": "example.com",
+            "ValidationMethod": "DNS",
+            "ValidationStatus": "SUCCESS"
+          }
+        ]
+      },
+      "superseded": "the pack answered one flat row under DomainValidations; the model declares DomainValidationSummaryList with the validation pair nested, and the bundle answers the declared nesting"
+    },
+    {
+      "operation": "ListCertificateDomainValidations",
+      "input": {
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainValidations": [
+          {
+            "DomainName": "",
+            "ValidationMethod": "DNS",
+            "ValidationStatus": "SUCCESS"
+          }
+        ]
+      },
+      "superseded": "the pack answered one flat row under DomainValidations; the model declares DomainValidationSummaryList with the validation pair nested, and the bundle answers the declared nesting"
+    },
+    {
+      "operation": "ExportCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 3
+        },
+        "Passphrase": "cGFzc3BocmFzZQ=="
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        "PrivateKey": "mirror-private-key"
+      }
+    },
+    {
+      "operation": "ExportCertificate",
+      "input": {
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/absent",
+        "Passphrase": "cGFzc3BocmFzZQ=="
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ImportCertificate",
+      "input": {
+        "Certificate": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        "PrivateKey": "mirror-private-key"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "Certificate": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+          "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/5f59f223",
+          "DomainName": "imported.local",
+          "Status": "ISSUED",
+          "Type": "IMPORTED"
+        }
+      }
+    },
+    {
+      "operation": "DeleteCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeCertificate",
+      "input": {
+        "CertificateArn": {
+          "$fromPath": "CertificateArn",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetAccountConfiguration",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ExpiryEvents": {
+          "DaysBeforeExpiry": 45
+        }
+      }
+    },
+    {
+      "operation": "PutAccountConfiguration",
+      "input": {
+        "ExpiryEvents": {
+          "DaysBeforeExpiry": 30
+        },
+        "IdempotencyToken": "tok-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAccountConfiguration",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ExpiryEvents": {
+          "DaysBeforeExpiry": 30
+        },
+        "IdempotencyToken": "tok-1"
+      },
+      "superseded": "the pack answered the whole stored request flat, echoing the IdempotencyToken member the response shape does not declare; the bundle answers ExpiryEvents alone"
+    },
+    {
+      "operation": "DescribeAcmeEndpoint",
+      "input": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/absent",
+        "EndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateAcmeEndpoint",
+      "input": {
+        "AuthorizationBehavior": "REUSE_AUTHORIZATION",
+        "CertificateAuthority": {
+          "PublicCertificateAuthority": {}
+        },
+        "EndpointName": "ep1",
+        "IdempotencyToken": "tok-ep"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "EndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0"
+      },
+      "superseded": "the pack answered flat off-model member names (Arn plus DomainValidationArn/EndpointArn/ExternalAccountBindingArn) where the model declares AcmeDomainValidationArn/AcmeEndpointArn/ExternalAccountBinding; the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeAcmeEndpoint",
+      "input": {
+        "AcmeEndpointArn": {
+          "$fromPath": "AcmeEndpointArn",
+          "$fromStep": 40
+        },
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 40
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "AuthorizationBehavior": "REUSE_AUTHORIZATION",
+        "CertificateAuthority": {
+          "PublicCertificateAuthority": {}
+        },
+        "EndpointName": "ep1",
+        "IdempotencyToken": "tok-ep",
+        "Kind": "ep",
+        "Status": "ACTIVE"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeAcmeEndpoint",
+      "input": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/absent",
+        "EndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "AuthorizationBehavior": "REUSE_AUTHORIZATION",
+        "CertificateAuthority": {
+          "PublicCertificateAuthority": {}
+        },
+        "EndpointName": "ep1",
+        "IdempotencyToken": "tok-ep",
+        "Kind": "ep",
+        "Status": "ACTIVE"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    },
+    {
+      "operation": "UpdateAcmeEndpoint",
+      "input": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "AuthorizationBehavior": "DISTINCT_RECORD",
+        "EndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Status": "ACTIVE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "AuthorizationBehavior": "DISTINCT_RECORD",
+        "CertificateAuthority": {
+          "PublicCertificateAuthority": {}
+        },
+        "EndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "EndpointName": "ep1",
+        "IdempotencyToken": "tok-ep",
+        "Kind": "ep",
+        "Status": "ACTIVE"
+      },
+      "superseded": "the pack answered the whole stored record where the model declares no output members; the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeAcmeEndpoint",
+      "input": {
+        "AcmeEndpointArn": {
+          "$fromPath": "AcmeEndpointArn",
+          "$fromStep": 40
+        },
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 40
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "AuthorizationBehavior": "DISTINCT_RECORD",
+        "CertificateAuthority": {
+          "PublicCertificateAuthority": {}
+        },
+        "EndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "EndpointName": "ep1",
+        "IdempotencyToken": "tok-ep",
+        "Kind": "ep",
+        "Status": "ACTIVE"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListAcmeEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": [
+          {
+            "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+            "Arn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+            "AuthorizationBehavior": "DISTINCT_RECORD",
+            "CertificateAuthority": {
+              "PublicCertificateAuthority": {}
+            },
+            "EndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+            "EndpointName": "ep1",
+            "IdempotencyToken": "tok-ep",
+            "Kind": "ep",
+            "Status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "the pack listed the raw records under a member the model does not declare (or, for bindings, under the declared member but with the raw record as the item); the bundle projects the declared item shape"
+    },
+    {
+      "operation": "DescribeAcmeDomainValidation",
+      "input": {
+        "AcmeDomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/absent",
+        "DomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateAcmeDomainValidation",
+      "input": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "DomainName": "example.com",
+        "IdempotencyToken": "tok-dv",
+        "PrevalidationOptions": {
+          "DnsPrevalidation": {
+            "HostedZoneId": "Z123"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "DomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d"
+      },
+      "superseded": "the pack answered flat off-model member names (Arn plus DomainValidationArn/EndpointArn/ExternalAccountBindingArn) where the model declares AcmeDomainValidationArn/AcmeEndpointArn/ExternalAccountBinding; the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeAcmeDomainValidation",
+      "input": {
+        "AcmeDomainValidationArn": {
+          "$fromPath": "AcmeDomainValidationArn",
+          "$fromStep": 47
+        },
+        "DomainValidationArn": {
+          "$fromPath": "DomainValidationArn",
+          "$fromStep": 47
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "DomainName": "example.com",
+        "IdempotencyToken": "tok-dv",
+        "Kind": "dv",
+        "PrevalidationOptions": {
+          "DnsPrevalidation": {
+            "HostedZoneId": "Z123"
+          }
+        },
+        "Status": "ACTIVE"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    },
+    {
+      "operation": "UpdateAcmeDomainValidation",
+      "input": {
+        "AcmeDomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "DomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "Status": "VALID"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AcmeDomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "DomainName": "example.com",
+        "DomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "IdempotencyToken": "tok-dv",
+        "Kind": "dv",
+        "PrevalidationOptions": {
+          "DnsPrevalidation": {
+            "HostedZoneId": "Z123"
+          }
+        },
+        "Status": "VALID"
+      },
+      "superseded": "the pack answered the whole stored record where the model declares no output members; the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeAcmeDomainValidation",
+      "input": {
+        "AcmeDomainValidationArn": {
+          "$fromPath": "AcmeDomainValidationArn",
+          "$fromStep": 47
+        },
+        "DomainValidationArn": {
+          "$fromPath": "DomainValidationArn",
+          "$fromStep": 47
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AcmeDomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "DomainName": "example.com",
+        "DomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+        "IdempotencyToken": "tok-dv",
+        "Kind": "dv",
+        "PrevalidationOptions": {
+          "DnsPrevalidation": {
+            "HostedZoneId": "Z123"
+          }
+        },
+        "Status": "VALID"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListAcmeDomainValidations",
+      "input": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainValidations": [
+          {
+            "AcmeDomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+            "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+            "Arn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+            "DomainName": "example.com",
+            "DomainValidationArn": "arn:aws:acm:us-east-1:000000000000:acme/dv/33f6fc5d",
+            "IdempotencyToken": "tok-dv",
+            "Kind": "dv",
+            "PrevalidationOptions": {
+              "DnsPrevalidation": {
+                "HostedZoneId": "Z123"
+              }
+            },
+            "Status": "VALID"
+          }
+        ]
+      },
+      "superseded": "the pack listed the raw records under a member the model does not declare (or, for bindings, under the declared member but with the raw record as the item); the bundle projects the declared item shape"
+    },
+    {
+      "operation": "DescribeAcmeExternalAccountBinding",
+      "input": {
+        "AcmeExternalAccountBindingArn": "arn:aws:acm:us-east-1:000000000000:acme/eab/absent",
+        "ExternalAccountBindingArn": "arn:aws:acm:us-east-1:000000000000:acme/eab/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateAcmeExternalAccountBinding",
+      "input": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "IdempotencyToken": "tok-eab",
+        "RoleArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/eab/83d4958a",
+        "ExternalAccountBindingArn": "arn:aws:acm:us-east-1:000000000000:acme/eab/83d4958a",
+        "KeyId": "83d4958a"
+      },
+      "superseded": "the pack answered flat off-model member names (Arn plus DomainValidationArn/EndpointArn/ExternalAccountBindingArn) where the model declares AcmeDomainValidationArn/AcmeEndpointArn/ExternalAccountBinding; the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeAcmeExternalAccountBinding",
+      "input": {
+        "AcmeExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBinding.Arn",
+          "$fromStep": 53
+        },
+        "ExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBindingArn",
+          "$fromStep": 53
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/eab/83d4958a",
+        "IdempotencyToken": "tok-eab",
+        "Kind": "eab",
+        "RoleArn": "arn:aws:iam::000000000000:role/r",
+        "Status": "ACTIVE"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListAcmeExternalAccountBindings",
+      "input": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ExternalAccountBindings": [
+          {
+            "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+            "Arn": "arn:aws:acm:us-east-1:000000000000:acme/eab/83d4958a",
+            "IdempotencyToken": "tok-eab",
+            "Kind": "eab",
+            "RoleArn": "arn:aws:iam::000000000000:role/r",
+            "Status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "the pack listed the raw records under a member the model does not declare (or, for bindings, under the declared member but with the raw record as the item); the bundle projects the declared item shape"
+    },
+    {
+      "operation": "GetAcmeExternalAccountBindingCredentials",
+      "input": {
+        "AcmeExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBinding.Arn",
+          "$fromStep": 53
+        },
+        "ExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBindingArn",
+          "$fromStep": 53
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyId": "83d4958a",
+        "MacKey": "d766f9a93855d89c60c3df92202ab6f6"
+      }
+    },
+    {
+      "operation": "RevokeAcmeExternalAccountBinding",
+      "input": {
+        "AcmeExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBinding.Arn",
+          "$fromStep": 53
+        },
+        "ExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBindingArn",
+          "$fromStep": 53
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/eab/83d4958a",
+        "IdempotencyToken": "tok-eab",
+        "Kind": "eab",
+        "RoleArn": "arn:aws:iam::000000000000:role/r",
+        "Status": "REVOKED"
+      },
+      "superseded": "the pack answered the whole stored record where the model declares no output members; the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeAcmeExternalAccountBinding",
+      "input": {
+        "AcmeExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBinding.Arn",
+          "$fromStep": 53
+        },
+        "ExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBindingArn",
+          "$fromStep": 53
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0",
+        "Arn": "arn:aws:acm:us-east-1:000000000000:acme/eab/83d4958a",
+        "IdempotencyToken": "tok-eab",
+        "Kind": "eab",
+        "RoleArn": "arn:aws:iam::000000000000:role/r",
+        "Status": "REVOKED"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    },
+    {
+      "operation": "DeleteAcmeExternalAccountBinding",
+      "input": {
+        "AcmeExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBinding.Arn",
+          "$fromStep": 53
+        },
+        "ExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBindingArn",
+          "$fromStep": 53
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeAcmeExternalAccountBinding",
+      "input": {
+        "AcmeExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBinding.Arn",
+          "$fromStep": 53
+        },
+        "ExternalAccountBindingArn": {
+          "$fromPath": "ExternalAccountBindingArn",
+          "$fromStep": 53
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteAcmeEndpoint",
+      "input": {
+        "AcmeEndpointArn": {
+          "$fromPath": "AcmeEndpointArn",
+          "$fromStep": 40
+        },
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 40
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAcmeEndpoint",
+      "input": {
+        "AcmeEndpointArn": {
+          "$fromPath": "AcmeEndpointArn",
+          "$fromStep": 40
+        },
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 40
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeAcmeEndpoint",
+      "input": {
+        "AcmeEndpointArn": {
+          "$fromPath": "AcmeEndpointArn",
+          "$fromStep": 40
+        },
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 40
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteAcmeDomainValidation",
+      "input": {
+        "AcmeDomainValidationArn": {
+          "$fromPath": "AcmeDomainValidationArn",
+          "$fromStep": 47
+        },
+        "DomainValidationArn": {
+          "$fromPath": "DomainValidationArn",
+          "$fromStep": 47
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeAcmeDomainValidation",
+      "input": {
+        "AcmeDomainValidationArn": {
+          "$fromPath": "AcmeDomainValidationArn",
+          "$fromStep": 47
+        },
+        "DomainValidationArn": {
+          "$fromPath": "DomainValidationArn",
+          "$fromStep": 47
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeAcmeAccount",
+      "input": {
+        "AccountUrl": "https://acme.example/acct/1",
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountArn": "arn:aws:acm:us-east-1:000000000000:acme/acct/default",
+        "Status": "ACTIVE"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListAcmeAccounts",
+      "input": {
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Accounts": [
+          {
+            "AccountArn": "arn:aws:acm:us-east-1:000000000000:acme/acct/default",
+            "Status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "the pack listed the raw records under a member the model does not declare (or, for bindings, under the declared member but with the raw record as the item); the bundle projects the declared item shape"
+    },
+    {
+      "operation": "RevokeAcmeAccount",
+      "input": {
+        "AccountUrl": "https://acme.example/acct/1",
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountArn": "arn:aws:acm:us-east-1:000000000000:acme/acct/default",
+        "Status": "REVOKED"
+      },
+      "superseded": "the pack answered the whole stored record where the model declares no output members; the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeAcmeAccount",
+      "input": {
+        "AccountUrl": "https://acme.example/acct/1",
+        "AcmeEndpointArn": "arn:aws:acm:us-east-1:000000000000:acme/ep/9c8e2cb0"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountArn": "arn:aws:acm:us-east-1:000000000000:acme/acct/default",
+        "Status": "REVOKED"
+      },
+      "superseded": "the pack answered the raw record flat; the model declares it wrapped (AcmeDomainValidation / AcmeEndpoint / ExternalAccountBinding / AcmeAccount), and the bundle answers the declared shape"
+    }
+  ]
+}

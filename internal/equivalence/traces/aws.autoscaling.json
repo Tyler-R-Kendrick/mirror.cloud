@@ -1,0 +1,1973 @@
+{
+  "schema": "trace/1",
+  "service": "aws.autoscaling",
+  "source": "pack:internal/services/aws/autoscaling@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered members the output shape does not declare (Activities on the attach/detach family, the flat warm-pool record, Activities on LaunchInstances), the bundle answers the declared shape and the recorded members are superseded with that reason.",
+  "steps": [
+    {
+      "operation": "DescribeTags",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": null
+      }
+    },
+    {
+      "operation": "CreateLaunchConfiguration",
+      "input": {
+        "LaunchConfigurationName": "lc1",
+        "ImageId": "ami-1",
+        "InstanceType": "t3.micro"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeLaunchConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LaunchConfigurations": [
+          {
+            "ImageId": "ami-1",
+            "InstanceType": "t3.micro",
+            "LaunchConfigurationName": "lc1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateAutoScalingGroup",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "MinSize": 1,
+        "MaxSize": 2,
+        "DesiredCapacity": 1,
+        "LaunchConfigurationName": "lc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {
+        "AutoScalingGroupNames.member.1": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 1,
+            "LaunchConfigurationName": "lc1",
+            "MaxSize": 2,
+            "MinSize": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {
+        "AutoScalingGroupNames.member.1": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": []
+      }
+    },
+    {
+      "operation": "UpdateAutoScalingGroup",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "MaxSize": 5
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {
+        "AutoScalingGroupNames.member.1": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": null,
+            "LaunchConfigurationName": "",
+            "MaxSize": 5,
+            "MinSize": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SetDesiredCapacity",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "DesiredCapacity": 3
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "SetDesiredCapacity",
+      "input": {
+        "AutoScalingGroupName": "g2",
+        "DesiredCapacity": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 3,
+            "LaunchConfigurationName": "",
+            "MaxSize": 5,
+            "MinSize": null
+          },
+          {
+            "AutoScalingGroupName": "g2",
+            "DesiredCapacity": 2
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AttachInstances",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "InstanceIds": [
+          "i-aaa",
+          "i-bbb"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000001",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "AttachInstances answers smithy.api#Unit, which declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {
+        "AutoScalingGroupNames.member.1": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 3,
+            "Instances": [
+              "i-aaa",
+              "i-bbb"
+            ],
+            "LaunchConfigurationName": "",
+            "MaxSize": 5,
+            "MinSize": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAutoScalingInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingInstances": [
+          "i-aaa",
+          "i-bbb"
+        ]
+      }
+    },
+    {
+      "operation": "DetachInstances",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "InstanceIds": [
+          "i-aaa"
+        ],
+        "ShouldDecrementDesiredCapacity": false
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000002",
+            "StatusCode": "Successful"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAutoScalingInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingInstances": [
+          "i-bbb"
+        ]
+      }
+    },
+    {
+      "operation": "AttachLoadBalancers",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "LoadBalancerNames": [
+          "lb1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000003",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "AttachLoadBalancersResultType declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeLoadBalancers",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": [
+          "lb1"
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLoadBalancers",
+      "input": {
+        "AutoScalingGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": null
+      }
+    },
+    {
+      "operation": "DetachLoadBalancers",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "LoadBalancerNames": [
+          "lb1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000004",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "DetachLoadBalancersResultType declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeLoadBalancers",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": null
+      }
+    },
+    {
+      "operation": "AttachLoadBalancerTargetGroups",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "TargetGroupARNs": [
+          "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg1/abc"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000005",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "AttachLoadBalancerTargetGroupsResultType declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeLoadBalancerTargetGroups",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancerTargetGroups": [
+          "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg1/abc"
+        ]
+      }
+    },
+    {
+      "operation": "DetachLoadBalancerTargetGroups",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "TargetGroupARNs": [
+          "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg1/abc"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000006",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "DetachLoadBalancerTargetGroupsResultType declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "AttachTrafficSources",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "TrafficSources": [
+          {
+            "Identifier": "ts1",
+            "Type": "vpc-lattice"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000007",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "AttachTrafficSourcesResultType declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeTrafficSources",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrafficSources": [
+          {
+            "Identifier": "ts1",
+            "Type": "vpc-lattice"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetachTrafficSources",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "TrafficSources": [
+          {
+            "Identifier": "ts1",
+            "Type": "vpc-lattice"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000008",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "DetachTrafficSourcesResultType declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "EnableMetricsCollection",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "Granularity": "1Minute"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DisableMetricsCollection",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "SuspendProcesses",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ResumeProcesses",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {
+        "AutoScalingGroupNames.member.1": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 3,
+            "Instances": [
+              "i-bbb"
+            ],
+            "LaunchConfigurationName": "",
+            "LoadBalancerNames": null,
+            "MaxSize": 5,
+            "MetricsCollection": "Disabled",
+            "MinSize": null,
+            "ProcessState": "Resumed",
+            "TargetGroupARNs": null,
+            "TrafficSources": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "EnterStandby",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "InstanceIds": [
+          "i-ccc"
+        ],
+        "ShouldDecrementDesiredCapacity": false
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000009",
+            "StatusCode": "Successful"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {
+        "AutoScalingGroupNames.member.1": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 3,
+            "InstanceState": "Standby",
+            "Instances": [
+              "i-bbb",
+              "i-ccc"
+            ],
+            "LaunchConfigurationName": "",
+            "LoadBalancerNames": null,
+            "MaxSize": 5,
+            "MetricsCollection": "Disabled",
+            "MinSize": null,
+            "ProcessState": "Resumed",
+            "TargetGroupARNs": null,
+            "TrafficSources": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ExitStandby",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "InstanceIds": [
+          "i-ccc2"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000010",
+            "StatusCode": "Successful"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SetInstanceProtection",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "InstanceIds": [
+          "i-ddd"
+        ],
+        "ProtectedFromScaleIn": false
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000011",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "SetInstanceProtectionAnswer declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {
+        "AutoScalingGroupNames.member.1": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 3,
+            "InstanceState": "InService",
+            "Instances": [
+              "i-bbb",
+              "i-ccc",
+              "i-ccc2",
+              "i-ddd"
+            ],
+            "LaunchConfigurationName": "",
+            "LoadBalancerNames": null,
+            "MaxSize": 5,
+            "MetricsCollection": "Disabled",
+            "MinSize": null,
+            "ProcessState": "Resumed",
+            "ProtectedFromScaleIn": true,
+            "TargetGroupARNs": null,
+            "TrafficSources": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAutoScalingInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingInstances": [
+          "i-bbb",
+          "i-ccc",
+          "i-ccc2",
+          "i-ddd"
+        ]
+      }
+    },
+    {
+      "operation": "SetInstanceHealth",
+      "input": {
+        "InstanceId": "i-zzz",
+        "HealthStatus": "Unhealthy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000012",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "SetInstanceHealth answers smithy.api#Unit, which declares no members; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "",
+            "InstanceState": "Unhealthy",
+            "Instances": null
+          },
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 3,
+            "InstanceState": "InService",
+            "Instances": [
+              "i-bbb",
+              "i-ccc",
+              "i-ccc2",
+              "i-ddd"
+            ],
+            "LaunchConfigurationName": "",
+            "LoadBalancerNames": null,
+            "MaxSize": 5,
+            "MetricsCollection": "Disabled",
+            "MinSize": null,
+            "ProcessState": "Resumed",
+            "ProtectedFromScaleIn": true,
+            "TargetGroupARNs": null,
+            "TrafficSources": null
+          },
+          {
+            "AutoScalingGroupName": "g2",
+            "DesiredCapacity": 2
+          }
+        ]
+      }
+    },
+    {
+      "operation": "TerminateInstanceInAutoScalingGroup",
+      "input": {
+        "ShouldDecrementDesiredCapacity": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activity": {
+          "ActivityId": "aa00000000000013",
+          "StatusCode": "Successful"
+        }
+      }
+    },
+    {
+      "operation": "PutScalingPolicy",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "PolicyName": "p1",
+        "AdjustmentType": "ChangeInCapacity",
+        "ScalingAdjustment": 1,
+        "PolicyType": "SimpleScaling"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyARN": "arn:aws:autoscaling:us-east-1:000000000000:policy:g1:policyName/p1"
+      }
+    },
+    {
+      "operation": "DescribePolicies",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalingPolicies": [
+          {
+            "AdjustmentType": "ChangeInCapacity",
+            "AutoScalingGroupName": "g1",
+            "PolicyARN": "arn:aws:autoscaling:us-east-1:000000000000:policy:g1:policyName/p1",
+            "PolicyName": "p1",
+            "PolicyType": "SimpleScaling",
+            "ScalingAdjustment": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribePolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalingPolicies": null
+      }
+    },
+    {
+      "operation": "ExecutePolicy",
+      "input": {
+        "PolicyName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeScalingActivities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000014",
+            "AutoScalingGroupName": "",
+            "Description": "ExecutePolicy",
+            "StatusCode": "Successful"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeletePolicy",
+      "input": {
+        "PolicyName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribePolicies",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalingPolicies": [
+          {
+            "AdjustmentType": "ChangeInCapacity",
+            "AutoScalingGroupName": "g1",
+            "PolicyARN": "arn:aws:autoscaling:us-east-1:000000000000:policy:g1:policyName/p1",
+            "PolicyName": "p1",
+            "PolicyType": "SimpleScaling",
+            "ScalingAdjustment": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeletePolicy",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "PolicyName": "p1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribePolicies",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalingPolicies": null
+      }
+    },
+    {
+      "operation": "PutScheduledUpdateGroupAction",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "ScheduledActionName": "s1",
+        "DesiredCapacity": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeScheduledActions",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScheduledUpdateGroupActions": [
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 2,
+            "ScheduledActionName": "s1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchPutScheduledUpdateGroupAction",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "ScheduledUpdateGroupActions": [
+          {
+            "ScheduledActionName": "s2",
+            "MinSize": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeScheduledActions",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScheduledUpdateGroupActions": [
+          {
+            "AutoScalingGroupName": "g1",
+            "ScheduledActionName": "aa00000000000015",
+            "ScheduledUpdateGroupActions": [
+              {
+                "MinSize": 1,
+                "ScheduledActionName": "s2"
+              }
+            ]
+          },
+          {
+            "AutoScalingGroupName": "g1",
+            "DesiredCapacity": 2,
+            "ScheduledActionName": "s1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteScheduledAction",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "ScheduledActionName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "BatchDeleteScheduledAction",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "ScheduledActionNames": [
+          "s2"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeScheduledActions",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScheduledUpdateGroupActions": [
+          {
+            "AutoScalingGroupName": "g1",
+            "ScheduledActionName": "aa00000000000015",
+            "ScheduledUpdateGroupActions": [
+              {
+                "MinSize": 1,
+                "ScheduledActionName": "s2"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutLifecycleHook",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "LifecycleHookName": "h1",
+        "LifecycleTransition": "autoscaling:EC2_INSTANCE_LAUNCHING"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeLifecycleHooks",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LifecycleHooks": [
+          {
+            "AutoScalingGroupName": "g1",
+            "LifecycleHookName": "h1",
+            "LifecycleTransition": "autoscaling:EC2_INSTANCE_LAUNCHING"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CompleteLifecycleAction",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "LifecycleHookName": "h1",
+        "LifecycleActionResult": "CONTINUE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "RecordLifecycleActionHeartbeat",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "LifecycleHookName": "h1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteLifecycleHook",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "LifecycleHookName": "h1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeLifecycleHooks",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LifecycleHooks": null
+      }
+    },
+    {
+      "operation": "PutNotificationConfiguration",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "TopicARN": "arn:aws:sns:us-east-1:000000000000:t1",
+        "NotificationTypes": [
+          "autoscaling:EC2_INSTANCE_LAUNCH"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeNotificationConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NotificationConfigurations": [
+          {
+            "AutoScalingGroupName": "g1",
+            "NotificationTypes": [
+              "autoscaling:EC2_INSTANCE_LAUNCH"
+            ],
+            "TopicARN": "arn:aws:sns:us-east-1:000000000000:t1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteNotificationConfiguration",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "TopicARN": "arn:aws:sns:us-east-1:000000000000:t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeNotificationConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NotificationConfigurations": null
+      }
+    },
+    {
+      "operation": "PutWarmPool",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "MinSize": 1,
+        "PoolState": "Stopped"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeWarmPool",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroupName": "g1",
+        "MinSize": 1,
+        "PoolState": "Stopped"
+      },
+      "superseded": "the pack answered the stored put request flat at the top level; the model declares WarmPoolConfiguration and Instances, and the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeWarmPool",
+      "input": {
+        "AutoScalingGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Instances": [],
+        "WarmPoolConfiguration": {
+          "MinSize": 0
+        }
+      }
+    },
+    {
+      "operation": "DeleteWarmPool",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "StartInstanceRefresh",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceRefreshId": "aa00000000000016"
+      }
+    },
+    {
+      "operation": "DescribeInstanceRefreshes",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceRefreshes": [
+          {
+            "AutoScalingGroupName": "g1",
+            "InstanceRefreshId": "aa00000000000016",
+            "Status": "InProgress"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CancelInstanceRefresh",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "InstanceRefreshId": {
+          "$fromStep": 72,
+          "$fromPath": "InstanceRefreshId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceRefreshId": "aa00000000000016"
+      }
+    },
+    {
+      "operation": "DescribeInstanceRefreshes",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceRefreshes": [
+          {
+            "AutoScalingGroupName": "g1",
+            "InstanceRefreshId": "aa00000000000016",
+            "Status": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RollbackInstanceRefresh",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceRefreshId": "aa00000000000016"
+      }
+    },
+    {
+      "operation": "DescribeInstanceRefreshes",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceRefreshes": [
+          {
+            "AutoScalingGroupName": "g1",
+            "InstanceRefreshId": "aa00000000000016",
+            "Status": "RollbackInProgress"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "LaunchInstances",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "ClientToken": "tok1",
+        "RequestedCapacity": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000017",
+            "AutoScalingGroupName": "g1",
+            "Description": "LaunchInstances",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "LaunchInstancesResult declares no Activities member; the codec drops the Activities the pack answered and the bundle answers nothing"
+    },
+    {
+      "operation": "DescribeScalingActivities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Activities": [
+          {
+            "ActivityId": "aa00000000000014",
+            "AutoScalingGroupName": "",
+            "Description": "ExecutePolicy",
+            "StatusCode": "Successful"
+          },
+          {
+            "ActivityId": "aa00000000000017",
+            "AutoScalingGroupName": "g1",
+            "Description": "LaunchInstances",
+            "StatusCode": "Successful"
+          }
+        ]
+      },
+      "superseded": "two generated activity ids sort by value, so the listing order differs between the recording and any replay; the single-record describe above gates the record contents"
+    },
+    {
+      "operation": "CreateOrUpdateTags",
+      "input": {
+        "Tags": [
+          {
+            "Key": "k1",
+            "Value": "v1",
+            "ResourceId": "g1",
+            "ResourceType": "auto-scaling-group",
+            "PropagateAtLaunch": true
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeTags",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "k1",
+            "PropagateAtLaunch": true,
+            "ResourceId": "g1",
+            "ResourceType": "auto-scaling-group",
+            "Value": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteTags",
+      "input": {
+        "Tags": [
+          {
+            "Key": "k1",
+            "ResourceId": "g1",
+            "ResourceType": "auto-scaling-group"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeTags",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "DescribeAccountLimits",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MaxNumberOfAutoScalingGroups": 200,
+        "MaxNumberOfLaunchConfigurations": 200,
+        "NumberOfAutoScalingGroups": 0,
+        "NumberOfLaunchConfigurations": 0
+      }
+    },
+    {
+      "operation": "DescribeAdjustmentTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AdjustmentTypes": [
+          {
+            "AdjustmentType": "ChangeInCapacity"
+          },
+          {
+            "AdjustmentType": "ExactCapacity"
+          },
+          {
+            "AdjustmentType": "PercentChangeInCapacity"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAutoScalingNotificationTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingNotificationTypes": [
+          "autoscaling:EC2_INSTANCE_LAUNCH",
+          "autoscaling:EC2_INSTANCE_TERMINATE"
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLifecycleHookTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LifecycleHookTypes": [
+          "autoscaling:EC2_INSTANCE_LAUNCHING",
+          "autoscaling:EC2_INSTANCE_TERMINATING"
+        ]
+      }
+    },
+    {
+      "operation": "DescribeMetricCollectionTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Granularities": [
+          {
+            "Granularity": "1Minute"
+          }
+        ],
+        "Metrics": [
+          {
+            "Metric": "GroupMinSize"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeScalingProcessTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Processes": [
+          {
+            "ProcessName": "Launch"
+          },
+          {
+            "ProcessName": "Terminate"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTerminationPolicyTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TerminationPolicyTypes": [
+          "OldestInstance",
+          "NewestInstance",
+          "Default"
+        ]
+      }
+    },
+    {
+      "operation": "GetPredictiveScalingForecast",
+      "input": {
+        "AutoScalingGroupName": "g1",
+        "PolicyName": "p1",
+        "StartTime": "2026-01-01T00:00:00Z",
+        "EndTime": "2026-01-02T00:00:00Z"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CapacityForecast": [],
+        "LoadForecast": []
+      }
+    },
+    {
+      "operation": "DeleteLaunchConfiguration",
+      "input": {
+        "LaunchConfigurationName": "lc1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeLaunchConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LaunchConfigurations": null
+      }
+    },
+    {
+      "operation": "DeleteLaunchConfiguration",
+      "input": {
+        "LaunchConfigurationName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteAutoScalingGroup",
+      "input": {
+        "AutoScalingGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteAutoScalingGroup",
+      "input": {
+        "AutoScalingGroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeAutoScalingGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutoScalingGroups": [
+          {
+            "AutoScalingGroupName": "",
+            "InstanceState": "Unhealthy",
+            "Instances": null
+          },
+          {
+            "AutoScalingGroupName": "g2",
+            "DesiredCapacity": 2
+          }
+        ]
+      }
+    }
+  ]
+}

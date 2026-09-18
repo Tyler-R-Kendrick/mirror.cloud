@@ -1,0 +1,615 @@
+schema: bir/1
+service: aws.acm
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No certificate is ever issued: a request or an import stores a
+# record that is ISSUED the moment it exists, GetCertificate answers the same
+# placeholder PEM for everything, and the ACME surface is four collections of
+# request echoes.
+provenance: authored
+
+# The pack never checked for a required member; an absent CertificateArn fell
+# through its lookups as the empty key and answered ResourceNotFoundException,
+# which is what the engine now answers up front for every absent required
+# member. The paths where the pack instead *succeeded* on an absent required
+# member (RequestCertificate with no DomainName issued a certificate for the
+# empty domain) are gone, and that is recorded under quirks.
+missing_input_error: NotFound
+
+resources:
+  # Certificates are keyed by the id segment of their ARN: the pack took
+  # everything after the last '/' of whatever it was given, so a bare id
+  # addresses the same record as the whole ARN.
+  cert:
+    collection: acm
+    id:
+      generate: { kind: hex, bytes: 8 }
+      derive: "lastSegment(string(input.CertificateArn), '/')"
+
+  # The pack kept tags beside the certificates in one collection under a
+  # "tags:" key prefix that ListCertificates then had to skip; a collection of
+  # their own is the same containment without the skip. The whole tag set is
+  # one record, replaced wholesale by every tag write. TagResource accepts the
+  # ARN under ResourceArn or CertificateArn, first present non-empty wins.
+  tagset:
+    collection: acmtags
+    id:
+      derive: >-
+        'ResourceArn' in input && string(input.ResourceArn) != ''
+          ? lastSegment(string(input.ResourceArn), '/')
+          : lastSegment(string(input.CertificateArn), '/')
+    record:
+      Tags: input.Tags
+
+  acctcfg:
+    collection: acmacct
+    singleton: default
+
+  # The pack kept all three ACME kinds plus the account in one collection
+  # under kind prefixes (dv:, ep:, eab:, acct:); one collection per kind is
+  # the same partitioning. Each is addressed by the id segment of its ARN.
+  dv:
+    collection: acmedv
+    id:
+      generate: { kind: hex, bytes: 8 }
+      derive: "lastSegment(string(input.AcmeDomainValidationArn), '/')"
+
+  ep:
+    collection: acmeep
+    id:
+      generate: { kind: hex, bytes: 8 }
+      derive: "lastSegment(string(input.AcmeEndpointArn), '/')"
+
+  eab:
+    collection: acmeeab
+    id:
+      generate: { kind: hex, bytes: 8 }
+      derive: "lastSegment(string(input.AcmeExternalAccountBindingArn), '/')"
+
+  acct:
+    collection: acmeacct
+    singleton: default
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  RequestCertificate:
+    effects:
+      - create:
+          resource: cert
+          record:
+            CertificateArn: >-
+              'arn:aws:acm:' + identity.region + ':' + identity.account
+              + ':certificate/' + id
+            DomainName: "string(input.DomainName)"
+            Status: "'ISSUED'"
+            Type: "'AMAZON_ISSUED'"
+    output:
+      CertificateArn: rec.CertificateArn
+
+  ImportCertificate:
+    effects:
+      - create:
+          resource: cert
+          record:
+            CertificateArn: >-
+              'arn:aws:acm:' + identity.region + ':' + identity.account
+              + ':certificate/' + id
+            # DomainName is not a member of the declared request; the pack
+            # read it anyway and defaulted to imported.local.
+            DomainName: >-
+              'DomainName' in input && string(input.DomainName) != ''
+                ? string(input.DomainName) : 'imported.local'
+            Status: "'ISSUED'"
+            Type: "'IMPORTED'"
+            Certificate: input.Certificate
+    output:
+      CertificateArn: rec.CertificateArn
+
+  DescribeCertificate:
+    reads:
+      c: { resource: cert }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      Certificate: c
+
+  ListCertificates:
+    list: { resource: cert, member: CertificateSummaryList, paginate: model }
+    output:
+      CertificateSummaryList: >
+        items.map(x, {
+          'CertificateArn': x.CertificateArn,
+          'DomainName': x.DomainName,
+          'Status': x.Status
+        })
+
+  DeleteCertificate:
+    effects:
+      - delete: { resource: cert, missing: ignore }
+    output: {}
+
+  # The stored certificate body is never read back: both operations answer
+  # the same constants for any certificate that exists.
+  GetCertificate:
+    reads:
+      c: { resource: cert }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      Certificate: "'-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----\\n'"
+      CertificateChain: "'-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----\\n'"
+
+  ExportCertificate:
+    reads:
+      c: { resource: cert }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      Certificate: "'-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----\\n'"
+      PrivateKey: "'mirror-private-key'"
+
+  AddTagsToCertificate:
+    effects:
+      - put: { resource: tagset }
+    output: {}
+
+  ListTagsForCertificate:
+    reads:
+      t: { resource: tagset }
+    output:
+      Tags: "t_found ? t.Tags : []"
+
+  RemoveTagsFromCertificate:
+    effects:
+      - delete: { resource: tagset, missing: ignore }
+    output: {}
+
+  TagResource:
+    effects:
+      - put: { resource: tagset }
+    output: {}
+
+  ListTagsForResource:
+    reads:
+      t: { resource: tagset }
+    output:
+      Tags: "t_found ? t.Tags : []"
+
+  UntagResource:
+    effects:
+      - delete: { resource: tagset, missing: ignore }
+    output: {}
+
+  # The four lifecycle operations are one read-modify-write in the pack, and
+  # each answered {CertificateArn, Certificate} where the model declares {} or
+  # {CertificateArn}; the recorded steps are superseded for that, and the
+  # DescribeCertificate after each is what gates the state change.
+  RenewCertificate:
+    reads:
+      c: { resource: cert }
+    require:
+      - { cond: c_found, error: NotFound }
+    effects:
+      - patch:
+          resource: cert
+          record:
+            Status: "'ISSUED'"
+            Renewed: true
+    output: {}
+
+  RevokeCertificate:
+    reads:
+      c: { resource: cert }
+    require:
+      - { cond: c_found, error: NotFound }
+    effects:
+      - patch:
+          resource: cert
+          record:
+            Status: "'REVOKED'"
+            RevocationReason: "string(input.RevocationReason)"
+    output:
+      CertificateArn: rec.CertificateArn
+
+  ResendValidationEmail:
+    reads:
+      c: { resource: cert }
+    require:
+      - { cond: c_found, error: NotFound }
+    effects:
+      - patch:
+          resource: cert
+          record:
+            ValidationEmailSent: true
+    output: {}
+
+  UpdateCertificateOptions:
+    reads:
+      c: { resource: cert }
+    require:
+      - { cond: c_found, error: NotFound }
+    effects:
+      - patch:
+          resource: cert
+          record:
+            Options: input.Options
+    output: {}
+
+  # The pack filtered on a DomainName member the model does not declare (the
+  # declared filter is FilterStatement), so a spec-conformant request matches
+  # everything; the off-model member still works when sent. The pack answered
+  # CertificateSummaryList where the model declares Results; recorded steps
+  # are superseded for that.
+  SearchCertificates:
+    list:
+      resource: cert
+      member: Results
+      paginate: model
+      filter: >
+        'DomainName' in input && string(input.DomainName) != ''
+          ? string(item.DomainName) == string(input.DomainName) : true
+    output:
+      Results: "items.map(x, {'CertificateArn': x.CertificateArn})"
+
+  # One row, always SUCCESS/DNS, even for a certificate that does not exist
+  # (DomainName comes back empty then); the pack never faults here. The pack
+  # answered the flat members under DomainValidations; the model declares
+  # DomainValidationSummaryList with the same facts nested under
+  # ActiveValidationConfiguration, and the recorded steps are superseded.
+  ListCertificateDomainValidations:
+    reads:
+      c: { resource: cert }
+    output:
+      DomainValidationSummaryList: >
+        [{
+          'DomainName': c_found ? string(c.DomainName) : '',
+          'ActiveValidationConfiguration': {
+            'ValidationMethod': 'DNS',
+            'ValidationStatus': 'SUCCESS'
+          }
+        }]
+
+  PutAccountConfiguration:
+    effects:
+      - put: { resource: acctcfg, spread: input }
+    output: {}
+
+  GetAccountConfiguration:
+    reads:
+      a: { resource: acctcfg }
+    output:
+      ExpiryEvents: >-
+        a_found
+          ? ('ExpiryEvents' in a ? a.ExpiryEvents : null)
+          : {'DaysBeforeExpiry': 45}
+
+  CreateAcmeDomainValidation:
+    effects:
+      - create:
+          resource: dv
+          spread: input
+          record:
+            Arn: >-
+              'arn:aws:acm:' + identity.region + ':' + identity.account
+              + ':acme/dv/' + id
+            Kind: "'dv'"
+            Status: "'ACTIVE'"
+    output:
+      AcmeDomainValidationArn: rec.Arn
+
+  CreateAcmeEndpoint:
+    effects:
+      - create:
+          resource: ep
+          spread: input
+          record:
+            Arn: >-
+              'arn:aws:acm:' + identity.region + ':' + identity.account
+              + ':acme/ep/' + id
+            Kind: "'ep'"
+            Status: "'ACTIVE'"
+    output:
+      AcmeEndpointArn: rec.Arn
+
+  CreateAcmeExternalAccountBinding:
+    effects:
+      - create:
+          resource: eab
+          spread: input
+          record:
+            Arn: >-
+              'arn:aws:acm:' + identity.region + ':' + identity.account
+              + ':acme/eab/' + id
+            Kind: "'eab'"
+            Status: "'ACTIVE'"
+    output:
+      ExternalAccountBinding: rec
+
+  # Describing any of the three kinds falls back to the FIRST record of that
+  # kind when the ARN asked for is not found -- a wrong ARN answers with
+  # someone else's validation rather than a fault, and only an empty kind
+  # faults.
+  DescribeAcmeDomainValidation:
+    reads:
+      d: { resource: dv }
+    select: { binding: first_dv, resource: dv, limit: "1" }
+    require:
+      - { cond: "d_found || size(first_dv) > 0", error: NotFound }
+    output:
+      AcmeDomainValidation: "d_found ? d : first_dv[0]"
+
+  DescribeAcmeEndpoint:
+    reads:
+      e: { resource: ep }
+    select: { binding: first_ep, resource: ep, limit: "1" }
+    require:
+      - { cond: "e_found || size(first_ep) > 0", error: NotFound }
+    output:
+      AcmeEndpoint: "e_found ? e : first_ep[0]"
+
+  DescribeAcmeExternalAccountBinding:
+    reads:
+      b: { resource: eab }
+    select: { binding: first_eab, resource: eab, limit: "1" }
+    require:
+      - { cond: "b_found || size(first_eab) > 0", error: NotFound }
+    output:
+      ExternalAccountBinding: "b_found ? b : first_eab[0]"
+
+  # Updates are upserts: an unknown ARN creates a record holding Kind and the
+  # request members. The pack answered the whole record where the model
+  # declares no output members; the recorded steps are superseded.
+  UpdateAcmeDomainValidation:
+    effects:
+      - put:
+          resource: dv
+          spread: input
+          record:
+            Kind: "'dv'"
+    output: {}
+
+  UpdateAcmeEndpoint:
+    effects:
+      - put:
+          resource: ep
+          spread: input
+          record:
+            Kind: "'ep'"
+    output: {}
+
+  DeleteAcmeDomainValidation:
+    effects:
+      - delete: { resource: dv, missing: ignore }
+    output: {}
+
+  DeleteAcmeEndpoint:
+    effects:
+      - delete: { resource: ep, missing: ignore }
+    output: {}
+
+  DeleteAcmeExternalAccountBinding:
+    effects:
+      - delete: { resource: eab, missing: ignore }
+    output: {}
+
+  # The pack's item lists were the raw records under names the model does not
+  # declare (DomainValidations, Endpoints, Accounts; ExternalAccountBindings
+  # keeps its name but not its item shape). All four recorded list steps are
+  # superseded.
+  ListAcmeDomainValidations:
+    list: { resource: dv, member: AcmeDomainValidations, paginate: model }
+    output:
+      AcmeDomainValidations: >
+        items.map(x, {
+          'AcmeDomainValidationArn': 'Arn' in x ? string(x.Arn) : '',
+          'DomainName': 'DomainName' in x ? string(x.DomainName) : '',
+          'Status': 'Status' in x ? string(x.Status) : ''
+        })
+
+  ListAcmeEndpoints:
+    list: { resource: ep, member: AcmeEndpoints, paginate: model }
+    output:
+      AcmeEndpoints: >
+        items.map(x, {
+          'AcmeEndpointArn': 'Arn' in x ? string(x.Arn) : '',
+          'Status': 'Status' in x ? string(x.Status) : ''
+        })
+
+  ListAcmeExternalAccountBindings:
+    list: { resource: eab, member: ExternalAccountBindings, paginate: model }
+    output:
+      ExternalAccountBindings: >
+        items.map(x, {
+          'AcmeExternalAccountBindingArn': 'Arn' in x ? string(x.Arn) : '',
+          'AcmeEndpointArn': 'AcmeEndpointArn' in x ? string(x.AcmeEndpointArn) : ''
+        })
+
+  # Reading the account creates it: the first DescribeAcmeAccount or
+  # ListAcmeAccounts writes the default record as a side effect, and revoking
+  # an account that was never described creates it already REVOKED.
+  DescribeAcmeAccount:
+    let:
+      acctArn: "'arn:aws:acm:' + identity.region + ':' + identity.account + ':acme/acct/default'"
+    reads:
+      a: { resource: acct }
+    effects:
+      - put:
+          resource: acct
+          when: "!a_found"
+          record:
+            AccountArn: acctArn
+            Status: "'ACTIVE'"
+    output:
+      AcmeAccount: "a_found ? a : {'AccountArn': acctArn, 'Status': 'ACTIVE'}"
+
+  ListAcmeAccounts:
+    let:
+      acctArn: "'arn:aws:acm:' + identity.region + ':' + identity.account + ':acme/acct/default'"
+    reads:
+      a: { resource: acct }
+    effects:
+      - put:
+          resource: acct
+          when: "!a_found"
+          record:
+            AccountArn: acctArn
+            Status: "'ACTIVE'"
+    output:
+      AcmeAccounts: "a_found ? [a] : [{'AccountArn': acctArn, 'Status': 'ACTIVE'}]"
+
+  RevokeAcmeAccount:
+    effects:
+      - put:
+          resource: acct
+          record:
+            Status: "'REVOKED'"
+    output: {}
+
+  RevokeAcmeExternalAccountBinding:
+    effects:
+      - put:
+          resource: eab
+          record:
+            Status: "'REVOKED'"
+    output: {}
+
+  # Credentials are answered for any ARN, bound or not; an unknown one echoes
+  # the id it was asked about. The pack derived MacKey deterministically from
+  # the KeyId, so two calls for one binding agreed; the bundle draws a fresh
+  # one per call, which the recording's one call cannot tell apart (quirks).
+  GetAcmeExternalAccountBindingCredentials:
+    reads:
+      e: { resource: eab }
+    let:
+      kid: >-
+        e_found && 'KeyId' in e && string(e.KeyId) != ''
+          ? string(e.KeyId) : id
+    effects:
+      - generate: { bind: mac, kind: hex, bytes: 32 }
+    output:
+      KeyId: kid
+      MacKey: fx.mac
+
+quirks:
+  - operation: RequestCertificate
+    note: >
+      A certificate is ISSUED the moment it is requested: nothing validates
+      the domain, sends email, or waits. SubjectAlternativeNames, Tags,
+      KeyAlgorithm, Options and IdempotencyToken are dropped, so asking for
+      the same domain twice mints two certificates and a Describe shows none
+      of the options sent. The pack issued a certificate for the empty domain
+      when DomainName was absent; the model marks DomainName required and the
+      engine now rejects its absence, so that path is gone.
+  - operation: ImportCertificate
+    note: >
+      The pack read a DomainName member the model does not declare on this
+      operation and defaulted it to imported.local; sending it still works.
+      The stored Certificate body is write-only: GetCertificate and
+      ExportCertificate answer the same placeholder PEM and mirror-private-key
+      for every certificate, imported or not.
+  - operation: DescribeCertificate
+    note: >
+      Anything after the last '/' of CertificateArn is the key, so a bare id,
+      another region's ARN, or another service's ARN ending in the same id all
+      address the same record. Once RenewCertificate, RevokeCertificate,
+      ResendValidationEmail or UpdateCertificateOptions has run, the described
+      Certificate carries the pack's internal members (Renewed,
+      ValidationEmailSent, ...) that CertificateDetail does not declare.
+  - operation: DeleteCertificate
+    note: >
+      Deleting a certificate that does not exist succeeds, and deleting one
+      that does leaves its tags behind: the tag record is keyed separately and
+      no operation removes it, so ListTagsForCertificate still answers them
+      for a deleted certificate.
+  - operation: AddTagsToCertificate
+    note: >
+      Every tag write replaces the whole tag set, and RemoveTagsFromCertificate
+      deletes all of them whatever Tags it was given (UntagResource likewise
+      ignores TagKeys). Tagging or untagging a certificate that does not exist
+      succeeds. TagResource accepted the ARN under CertificateArn as well as
+      ResourceArn; the model declares only ResourceArn, and the fallback is
+      kept.
+  - operation: RenewCertificate
+    note: >
+      Renew, Revoke, ResendValidationEmail and UpdateCertificateOptions are
+      one read-modify-write in the pack, answering {CertificateArn,
+      Certificate} where the model declares {} (or CertificateArn alone for
+      Revoke). The recorded steps are superseded on that; the
+      DescribeCertificate steps after them gate the stored state. A renew
+      after a revoke sets the status back to ISSUED, and RevocationReason was
+      stored as "" when omitted, which the model now forbids by requiring it.
+  - operation: SearchCertificates
+    note: >
+      The pack filtered on a DomainName member the model does not declare --
+      the declared input is FilterStatement -- so a spec-conformant search
+      matches every certificate in the account, and only the off-model member
+      narrows anything. The pack answered CertificateSummaryList where the
+      model declares Results of CertificateSearchResult; recorded steps are
+      superseded, and the bundle projects the one member that shape carries.
+  - operation: ListCertificateDomainValidations
+    note: >
+      Always exactly one row, ValidationStatus SUCCESS and ValidationMethod
+      DNS, even for a certificate that does not exist -- then with an empty
+      DomainName. It never faults. The pack answered the row flat under
+      DomainValidations; the model declares DomainValidationSummaryList with
+      the validation pair nested under a configuration, so the recorded steps
+      are superseded and the bundle answers the declared nesting.
+  - operation: PutAccountConfiguration
+    note: >
+      The whole request is stored, IdempotencyToken included, and
+      GetAccountConfiguration answered it all back flat -- a member the
+      response shape does not declare, so the recorded get-after-put is
+      superseded and the bundle answers ExpiryEvents alone. Unconfigured, the
+      answer is DaysBeforeExpiry 45.
+  - operation: CreateAcmeDomainValidation
+    note: >
+      The three ACME creates store the request spread over {Arn, Kind,
+      Status}: in the pack a request member named Arn, Kind or Status would
+      have overwritten the fixed value, where the bundle's declared members
+      win -- no declared input shape carries those names, so the orders only
+      diverge on members no model-conformant client can send. The pack
+      answered flat {Arn, DomainValidationArn} (EndpointArn,
+      ExternalAccountBindingArn + KeyId for the others) where the model
+      declares AcmeDomainValidationArn, AcmeEndpointArn and an
+      ExternalAccountBinding structure; all three recorded creates are
+      superseded. Nothing checks that the AcmeEndpointArn a validation or
+      binding names exists.
+  - operation: DescribeAcmeDomainValidation
+    note: >
+      An ARN that matches no record is not a fault while any record of the
+      kind exists: the pack fell back to the FIRST record under the kind
+      prefix, so asking for a validation that was never created answers with
+      an unrelated one. Only an empty kind answers ResourceNotFoundException.
+      The pack also fell back to DomainName as the key, a member the model
+      does not declare on this operation; that path is unreachable under model
+      validation and is not transcribed. DescribeAcmeEndpoint and
+      DescribeAcmeExternalAccountBinding behave the same (EndpointName and
+      KeyId fallbacks equally dead).
+  - operation: UpdateAcmeDomainValidation
+    note: >
+      Updates are upserts: an unknown ARN creates a record holding Kind and
+      the request's members, which is how a validation with no DomainName and
+      no ARN comes to exist and then answers first-record describes. The pack
+      answered the whole record where the model declares no output members;
+      both recorded updates are superseded. UpdateAcmeEndpoint is the same.
+  - operation: DescribeAcmeAccount
+    note: >
+      Reading the account creates it: the first Describe or List writes
+      {AccountArn, Status: ACTIVE} as a side effect, and RevokeAcmeAccount on
+      an account that was never read creates it already REVOKED. The account's
+      ARN ends in acme/acct/default. The pack answered the bare record under
+      Accounts where the model declares AcmeAccounts; the recorded list is
+      superseded.
+  - operation: GetAcmeExternalAccountBindingCredentials
+    note: >
+      Credentials are answered for any ARN, bound or never created -- an
+      unknown one echoes the id it was asked about as KeyId. The pack derived
+      MacKey deterministically from the KeyId, so repeated calls for one
+      binding agreed and the value was stable across a restart with the same
+      seed; the bundle draws a fresh MacKey per call. The recording calls it
+      once, which cannot tell the two apart.

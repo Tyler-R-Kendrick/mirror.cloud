@@ -1,0 +1,896 @@
+{
+  "schema": "trace/1",
+  "service": "aws.timestream",
+  "source": "pack:internal/services/aws/timestream@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The Query steps are superseded: the served model carries Query from the hand-authored catalog with no output shape, so the bundle cannot declare the Rows and ColumnInfo members the pack answered with; the bundle is shadowed for exactly that reason and those steps still run, keeping the record state behind later steps real.",
+  "steps": [
+    {
+      "operation": "ListDatabases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Databases": null
+      }
+    },
+    {
+      "operation": "CreateDatabase",
+      "input": {
+        "DatabaseName": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDatabase",
+      "input": {
+        "DatabaseName": "metrics"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics",
+          "DatabaseName": "metrics"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDatabase",
+      "input": {
+        "DatabaseName": "metrics"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics",
+          "DatabaseName": "metrics"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDatabase",
+      "input": {
+        "DatabaseName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDatabase",
+      "input": {
+        "DatabaseName": "events"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/events",
+          "DatabaseName": "events"
+        }
+      }
+    },
+    {
+      "operation": "ListDatabases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Databases": [
+          {
+            "Arn": "arn:aws:timestream:us-east-1:000000000000:database/events",
+            "DatabaseName": "events"
+          },
+          {
+            "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics",
+            "DatabaseName": "metrics"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateDatabase",
+      "input": {
+        "DatabaseName": "ghost",
+        "KmsKeyId": "kms-key-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/ghost",
+          "DatabaseName": "ghost"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDatabase",
+      "input": {
+        "DatabaseName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/ghost",
+          "DatabaseName": "ghost"
+        }
+      }
+    },
+    {
+      "operation": "UpdateDatabase",
+      "input": {
+        "DatabaseName": "metrics",
+        "KmsKeyId": "kms-key-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics",
+          "DatabaseName": "metrics"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDatabase",
+      "input": {
+        "DatabaseName": "metrics"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics",
+          "DatabaseName": "metrics"
+        }
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "cpu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Table": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics/table/cpu",
+          "DatabaseName": "metrics",
+          "TableName": "cpu"
+        }
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "mem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Table": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics/table/mem",
+          "DatabaseName": "metrics",
+          "TableName": "mem"
+        }
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "DatabaseName": "events",
+        "TableName": "cpu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Table": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/events/table/cpu",
+          "DatabaseName": "events",
+          "TableName": "cpu"
+        }
+      }
+    },
+    {
+      "operation": "DescribeTable",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "cpu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Table": {
+          "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics/table/cpu",
+          "DatabaseName": "metrics",
+          "TableName": "cpu"
+        }
+      }
+    },
+    {
+      "operation": "DescribeTable",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeTable",
+      "input": {
+        "DatabaseName": "absent",
+        "TableName": "cpu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListTables",
+      "input": {
+        "DatabaseName": "metrics"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tables": [
+          {
+            "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics/table/cpu",
+            "DatabaseName": "metrics",
+            "TableName": "cpu"
+          },
+          {
+            "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics/table/mem",
+            "DatabaseName": "metrics",
+            "TableName": "mem"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTables",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tables": null
+      }
+    },
+    {
+      "operation": "ListTables",
+      "input": {
+        "DatabaseName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tables": null
+      }
+    },
+    {
+      "operation": "WriteRecords",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "cpu",
+        "Records": [
+          {
+            "MeasureName": "pct",
+            "MeasureValue": "1"
+          },
+          {
+            "MeasureName": "pct",
+            "MeasureValue": "2"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RecordsIngested": {
+          "Total": 2
+        }
+      }
+    },
+    {
+      "operation": "WriteRecords",
+      "input": {
+        "DatabaseName": "events",
+        "TableName": "cpu",
+        "Records": [
+          {
+            "MeasureName": "hits",
+            "MeasureValue": "7"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RecordsIngested": {
+          "Total": 1
+        }
+      }
+    },
+    {
+      "operation": "WriteRecords",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "mem",
+        "Records": [
+          {
+            "MeasureName": "pct",
+            "MeasureValue": "9"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RecordsIngested": {
+          "Total": 1
+        }
+      }
+    },
+    {
+      "operation": "Query",
+      "input": {
+        "QueryString": "SELECT * FROM cpu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ColumnInfo": [
+          {
+            "Name": "measure",
+            "Type": "VARCHAR"
+          }
+        ],
+        "Rows": [
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"hits\",\"MeasureValue\":\"7\"}"
+              }
+            ]
+          },
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"1\"}"
+              }
+            ]
+          },
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"2\"}"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "the pack matched any database or table name appearing as a substring of QueryString and answered one ScalarValue row per stored record; the served model carries Query from the catalog with no output shape, so the bundle cannot declare Rows or ColumnInfo and answers an empty body"
+    },
+    {
+      "operation": "Query",
+      "input": {
+        "QueryString": "SELECT * FROM metrics"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ColumnInfo": [
+          {
+            "Name": "measure",
+            "Type": "VARCHAR"
+          }
+        ],
+        "Rows": [
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"1\"}"
+              }
+            ]
+          },
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"2\"}"
+              }
+            ]
+          },
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"9\"}"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "the pack matched on the database name too, so this answered every table under metrics; the served model carries Query from the catalog with no output shape, so the bundle cannot declare Rows or ColumnInfo and answers an empty body"
+    },
+    {
+      "operation": "Query",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ColumnInfo": [
+          {
+            "Name": "measure",
+            "Type": "VARCHAR"
+          }
+        ],
+        "Rows": [
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"hits\",\"MeasureValue\":\"7\"}"
+              }
+            ]
+          },
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"1\"}"
+              }
+            ]
+          },
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"2\"}"
+              }
+            ]
+          },
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"9\"}"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "an absent QueryString matched every stored batch; the served model carries Query from the catalog with no output shape, so the bundle cannot declare Rows or ColumnInfo and answers an empty body"
+    },
+    {
+      "operation": "Query",
+      "input": {
+        "QueryString": "SELECT * FROM nothing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ColumnInfo": [
+          {
+            "Name": "measure",
+            "Type": "VARCHAR"
+          }
+        ],
+        "Rows": null
+      },
+      "superseded": "the pack answered its fixed header with no rows; the served model carries Query from the catalog with no output shape, so the bundle cannot declare Rows or ColumnInfo and answers an empty body"
+    },
+    {
+      "operation": "DescribeEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": [
+          {
+            "Address": "127.0.0.1",
+            "CachePeriodInMinutes": 60
+          }
+        ]
+      }
+    },
+    {
+      "operation": "WriteRecords",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "cpu",
+        "Records": [
+          {
+            "MeasureName": "pct",
+            "MeasureValue": "3"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RecordsIngested": {
+          "Total": 1
+        }
+      }
+    },
+    {
+      "operation": "Query",
+      "input": {
+        "QueryString": "SELECT * FROM cpu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ColumnInfo": [
+          {
+            "Name": "measure",
+            "Type": "VARCHAR"
+          }
+        ],
+        "Rows": [
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"hits\",\"MeasureValue\":\"7\"}"
+              }
+            ]
+          },
+          {
+            "Data": [
+              {
+                "ScalarValue": "{\"MeasureName\":\"pct\",\"MeasureValue\":\"3\"}"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "the second WriteRecords replaced the first batch outright, which only this answer shows; the served model carries Query from the catalog with no output shape, so the bundle cannot declare Rows or ColumnInfo and answers an empty body"
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "mem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTable",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "mem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {
+        "DatabaseName": "metrics",
+        "TableName": "mem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDatabase",
+      "input": {
+        "DatabaseName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDatabase",
+      "input": {
+        "DatabaseName": "events"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTables",
+      "input": {
+        "DatabaseName": "events"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tables": [
+          {
+            "Arn": "arn:aws:timestream:us-east-1:000000000000:database/events/table/cpu",
+            "DatabaseName": "events",
+            "TableName": "cpu"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListDatabases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Databases": [
+          {
+            "Arn": "arn:aws:timestream:us-east-1:000000000000:database/ghost",
+            "DatabaseName": "ghost"
+          },
+          {
+            "Arn": "arn:aws:timestream:us-east-1:000000000000:database/metrics",
+            "DatabaseName": "metrics"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDatabase",
+      "input": {
+        "DatabaseName": "metrics"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDatabase",
+      "input": {
+        "DatabaseName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDatabases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Databases": null
+      }
+    }
+  ]
+}

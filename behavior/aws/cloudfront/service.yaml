@@ -1,0 +1,193 @@
+schema: bir/1
+service: aws.cloudfront
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No CDN exists: a distribution is Deployed the moment it is created
+# and serves nothing, and an invalidation is Completed the moment it is
+# requested and invalidates nothing.
+provenance: authored
+
+resources:
+  distribution:
+    collection: cfd
+    id:
+      # The pack's distID was the first non-empty of Id, DistributionId, in
+      # that order. GetInvalidation declares both, so there the distribution
+      # key is the invalidation's id -- see quirks.
+      input_members: [Id, DistributionId]
+    arn: "arn:{partition}:cloudfront::{account}:distribution/{id}"
+    record:
+      Id: id
+      DomainName: "lower(id) + '.cloudfront.net'"
+      Status: "'Deployed'"
+      CallerReference: "'CallerReference' in input ? string(input.CallerReference) : ''"
+      OriginDomainName: "'DomainName' in input ? string(input.DomainName) : ''"
+      ARN: arn
+
+  invalidation:
+    collection: "cfinv:{distribution.id}"
+    parent: distribution
+    id:
+      # The pack's invID was the first non-empty of InvalidationId, Id;
+      # InvalidationId is the name its own path parser set, the model declares
+      # neither that nor uses it -- GetInvalidation's declared Id is the
+      # invalidation's.
+      input_members: [InvalidationId, Id]
+    record:
+      Id: id
+      Status: "'Completed'"
+      DistributionId: "'Id' in input && string(input.Id) != '' ? string(input.Id) : string(input.DistributionId)"
+
+errors:
+  NoSuchDistribution:
+    code: NoSuchDistribution
+    http: 404
+    fault: client
+  NoSuchInvalidation:
+    code: NoSuchInvalidation
+    http: 404
+    fault: client
+
+operations:
+  CreateDistribution:
+    effects:
+      - generate: { bind: dist, kind: hex, bytes: 8 }
+      - create:
+          resource: distribution
+          key: "'E' + upper(fx.dist)"
+    output:
+      Distribution: rec
+      ETag: rec.Id
+
+  GetDistribution:
+    reads:
+      d: { resource: distribution }
+    require:
+      - { cond: d_found, error: NoSuchDistribution }
+    output:
+      Distribution: d
+      ETag: d.Id
+
+  GetDistributionConfig:
+    reads:
+      d: { resource: distribution }
+    require:
+      - { cond: d_found, error: NoSuchDistribution }
+    output:
+      DistributionConfig: d
+      ETag: d.Id
+
+  # The pack amended OriginDomainName only from a raw XML body and otherwise
+  # stored the record back unchanged; see quirks. The read is the behavior.
+  UpdateDistribution:
+    reads:
+      d: { resource: distribution }
+    require:
+      - { cond: d_found, error: NoSuchDistribution }
+    output:
+      Distribution: d
+      ETag: d.Id
+
+  # Idempotent, and the distribution's invalidations survive it.
+  DeleteDistribution:
+    effects:
+      - delete: { resource: distribution, missing: ignore }
+
+  ListDistributions:
+    list:
+      resource: distribution
+      member: DistributionList
+      paginate: model
+    # The pack answered flat Items/Quantity/IsTruncated members the model does
+    # not declare; the declared answer wraps the page in DistributionList.
+    output:
+      DistributionList: "{'Items': items.map(x, {'Id': x.Id, 'ARN': x.ARN, 'DomainName': x.DomainName, 'Status': x.Status}), 'IsTruncated': false, 'Marker': '', 'MaxItems': 0, 'Quantity': size(items)}"
+
+  CreateInvalidation:
+    reads:
+      # Scopes the collection to the distribution; the pack never checked the
+      # distribution exists, and neither does this.
+      dist: { resource: distribution }
+    effects:
+      - generate: { bind: inv, kind: hex, bytes: 8 }
+      - create:
+          resource: invalidation
+          key: "'I' + upper(fx.inv)"
+    output:
+      Invalidation: rec
+
+  GetInvalidation:
+    reads:
+      dist: { resource: distribution }
+      inv: { resource: invalidation }
+    require:
+      - { cond: inv_found, error: NoSuchInvalidation }
+    output:
+      Invalidation: inv
+
+  ListInvalidations:
+    reads:
+      dist: { resource: distribution }
+    list:
+      resource: invalidation
+      member: InvalidationList
+      paginate: model
+    # Same flat-versus-wrapped divergence as ListDistributions.
+    output:
+      InvalidationList: "{'Items': items.map(x, {'Id': x.Id, 'Status': x.Status}), 'IsTruncated': false, 'Marker': '', 'MaxItems': 0, 'Quantity': size(items)}"
+
+quirks:
+  - operation: CreateDistribution
+    note: >
+      The id is "E" followed by upper-case hex and the domain is that id
+      folded lower plus .cloudfront.net; the distribution is Deployed at
+      birth, its ARN names the account but no region, and the ETag is the id
+      itself. CallerReference and the origin's DomainName were read from flat
+      request members, or extracted out of the raw XML body (`_body`) when
+      those were absent. B-IR has no substring extraction and the engine's
+      codec never presents a `_body` member -- the model's payload splat puts
+      DistributionConfig's members flat into the input instead -- so the
+      `_body` fallback is dead in the bundle. The same is true of
+      UpdateDistribution's only amendment, which rewrote OriginDomainName from
+      `<DomainName>` tags in the raw body and otherwise stored the record back
+      unchanged; the bundle answers the stored record either way.
+  - operation: GetDistribution
+    note: >
+      The pack answered Id, Status and ETag at the top level alongside
+      Distribution; GetDistributionResult declares only Distribution and ETag,
+      so the bundle answers the record under Distribution and the ETag, and
+      the recorded steps carry the pack's fuller answer as superseded.
+      CreateDistribution (Id, DomainName, Status), GetInvalidation and
+      CreateInvalidation (Id, Status) diverge the same way, and the two list
+      operations answered flat Items/Quantity bodies where the model wraps the
+      page in DistributionList and InvalidationList -- every one of those
+      steps is superseded in the recording, which is most of it.
+  - operation: GetInvalidation
+    note: >
+      The pack resolved the distribution id by reading Id before
+      DistributionId, and GetInvalidation's declared Id is the invalidation's
+      -- so a model-shaped request (DistributionId plus Id, both required)
+      looks the invalidation up in a collection named for the invalidation's
+      own id and always answers NoSuchInvalidation, even when the invalidation
+      exists. The transcription keeps the pack's member order, so the bundle
+      does the same; the recording gates it. A request that also passes
+      InvalidationId -- the member name the pack's own path parser set --
+      resolves the distribution by Id and the invalidation by InvalidationId
+      and works.
+  - operation: CreateInvalidation
+    note: >
+      The distribution is never checked to exist: an invalidation for a
+      distribution that was never created is written to a collection named for
+      it and answers Completed, and is listed by ListInvalidations under the
+      same id afterwards. The invalidation batch (paths, caller reference) is
+      not stored.
+  - operation: DeleteDistribution
+    note: >
+      Deleting is idempotent and answers nothing, and a distribution's
+      invalidations survive it in their own per-distribution collections.
+      Where the engine now rejects a request missing a required member with
+      ValidationException, the pack fell through: reads faulted
+      NoSuchDistribution on the empty key, DeleteDistribution deleted the
+      empty key and succeeded, and CreateInvalidation wrote to the collection
+      named "". Those paths are unreachable under model validation and are
+      not transcribed.

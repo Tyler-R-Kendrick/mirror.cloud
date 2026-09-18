@@ -1,0 +1,332 @@
+schema: bir/1
+service: aws.opensearch
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A domain is Created the moment it is asked for, with an Endpoint
+# host nothing listens on, and the document store behind it is a per-index
+# collection with a substring query, not Lucene.
+provenance: authored
+
+# IndexDocument, GetDocument, DeleteDocument and Search come from the
+# hand-authored catalog with no input or output shape -- the vendored
+# 2021-01-01 specification is the control plane only -- so the bundle cannot
+# declare the _index, _id, _source and hits members the pack answers with:
+# the loader requires every output member to resolve against the served model,
+# and there is no output shape to resolve against. The pack keeps serving
+# until the model carries the data-plane shapes or the engine gains an
+# escape; the recording's data-plane steps are superseded with this reason.
+# Their writes and deletes are still transcribed, so the day the shapes land
+# the state behind them is already the pack's.
+shadow: >
+  The data plane is not expressible: the served model carries IndexDocument,
+  GetDocument, DeleteDocument and Search from the catalog with empty input and
+  output shapes, and the loader forbids output members an output shape does
+  not declare, so the bundle can answer them with nothing but an empty body
+  where the pack answered _index/_id/result, found/_source and hits. Every
+  control-plane operation is transcribed and gated.
+
+# The pack answered an empty DomainName on create with ValidationException;
+# that is also the service's vocabulary for the required members the model now
+# enforces.
+missing_input_error: Validation
+
+resources:
+  domain:
+    collection: osdom
+    id:
+      # The pack read DomainName first and domainName second; the model
+      # requires DomainName on every control-plane operation, so the
+      # lowercase fallback is reachable only from the shapeless data plane.
+      input_members: [DomainName, domainName]
+    arn: "arn:{partition}:es:{region}:{account}:domain/{id}"
+    # Re-evaluated on every write, so UpdateDomainConfig recomputes the same
+    # values over the record it just read -- the members are functions of the
+    # name and the identity, and EngineVersion is overridden back to the
+    # stored value by the update's own effect record.
+    record:
+      DomainName: id
+      ARN: arn
+      Created: true
+      Deleted: false
+      Processing: false
+      EngineVersion: >
+        'EngineVersion' in input && string(input.EngineVersion) != ''
+          ? string(input.EngineVersion)
+          : ('engineVersion' in input && string(input.engineVersion) != ''
+              ? string(input.engineVersion)
+              : 'OpenSearch_2.11')
+      Endpoint: "id + '.' + identity.region + '.es.localhost.localstack.cloud'"
+      DomainId: "identity.account + '/' + id"
+
+  tag:
+    collection: ostag
+    id:
+      input_members: [ARN]
+
+  # The pack scoped documents to a per-domain-and-index collection; a
+  # composite key over one collection is the same containment. Every access
+  # names its key explicitly, because the id is sometimes generated at write
+  # time. The record wraps the stored document with the coordinates a listing
+  # would need to project a hit: the pack stored the bare source and read the
+  # id back off the store key, which a B-IR list never sees.
+  document:
+    collection: osdoc
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateDomain:
+    require:
+      - { cond: "string(input.DomainName) != ''", error: Validation }
+    effects:
+      - put: { resource: domain }
+    output:
+      DomainStatus: rec
+
+  DescribeDomain:
+    reads:
+      d: { resource: domain }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      DomainStatus: d
+
+  # The config read and the status read are the same record under two
+  # members, which is what the pack answered.
+  DescribeDomainConfig:
+    reads:
+      d: { resource: domain }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      DomainConfig: d
+
+  # Named domains that match nothing are skipped rather than faulting; the
+  # filter gives that for free. The pack walked the request's names in
+  # request order where this answers in store order -- the recorded
+  # out-of-order step is superseded with that reason.
+  DescribeDomains:
+    list:
+      resource: domain
+      member: DomainStatusList
+      paginate: model
+      filter: "input.DomainNames.exists(n, string(n) == string(item.DomainName))"
+
+  ListDomainNames:
+    list: { resource: domain, member: DomainNames, paginate: model }
+    output:
+      DomainNames: "items.map(d, {'DomainName': d.DomainName, 'EngineType': 'OpenSearch'})"
+
+  # Deleting answers a two-member status naming the domain whether or not it
+  # existed, and never reads the record it removes.
+  DeleteDomain:
+    effects:
+      - delete: { resource: domain, missing: ignore }
+    output:
+      DomainStatus: "{'DomainName': string(input.DomainName), 'Deleted': true}"
+
+  # The update rewrites only EngineVersion, and only when the request carries
+  # a nonempty one; the put merges onto the stored record, which is the pack's
+  # read-modify-write.
+  UpdateDomainConfig:
+    reads:
+      d: { resource: domain }
+    require:
+      - { cond: d_found, error: NotFound }
+    effects:
+      - put:
+          resource: domain
+          record:
+            EngineVersion: >
+              'EngineVersion' in input && string(input.EngineVersion) != ''
+                ? string(input.EngineVersion)
+                : d.EngineVersion
+    output:
+      DomainConfig: rec
+
+  AddTags:
+    effects:
+      - put:
+          resource: tag
+          record:
+            TagList: "input.TagList"
+    output: {}
+
+  # An ARN nothing was added to answers an empty list, not a fault.
+  ListTags:
+    reads:
+      t: { resource: tag }
+    output:
+      TagList: "t_found ? t.TagList : []"
+
+  # RemoveTags ignores TagKeys entirely: the whole tag list for the ARN goes.
+  RemoveTags:
+    effects:
+      - delete: { resource: tag, missing: ignore }
+    output: {}
+
+  # See the shadow note: the four data-plane operations answer members no
+  # output shape declares, so their answers here are empty. Their faults and
+  # their writes are the pack's.
+  IndexDocument:
+    reads:
+      d: { resource: domain }
+    let:
+      dom: >
+        'DomainName' in input && string(input.DomainName) != ''
+          ? string(input.DomainName)
+          : ('domainName' in input && string(input.domainName) != ''
+              ? string(input.domainName) : '')
+      idx: >
+        'Index' in input && string(input.Index) != ''
+          ? string(input.Index)
+          : ('index' in input && string(input.index) != ''
+              ? string(input.index) : '')
+      did: >
+        'Id' in input && string(input.Id) != ''
+          ? string(input.Id)
+          : ('id' in input && string(input.id) != ''
+              ? string(input.id) : '')
+    require:
+      # The pack checked the domain only when the request named one.
+      - { cond: "dom == '' || d_found", error: NotFound }
+      - { cond: "idx != ''", error: Validation }
+    effects:
+      - generate: { bind: docid, kind: hex, bytes: 8, when: "did == ''" }
+      - put:
+          resource: document
+          key: "(dom == '' ? '_' : dom) + '/' + idx + '/' + (did != '' ? did : fx.docid)"
+          record:
+            _id: "did != '' ? did : fx.docid"
+            _domain: "dom == '' ? '_' : dom"
+            _index: "idx"
+            # Document, else _source, else the request minus its addressing
+            # members -- the pack's stripMeta.
+            _source: >
+              'Document' in input && input.Document != null
+                ? input.Document
+                : ('_source' in input && input._source != null
+                    ? input._source
+                    : without(input, ['DomainName', 'domainName', 'Index', 'index', 'Id', 'id', 'query', 'body']))
+    output: {}
+
+  GetDocument:
+    output: {}
+
+  DeleteDocument:
+    let:
+      dom: >
+        'DomainName' in input && string(input.DomainName) != ''
+          ? string(input.DomainName)
+          : ('domainName' in input && string(input.domainName) != ''
+              ? string(input.domainName) : '')
+      idx: >
+        'Index' in input && string(input.Index) != ''
+          ? string(input.Index)
+          : ('index' in input && string(input.index) != ''
+              ? string(input.index) : '')
+      did: >
+        'Id' in input && string(input.Id) != ''
+          ? string(input.Id)
+          : ('id' in input && string(input.id) != ''
+              ? string(input.id) : '')
+    effects:
+      - delete:
+          resource: document
+          key: "(dom == '' ? '_' : dom) + '/' + idx + '/' + did"
+          missing: ignore
+    output: {}
+
+  # ponytail: the pack's match_all / term / match / query_string substring
+  # query is not transcribed at all; upgrade is the model carrying the
+  # data-plane shapes, then a real query DSL.
+  Search:
+    output: {}
+
+quirks:
+  - operation: CreateDomain
+    note: >
+      A domain is Created, not Processing and never Deleted the moment it is
+      asked for, with an Endpoint under es.localhost.localstack.cloud that
+      nothing listens on and a DomainId that is account/name. ClusterConfig --
+      which the model's DomainStatus marks required -- is never set, nor are
+      AccessPolicies, EBSOptions or the VPC and encryption options, so a
+      domain has no nodes and no storage. Creating over an existing name
+      overwrites the record, where the real service answers
+      ResourceAlreadyExistsException. The pack read EngineVersion with a
+      lowercase engineVersion fallback; the model declares only EngineVersion.
+  - operation: CreateDomain
+    note: >
+      The pack fell back to a lowercase domainName member everywhere, and
+      answered an absent DomainName with ValidationException from its own
+      name check. The model marks DomainName required, so the engine rejects
+      its absence first -- the lowercase fallback is dead on the control
+      plane and only the empty-string refusal is the bundle's own. The same
+      is true of DescribeDomain, DescribeDomains, DeleteDomain,
+      UpdateDomainConfig and DescribeDomainConfig, and of ARN, TagList and
+      TagKeys on the tag operations: an AddTags with no ARN stored the list
+      under the empty key where the engine now rejects the request.
+  - operation: DescribeDomain
+    note: >
+      DescribeDomainConfig is the same read answered under DomainConfig
+      instead of DomainStatus: the "config" is the whole stored record,
+      EngineVersion and Endpoint included, not the model's DomainConfig
+      shape. UpdateDomainConfig answers the same record under the same
+      member.
+  - operation: DescribeDomains
+    note: >
+      The pack walked DomainNames in request order and skipped names matching
+      nothing; the bundle filters the store, so the answers agree on
+      membership but a request naming domains out of store order gets them in
+      store order. The recorded out-of-order step is superseded with this
+      reason.
+  - operation: ListDomainNames
+    note: >
+      Every domain reports EngineType OpenSearch whatever it was created as,
+      and the EngineType filter the model accepts is ignored.
+  - operation: DeleteDomain
+    note: >
+      Deleting answers a two-member status -- DomainName and Deleted: true --
+      whether or not the domain existed, and never reads the record it
+      removes, so the answer describes a state no later describe can observe.
+      Nothing cascades: documents indexed under the domain survive it in
+      their own collection.
+  - operation: UpdateDomainConfig
+    note: >
+      Only EngineVersion is updatable; every other member the request carries
+      is dropped, and an update without an EngineVersion rewrites the record
+      unchanged. ClusterConfig, EBSOptions and the rest of the model's
+      updateable surface are accepted and forgotten.
+  - operation: RemoveTags
+    note: >
+      TagKeys is required by the model and ignored by the pack: removing any
+      keys removes the ARN's whole tag list.
+  - operation: IndexDocument
+    note: >
+      Indexing into a named domain that does not exist faults
+      ResourceNotFoundException, but a request naming no domain writes to the
+      shared "_" collection unchecked. An absent Id is a generated hex token;
+      an empty Index is ValidationException. The document stored is Document,
+      else _source, else the request minus its addressing members -- so an
+      IndexDocument call's spare top-level members ARE the document.
+  - operation: GetDocument
+    note: >
+      A missing document is not a fault: the answer is found: false with the
+      index and id echoed. DeleteDocument answers result: deleted whether or
+      not the document existed.
+  - operation: Search
+    note: >
+      Not a query engine: match_all and the empty query match everything,
+      term and match compare one arbitrarily chosen field (Go map order, so a
+      multi-field query is nondeterministic), and query_string substring-
+      matches Go's fmt rendering of the document. None of this is
+      transcribed -- the catalog carries Search with no output shape, which
+      is why the bundle is shadowed.

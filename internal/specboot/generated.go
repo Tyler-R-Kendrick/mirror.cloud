@@ -7,17 +7,20 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
-// servedAs names the four services the runtime serves under an ID the
+// servedAs names the services the runtime serves under an ID the
 // specification does not use. Three are historical wire names the SDKs still
 // send -- CloudWatch signs as `monitoring`, ELBv2 as `elasticloadbalancing` --
-// and one is a shortening the catalog chose. The generated models are keyed by
-// the specification's ID, so the two have to be joined somewhere; here, once,
-// rather than at every reader.
+// one is a shortening the catalog chose, and one is a specification vendored
+// under its endpoint prefix: the OpenSearch 2021-01-01 model generated as
+// aws.es while the service is served as aws.opensearch. The generated models
+// are keyed by the specification's ID, so the two have to be joined somewhere;
+// here, once, rather than at every reader.
 var servedAs = map[string]string{
 	"aws.monitoring":           "aws.cloudwatch",
 	"aws.elasticloadbalancing": "aws.elbv2",
 	"aws.api.ecr":              "aws.ecr",
 	"aws.tagging":              "aws.resourcegroupstaggingapi",
+	"aws.opensearch":           "aws.es",
 }
 
 // adoptGenerated replaces each service's wire description with the one

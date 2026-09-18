@@ -1,0 +1,898 @@
+{
+  "schema": "trace/1",
+  "service": "aws.opensearch",
+  "source": "pack:internal/services/aws/opensearch@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The IndexDocument, GetDocument, DeleteDocument and Search steps are superseded: the served model carries those operations from the hand-authored catalog with no output shape (the vendored 2021-01-01 specification is the control plane only), so the bundle cannot declare the _index/_id/_source/hits members the pack answered with, and answers them empty. Their fault steps still gate. One DescribeDomains step is superseded because the pack answered in request order and the bundle lists in store order.",
+  "steps": [
+    {
+      "operation": "ListDomainNames",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainNames": null
+      }
+    },
+    {
+      "operation": "CreateDomain",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1",
+          "Created": true,
+          "Deleted": false,
+          "DomainId": "000000000000/d1",
+          "DomainName": "d1",
+          "Endpoint": "d1.us-east-1.es.localhost.localstack.cloud",
+          "EngineVersion": "OpenSearch_2.11",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "CreateDomain",
+      "input": {
+        "DomainName": "d2",
+        "EngineVersion": "OpenSearch_2.13"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "ARN": "arn:aws:es:us-east-1:000000000000:domain/d2",
+          "Created": true,
+          "Deleted": false,
+          "DomainId": "000000000000/d2",
+          "DomainName": "d2",
+          "Endpoint": "d2.us-east-1.es.localhost.localstack.cloud",
+          "EngineVersion": "OpenSearch_2.13",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "CreateDomain",
+      "input": {
+        "DomainName": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDomain",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1",
+          "Created": true,
+          "Deleted": false,
+          "DomainId": "000000000000/d1",
+          "DomainName": "d1",
+          "Endpoint": "d1.us-east-1.es.localhost.localstack.cloud",
+          "EngineVersion": "OpenSearch_2.11",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "DomainName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeDomainConfig",
+      "input": {
+        "DomainName": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainConfig": {
+          "ARN": "arn:aws:es:us-east-1:000000000000:domain/d2",
+          "Created": true,
+          "Deleted": false,
+          "DomainId": "000000000000/d2",
+          "DomainName": "d2",
+          "Endpoint": "d2.us-east-1.es.localhost.localstack.cloud",
+          "EngineVersion": "OpenSearch_2.13",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "DescribeDomains",
+      "input": {
+        "DomainNames": ["d1", "d2"]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatusList": [
+          {
+            "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1",
+            "Created": true,
+            "Deleted": false,
+            "DomainId": "000000000000/d1",
+            "DomainName": "d1",
+            "Endpoint": "d1.us-east-1.es.localhost.localstack.cloud",
+            "EngineVersion": "OpenSearch_2.11",
+            "Processing": false
+          },
+          {
+            "ARN": "arn:aws:es:us-east-1:000000000000:domain/d2",
+            "Created": true,
+            "Deleted": false,
+            "DomainId": "000000000000/d2",
+            "DomainName": "d2",
+            "Endpoint": "d2.us-east-1.es.localhost.localstack.cloud",
+            "EngineVersion": "OpenSearch_2.13",
+            "Processing": false
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDomains",
+      "input": {
+        "DomainNames": ["d2", "d1"]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatusList": [
+          {
+            "ARN": "arn:aws:es:us-east-1:000000000000:domain/d2",
+            "Created": true,
+            "Deleted": false,
+            "DomainId": "000000000000/d2",
+            "DomainName": "d2",
+            "Endpoint": "d2.us-east-1.es.localhost.localstack.cloud",
+            "EngineVersion": "OpenSearch_2.13",
+            "Processing": false
+          },
+          {
+            "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1",
+            "Created": true,
+            "Deleted": false,
+            "DomainId": "000000000000/d1",
+            "DomainName": "d1",
+            "Endpoint": "d1.us-east-1.es.localhost.localstack.cloud",
+            "EngineVersion": "OpenSearch_2.11",
+            "Processing": false
+          }
+        ]
+      },
+      "superseded": "the pack walked DomainNames in request order; the bundle filters the store, which lists in key order, so an out-of-order request gets the same members in store order"
+    },
+    {
+      "operation": "DescribeDomains",
+      "input": {
+        "DomainNames": ["d1", "ghost"]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatusList": [
+          {
+            "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1",
+            "Created": true,
+            "Deleted": false,
+            "DomainId": "000000000000/d1",
+            "DomainName": "d1",
+            "Endpoint": "d1.us-east-1.es.localhost.localstack.cloud",
+            "EngineVersion": "OpenSearch_2.11",
+            "Processing": false
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateDomainConfig",
+      "input": {
+        "DomainName": "d2",
+        "EngineVersion": "OpenSearch_2.5"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainConfig": {
+          "ARN": "arn:aws:es:us-east-1:000000000000:domain/d2",
+          "Created": true,
+          "Deleted": false,
+          "DomainId": "000000000000/d2",
+          "DomainName": "d2",
+          "Endpoint": "d2.us-east-1.es.localhost.localstack.cloud",
+          "EngineVersion": "OpenSearch_2.5",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "UpdateDomainConfig",
+      "input": {
+        "DomainName": "ghost",
+        "EngineVersion": "OpenSearch_2.5"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateDomainConfig",
+      "input": {
+        "DomainName": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainConfig": {
+          "ARN": "arn:aws:es:us-east-1:000000000000:domain/d2",
+          "Created": true,
+          "Deleted": false,
+          "DomainId": "000000000000/d2",
+          "DomainName": "d2",
+          "Endpoint": "d2.us-east-1.es.localhost.localstack.cloud",
+          "EngineVersion": "OpenSearch_2.5",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "DomainName": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "ARN": "arn:aws:es:us-east-1:000000000000:domain/d2",
+          "Created": true,
+          "Deleted": false,
+          "DomainId": "000000000000/d2",
+          "DomainName": "d2",
+          "Endpoint": "d2.us-east-1.es.localhost.localstack.cloud",
+          "EngineVersion": "OpenSearch_2.5",
+          "Processing": false
+        }
+      }
+    },
+    {
+      "operation": "AddTags",
+      "input": {
+        "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1",
+        "TagList": [
+          {
+            "Key": "env",
+            "Value": "dev"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListTags",
+      "input": {
+        "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": [
+          {
+            "Key": "env",
+            "Value": "dev"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTags",
+      "input": {
+        "ARN": "arn:aws:es:us-east-1:000000000000:domain/ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": []
+      }
+    },
+    {
+      "operation": "RemoveTags",
+      "input": {
+        "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1",
+        "TagKeys": ["env"]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListTags",
+      "input": {
+        "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": []
+      }
+    },
+    {
+      "operation": "IndexDocument",
+      "input": {
+        "DomainName": "ghost",
+        "Index": "events",
+        "Document": {
+          "message": "lost"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "IndexDocument",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "IndexDocument",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities",
+        "Id": "1",
+        "name": "austin",
+        "state": "tx"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_id": "1",
+        "_index": "cities",
+        "_shards": {
+          "successful": 1,
+          "total": 1
+        },
+        "result": "created"
+      },
+      "superseded": "the served model carries IndexDocument from the catalog with no output shape, so the bundle cannot declare _index/_id/result/_shards and answers empty; the write itself is transcribed"
+    },
+    {
+      "operation": "IndexDocument",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities",
+        "Document": {
+          "name": "plano",
+          "state": "tx"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_id": "aa00000000000001",
+        "_index": "cities",
+        "_shards": {
+          "successful": 1,
+          "total": 1
+        },
+        "result": "created"
+      },
+      "superseded": "the served model carries IndexDocument from the catalog with no output shape, so the bundle cannot declare _index/_id/result/_shards and answers empty; the write itself is transcribed, generated id included"
+    },
+    {
+      "operation": "GetDocument",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities",
+        "Id": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_id": "1",
+        "_index": "cities",
+        "_source": {
+          "name": "austin",
+          "state": "tx"
+        },
+        "found": true
+      },
+      "superseded": "the served model carries GetDocument from the catalog with no output shape, so the bundle cannot declare found/_source and answers empty"
+    },
+    {
+      "operation": "GetDocument",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities",
+        "Id": {
+          "$fromStep": 23,
+          "$fromPath": "_id"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_id": "aa00000000000001",
+        "_index": "cities",
+        "_source": {
+          "name": "plano",
+          "state": "tx"
+        },
+        "found": true
+      },
+      "superseded": "the served model carries GetDocument from the catalog with no output shape, so the bundle cannot declare found/_source and answers empty"
+    },
+    {
+      "operation": "Search",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities",
+        "query": {
+          "match": {
+            "name": "austin"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "hits": {
+          "hits": [
+            {
+              "_id": "1",
+              "_index": "cities",
+              "_score": 1,
+              "_source": {
+                "name": "austin",
+                "state": "tx"
+              }
+            }
+          ],
+          "total": {
+            "relation": "eq",
+            "value": 1
+          }
+        },
+        "timed_out": false
+      },
+      "superseded": "the served model carries Search from the catalog with no output shape, so the bundle cannot declare hits and answers empty; the pack's substring query DSL is not transcribed"
+    },
+    {
+      "operation": "Search",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities",
+        "query": {
+          "match": {
+            "name": "nowhere"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "hits": {
+          "hits": null,
+          "total": {
+            "relation": "eq",
+            "value": 0
+          }
+        },
+        "timed_out": false
+      },
+      "superseded": "the served model carries Search from the catalog with no output shape, so the bundle cannot declare hits and answers empty"
+    },
+    {
+      "operation": "Search",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "hits": {
+          "hits": [
+            {
+              "_id": "1",
+              "_index": "cities",
+              "_score": 1,
+              "_source": {
+                "name": "austin",
+                "state": "tx"
+              }
+            },
+            {
+              "_id": "aa00000000000001",
+              "_index": "cities",
+              "_score": 1,
+              "_source": {
+                "name": "plano",
+                "state": "tx"
+              }
+            }
+          ],
+          "total": {
+            "relation": "eq",
+            "value": 2
+          }
+        },
+        "timed_out": false
+      },
+      "superseded": "the served model carries Search from the catalog with no output shape, so the bundle cannot declare hits and answers empty; an absent query matched every document in the index"
+    },
+    {
+      "operation": "DeleteDocument",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities",
+        "Id": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_id": "1",
+        "_index": "cities",
+        "result": "deleted"
+      },
+      "superseded": "the served model carries DeleteDocument from the catalog with no output shape, so the bundle cannot declare result and answers empty; the delete itself is transcribed"
+    },
+    {
+      "operation": "GetDocument",
+      "input": {
+        "DomainName": "d1",
+        "Index": "cities",
+        "Id": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_id": "1",
+        "_index": "cities",
+        "found": false
+      },
+      "superseded": "the served model carries GetDocument from the catalog with no output shape, so the bundle cannot declare found and answers empty; a missing document is found: false, not a fault"
+    },
+    {
+      "operation": "IndexDocument",
+      "input": {
+        "Index": "events",
+        "Document": {
+          "message": "orphan"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "_id": "aa00000000000002",
+        "_index": "events",
+        "_shards": {
+          "successful": 1,
+          "total": 1
+        },
+        "result": "created"
+      },
+      "superseded": "the served model carries IndexDocument from the catalog with no output shape, so the bundle answers empty; a request naming no domain skips the existence check and writes to the shared \"_\" index scope"
+    },
+    {
+      "operation": "DeleteDomain",
+      "input": {
+        "DomainName": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "Deleted": true,
+          "DomainName": "d2"
+        }
+      }
+    },
+    {
+      "operation": "DeleteDomain",
+      "input": {
+        "DomainName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "Deleted": true,
+          "DomainName": "ghost"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "DomainName": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDomainNames",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainNames": [
+          {
+            "DomainName": "d1",
+            "EngineType": "OpenSearch"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDomain",
+      "input": {
+        "DomainName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainStatus": {
+          "Deleted": true,
+          "DomainName": "d1"
+        }
+      }
+    },
+    {
+      "operation": "ListDomainNames",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DomainNames": null
+      }
+    }
+  ]
+}

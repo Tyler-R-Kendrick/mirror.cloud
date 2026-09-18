@@ -1,0 +1,913 @@
+schema: bir/1
+service: aws.elasticache
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is cached: a cluster is available the moment it is created,
+# every modify succeeds whether or not the record exists, and every describe
+# that names something absent answers CacheClusterNotFound -- whatever the
+# resource actually is.
+provenance: authored
+
+resources:
+  cluster:
+    collection: cache
+    id:
+      input_members: [CacheClusterId]
+
+  replgroup:
+    collection: rg
+    id:
+      input_members: [ReplicationGroupId]
+
+  subnetgroup:
+    collection: csubnet
+    id:
+      input_members: [CacheSubnetGroupName]
+
+  snapshot:
+    collection: csnap
+    id:
+      input_members: [SnapshotName]
+
+  # The pack stored the tag list itself under the resource name; here the
+  # record wraps it in one member so reads can name it.
+  tags:
+    collection: ctags
+    id:
+      input_members: [ResourceName]
+
+  user:
+    collection: ecuser
+    id:
+      input_members: [UserId]
+
+  usergroup:
+    collection: ecug
+    id:
+      input_members: [UserGroupId]
+
+  serverless:
+    collection: ecsls
+    id:
+      input_members: [ServerlessCacheName]
+
+  serverlesssnap:
+    collection: ecslssnap
+    id:
+      input_members: [ServerlessCacheSnapshotName, SnapshotName]
+
+  # CreateGlobalReplicationGroup's input declares no GlobalReplicationGroupId,
+  # so the pack's lookup of one always missed and it minted a random key for
+  # every create; the id only exists as an input to the other operations.
+  globalrg:
+    collection: ecgrg
+    id:
+      input_members: [GlobalReplicationGroupId]
+
+  paramgroup:
+    collection: ecpg
+    id:
+      input_members: [CacheParameterGroupName]
+
+  secgroup:
+    collection: ecsg
+    id:
+      input_members: [CacheSecurityGroupName]
+
+  reservednode:
+    collection: ecreserved
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [ReservedCacheNodeId]
+
+  # Keyed by ServiceUpdateName plus the operation that recorded it, which no
+  # request member carries -- every write names its key explicitly.
+  updateaction:
+    collection: ecupd
+
+errors:
+  # The pack answered every missing-record describe with this one fault,
+  # whatever kind of record was asked about.
+  NotFound:
+    code: CacheClusterNotFound
+    http: 404
+    fault: client
+
+operations:
+  # --- cache clusters -------------------------------------------------------
+
+  CreateCacheCluster:
+    effects:
+      - create:
+          resource: cluster
+          record:
+            CacheClusterId: id
+            CacheClusterStatus: "'available'"
+            Engine: "'Engine' in input ? string(input.Engine) : ''"
+            CacheNodeType: "'CacheNodeType' in input ? string(input.CacheNodeType) : ''"
+    output:
+      CacheCluster: rec
+
+  DescribeCacheClusters:
+    reads:
+      r: { resource: cluster, key: "'CacheClusterId' in input ? string(input.CacheClusterId) : ''" }
+    require:
+      - { cond: "!('CacheClusterId' in input) || string(input.CacheClusterId) == '' || r_found", error: NotFound }
+    list:
+      resource: cluster
+      member: CacheClusters
+      paginate: model
+      key: "'CacheClusterId' in input ? string(input.CacheClusterId) : ''"
+
+  # The pack spread the whole request over the stored record and wrote it
+  # back, creating the record when it was absent.
+  ModifyCacheCluster:
+    effects:
+      - patch: { resource: cluster, spread: input }
+    output:
+      CacheCluster: rec
+
+  DeleteCacheCluster:
+    effects:
+      - delete: { resource: cluster, missing: ignore }
+    output:
+      CacheCluster: "{'CacheClusterId': string(input.CacheClusterId), 'CacheClusterStatus': 'deleting'}"
+
+  RebootCacheCluster:
+    effects:
+      - patch:
+          resource: cluster
+          record:
+            CacheClusterStatus: "'rebooting'"
+    output:
+      CacheCluster: rec
+
+  # --- replication groups ---------------------------------------------------
+
+  CreateReplicationGroup:
+    effects:
+      - create:
+          resource: replgroup
+          record:
+            ReplicationGroupId: id
+            Status: "'available'"
+    output:
+      ReplicationGroup: rec
+
+  DescribeReplicationGroups:
+    reads:
+      r: { resource: replgroup, key: "'ReplicationGroupId' in input ? string(input.ReplicationGroupId) : ''" }
+    require:
+      - { cond: "!('ReplicationGroupId' in input) || string(input.ReplicationGroupId) == '' || r_found", error: NotFound }
+    list:
+      resource: replgroup
+      member: ReplicationGroups
+      paginate: model
+      key: "'ReplicationGroupId' in input ? string(input.ReplicationGroupId) : ''"
+
+  DeleteReplicationGroup:
+    effects:
+      - delete: { resource: replgroup, missing: ignore }
+    output:
+      ReplicationGroup: "{'ReplicationGroupId': string(input.ReplicationGroupId), 'Status': 'deleting'}"
+
+  ModifyReplicationGroup:
+    effects:
+      - patch: { resource: replgroup, spread: input }
+    output:
+      ReplicationGroup: rec
+
+  ModifyReplicationGroupShardConfiguration:
+    effects:
+      - patch: { resource: replgroup, spread: input }
+    output:
+      ReplicationGroup: rec
+
+  # The pack stored the count under Replicas and the operation's own name
+  # under LastAction; neither is a member the ReplicationGroup shape declares.
+  IncreaseReplicaCount:
+    effects:
+      - patch:
+          resource: replgroup
+          record:
+            Replicas: "'NewReplicaCount' in input ? input.NewReplicaCount : null"
+            LastAction: "'IncreaseReplicaCount'"
+    output:
+      ReplicationGroup: rec
+
+  DecreaseReplicaCount:
+    effects:
+      - patch:
+          resource: replgroup
+          record:
+            Replicas: "'NewReplicaCount' in input ? input.NewReplicaCount : null"
+            LastAction: "'DecreaseReplicaCount'"
+    output:
+      ReplicationGroup: rec
+
+  # All four migration operations did the same thing: stamp the operation's
+  # name under Migration on the group, creating it when absent.
+  StartMigration:
+    effects:
+      - patch:
+          resource: replgroup
+          record:
+            Migration: "'StartMigration'"
+    output:
+      ReplicationGroup: rec
+
+  CompleteMigration:
+    effects:
+      - patch:
+          resource: replgroup
+          record:
+            Migration: "'CompleteMigration'"
+    output:
+      ReplicationGroup: rec
+
+  TestMigration:
+    effects:
+      - patch:
+          resource: replgroup
+          record:
+            Migration: "'TestMigration'"
+    output:
+      ReplicationGroup: rec
+
+  TestFailover:
+    effects:
+      - patch:
+          resource: replgroup
+          record:
+            Migration: "'TestFailover'"
+    output:
+      ReplicationGroup: rec
+
+  # --- subnet groups --------------------------------------------------------
+
+  # SubnetIds and the description are accepted and dropped; the record is the
+  # name alone.
+  CreateCacheSubnetGroup:
+    effects:
+      - create:
+          resource: subnetgroup
+          record:
+            CacheSubnetGroupName: id
+    output:
+      CacheSubnetGroup: rec
+
+  DescribeCacheSubnetGroups:
+    reads:
+      r: { resource: subnetgroup, key: "'CacheSubnetGroupName' in input ? string(input.CacheSubnetGroupName) : ''" }
+    require:
+      - { cond: "!('CacheSubnetGroupName' in input) || string(input.CacheSubnetGroupName) == '' || r_found", error: NotFound }
+    list:
+      resource: subnetgroup
+      member: CacheSubnetGroups
+      paginate: model
+      key: "'CacheSubnetGroupName' in input ? string(input.CacheSubnetGroupName) : ''"
+
+  ModifyCacheSubnetGroup:
+    effects:
+      - patch: { resource: subnetgroup, spread: input }
+    output:
+      CacheSubnetGroup: rec
+
+  DeleteCacheSubnetGroup:
+    effects:
+      - delete: { resource: subnetgroup, missing: ignore }
+    output: {}
+
+  # --- snapshots ------------------------------------------------------------
+
+  CreateSnapshot:
+    effects:
+      - create:
+          resource: snapshot
+          record:
+            SnapshotName: id
+            CacheClusterId: "'CacheClusterId' in input ? string(input.CacheClusterId) : ''"
+    output:
+      Snapshot: rec
+
+  DescribeSnapshots:
+    reads:
+      r: { resource: snapshot, key: "'SnapshotName' in input ? string(input.SnapshotName) : ''" }
+    require:
+      - { cond: "!('SnapshotName' in input) || string(input.SnapshotName) == '' || r_found", error: NotFound }
+    list:
+      resource: snapshot
+      member: Snapshots
+      paginate: model
+      key: "'SnapshotName' in input ? string(input.SnapshotName) : ''"
+
+  DeleteSnapshot:
+    effects:
+      - delete: { resource: snapshot, missing: ignore }
+    output: {}
+
+  # A copy of an absent source succeeds, producing a record that is the target
+  # name alone.
+  CopySnapshot:
+    reads:
+      s: { resource: snapshot, key: "string(input.SourceSnapshotName)" }
+    effects:
+      - create:
+          resource: snapshot
+          key: "string(input.TargetSnapshotName)"
+          record:
+            SnapshotName: "string(input.TargetSnapshotName)"
+            CacheClusterId: "'CacheClusterId' in s ? s.CacheClusterId : null"
+    output:
+      Snapshot: rec
+
+  # --- tags -----------------------------------------------------------------
+
+  # TagKeys is ignored: a remove drops every tag the resource carries.
+  AddTagsToResource:
+    effects:
+      - create:
+          resource: tags
+          record:
+            Tags: input.Tags
+    output: {}
+
+  ListTagsForResource:
+    reads:
+      t: { resource: tags }
+    output:
+      TagList: "t_found ? t.Tags : []"
+
+  RemoveTagsFromResource:
+    effects:
+      - delete: { resource: tags, missing: ignore }
+    output: {}
+
+  # --- users ----------------------------------------------------------------
+
+  # ModifyUser is the same write as CreateUser: the request spread overwrites
+  # the whole record, so a modify loses whatever the modify request did not
+  # repeat. The pack generated an id when UserId was absent; the model
+  # requires UserId and the engine rejects its absence, so that path is gone.
+  CreateUser:
+    effects:
+      - create:
+          resource: user
+          spread: input
+          record:
+            Status: "'active'"
+    output:
+      UserId: "string(input.UserId)"
+      UserName: "'UserName' in rec ? rec.UserName : null"
+      Engine: "'Engine' in rec ? rec.Engine : null"
+      AccessString: "'AccessString' in rec ? rec.AccessString : null"
+      Status: "'active'"
+
+  ModifyUser:
+    effects:
+      - create:
+          resource: user
+          spread: input
+          record:
+            Status: "'active'"
+    output:
+      UserId: "string(input.UserId)"
+      UserName: "'UserName' in rec ? rec.UserName : null"
+      Engine: "'Engine' in rec ? rec.Engine : null"
+      AccessString: "'AccessString' in rec ? rec.AccessString : null"
+      Status: "'active'"
+
+  DescribeUsers:
+    reads:
+      r: { resource: user, key: "'UserId' in input ? string(input.UserId) : ''" }
+    require:
+      - { cond: "!('UserId' in input) || string(input.UserId) == '' || r_found", error: NotFound }
+    list:
+      resource: user
+      member: Users
+      paginate: model
+      key: "'UserId' in input ? string(input.UserId) : ''"
+
+  DeleteUser:
+    effects:
+      - delete: { resource: user, missing: ignore }
+    output:
+      UserId: "string(input.UserId)"
+      Status: "'deleting'"
+
+  # --- user groups ----------------------------------------------------------
+
+  CreateUserGroup:
+    effects:
+      - create:
+          resource: usergroup
+          spread: input
+          record:
+            Status: "'active'"
+    output:
+      UserGroupId: "string(input.UserGroupId)"
+      Engine: "'Engine' in rec ? rec.Engine : null"
+      Status: "'active'"
+
+  ModifyUserGroup:
+    effects:
+      - create:
+          resource: usergroup
+          spread: input
+          record:
+            Status: "'active'"
+    output:
+      UserGroupId: "string(input.UserGroupId)"
+      Engine: "'Engine' in rec ? rec.Engine : null"
+      Status: "'active'"
+
+  DescribeUserGroups:
+    reads:
+      r: { resource: usergroup, key: "'UserGroupId' in input ? string(input.UserGroupId) : ''" }
+    require:
+      - { cond: "!('UserGroupId' in input) || string(input.UserGroupId) == '' || r_found", error: NotFound }
+    list:
+      resource: usergroup
+      member: UserGroups
+      paginate: model
+      key: "'UserGroupId' in input ? string(input.UserGroupId) : ''"
+
+  DeleteUserGroup:
+    effects:
+      - delete: { resource: usergroup, missing: ignore }
+    output: {}
+
+  # --- serverless caches ----------------------------------------------------
+
+  CreateServerlessCache:
+    effects:
+      - create:
+          resource: serverless
+          spread: input
+          record:
+            Status: "'available'"
+    output:
+      ServerlessCache: rec
+
+  ModifyServerlessCache:
+    effects:
+      - create:
+          resource: serverless
+          spread: input
+          record:
+            Status: "'available'"
+    output:
+      ServerlessCache: rec
+
+  DescribeServerlessCaches:
+    reads:
+      r: { resource: serverless, key: "'ServerlessCacheName' in input ? string(input.ServerlessCacheName) : ''" }
+    require:
+      - { cond: "!('ServerlessCacheName' in input) || string(input.ServerlessCacheName) == '' || r_found", error: NotFound }
+    list:
+      resource: serverless
+      member: ServerlessCaches
+      paginate: model
+      key: "'ServerlessCacheName' in input ? string(input.ServerlessCacheName) : ''"
+
+  DeleteServerlessCache:
+    effects:
+      - delete: { resource: serverless, missing: ignore }
+    output:
+      ServerlessCache: "{'Status': 'deleting'}"
+
+  # --- serverless cache snapshots -------------------------------------------
+
+  CreateServerlessCacheSnapshot:
+    effects:
+      - create:
+          resource: serverlesssnap
+          spread: input
+          record:
+            Status: "'available'"
+    output:
+      ServerlessCacheSnapshot: rec
+
+  DescribeServerlessCacheSnapshots:
+    reads:
+      r:
+        resource: serverlesssnap
+        key: >
+          'ServerlessCacheSnapshotName' in input && string(input.ServerlessCacheSnapshotName) != ''
+            ? string(input.ServerlessCacheSnapshotName)
+            : ('SnapshotName' in input ? string(input.SnapshotName) : '')
+    require:
+      - cond: >
+          (('ServerlessCacheSnapshotName' in input && string(input.ServerlessCacheSnapshotName) != '')
+            || ('SnapshotName' in input && string(input.SnapshotName) != '')) ? r_found : true
+        error: NotFound
+    list:
+      resource: serverlesssnap
+      member: ServerlessCacheSnapshots
+      paginate: model
+      key: >
+        'ServerlessCacheSnapshotName' in input && string(input.ServerlessCacheSnapshotName) != ''
+          ? string(input.ServerlessCacheSnapshotName)
+          : ('SnapshotName' in input ? string(input.SnapshotName) : '')
+
+  DeleteServerlessCacheSnapshot:
+    effects:
+      - delete: { resource: serverlesssnap, missing: ignore }
+    output: {}
+
+  CopyServerlessCacheSnapshot:
+    reads:
+      s: { resource: serverlesssnap, key: "string(input.SourceServerlessCacheSnapshotName)" }
+    effects:
+      - create:
+          resource: serverlesssnap
+          key: "string(input.TargetServerlessCacheSnapshotName)"
+          record:
+            ServerlessCacheSnapshotName: "string(input.TargetServerlessCacheSnapshotName)"
+            Status: "'Status' in s ? s.Status : 'available'"
+            ServerlessCacheName: "'ServerlessCacheName' in s ? s.ServerlessCacheName : null"
+            KmsKeyId: "'KmsKeyId' in s ? s.KmsKeyId : null"
+            Tags: "'Tags' in s ? s.Tags : null"
+    output:
+      ServerlessCacheSnapshot: rec
+
+  # Reads nothing: the answer is a fixed exporting stub whatever the snapshot.
+  ExportServerlessCacheSnapshot:
+    output:
+      ServerlessCacheSnapshot: "{'Status': 'exporting'}"
+
+  # --- global replication groups --------------------------------------------
+
+  # The model's request declares no GlobalReplicationGroupId, so the pack's
+  # read of one always missed and every create landed on a freshly generated
+  # key no caller ever learns; the record carries no identifier member. The
+  # direct-Invoke fallback that keyed on a caller-supplied GlobalReplicationGroupId
+  # is kept through the key expression.
+  CreateGlobalReplicationGroup:
+    effects:
+      - generate: { bind: gid, kind: hex, bytes: 8 }
+      - create:
+          resource: globalrg
+          key: "'GlobalReplicationGroupId' in input && string(input.GlobalReplicationGroupId) != '' ? string(input.GlobalReplicationGroupId) : fx.gid"
+          spread: input
+          record:
+            Status: "'available'"
+    output:
+      GlobalReplicationGroup: rec
+
+  ModifyGlobalReplicationGroup:
+    effects:
+      - create:
+          resource: globalrg
+          spread: input
+          record:
+            Status: "'available'"
+    output:
+      GlobalReplicationGroup: rec
+
+  DescribeGlobalReplicationGroups:
+    reads:
+      r: { resource: globalrg, key: "'GlobalReplicationGroupId' in input ? string(input.GlobalReplicationGroupId) : ''" }
+    require:
+      - { cond: "!('GlobalReplicationGroupId' in input) || string(input.GlobalReplicationGroupId) == '' || r_found", error: NotFound }
+    list:
+      resource: globalrg
+      member: GlobalReplicationGroups
+      paginate: model
+      key: "'GlobalReplicationGroupId' in input ? string(input.GlobalReplicationGroupId) : ''"
+
+  DeleteGlobalReplicationGroup:
+    effects:
+      - delete: { resource: globalrg, missing: ignore }
+    output: {}
+
+  # A disassociate deletes the group outright, exactly like the delete.
+  DisassociateGlobalReplicationGroup:
+    effects:
+      - delete: { resource: globalrg, missing: ignore }
+    output: {}
+
+  IncreaseNodeGroupsInGlobalReplicationGroup:
+    effects:
+      - patch:
+          resource: globalrg
+          record:
+            LastAction: "'IncreaseNodeGroupsInGlobalReplicationGroup'"
+    output:
+      GlobalReplicationGroup: rec
+
+  DecreaseNodeGroupsInGlobalReplicationGroup:
+    effects:
+      - patch:
+          resource: globalrg
+          record:
+            LastAction: "'DecreaseNodeGroupsInGlobalReplicationGroup'"
+    output:
+      GlobalReplicationGroup: rec
+
+  RebalanceSlotsInGlobalReplicationGroup:
+    effects:
+      - patch:
+          resource: globalrg
+          record:
+            LastAction: "'RebalanceSlotsInGlobalReplicationGroup'"
+    output:
+      GlobalReplicationGroup: rec
+
+  FailoverGlobalReplicationGroup:
+    effects:
+      - patch:
+          resource: globalrg
+          record:
+            LastAction: "'FailoverGlobalReplicationGroup'"
+    output:
+      GlobalReplicationGroup: rec
+
+  # --- parameter groups -------------------------------------------------------
+
+  # All three writes are the same overwrite: the request spread, nothing added.
+  CreateCacheParameterGroup:
+    effects:
+      - create:
+          resource: paramgroup
+          spread: input
+    output:
+      CacheParameterGroup: rec
+
+  ModifyCacheParameterGroup:
+    effects:
+      - create:
+          resource: paramgroup
+          spread: input
+    output:
+      CacheParameterGroupName: "string(input.CacheParameterGroupName)"
+
+  ResetCacheParameterGroup:
+    effects:
+      - create:
+          resource: paramgroup
+          spread: input
+    output:
+      CacheParameterGroupName: "string(input.CacheParameterGroupName)"
+
+  DescribeCacheParameterGroups:
+    reads:
+      r: { resource: paramgroup, key: "'CacheParameterGroupName' in input ? string(input.CacheParameterGroupName) : ''" }
+    require:
+      - { cond: "!('CacheParameterGroupName' in input) || string(input.CacheParameterGroupName) == '' || r_found", error: NotFound }
+    list:
+      resource: paramgroup
+      member: CacheParameterGroups
+      paginate: model
+      key: "'CacheParameterGroupName' in input ? string(input.CacheParameterGroupName) : ''"
+
+  DeleteCacheParameterGroup:
+    effects:
+      - delete: { resource: paramgroup, missing: ignore }
+    output: {}
+
+  # --- security groups --------------------------------------------------------
+
+  CreateCacheSecurityGroup:
+    effects:
+      - create:
+          resource: secgroup
+          spread: input
+    output:
+      CacheSecurityGroup: rec
+
+  DescribeCacheSecurityGroups:
+    reads:
+      r: { resource: secgroup, key: "'CacheSecurityGroupName' in input ? string(input.CacheSecurityGroupName) : ''" }
+    require:
+      - { cond: "!('CacheSecurityGroupName' in input) || string(input.CacheSecurityGroupName) == '' || r_found", error: NotFound }
+    list:
+      resource: secgroup
+      member: CacheSecurityGroups
+      paginate: model
+      key: "'CacheSecurityGroupName' in input ? string(input.CacheSecurityGroupName) : ''"
+
+  DeleteCacheSecurityGroup:
+    effects:
+      - delete: { resource: secgroup, missing: ignore }
+    output: {}
+
+  # Authorize and revoke are the same write apart from the stamped name: the
+  # group is patched with the EC2 name and the operation, created if absent.
+  AuthorizeCacheSecurityGroupIngress:
+    effects:
+      - patch:
+          resource: secgroup
+          record:
+            EC2SecurityGroupName: "string(input.EC2SecurityGroupName)"
+            LastAction: "'AuthorizeCacheSecurityGroupIngress'"
+    output:
+      CacheSecurityGroup: rec
+
+  RevokeCacheSecurityGroupIngress:
+    effects:
+      - patch:
+          resource: secgroup
+          record:
+            EC2SecurityGroupName: "string(input.EC2SecurityGroupName)"
+            LastAction: "'RevokeCacheSecurityGroupIngress'"
+    output:
+      CacheSecurityGroup: rec
+
+  # --- update actions ---------------------------------------------------------
+
+  # Each batch operation records itself under ServiceUpdateName+operation and
+  # answers two empty lists; nothing is ever processed.
+  BatchApplyUpdateAction:
+    effects:
+      - create:
+          resource: updateaction
+          key: "string(input.ServiceUpdateName) + 'BatchApplyUpdateAction'"
+          record:
+            Action: "'BatchApplyUpdateAction'"
+            ServiceUpdateName: "string(input.ServiceUpdateName)"
+    output:
+      ProcessedUpdateActions: "[]"
+      UnprocessedUpdateActions: "[]"
+
+  BatchStopUpdateAction:
+    effects:
+      - create:
+          resource: updateaction
+          key: "string(input.ServiceUpdateName) + 'BatchStopUpdateAction'"
+          record:
+            Action: "'BatchStopUpdateAction'"
+            ServiceUpdateName: "string(input.ServiceUpdateName)"
+    output:
+      ProcessedUpdateActions: "[]"
+      UnprocessedUpdateActions: "[]"
+
+  # Every filter the request declares is ignored; the listing is always all
+  # recorded actions. The stored Action member is no member of the UpdateAction
+  # shape, and the pack answered it anyway.
+  DescribeUpdateActions:
+    list: { resource: updateaction, member: UpdateActions, paginate: model }
+
+  # --- constants --------------------------------------------------------------
+
+  DescribeServiceUpdates:
+    output:
+      ServiceUpdates: "[]"
+
+  DescribeCacheEngineVersions:
+    output:
+      CacheEngineVersions: "[{'Engine': 'redis', 'EngineVersion': '7.0'}]"
+
+  DescribeEvents:
+    output:
+      Events: "[]"
+
+  # One fixed parameter row whatever group is named; the group is not read.
+  DescribeCacheParameters:
+    output:
+      Parameters: "[{'ParameterName': 'maxmemory-policy', 'ParameterValue': 'volatile-lru'}]"
+
+  # The pack answered the same fixed row as DescribeCacheParameters, but the
+  # operation's own shape declares only EngineDefaults, so the bundle answers
+  # nothing; the recording is superseded with that reason.
+  DescribeEngineDefaultParameters:
+    output: {}
+
+  DescribeReservedCacheNodesOfferings:
+    output:
+      ReservedCacheNodesOfferings: "[{'ReservedCacheNodesOfferingId': 'off-1', 'CacheNodeType': 'cache.t3.micro', 'Duration': 31536000}]"
+
+  ListAllowedNodeTypeModifications:
+    output:
+      ScaleUpModifications: "['cache.t3.small']"
+      ScaleDownModifications: "['cache.t3.micro']"
+
+  # --- reserved cache nodes -----------------------------------------------------
+
+  # The pack minted a fresh id unconditionally; the ReservedCacheNodeId the
+  # request may carry is ignored.
+  PurchaseReservedCacheNodesOffering:
+    effects:
+      - create:
+          resource: reservednode
+          record:
+            ReservedCacheNodeId: id
+            ReservedCacheNodesOfferingId: "'ReservedCacheNodesOfferingId' in input ? string(input.ReservedCacheNodesOfferingId) : ''"
+            State: "'payment-pending'"
+    output:
+      ReservedCacheNode: rec
+
+  DescribeReservedCacheNodes:
+    reads:
+      r: { resource: reservednode, key: "'ReservedCacheNodeId' in input ? string(input.ReservedCacheNodeId) : ''" }
+    require:
+      - { cond: "!('ReservedCacheNodeId' in input) || string(input.ReservedCacheNodeId) == '' || r_found", error: NotFound }
+    list:
+      resource: reservednode
+      member: ReservedCacheNodes
+      paginate: model
+      key: "'ReservedCacheNodeId' in input ? string(input.ReservedCacheNodeId) : ''"
+
+quirks:
+  - operation: DescribeCacheClusters
+    note: >
+      Every describe-one miss in this service answers CacheClusterNotFound at
+      404, whatever was asked about -- a user, a snapshot, a serverless cache,
+      a security group, a replication group. The pack had one helper with one
+      fault literal; the error table keeps it as the single NotFound row. The
+      real service has a per-resource fault vocabulary (UserNotFoundFault,
+      SnapshotNotFoundFault and friends); a probe settles each.
+  - operation: ModifyCacheCluster
+    note: >
+      No modify in this service checks that the thing it modifies exists: the
+      pack read the record, spread the request over it and wrote it back, so
+      modifying an absent cluster, group, user or security group succeeds and
+      conjures a partial record that later describes answer. Deletes are the
+      mirror image: deleting anything absent succeeds.
+  - operation: ModifyUser
+    note: >
+      ModifyUser, ModifyUserGroup, ModifyServerlessCache,
+      ModifyCacheParameterGroup, ResetCacheParameterGroup and
+      ModifyGlobalReplicationGroup are not merges: each overwrites the record
+      with the spread of its own request, so modifying a user drops the
+      UserName and AccessString the create stored, and resetting a parameter
+      group erases its family and description. The real service patches.
+  - operation: CreateUser
+    note: >
+      The pack wrapped its answer in a User member, but the operation's output
+      shape IS User -- flat, with no such member -- so the bundle answers the
+      declared flat members and the recording is superseded. ModifyUser,
+      CreateUserGroup and ModifyUserGroup are the same, and DeleteUser answers
+      flat while the creates wrap, one inconsistency the pack kept.
+      ModifyCacheParameterGroup and ResetCacheParameterGroup wrapped in
+      CacheParameterGroup where the model declares only CacheParameterGroupName.
+  - operation: CreateGlobalReplicationGroup
+    note: >
+      The model's request declares no GlobalReplicationGroupId -- only a
+      suffix and a primary group -- so the pack's lookup of one always missed
+      and every create was keyed by a freshly generated hex id that no answer
+      ever reveals. A created global group is therefore visible only in the
+      list-all; describing it by any id faults CacheClusterNotFound, and a
+      modify by id lands on a phantom record. A direct call that smuggled
+      GlobalReplicationGroupId past the codec did key on it, which the key
+      expression preserves.
+  - operation: PurchaseReservedCacheNodesOffering
+    note: >
+      The purchase mints a fresh ReservedCacheNodeId unconditionally and
+      answers it; the ReservedCacheNodeId the model lets a request carry is
+      ignored. The node is born payment-pending and stays there, and the one
+      offering DescribeReservedCacheNodesOfferings knows is a fixed
+      cache.t3.micro row.
+  - operation: RemoveTagsFromResource
+    note: >
+      TagKeys is ignored: a remove deletes every tag the resource carries,
+      where the real service removes only the named keys. AddTagsToResource
+      likewise replaces the whole set rather than merging, and ResourceName is
+      never checked against anything -- any string is a taggable resource.
+  - operation: CopySnapshot
+    note: >
+      Copying a snapshot that does not exist succeeds and produces a record
+      carrying only the target name, and copying one that exists duplicates
+      only the handful of members a create ever stored. CopyServerlessCacheSnapshot
+      is the same one level up. Neither copy checks state, and the target
+      overwrites anything already holding its name.
+  - operation: DescribeEngineDefaultParameters
+    note: >
+      The pack answered the same fixed maxmemory-policy row as
+      DescribeCacheParameters, but this operation's shape declares only
+      EngineDefaults -- Parameters is not a member it can carry. The bundle
+      answers nothing and the recording is superseded. DescribeCacheParameters
+      keeps the fixed row, which is declared there, and ignores the group named.
+  - operation: DescribeUpdateActions
+    note: >
+      The listing ignores every filter the request declares -- service update
+      name, status, engine, the lot -- and always answers every recorded
+      BatchApplyUpdateAction and BatchStopUpdateAction. The stored Action
+      member is not part of the UpdateAction shape; the pack answered it
+      anyway and the listing keeps it.
+  - operation: CreateCacheCluster
+    note: >
+      A cluster is available the moment it is created, with no nodes, no
+      endpoint and no engine version -- NumCacheNodes and the rest of the
+      declared surface are accepted and dropped. Re-creating an existing id
+      overwrites the record, resetting the status to available and dropping
+      whatever a modify had added, where the real service faults
+      CacheClusterAlreadyExists. CacheClusterId is required by the model and
+      the engine now rejects its absence; the pack proceeded with an
+      empty-string key, one phantom row shared by every such call.
+  - operation: CreateCacheSubnetGroup
+    note: >
+      SubnetIds and CacheSubnetGroupDescription are required by the model,
+      accepted, and dropped: the stored record is the name alone, so a
+      described subnet group has no subnets and no description.
+  - operation: DisassociateGlobalReplicationGroup
+    note: >
+      Disassociating deletes the global group outright, exactly what
+      DeleteGlobalReplicationGroup does; nothing is disassociated from
+      anything, and the replication group named in the request is untouched.
+  - operation: ExportServerlessCacheSnapshot
+    note: >
+      The export reads nothing: the answer is a fixed {Status: exporting}
+      stub whether or not the snapshot exists, and nothing is exported to the
+      bucket named. DescribeServerlessCacheSnapshots afterwards shows the
+      snapshot still available.

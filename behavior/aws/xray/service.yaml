@@ -1,0 +1,179 @@
+schema: bir/1
+service: aws.xray
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Segments are caller-supplied JSON documents stored whole under
+# their trace id; nothing samples, aggregates, or expires them, and the
+# telemetry and sampling-rule operations are stubs.
+provenance: authored
+
+resources:
+  # One record per trace id, holding the parsed segment document. A document
+  # naming no trace_id (and no id) is stored under a generated id, which the
+  # create effect draws per element.
+  segment:
+    collection: xray
+    id:
+      generate: { kind: hex, bytes: 16 } # pack: deps.Rand.Hex(16)
+
+  group:
+    collection: xrayg
+    id:
+      input_members: [GroupName]
+    arn: "arn:{partition}:xray:{region}:{account}:group/{id}"
+    record:
+      GroupName: id
+      GroupARN: arn
+
+errors:
+  InvalidRequest:
+    code: InvalidRequestException
+    http: 400
+    fault: client
+
+operations:
+  # Each document is a JSON string. Documents carrying a trace_id (or an id)
+  # are keyed by it; the rest get a generated id. The parsed document is
+  # stored whole under `doc`, with trace_id forced back onto it, because the
+  # pack's readers answer the document itself.
+  PutTraceSegments:
+    effects:
+      - put:
+          resource: segment
+          for_each: "input.TraceSegmentDocuments"
+          when: "parseJSON(item) != null && (('trace_id' in parseJSON(item) && parseJSON(item).trace_id != '') || ('id' in parseJSON(item) && parseJSON(item).id != ''))"
+          key: "('trace_id' in parseJSON(item) && parseJSON(item).trace_id != '') ? string(parseJSON(item).trace_id) : string(parseJSON(item).id)"
+          record:
+            trace_id: id
+            doc: "merge(parseJSON(item), {'trace_id': id})"
+      - create:
+          resource: segment
+          for_each: "input.TraceSegmentDocuments"
+          when: "!(parseJSON(item) != null && (('trace_id' in parseJSON(item) && parseJSON(item).trace_id != '') || ('id' in parseJSON(item) && parseJSON(item).id != '')))"
+          record:
+            trace_id: id
+            doc: "merge(parseJSON(item) == null ? {'document': item} : parseJSON(item), {'trace_id': id})"
+    output:
+      UnprocessedTraceSegments: "[]"
+
+  # The pack read each requested id in turn, skipping the ones it did not
+  # have; the list projection answers the same rows in key order rather than
+  # request order.
+  BatchGetTraces:
+    list:
+      resource: segment
+      member: Traces
+      paginate: model
+      filter: "'TraceIds' in input && item.trace_id in input.TraceIds"
+    output:
+      Traces: "items.map(t, {'Id': t.trace_id, 'Segments': [t.doc]})"
+      UnprocessedTraceIds: "[]"
+
+  # Every stored segment, whatever time range or filter the request named.
+  GetTraceSummaries:
+    list:
+      resource: segment
+      member: TraceSummaries
+      paginate: model
+    output:
+      TraceSummaries: "items.map(t, {'Id': t.trace_id, 'Duration': 'end_time' in t.doc ? t.doc.end_time : null})"
+
+  GetServiceGraph:
+    list:
+      resource: segment
+      member: Services
+      paginate: model
+    output:
+      Services: "items.map(t, {'Name': ('name' in t.doc && t.doc.name != '') ? t.doc.name : t.trace_id, 'Type': 'origin' in t.doc ? t.doc.origin : null})"
+
+  CreateGroup:
+    effects:
+      - put:
+          resource: group
+          record:
+            FilterExpression: "'FilterExpression' in input ? string(input.FilterExpression) : ''"
+    output:
+      Group: rec
+
+  GetGroup:
+    reads:
+      g: { resource: group }
+    require:
+      - { cond: g_found, error: InvalidRequest }
+    output:
+      Group: g
+
+  GetGroups:
+    list: { resource: group, member: Groups, paginate: model }
+
+  # An empty or absent FilterExpression leaves the stored one alone.
+  UpdateGroup:
+    reads:
+      g: { resource: group }
+    require:
+      - { cond: g_found, error: InvalidRequest }
+    effects:
+      - put:
+          resource: group
+          record:
+            FilterExpression: "('FilterExpression' in input && string(input.FilterExpression) != '') ? string(input.FilterExpression) : g.FilterExpression"
+    output:
+      Group: rec
+
+  DeleteGroup:
+    effects:
+      - delete: { resource: group, missing: ignore }
+    output: {}
+
+  # ponytail: the pack discarded telemetry records and answered no sampling
+  # rules; the bundle does the same.
+  PutTelemetryRecords:
+    output: {}
+
+  GetSamplingRules:
+    output:
+      SamplingRuleRecords: "[]"
+
+quirks:
+  - operation: PutTraceSegments
+    note: >
+      The pack answered a TraceIds member the result shape does not declare;
+      the wire codec drops it, so the bundle does not answer it and the
+      recording supersedes the member. Documents sharing a trace id overwrite
+      each other -- a trace id keys one stored document, not an accumulated
+      trace -- and a document that is valid JSON but not an object (a bare
+      string or number) faults the operation where the pack stored it as
+      {"document": raw}; the pack's fallback for unparseable documents is
+      transcribed.
+  - operation: BatchGetTraces
+    note: >
+      The pack answered in request order and repeated an id the request
+      listed twice; the bundle's list answers in key order and once. Unknown
+      ids are silently dropped either way -- UnprocessedTraceIds is always
+      empty.
+  - operation: GetTraceSummaries
+    note: >
+      StartTime, EndTime, FilterExpression and every other input member are
+      ignored: the pack listed every stored segment, answered Id from the
+      store key and Duration from the document's end_time, and nothing else
+      the declared TraceSummary carries. GetServiceGraph likewise ignores its
+      time range and group members, answering Name (falling back to the trace
+      id) and Type from the document's origin. The model marks StartTime and
+      EndTime required, so the engine now rejects a request that omits them,
+      which the pack accepted and ignored.
+  - operation: CreateGroup
+    note: >
+      Creating over an existing name overwrites the group rather than
+      faulting, and GroupARN is built with the request's region and account
+      whether or not they are real. GetGroup and UpdateGroup fault
+      InvalidRequestException on an unknown name; DeleteGroup never faults.
+      InsightsConfiguration is accepted and dropped.
+  - operation: UpdateGroup
+    note: >
+      Only FilterExpression can change, and only when the request carries a
+      non-empty one; GroupARN and GroupName in the request are ignored --
+      GroupName alone addresses the group.
+  - operation: PutTelemetryRecords
+    note: >
+      Telemetry records are discarded and GetSamplingRules always answers an
+      empty list: no sampling daemon exists behind this pack.

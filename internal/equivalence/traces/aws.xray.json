@@ -1,0 +1,477 @@
+{
+  "schema": "trace/1",
+  "service": "aws.xray",
+  "source": "pack:internal/services/aws/xray@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered members the model does not declare (PutTraceSegments.TraceIds), the bundle cannot answer them and the recorded members are superseded with that reason. BatchGetTraces steps request ids in store-key order because the bundle's list answers in key order where the pack answered in request order.",
+  "steps": [
+    {
+      "operation": "GetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Groups": null
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateGroup",
+      "input": {
+        "GroupName": "g1",
+        "FilterExpression": "service(\"api\")"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "GroupName": "g1",
+          "GroupARN": "arn:aws:xray:us-east-1:000000000000:group/g1",
+          "FilterExpression": "service(\"api\")"
+        }
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "GroupName": "g1",
+          "GroupARN": "arn:aws:xray:us-east-1:000000000000:group/g1",
+          "FilterExpression": "service(\"api\")"
+        }
+      }
+    },
+    {
+      "operation": "UpdateGroup",
+      "input": {
+        "GroupName": "ghost",
+        "FilterExpression": "service(\"web\")"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateGroup",
+      "input": {
+        "GroupName": "g1",
+        "FilterExpression": "service(\"web\")"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "GroupName": "g1",
+          "GroupARN": "arn:aws:xray:us-east-1:000000000000:group/g1",
+          "FilterExpression": "service(\"web\")"
+        }
+      }
+    },
+    {
+      "operation": "UpdateGroup",
+      "input": {
+        "GroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "GroupName": "g1",
+          "GroupARN": "arn:aws:xray:us-east-1:000000000000:group/g1",
+          "FilterExpression": "service(\"web\")"
+        }
+      }
+    },
+    {
+      "operation": "CreateGroup",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "GroupName": "g2",
+          "GroupARN": "arn:aws:xray:us-east-1:000000000000:group/g2",
+          "FilterExpression": ""
+        }
+      }
+    },
+    {
+      "operation": "GetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Groups": [
+          {
+            "GroupName": "g1",
+            "GroupARN": "arn:aws:xray:us-east-1:000000000000:group/g1",
+            "FilterExpression": "service(\"web\")"
+          },
+          {
+            "GroupName": "g2",
+            "GroupARN": "arn:aws:xray:us-east-1:000000000000:group/g2",
+            "FilterExpression": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutTraceSegments",
+      "input": {
+        "TraceSegmentDocuments": [
+          "{\"trace_id\":\"1-5f84c7a1-aaaaaaaaaaaaaaaaaaaaaaaa\",\"id\":\"bbbbbbbbbbbbbbbb\",\"name\":\"api\",\"origin\":\"AWS::ApiGateway::Stage\",\"end_time\":1.5}",
+          "{\"id\":\"cccccccccccccccc\",\"name\":\"web\"}"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UnprocessedTraceSegments": [],
+        "TraceIds": [
+          "1-5f84c7a1-aaaaaaaaaaaaaaaaaaaaaaaa",
+          "cccccccccccccccc"
+        ]
+      },
+      "superseded": "the pack answered TraceIds alongside UnprocessedTraceSegments; the result shape declares only UnprocessedTraceSegments, so the bundle cannot answer it"
+    },
+    {
+      "operation": "PutTraceSegments",
+      "input": {
+        "TraceSegmentDocuments": [
+          "{\"name\":\"worker\",\"end_time\":2.5}"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UnprocessedTraceSegments": [],
+        "TraceIds": [
+          "aa00000000000001"
+        ]
+      },
+      "superseded": "the pack answered TraceIds carrying the generated id alongside UnprocessedTraceSegments; the result shape declares only UnprocessedTraceSegments, so the bundle cannot answer it"
+    },
+    {
+      "operation": "GetTraceSummaries",
+      "input": {
+        "StartTime": 0,
+        "EndTime": 2000000000
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TraceSummaries": [
+          {
+            "Id": "1-5f84c7a1-aaaaaaaaaaaaaaaaaaaaaaaa",
+            "Duration": 1.5
+          },
+          {
+            "Id": "aa00000000000001",
+            "Duration": 2.5
+          },
+          {
+            "Id": "cccccccccccccccc",
+            "Duration": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetServiceGraph",
+      "input": {
+        "StartTime": 0,
+        "EndTime": 2000000000
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Services": [
+          {
+            "Name": "api",
+            "Type": "AWS::ApiGateway::Stage"
+          },
+          {
+            "Name": "worker",
+            "Type": null
+          },
+          {
+            "Name": "web",
+            "Type": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchGetTraces",
+      "input": {
+        "TraceIds": [
+          "1-5f84c7a1-aaaaaaaaaaaaaaaaaaaaaaaa",
+          "cccccccccccccccc",
+          "ghost"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Traces": [
+          {
+            "Id": "1-5f84c7a1-aaaaaaaaaaaaaaaaaaaaaaaa",
+            "Segments": [
+              {
+                "trace_id": "1-5f84c7a1-aaaaaaaaaaaaaaaaaaaaaaaa",
+                "id": "bbbbbbbbbbbbbbbb",
+                "name": "api",
+                "origin": "AWS::ApiGateway::Stage",
+                "end_time": 1.5
+              }
+            ]
+          },
+          {
+            "Id": "cccccccccccccccc",
+            "Segments": [
+              {
+                "id": "cccccccccccccccc",
+                "trace_id": "cccccccccccccccc",
+                "name": "web"
+              }
+            ]
+          }
+        ],
+        "UnprocessedTraceIds": []
+      }
+    },
+    {
+      "operation": "BatchGetTraces",
+      "input": {
+        "TraceIds": [
+          {
+            "$fromStep": 11,
+            "$fromPath": "TraceSummaries.1.Id"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Traces": [
+          {
+            "Id": "aa00000000000001",
+            "Segments": [
+              {
+                "name": "worker",
+                "trace_id": "aa00000000000001",
+                "end_time": 2.5
+              }
+            ]
+          }
+        ],
+        "UnprocessedTraceIds": []
+      }
+    },
+    {
+      "operation": "GetSamplingRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SamplingRuleRecords": []
+      }
+    },
+    {
+      "operation": "PutTelemetryRecords",
+      "input": {
+        "TelemetryRecords": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteGroup",
+      "input": {
+        "GroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteGroup",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Groups": [
+          {
+            "GroupName": "g1",
+            "GroupARN": "arn:aws:xray:us-east-1:000000000000:group/g1",
+            "FilterExpression": "service(\"web\")"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteGroup",
+      "input": {
+        "GroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "g1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

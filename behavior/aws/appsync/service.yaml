@@ -1,0 +1,251 @@
+schema: bir/1
+service: aws.appsync
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No GraphQL runtime exists: a schema is SUCCESS the moment it is
+# submitted, an API key never expires, and a data source is a name and a type
+# string pointing at nothing.
+provenance: authored
+
+# The pack answered an absent or empty apiId with NotFoundException -- its
+# first() helper treats an empty string as absent and the store holds no empty
+# key -- so NotFound is also the service's word for a missing required member.
+# The engine's model check now rejects an absent required member before any
+# behavior runs; the pack's own fallbacks for that case are dead.
+missing_input_error: NotFound
+
+shadow: >
+  Complete and gated, but not yet serving: the pack's GraphQL operation (the
+  query echo) has no operation in the generated model, and the loader rejects
+  bundle operations the model lacks, so a serving bundle would drop the query
+  endpoint the pack answers. The bundle takes over when the model carries it.
+
+resources:
+  api:
+    collection: asapi
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [apiId]
+    arn: "arn:{partition}:appsync:{region}:{account}:apis/{id}"
+    # Only what every write may recompute lives here. name and
+    # authenticationType are create-time values: an update must not recompute
+    # them from its own request, because the pack's update ignores
+    # authenticationType entirely and keeps the old name on an empty one.
+    record:
+      apiId: id
+      uris: "{'GRAPHQL': 'http://appsync.localhost/' + id + '/graphql'}"
+      arn: arn
+
+  # Keys are scoped to their api rather than filtered out of one shared
+  # collection, which is what the pack's "askey:"+apiId did. Every operation
+  # on a key therefore reads its api first -- not to check it exists, which
+  # this service never does, but because the collection is named for it.
+  api_key:
+    collection: "askey:{api.id}"
+    parent: api
+    id:
+      generate: { kind: hex, bytes: 16 }
+      input_members: [id]
+    record:
+      id: id
+      description: "'description' in input ? string(input.description) : ''"
+      expires: 0
+
+  # One schema per api, keyed by the api id in a single collection.
+  schema:
+    collection: asschema
+    id:
+      input_members: [apiId]
+    record:
+      status: "'SUCCESS'"
+      definition: "'definition' in input ? string(input.definition) : ''"
+
+  data_source:
+    collection: "asds:{api.id}"
+    parent: api
+    id:
+      input_members: [name]
+    record:
+      name: id
+      type: "'type' in input ? string(input.type) : ''"
+      apiId: "'apiId' in input ? string(input.apiId) : ''"
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateGraphqlApi:
+    effects:
+      - create:
+          resource: api
+          record:
+            name: "string(input.name)"
+            authenticationType: >
+              'authenticationType' in input && string(input.authenticationType) != ''
+                ? string(input.authenticationType) : 'API_KEY'
+    output:
+      graphqlApi: rec
+
+  GetGraphqlApi:
+    reads:
+      api: { resource: api }
+    require:
+      - { cond: api_found, error: NotFound }
+    output:
+      graphqlApi: api
+
+  ListGraphqlApis:
+    list: { resource: api, member: graphqlApis, paginate: model }
+
+  # The pack reads the record, replaces the name only when the request carries
+  # a non-empty one, and writes it back; authenticationType and everything
+  # else the update request carries are ignored.
+  UpdateGraphqlApi:
+    reads:
+      api: { resource: api }
+    require:
+      - { cond: api_found, error: NotFound }
+    effects:
+      - patch:
+          resource: api
+          record:
+            name: "string(input.name) != '' ? string(input.name) : api.name"
+    output:
+      graphqlApi: rec
+
+  DeleteGraphqlApi:
+    effects:
+      - delete: { resource: api, missing: ignore }
+    output: {}
+
+  CreateApiKey:
+    reads:
+      api: { resource: api }
+    effects:
+      - create: { resource: api_key }
+    output:
+      apiKey: rec
+
+  ListApiKeys:
+    reads:
+      api: { resource: api }
+    list: { resource: api_key, member: apiKeys, paginate: model }
+
+  DeleteApiKey:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: api_key, missing: ignore }
+    output: {}
+
+  # Submitting a schema stores it and reports SUCCESS at once; nothing parses
+  # or compiles the definition.
+  StartSchemaCreation:
+    effects:
+      - put: { resource: schema }
+    output:
+      status: "'SUCCESS'"
+
+  # Before anything was submitted the status is PROCESSING rather than a
+  # fault; after, it is whatever was stored, which is always SUCCESS.
+  GetSchemaCreationStatus:
+    reads:
+      s: { resource: schema }
+    output:
+      status: "s_found ? string(s.status) : 'PROCESSING'"
+
+  CreateDataSource:
+    reads:
+      api: { resource: api }
+    effects:
+      - put: { resource: data_source }
+    output:
+      dataSource: rec
+
+  GetDataSource:
+    reads:
+      api: { resource: api }
+      ds: { resource: data_source }
+    require:
+      - { cond: ds_found, error: NotFound }
+    output:
+      dataSource: ds
+
+  # The stored record carries apiId, which DataSource does not declare, so the
+  # list projects the declared members.
+  ListDataSources:
+    reads:
+      api: { resource: api }
+    list:
+      resource: data_source
+      member: dataSources
+      paginate: model
+    output:
+      dataSources: "items.map(x, {'name': x.name, 'type': x.type})"
+
+  DeleteDataSource:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: data_source, missing: ignore }
+    output: {}
+
+quirks:
+  - operation: CreateGraphqlApi
+    note: >
+      The model requires name and authenticationType and the engine now
+      rejects a request that omits either, which the pack accepted: an absent
+      name stored an empty-named api, and an absent or empty
+      authenticationType defaulted to API_KEY. The default survives; the
+      absent-member path is dead. Nothing checks a name for uniqueness, so two
+      apis can share one. The pack's fallbacks for capitalized member names
+      (ApiId, Name, Type, Definition, here and on every other operation) name
+      members the model does not declare and are unreachable; they are not
+      transcribed.
+  - operation: UpdateGraphqlApi
+    note: >
+      An update moves the name and nothing else: authenticationType, which the
+      model requires on the request, is ignored, so an api created API_KEY
+      stays API_KEY however the update is spelled. An empty name keeps the old
+      one. Updating an api that does not exist faults NotFoundException.
+  - operation: CreateApiKey
+    note: >
+      The api the key is for is never checked to exist, so keys can be created
+      for an api that was never created and are listed under it forever. The
+      expires the request may carry is ignored: every key is stored with
+      expires 0 and never expires. Deleting a key that does not exist
+      succeeds, as does deleting an api that does not exist.
+  - operation: GetSchemaCreationStatus
+    note: >
+      An api with no submitted schema answers PROCESSING rather than a fault,
+      whether or not the api exists; a submitted schema is SUCCESS the moment
+      StartSchemaCreation returns, because nothing ever compiles it. The
+      definition is stored but never served back -- GetIntrospectionSchema is
+      not among the operations the pack served.
+  - operation: DeleteGraphqlApi
+    note: >
+      Deleting an api removes only the api record: its keys, schema and data
+      sources survive in their own collections, unreachable because those
+      collections are named for the deleted id and ids are generated, so the
+      id never comes back. Deleting an absent or empty id succeeds, where
+      reading one faults.
+  - operation: ListGraphqlApis
+    note: >
+      The pack listed every record unbounded; paginate: model retrofits the
+      declared pagination, and the apiType and owner filters the model
+      declares are ignored, as the pack ignored them. ListApiKeys and
+      ListDataSources are the same. The records a data-source list carries
+      include the stored apiId, which the DataSource shape does not declare,
+      so the bundle's list projects the declared members and the recording
+      supersedes that one member per item.
+  - operation: GetGraphqlApi
+    note: >
+      The pack served a GraphQL operation that echoed query text -- a
+      __typename mention answered Query, a hello mention answered world, and
+      anything else came back under _echo. There is no such operation in the
+      AWS model, which declares only the control plane, so no SDK could ever
+      have called it and the bundle cannot express it. It is the one operation
+      this extraction removes, and it is not in the recording.

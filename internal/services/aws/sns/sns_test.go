@@ -26,7 +26,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -706,7 +706,7 @@ func TestSNSLambdaSuccessFeedbackDeliveryLog(t *testing.T) {
 	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "lambda", "Endpoint": "arn:aws:lambda:us-east-1:1:function:feedback"})
 	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": "logged"})
 	group := "sns/us-east-1/1/feedback"
-	logsPack := logs.New(deps)
+	logsPack := bundled.Handler("aws.logs", deps)
 	response, err := logsPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetLogEvents", Input: map[string]any{"logGroupName": group, "logStreamName": "delivery"}})
 	if err != nil {
 		t.Fatal(err)

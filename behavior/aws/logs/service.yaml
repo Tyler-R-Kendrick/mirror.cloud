@@ -1,0 +1,1125 @@
+schema: bir/1
+service: aws.logs
+
+# Transcribed from the hand-written pack, not established against the real
+# service. The pack never faults: every delete of an absent record succeeds,
+# every read of one answers an empty body or a stock default, and a request
+# missing a required member used to write to the empty key rather than be
+# rejected (the engine's model validation now answers ValidationException,
+# which the pack never had). 84 of the 118 operations share one generic
+# handler that spreads the whole request into a record keyed by the first
+# non-empty of a fixed member chain -- so CreateExportTask's taskId is the log
+# group name, and several Put/Update operations write phantom rows under
+# generated ids that ListLogGroups then answers as log groups.
+provenance: authored
+
+resources:
+  group:
+    collection: logsg
+    id:
+      input_members: [logGroupName, LogGroupName]
+    record:
+      logGroupName: id
+
+  # Streams and events share the pack's composite key, group + "/" + stream.
+  # The stored k member is that key, so the prefix listings the pack served
+  # (DescribeLogStreams, FilterLogEvents, the two filter lists) keep their
+  # exact semantics: a group whose name prefixes another's sees its streams.
+  stream:
+    collection: logsst
+    id:
+      derive: "('logGroupName' in input ? string(input.logGroupName) : '') + '/' + ('logStreamName' in input ? string(input.logStreamName) : '')"
+    record:
+      k: id
+
+  event:
+    collection: logsev
+    id:
+      derive: "('logGroupName' in input ? string(input.logGroupName) : '') + '/' + ('logStreamName' in input ? string(input.logStreamName) : '')"
+    record:
+      k: id
+
+  retention:
+    collection: logsret
+    id:
+      input_members: [logGroupName, LogGroupName]
+    record:
+      retentionInDays: "'retentionInDays' in input ? input.retentionInDays : null"
+
+  subfilter:
+    collection: logssub
+    id:
+      derive: "('logGroupName' in input ? string(input.logGroupName) : '') + '/' + ('filterName' in input ? string(input.filterName) : '')"
+    record:
+      k: id
+      filterName: input.filterName
+      filterPattern: input.filterPattern
+      destinationArn: input.destinationArn
+
+  metricfilter:
+    collection: logsmf
+    id:
+      derive: "('logGroupName' in input ? string(input.logGroupName) : '') + '/' + ('filterName' in input ? string(input.filterName) : '')"
+    record:
+      k: id
+      filterName: input.filterName
+      filterPattern: input.filterPattern
+
+  resourcepolicy:
+    collection: logspol
+    id:
+      input_members: [policyName, PolicyName]
+    record:
+      policyName: id
+      policyDocument: "'policyDocument' in input ? input.policyDocument : ''"
+
+  grouptags:
+    collection: logstag
+    id:
+      input_members: [logGroupName, LogGroupName]
+    record:
+      tags: "'tags' in input ? input.tags : ('Tags' in input ? input.Tags : null)"
+
+  destination:
+    collection: logsd
+    id:
+      input_members: [destinationName, DestinationName]
+    record:
+      destinationName: id
+      targetArn: input.targetArn
+      roleArn: input.roleArn
+
+  querydef:
+    collection: logsqd
+    id:
+      input_members: [queryDefinitionId, QueryDefinitionId]
+
+  query:
+    collection: logsq
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [queryId, QueryId]
+
+  kmskey:
+    collection: logskms
+    id:
+      input_members: [logGroupName, LogGroupName]
+    record:
+      kmsKeyId: "'kmsKeyId' in input ? input.kmsKeyId : ''"
+
+  # The generic handler's fourteen stores. The pack kept them all in one
+  # collection under a kind prefix; one collection each is the same thing.
+  # Records are the spread request plus a forced id member, written inline by
+  # each operation, so the resources themselves declare nothing.
+  delivery:
+    collection: ldel
+  exporttask:
+    collection: lexp
+  importtask:
+    collection: limp
+  anomalydetector:
+    collection: lanom
+  lookuptable:
+    collection: llut
+  scheduledquery:
+    collection: lsq
+  integration:
+    collection: lint
+  transformer:
+    collection: ltx
+  syslog:
+    collection: lsys
+  indexpolicy:
+    collection: lidx
+  dataprotection:
+    collection: ldp
+  accountpolicy:
+    collection: lacct
+  storagetier:
+    collection: ltier
+  misc:
+    collection: lmisc
+
+operations:
+  CreateLogGroup:
+    effects:
+      - create: { resource: group }
+
+  # Deleting a group leaves its streams, events, retention, tags and KMS row
+  # behind; only the group row goes.
+  DeleteLogGroup:
+    effects:
+      - delete: { resource: group, missing: ignore }
+
+  DescribeLogGroups:
+    list: { resource: group, member: logGroups, paginate: model }
+
+  CreateLogStream:
+    effects:
+      - create: { resource: stream }
+
+  DescribeLogStreams:
+    list:
+      resource: stream
+      member: logStreams
+      paginate: model
+      filter: "item.k.startsWith(('logGroupName' in input ? string(input.logGroupName) : '') + '/')"
+    output:
+      logStreams: "items.map(s, {'logStreamName': lastSegment(s.k, '/')})"
+
+  # Events accumulate in one record per stream; the token is just the count.
+  PutLogEvents:
+    reads:
+      ev: { resource: event }
+    effects:
+      - create:
+          resource: event
+          record:
+            events: "ev_found ? ev.events + input.logEvents : input.logEvents"
+    output:
+      nextSequenceToken: "string(size(ev_found ? ev.events + input.logEvents : input.logEvents))"
+
+  GetLogEvents:
+    reads:
+      ev: { resource: event }
+    output:
+      events: "ev_found ? ev.events : []"
+
+  # The pack ignores filterPattern entirely: every event in the group matches.
+  # CEL has no list flatten, so the per-stream lists are sewn together through
+  # their JSON rendering -- exact for values that arrived as JSON.
+  FilterLogEvents:
+    list:
+      resource: event
+      member: events
+      paginate: model
+      filter: "item.k.startsWith(('logGroupName' in input ? string(input.logGroupName) : '') + '/')"
+    output:
+      events: "parseJSON('[' + join(items.map(e, toJSON(e.events)).filter(s, s != '[]').map(s, substr(s, 1, blen(s) - 1)), ',') + ']')"
+
+  DeleteLogStream:
+    effects:
+      - delete: { resource: stream, missing: ignore }
+      - delete: { resource: event, missing: ignore }
+
+  # Retention is stored and never surfaces anywhere -- DescribeLogGroups does
+  # not read it.
+  PutRetentionPolicy:
+    effects:
+      - create: { resource: retention }
+
+  DeleteRetentionPolicy:
+    effects:
+      - delete: { resource: retention, missing: ignore }
+
+  PutSubscriptionFilter:
+    effects:
+      - create: { resource: subfilter }
+
+  DescribeSubscriptionFilters:
+    list:
+      resource: subfilter
+      member: subscriptionFilters
+      paginate: model
+      filter: "item.k.startsWith(string(input.logGroupName) + '/')"
+    output:
+      subscriptionFilters: "items.map(f, {'filterName': f.filterName, 'filterPattern': f.filterPattern, 'destinationArn': f.destinationArn})"
+
+  DeleteSubscriptionFilter:
+    effects:
+      - delete: { resource: subfilter, missing: ignore }
+
+  # The pack drops metricTransformations, which the model requires; only the
+  # name and pattern are stored.
+  PutMetricFilter:
+    effects:
+      - create: { resource: metricfilter }
+
+  DescribeMetricFilters:
+    list:
+      resource: metricfilter
+      member: metricFilters
+      paginate: model
+      filter: "item.k.startsWith(('logGroupName' in input ? string(input.logGroupName) : '') + '/')"
+    output:
+      metricFilters: "items.map(f, {'filterName': f.filterName, 'filterPattern': f.filterPattern})"
+
+  DeleteMetricFilter:
+    effects:
+      - delete: { resource: metricfilter, missing: ignore }
+
+  # The pack answered the flat record where the model wraps it in
+  # resourcePolicy; the recording's step is superseded for that.
+  PutResourcePolicy:
+    effects:
+      - create: { resource: resourcepolicy }
+    output:
+      resourcePolicy: rec
+
+  DescribeResourcePolicies:
+    list: { resource: resourcepolicy, member: resourcePolicies }
+
+  DeleteResourcePolicy:
+    effects:
+      - delete: { resource: resourcepolicy, missing: ignore }
+
+  TagLogGroup:
+    effects:
+      - create: { resource: grouptags }
+
+  # Untag deletes the whole tag map; tagKeys is never read.
+  UntagLogGroup:
+    effects:
+      - delete: { resource: grouptags, missing: ignore }
+
+  ListTagsLogGroup:
+    reads:
+      t: { resource: grouptags }
+    output:
+      tags: "t_found ? t.tags : {}"
+
+  PutDestination:
+    effects:
+      - create: { resource: destination }
+    output:
+      destination: rec
+
+  DescribeDestinations:
+    list: { resource: destination, member: destinations, paginate: model }
+
+  DeleteDestination:
+    effects:
+      - delete: { resource: destination, missing: ignore }
+
+  PutQueryDefinition:
+    let:
+      asked: "coalesce('queryDefinitionId' in input ? input.queryDefinitionId : '', 'QueryDefinitionId' in input ? input.QueryDefinitionId : '')"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: querydef
+          key: "asked != '' ? asked : fx.rid"
+          record:
+            queryDefinitionId: id
+            name: input.name
+            queryString: input.queryString
+    output:
+      queryDefinitionId: id
+
+  DescribeQueryDefinitions:
+    list: { resource: querydef, member: queryDefinitions }
+
+  DeleteQueryDefinition:
+    effects:
+      - delete: { resource: querydef, missing: ignore }
+    output:
+      success: "true"
+
+  # A query is Complete the moment it starts; nothing ever runs it.
+  StartQuery:
+    effects:
+      - create:
+          resource: query
+          record:
+            queryId: id
+            status: "'Complete'"
+            queryString: input.queryString
+    output:
+      queryId: id
+
+  # Unknown ids answer the same Complete/empty as known ones -- there is no
+  # fault. The pack's answer also carried queryId and queryString, which the
+  # response shape does not declare; those members are superseded in the
+  # recording.
+  GetQueryResults:
+    reads:
+      q: { resource: query }
+    output:
+      status: "'Complete'"
+      results: "[]"
+
+  # Stop flips the stored status to Cancelled, which GetQueryResults then
+  # overwrites back to Complete on the way out: a stopped query never reads
+  # as stopped.
+  StopQuery:
+    reads:
+      q: { resource: query }
+    effects:
+      - put:
+          resource: query
+          when: q_found
+          record:
+            status: "'Cancelled'"
+    output:
+      success: "true"
+
+  # The KMS row is stored and never read by anything.
+  AssociateKmsKey:
+    effects:
+      - create: { resource: kmskey }
+
+  DisassociateKmsKey:
+    effects:
+      - delete: { resource: kmskey, missing: ignore }
+  AssociateSourceToS3TableIntegration:
+    let:
+      asked: "coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: integration
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            integrationName: "'integrationName' in input ? input.integrationName : id"
+  CreateDelivery:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: delivery
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            deliveryId: "'deliveryId' in input ? input.deliveryId : id"
+    output:
+      delivery: "rec"
+  CreateExportTask:
+    let:
+      asked: "coalesce('taskId' in input ? input.taskId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: exporttask
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            taskId: "id"
+            status: "'COMPLETED'"
+    output:
+      taskId: "id"
+  CreateImportTask:
+    let:
+      asked: "coalesce('importId' in input ? input.importId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: importtask
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            importId: "'importId' in input ? input.importId : id"
+            taskId: "id"
+            status: "'COMPLETED'"
+    output:
+      importId: "id"
+  CreateLogAnomalyDetector:
+    let:
+      asked: "coalesce('anomalyDetectorArn' in input ? input.anomalyDetectorArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: anomalydetector
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            anomalyDetectorArn: "'anomalyDetectorArn' in input ? input.anomalyDetectorArn : id"
+    output:
+      anomalyDetectorArn: "id"
+  CreateLookupTable:
+    let:
+      asked: "coalesce('lookupTableName' in input ? input.lookupTableName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: lookuptable
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            lookupTableName: "'lookupTableName' in input ? input.lookupTableName : id"
+  CreateScheduledQuery:
+    let:
+      asked: "coalesce('scheduledQueryArn' in input ? input.scheduledQueryArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: scheduledquery
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            scheduledQueryArn: "'scheduledQueryArn' in input ? input.scheduledQueryArn : id"
+    output:
+      scheduledQueryArn: "id"
+  PutAccountPolicy:
+    let:
+      asked: "coalesce('policyName' in input ? input.policyName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: accountpolicy
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            policyName: "'policyName' in input ? input.policyName : id"
+    output:
+      accountPolicy: "rec"
+  PutBearerTokenAuthentication:
+    let:
+      asked: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: misc
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            name: "'name' in input ? input.name : id"
+  PutDataProtectionPolicy:
+    let:
+      asked: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: dataprotection
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            logGroupIdentifier: "'logGroupIdentifier' in input ? input.logGroupIdentifier : id"
+    output:
+      logGroupIdentifier: "id"
+      policyDocument: "input.policyDocument"
+  PutDeliveryDestination:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: delivery
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            deliveryId: "'deliveryId' in input ? input.deliveryId : id"
+    output:
+      deliveryDestination: "rec"
+  PutDeliveryDestinationPolicy:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: delivery
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            deliveryId: "'deliveryId' in input ? input.deliveryId : id"
+  PutDeliverySource:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: delivery
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            deliveryId: "'deliveryId' in input ? input.deliveryId : id"
+    output:
+      deliverySource: "rec"
+  PutDestinationPolicy:
+    let:
+      asked: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: misc
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            name: "'name' in input ? input.name : id"
+  PutIndexPolicy:
+    let:
+      asked: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: indexpolicy
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            logGroupIdentifier: "'logGroupIdentifier' in input ? input.logGroupIdentifier : id"
+    output:
+      indexPolicy: "rec"
+  PutIntegration:
+    let:
+      asked: "coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: integration
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            integrationName: "'integrationName' in input ? input.integrationName : id"
+    output:
+      integrationName: "id"
+  PutLogGroupDeletionProtection:
+    let:
+      asked: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: misc
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            name: "'name' in input ? input.name : id"
+  PutStorageTierPolicy:
+    let:
+      asked: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: storagetier
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            logGroupIdentifier: "'logGroupIdentifier' in input ? input.logGroupIdentifier : id"
+    output:
+      storageTier: "input.storageTier"
+  PutSyslogConfiguration:
+    let:
+      asked: "coalesce('syslogConfigurationName' in input ? input.syslogConfigurationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: syslog
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            syslogConfigurationName: "'syslogConfigurationName' in input ? input.syslogConfigurationName : id"
+  PutTransformer:
+    let:
+      asked: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: transformer
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            logGroupIdentifier: "'logGroupIdentifier' in input ? input.logGroupIdentifier : id"
+  StartLiveTail:
+    let:
+      asked: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: misc
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            name: "'name' in input ? input.name : id"
+            sessionId: "id"
+  TagResource:
+    let:
+      asked: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: misc
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            name: "'name' in input ? input.name : id"
+  TestMetricFilter:
+    let:
+      asked: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: misc
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            name: "'name' in input ? input.name : id"
+            matches: []
+    output:
+      matches: "[]"
+  TestTransformer:
+    let:
+      asked: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: transformer
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            logGroupIdentifier: "'logGroupIdentifier' in input ? input.logGroupIdentifier : id"
+            matches: []
+  UpdateAnomaly:
+    let:
+      asked: "coalesce('anomalyDetectorArn' in input ? input.anomalyDetectorArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: anomalydetector
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            anomalyDetectorArn: "'anomalyDetectorArn' in input ? input.anomalyDetectorArn : id"
+  UpdateDeliveryConfiguration:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: delivery
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            deliveryId: "'deliveryId' in input ? input.deliveryId : id"
+  UpdateLogAnomalyDetector:
+    let:
+      asked: "coalesce('anomalyDetectorArn' in input ? input.anomalyDetectorArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: anomalydetector
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            anomalyDetectorArn: "'anomalyDetectorArn' in input ? input.anomalyDetectorArn : id"
+  UpdateLookupTable:
+    let:
+      asked: "coalesce('lookupTableName' in input ? input.lookupTableName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: lookuptable
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            lookupTableName: "'lookupTableName' in input ? input.lookupTableName : id"
+  UpdateScheduledQuery:
+    let:
+      asked: "coalesce('scheduledQueryArn' in input ? input.scheduledQueryArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8, when: "asked == ''" }
+      - create:
+          resource: scheduledquery
+          key: "asked != '' ? asked : fx.rid"
+          spread: input
+          record:
+            scheduledQueryArn: "'scheduledQueryArn' in input ? input.scheduledQueryArn : id"
+  CancelExportTask:
+    let:
+      asked: "coalesce('taskId' in input ? input.taskId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: exporttask, key: "asked", when: "asked != ''", missing: ignore }
+  CancelImportTask:
+    let:
+      asked: "coalesce('importId' in input ? input.importId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: importtask, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteAccountPolicy:
+    let:
+      asked: "coalesce('policyName' in input ? input.policyName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: accountpolicy, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteDataProtectionPolicy:
+    let:
+      asked: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: dataprotection, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteDelivery:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: delivery, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteDeliveryDestination:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: delivery, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteDeliveryDestinationPolicy:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: delivery, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteDeliverySource:
+    let:
+      asked: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: delivery, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteIndexPolicy:
+    let:
+      asked: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: indexpolicy, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteIntegration:
+    let:
+      asked: "coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: integration, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteLogAnomalyDetector:
+    let:
+      asked: "coalesce('anomalyDetectorArn' in input ? input.anomalyDetectorArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: anomalydetector, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteLookupTable:
+    let:
+      asked: "coalesce('lookupTableName' in input ? input.lookupTableName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: lookuptable, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteScheduledQuery:
+    let:
+      asked: "coalesce('scheduledQueryArn' in input ? input.scheduledQueryArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: scheduledquery, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteSyslogConfiguration:
+    let:
+      asked: "coalesce('syslogConfigurationName' in input ? input.syslogConfigurationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: syslog, key: "asked", when: "asked != ''", missing: ignore }
+  DeleteTransformer:
+    let:
+      asked: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: transformer, key: "asked", when: "asked != ''", missing: ignore }
+  DisassociateSourceFromS3TableIntegration:
+    let:
+      asked: "coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: integration, key: "asked", when: "asked != ''", missing: ignore }
+  UntagResource:
+    let:
+      asked: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"
+    effects:
+      - delete: { resource: misc, key: "asked", when: "asked != ''", missing: ignore }
+  DescribeAccountPolicies:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: accountPolicies
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeConfigurationTemplates:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: configurationTemplates
+      paginate: model
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeDeliveries:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: deliveries
+      paginate: model
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeDeliveryDestinations:
+    reads:
+      t: { resource: delivery, key: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: delivery
+      member: deliveryDestinations
+      paginate: model
+      key: "t_found ? coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeDeliverySources:
+    reads:
+      t: { resource: delivery, key: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: delivery
+      member: deliverySources
+      paginate: model
+      key: "t_found ? coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeExportTasks:
+    reads:
+      t: { resource: exporttask, key: "coalesce('taskId' in input ? input.taskId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: exporttask
+      member: exportTasks
+      key: "t_found ? coalesce('taskId' in input ? input.taskId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeFieldIndexes:
+    reads:
+      t: { resource: indexpolicy, key: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: indexpolicy
+      member: fieldIndexes
+      key: "t_found ? coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeImportTaskBatches:
+    reads:
+      t: { resource: importtask, key: "coalesce('importId' in input ? input.importId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: importtask
+      member: importBatches
+      key: "t_found ? coalesce('importId' in input ? input.importId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeImportTasks:
+    reads:
+      t: { resource: importtask, key: "coalesce('importId' in input ? input.importId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: importtask
+      member: imports
+      key: "t_found ? coalesce('importId' in input ? input.importId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeIndexPolicies:
+    reads:
+      t: { resource: indexpolicy, key: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: indexpolicy
+      member: indexPolicies
+      key: "t_found ? coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeLookupTables:
+    reads:
+      t: { resource: lookuptable, key: "coalesce('lookupTableName' in input ? input.lookupTableName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: lookuptable
+      member: lookupTables
+      key: "t_found ? coalesce('lookupTableName' in input ? input.lookupTableName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  DescribeQueries:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: queries
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListAggregateLogGroupSummaries:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: aggregateLogGroupSummaries
+      paginate: model
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListAnomalies:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: anomalies
+      paginate: model
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListIntegrations:
+    reads:
+      t: { resource: integration, key: "coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: integration
+      member: integrationSummaries
+      key: "t_found ? coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListLogAnomalyDetectors:
+    reads:
+      t: { resource: anomalydetector, key: "coalesce('anomalyDetectorArn' in input ? input.anomalyDetectorArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: anomalydetector
+      member: anomalyDetectors
+      paginate: model
+      key: "t_found ? coalesce('anomalyDetectorArn' in input ? input.anomalyDetectorArn : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListLogGroups:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: logGroups
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListLogGroupsForQuery:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: logGroupIdentifiers
+      paginate: model
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListScheduledQueries:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: scheduledQueries
+      paginate: model
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListSourcesForS3TableIntegration:
+    reads:
+      t: { resource: integration, key: "coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: integration
+      member: sources
+      paginate: model
+      key: "t_found ? coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListSyslogConfigurations:
+    reads:
+      t: { resource: syslog, key: "coalesce('syslogConfigurationName' in input ? input.syslogConfigurationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: syslog
+      member: syslogConfigurations
+      key: "t_found ? coalesce('syslogConfigurationName' in input ? input.syslogConfigurationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  ListTagsForResource:
+    reads:
+      t: { resource: misc, key: "coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    list:
+      resource: misc
+      member: tags
+      key: "t_found ? coalesce('name' in input ? input.name : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', ''))))))) : ''"
+  GetDataProtectionPolicy:
+    reads:
+      d: { resource: dataprotection, key: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    output:
+      logGroupIdentifier: "d_found && 'logGroupIdentifier' in d ? d.logGroupIdentifier : null"
+      policyDocument: "d_found && 'policyDocument' in d ? d.policyDocument : null"
+  GetDelivery:
+    reads:
+      d: { resource: delivery, key: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    output:
+      delivery: "d_found ? d : {}"
+  GetDeliveryDestination:
+    reads:
+      d: { resource: delivery, key: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    output:
+      deliveryDestination: "d_found ? d : {}"
+  GetDeliveryDestinationPolicy: {}
+  GetDeliverySource:
+    reads:
+      d: { resource: delivery, key: "coalesce('deliveryId' in input ? input.deliveryId : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    output:
+      deliverySource: "d_found ? d : {}"
+  GetIntegration: {}
+  GetLogAnomalyDetector: {}
+  GetLogFields: {}
+  GetLogGroupFields: {}
+  GetLogObject: {}
+  GetLogRecord: {}
+  GetLookupTable: {}
+  GetScheduledQuery: {}
+  GetScheduledQueryHistory: {}
+  GetStorageTierPolicy: {}
+  GetTransformer:
+    reads:
+      t: { resource: transformer, key: "coalesce('logGroupIdentifier' in input ? input.logGroupIdentifier : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))" }
+    output:
+      logGroupIdentifier: "t_found && 'logGroupIdentifier' in t ? t.logGroupIdentifier : null"
+      transformerConfig: "t_found && 'transformerConfig' in t ? t.transformerConfig : null"
+
+quirks:
+  - operation: CreateLogGroup
+    note: >
+      The pack never faults, anywhere in the service. A request missing a
+      required member used to write or read the empty key; the model marks
+      those members required and the engine now answers ValidationException
+      before any behavior runs, so those paths are gone. The pack also stored
+      only the group name: no tags, no class, no KMS key, however the request
+      carried them (they land in their own stores, which nothing joins back).
+  - operation: DeleteLogGroup
+    note: >
+      Deleting a group deletes only the group row. Its streams, events,
+      retention policy, tags and KMS association survive, and
+      DescribeLogStreams still answers them for the deleted group.
+  - operation: DescribeLogStreams
+    note: >
+      Streams are matched by key prefix, not by group membership: a group
+      whose name followed by "/" prefixes another group's name sees that
+      group's streams. The answered logStreamName is the key's last
+      "/"-separated segment, so a stream whose own name contains "/" reads
+      back truncated. FilterLogEvents and both filter listings share the
+      prefix rule.
+  - operation: PutLogEvents
+    note: >
+      Events are appended to one record per stream and nextSequenceToken is
+      just how many events the stream now holds -- "1", "2", ... -- not an
+      opaque cursor. The events themselves are stored verbatim, entity and
+      sequenceToken ignored.
+  - operation: FilterLogEvents
+    note: >
+      filterPattern is never evaluated: every event in the group is
+      returned, in store-key order of the streams.
+  - operation: UntagLogGroup
+    note: >
+      tagKeys is ignored; the whole tag map is deleted. A partial untag is
+      not possible.
+  - operation: PutMetricFilter
+    note: >
+      metricTransformations -- required by the model -- is dropped on the
+      floor; the stored filter is a name and a pattern, so a metric filter
+      here can never emit a metric.
+  - operation: GetQueryResults
+    note: >
+      Every query is Complete with an empty result set, including query ids
+      that were never started -- there is no InvalidParameterException. The
+      pack's answer also carried queryId and queryString, which the response
+      shape does not declare; the bundle drops them and the recording
+      supersedes those two members.
+  - operation: StopQuery
+    note: >
+      Stopping writes Cancelled into the stored record, but GetQueryResults
+      forces Complete on every answer, so a stopped query never reads as
+      stopped. Stopping a query that was never started succeeds.
+  - operation: PutRetentionPolicy
+    note: >
+      The retention days are stored in their own collection and never read:
+      DescribeLogGroups does not answer them, and no expiry ever happens.
+      AssociateKmsKey's row is likewise write-only.
+  - operation: CreateExportTask
+    note: >
+      The generic handler resolves a record id from the first non-empty of
+      (taskId, logGroupName, name, ...); the request carries no taskId, so
+      the answered taskId IS the log group name, and a second export task on
+      one group overwrites the first. CreateImportTask is the same shape but
+      finds nothing and generates a hex id, which it also stores as taskId.
+  - operation: CreateScheduledQuery
+    note: >
+      scheduledQueryArn is not an input member, so the chain falls through
+      to name: the answered scheduledQueryArn is the query's name, not an
+      ARN. GetScheduledQuery and DeleteScheduledQuery read the declared
+      identifier member, which the chain does not know, so they can never
+      reach the record -- Get answers empty and Delete is a no-op.
+  - operation: DeleteDelivery
+    note: >
+      The model addresses a delivery by `id`; the handler's chain reads
+      deliveryId, so a well-formed request deletes nothing. Only a caller
+      echoing the undeclared deliveryId member (as CreateDelivery answers
+      it) can delete one. DeleteLookupTable is the same defect with
+      lookupTableArn/lookupTableName, and UpdateDeliveryConfiguration,
+      UpdateLookupTable and UpdateScheduledQuery write fresh phantom rows
+      under generated ids instead of updating anything.
+  - operation: DescribeDeliveries
+    note: >
+      "Deliveries" does not contain the substring "Delivery", so
+      DescribeDeliveries falls out of the delivery arm of the shape table
+      into the misc store, and answers whatever PutBearerTokenAuthentication,
+      PutDestinationPolicy, PutLogGroupDeletionProtection, StartLiveTail,
+      TagResource and TestMetricFilter wrote -- under the member name
+      "logGroups". DescribeAccountPolicies, DescribeConfigurationTemplates,
+      DescribeQueries, ListAnomalies, ListScheduledQueries,
+      ListLogGroupsForQuery, ListAggregateLogGroupSummaries and
+      ListTagsForResource share that store and that answer. The bundle lists
+      the same rows under the member the model declares for each operation,
+      and those steps are superseded in the recording.
+  - operation: ListLogGroups
+    note: >
+      This is not DescribeLogGroups: it lists the misc store, so the phantom
+      rows from the bearer-token, deletion-protection, destination-policy,
+      tagging, live-tail and metric-filter-test writes appear here as log
+      groups. ListLogGroups and DescribeLogGroups answer different things
+      for the same account.
+  - operation: PutDeliveryDestination
+    note: >
+      Destinations, sources and policies of the delivery family share one
+      store keyed by the chain; PutDeliveryDestination lands on the name
+      member, so GetDeliveryDestination (which does read name) finds it,
+      while PutDeliveryDestinationPolicy finds nothing in the chain and
+      writes a phantom row under a generated id that
+      GetDeliveryDestinationPolicy can never read back.
+  - operation: GetStorageTierPolicy
+    note: >
+      Always empty. The request has no members, so the read key is the bare
+      kind prefix, which PutStorageTierPolicy never writes -- its write is
+      keyed by a generated id, since storageTier is not in the chain either.
+  - operation: DescribeImportTaskBatches
+    note: >
+      The pack answered the import task record under "importTasks" here;
+      the model declares "importBatches". Several generic-handler answers
+      carry the record under a member the response shape does not declare
+      (importTask, delivery, transformer, scheduledQuery, anomalyDetector,
+      lookupTable, integration, exportTask); the bundle answers the declared
+      member or nothing, and the affected recording steps are superseded.

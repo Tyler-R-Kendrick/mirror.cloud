@@ -37,6 +37,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/allservices"
 )
@@ -208,9 +209,20 @@ func TestEveryBundleAnswersOverHTTP(t *testing.T) {
 	// zero, and the ratchet forbids it rising, so there is nothing left to
 	// exclude and the exclusion is gone: a gate that can quietly re-narrow
 	// itself is worse than one that fails.
+	// The model this test builds requests from must be the one the runtime
+	// serves: the booted bundle joins the generated models with the servedAs
+	// mapping and the catalog's extra operations, so aws.api.ecr, aws.tagging,
+	// aws.monitoring, aws.opensearch and the catalog-carried timestream Query
+	// all resolve here where the raw generated file would miss them.
+	servedModel := func(id string) (*model.Service, error) {
+		if svc := specboot.Bundle().ServiceByID(id); svc != nil {
+			return svc, nil
+		}
+		return generated.Model(id)
+	}
 	shared := map[string]int{}
 	for _, id := range ids {
-		if m, err := generated.Model(id); err == nil {
+		if m, err := servedModel(id); err == nil {
 			shared[m.EndpointPrefix]++
 		}
 	}
@@ -221,13 +233,20 @@ func TestEveryBundleAnswersOverHTTP(t *testing.T) {
 	skipped := 0
 	for _, id := range ids {
 		t.Run(id, func(t *testing.T) {
-			svc, err := generated.Model(id)
+			svc, err := servedModel(id)
 			if err != nil {
 				t.Fatalf("model: %v", err)
 			}
 			ir, err := behaviors.Load(id, svc)
 			if err != nil {
 				t.Fatalf("bundle: %v", err)
+			}
+			if ir.Shadow != "" {
+				// A shadowed bundle is gated by the recording replay and
+				// serves nothing yet; its pack answers HTTP. Reachability is
+				// measured when it takes over.
+				skipped++
+				t.Skipf("shadowed: %s", ir.Shadow)
 			}
 			op, ok := reachable(ir, svc)
 			if !ok {

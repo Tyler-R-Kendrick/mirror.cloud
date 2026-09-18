@@ -22,7 +22,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -1179,7 +1179,7 @@ func (p *Pack) recordLambdaDelivery(ctx context.Context, req *spi.Request, sub m
 	}
 	group := fmt.Sprintf("sns/%s/%s/%s", req.Identity.Region, req.Identity.Account, topicName(topicARN))
 	stream := "delivery"
-	logPack := logs.New(p.deps)
+	logPack := bundled.Handler("aws.logs", p.deps)
 	_, _ = logPack.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "CreateLogGroup", Input: map[string]any{"logGroupName": group}})
 	_, _ = logPack.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "CreateLogStream", Input: map[string]any{"logGroupName": group, "logStreamName": stream}})
 	providerResponse := ""

@@ -54,6 +54,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.cloudfront` | `restXml` | 9 | 0 |
 | `aws.scheduler` | `awsJson1_0` | 9 | 0 |
 | `aws.es` | `restJson1` | 14 | 0 |
+| `aws.opensearch` | `restJson1` | 0 | 14 |
 | `aws.glue` | `awsJson1_1` | 21 | 0 |
 | `aws.athena` | `awsJson1_1` | 9 | 0 |
 | `aws.cloudtrail` | `awsJson1_1` | 11 | 0 |
@@ -157,7 +158,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.account` | `awsJson1_1` | 6 | 0 |
 | `aws.iotwireless` | `awsJson1_1` | 6 | 0 |
 | `aws.s3tables` | `awsJson1_1` | 13 | 0 |
-| `aws.synthetics` | `awsJson1_1` | 6 | 0 |
+| `aws.synthetics` | `awsJson1_1` | 6 | 1 |
 | `aws.apprunner` | `awsJson1_1` | 6 | 0 |
 | `aws.proton` | `awsJson1_1` | 6 | 0 |
 | `aws.resiliencehub` | `awsJson1_1` | 6 | 0 |

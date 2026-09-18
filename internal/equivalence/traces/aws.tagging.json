@@ -1,0 +1,419 @@
+{
+  "schema": "trace/1",
+  "service": "aws.tagging",
+  "source": "pack:internal/services/aws/tagging@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The pack answered the tags of one resource in map-iteration order, so every resource observed here carries a single tag; the union, merge, removal and sentinel-leak semantics are all still exercised.",
+  "steps": [
+    {
+      "operation": "GetResources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceTagMappingList": null
+      }
+    },
+    {
+      "operation": "GetTagKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagKeys": null
+      }
+    },
+    {
+      "operation": "TagResources",
+      "input": {
+        "ResourceARNList": ["arn:aws:s3:::bucket-one"],
+        "Tags": { "env": "dev" }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedResourcesMap": {}
+      }
+    },
+    {
+      "operation": "TagResources",
+      "input": {
+        "ResourceARNList": ["arn:aws:s3:::bucket-one"],
+        "Tags": { "team": "core" }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedResourcesMap": {}
+      }
+    },
+    {
+      "operation": "GetTagKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagKeys": ["env", "team"]
+      }
+    },
+    {
+      "operation": "GetTagValues",
+      "input": {
+        "Key": "env"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagValues": ["dev"]
+      }
+    },
+    {
+      "operation": "TagResources",
+      "input": {
+        "ResourceARNList": ["arn:aws:s3:::bucket-two", "arn:aws:s3:::bucket-three"],
+        "Tags": { "env": "prod" }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedResourcesMap": {}
+      }
+    },
+    {
+      "operation": "GetTagValues",
+      "input": {
+        "Key": "env"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagValues": ["dev", "prod"]
+      }
+    },
+    {
+      "operation": "GetTagKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagKeys": ["env", "team"]
+      }
+    },
+    {
+      "operation": "UntagResources",
+      "input": {
+        "ResourceARNList": ["arn:aws:s3:::bucket-two"],
+        "TagKeys": ["env"]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedResourcesMap": {}
+      }
+    },
+    {
+      "operation": "GetTagKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagKeys": ["env", "team"]
+      }
+    },
+    {
+      "operation": "GetTagValues",
+      "input": {
+        "Key": "env"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagValues": ["dev", "prod"]
+      }
+    },
+    {
+      "operation": "UntagResources",
+      "input": {
+        "ResourceARNList": ["arn:aws:s3:::bucket-one"],
+        "TagKeys": ["team"]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedResourcesMap": {}
+      }
+    },
+    {
+      "operation": "GetTagKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagKeys": ["env"]
+      }
+    },
+    {
+      "operation": "GetResources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceTagMappingList": [
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-one",
+            "Tags": [{ "Key": "env", "Value": "dev" }]
+          },
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-three",
+            "Tags": [{ "Key": "env", "Value": "prod" }]
+          },
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-two",
+            "Tags": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagResources",
+      "input": {
+        "ResourceARNList": ["arn:aws:ec2:us-east-1:000000000000:instance/i-0123456789abcdef0"],
+        "TagKeys": ["env"]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedResourcesMap": {}
+      }
+    },
+    {
+      "operation": "GetResources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceTagMappingList": [
+          {
+            "ResourceARN": "arn:aws:ec2:us-east-1:000000000000:instance/i-0123456789abcdef0",
+            "Tags": null
+          },
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-one",
+            "Tags": [{ "Key": "env", "Value": "dev" }]
+          },
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-three",
+            "Tags": [{ "Key": "env", "Value": "prod" }]
+          },
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-two",
+            "Tags": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetComplianceSummary",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SummaryList": []
+      }
+    },
+    {
+      "operation": "DescribeReportCreation",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": "FAILED"
+      }
+    },
+    {
+      "operation": "StartReportCreation",
+      "input": {
+        "S3Bucket": "compliance-reports"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeReportCreation",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": "RUNNING"
+      }
+    },
+    {
+      "operation": "GetResources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceTagMappingList": [
+          {
+            "ResourceARN": "_report",
+            "Tags": null
+          },
+          {
+            "ResourceARN": "arn:aws:ec2:us-east-1:000000000000:instance/i-0123456789abcdef0",
+            "Tags": null
+          },
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-one",
+            "Tags": [{ "Key": "env", "Value": "dev" }]
+          },
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-three",
+            "Tags": [{ "Key": "env", "Value": "prod" }]
+          },
+          {
+            "ResourceARN": "arn:aws:s3:::bucket-two",
+            "Tags": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetTagKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagKeys": ["env"]
+      }
+    },
+    {
+      "operation": "ListRequiredTags",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RequiredTags": []
+      }
+    }
+  ]
+}

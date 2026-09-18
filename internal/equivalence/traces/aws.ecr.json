@@ -1,0 +1,1770 @@
+{
+  "schema": "trace/1",
+  "service": "aws.api.ecr",
+  "source": "pack:internal/services/aws/ecr@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered members the model does not declare (replicationStatus, signingStatus, the UpdateImageStorageClass image, StartImageScan's imageScanFindings, GetRegistryScanningConfiguration's registryScanningConfiguration, and the exclusions list), the bundle answers the declared shape and the step is superseded with that reason. partSize is superseded on representation alone: the pack answered a Go int and the recording round-trips through JSON as a float.",
+  "steps": [
+    {
+      "operation": "DescribeRepositories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositories": null
+      }
+    },
+    {
+      "operation": "CreateRepository",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repository": {
+          "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/app",
+          "repositoryName": "app",
+          "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/app",
+          "registryId": "000000000000"
+        }
+      }
+    },
+    {
+      "operation": "CreateRepository",
+      "input": {
+        "repositoryName": "zzz"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repository": {
+          "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/zzz",
+          "repositoryName": "zzz",
+          "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/zzz",
+          "registryId": "000000000000"
+        }
+      }
+    },
+    {
+      "operation": "DescribeRepositories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositories": [
+          {
+            "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/app",
+            "repositoryName": "app",
+            "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/app",
+            "registryId": "000000000000"
+          },
+          {
+            "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/zzz",
+            "repositoryName": "zzz",
+            "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/zzz",
+            "registryId": "000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutImage",
+      "input": {
+        "repositoryName": "app",
+        "imageTag": "v1",
+        "imageManifest": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "image": {
+          "imageDigest": "sha256:7c5891299f6489f8",
+          "imageManifest": "{}",
+          "imageTag": "v1"
+        }
+      }
+    },
+    {
+      "operation": "PutImage",
+      "input": {
+        "repositoryName": "app",
+        "imageManifest": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "image": {
+          "imageDigest": "sha256:5f59f223d7974d14",
+          "imageManifest": "{}",
+          "imageTag": "latest"
+        }
+      }
+    },
+    {
+      "operation": "BatchGetImage",
+      "input": {
+        "repositoryName": "app",
+        "imageIds": [
+          {
+            "imageTag": "v1"
+          },
+          {
+            "imageTag": "ghost"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "images": [
+          {
+            "imageDigest": "sha256:7c5891299f6489f8",
+            "imageManifest": "{}",
+            "imageTag": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListImages",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageIds": [
+          {
+            "imageDigest": "sha256:5f59f223d7974d14",
+            "imageTag": "latest"
+          },
+          {
+            "imageDigest": "sha256:7c5891299f6489f8",
+            "imageTag": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeImages",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageDetails": [
+          {
+            "imageDigest": "sha256:5f59f223d7974d14",
+            "imageManifest": "{}",
+            "imageTag": "latest"
+          },
+          {
+            "imageDigest": "sha256:7c5891299f6489f8",
+            "imageManifest": "{}",
+            "imageTag": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchDeleteImage",
+      "input": {
+        "repositoryName": "app",
+        "imageIds": [
+          {
+            "imageTag": "latest"
+          },
+          {
+            "imageTag": "ghost"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "imageIds": [
+          {
+            "imageTag": "latest"
+          },
+          {
+            "imageTag": "ghost"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListImages",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageIds": [
+          {
+            "imageDigest": "sha256:7c5891299f6489f8",
+            "imageTag": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetAuthorizationToken",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "authorizationData": [
+          {
+            "authorizationToken": "aa00000000000002",
+            "proxyEndpoint": "https://000000000000.dkr.ecr.us-east-1.amazonaws.com"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SetRepositoryPolicy",
+      "input": {
+        "repositoryName": "app",
+        "policyText": "{\"Version\":\"2012-10-17\"}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyText": "{\"Version\":\"2012-10-17\"}"
+      }
+    },
+    {
+      "operation": "GetRepositoryPolicy",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyText": "{\"Version\":\"2012-10-17\"}"
+      }
+    },
+    {
+      "operation": "GetRepositoryPolicy",
+      "input": {
+        "repositoryName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "RepositoryPolicyNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteRepositoryPolicy",
+      "input": {
+        "repositoryName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteRepositoryPolicy",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetRepositoryPolicy",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "RepositoryPolicyNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "resourceArn": "arn:aws:ecr:us-east-1:000000000000:repository/app",
+        "tags": [
+          {
+            "Key": "env",
+            "Value": "prod"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": "arn:aws:ecr:us-east-1:000000000000:repository/app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": [
+          {
+            "Key": "env",
+            "Value": "prod"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "resourceArn": "arn:aws:ecr:us-east-1:000000000000:repository/app",
+        "tagKeys": [
+          "env"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": "arn:aws:ecr:us-east-1:000000000000:repository/app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": []
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": "arn:aws:ecr:us-east-1:000000000000:repository/never"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": []
+      }
+    },
+    {
+      "operation": "InitiateLayerUpload",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "partSize": 5242880,
+        "uploadId": "aa00000000000001"
+      },
+      "superseded_members": {
+        "partSize": "the pack answered a Go int 5242880; the recording round-trips through JSON as a float, and the two render differently though the wire value is identical"
+      }
+    },
+    {
+      "operation": "UploadLayerPart",
+      "input": {
+        "repositoryName": "app",
+        "uploadId": {
+          "$fromStep": 23,
+          "$fromPath": "uploadId"
+        },
+        "partFirstByte": 0,
+        "partLastByte": 3,
+        "layerPartBlob": "QUJDRA=="
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lastByteReceived": 3,
+        "uploadId": "aa00000000000001"
+      }
+    },
+    {
+      "operation": "UploadLayerPart",
+      "input": {
+        "repositoryName": "app",
+        "uploadId": {
+          "$fromStep": 23,
+          "$fromPath": "uploadId"
+        },
+        "partFirstByte": 4,
+        "partLastByte": 7,
+        "layerPartBlob": "RUZH"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lastByteReceived": 7,
+        "uploadId": "aa00000000000001"
+      }
+    },
+    {
+      "operation": "CompleteLayerUpload",
+      "input": {
+        "repositoryName": "app",
+        "uploadId": {
+          "$fromStep": 23,
+          "$fromPath": "uploadId"
+        },
+        "layerDigests": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "layerDigest": "sha256:83d4958a39f75457",
+        "registryId": "000000000000",
+        "uploadId": "aa00000000000001"
+      }
+    },
+    {
+      "operation": "BatchCheckLayerAvailability",
+      "input": {
+        "repositoryName": "app",
+        "layerDigests": [
+          {
+            "$fromStep": 26,
+            "$fromPath": "layerDigest"
+          },
+          "sha256:deadbeefdeadbeef00"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "layers": [
+          {
+            "layerAvailability": "AVAILABLE",
+            "layerDigest": "sha256:83d4958a39f75457"
+          },
+          {
+            "layerAvailability": "UNAVAILABLE",
+            "layerDigest": "sha256:deadbeefdeadbeef00"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetDownloadUrlForLayer",
+      "input": {
+        "repositoryName": "app",
+        "layerDigest": "sha256:deadbeefdeadbeef00"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "downloadUrl": "http://127.0.0.1/ecr-layers/sha256:deadbeefdeadbeef00",
+        "layerDigest": "sha256:deadbeefdeadbeef00"
+      }
+    },
+    {
+      "operation": "StartImageScan",
+      "input": {
+        "repositoryName": "app",
+        "imageId": {
+          "imageTag": "v1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageId": {
+          "imageTag": "v1"
+        },
+        "imageScanFindings": {
+          "findingSeverityCounts": {},
+          "findings": []
+        },
+        "imageScanStatus": {
+          "status": "COMPLETE"
+        }
+      },
+      "superseded": "the pack answered imageScanFindings, which StartImageScanResponse does not declare; the bundle answers the declared imageScanStatus and imageId"
+    },
+    {
+      "operation": "DescribeImageScanFindings",
+      "input": {
+        "repositoryName": "app",
+        "imageId": {
+          "imageTag": "v1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageId": {
+          "imageTag": "v1"
+        },
+        "imageScanFindings": {
+          "findings": [],
+          "imageTag": "v1",
+          "status": "COMPLETE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeImageScanFindings",
+      "input": {
+        "repositoryName": "app",
+        "imageId": {
+          "imageTag": "ghost"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageId": {
+          "imageTag": "ghost"
+        },
+        "imageScanFindings": {
+          "findingSeverityCounts": {},
+          "findings": []
+        },
+        "imageScanStatus": {
+          "status": "COMPLETE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeImageReplicationStatus",
+      "input": {
+        "repositoryName": "app",
+        "imageId": {
+          "imageTag": "v1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "replicationStatus": "COMPLETE",
+        "repositoryName": "app"
+      },
+      "superseded": "the pack answered a singular replicationStatus string, which the response shape does not declare (it declares the replicationStatuses list); the bundle answers repositoryName only"
+    },
+    {
+      "operation": "DescribeImageSigningStatus",
+      "input": {
+        "repositoryName": "app",
+        "imageId": {
+          "imageTag": "v1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "signingStatus": "COMPLETE",
+        "repositoryName": "app"
+      },
+      "superseded": "the pack answered a singular signingStatus string, which the response shape does not declare (it declares the signingStatuses list); the bundle answers repositoryName only"
+    },
+    {
+      "operation": "ListImageReferrers",
+      "input": {
+        "repositoryName": "app",
+        "subjectId": {
+          "imageDigest": "sha256:deadbeefdeadbeef00"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "referrers": []
+      }
+    },
+    {
+      "operation": "UpdateImageStorageClass",
+      "input": {
+        "repositoryName": "app",
+        "imageId": {
+          "imageTag": "v1"
+        },
+        "targetStorageClass": "ARCHIVE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "image": {
+          "imageDigest": "sha256:7c5891299f6489f8",
+          "imageManifest": "{}",
+          "imageStorageClass": "ARCHIVE",
+          "imageTag": "v1"
+        }
+      },
+      "superseded": "the pack answered an image member that UpdateImageStorageClassResponse does not declare; the bundle answers an empty body and the write still happens"
+    },
+    {
+      "operation": "DescribeImages",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageDetails": [
+          {
+            "imageDigest": "sha256:7c5891299f6489f8",
+            "imageManifest": "{}",
+            "imageStorageClass": "ARCHIVE",
+            "imageTag": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutLifecyclePolicy",
+      "input": {
+        "repositoryName": "app",
+        "lifecyclePolicyText": "{\"rules\":[]}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lifecyclePolicyText": "{\"rules\":[]}",
+        "repositoryName": "app"
+      }
+    },
+    {
+      "operation": "GetLifecyclePolicy",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lifecyclePolicyText": "{\"rules\":[]}",
+        "repositoryName": "app"
+      }
+    },
+    {
+      "operation": "GetLifecyclePolicy",
+      "input": {
+        "repositoryName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lifecyclePolicyText": "",
+        "repositoryName": "ghost"
+      }
+    },
+    {
+      "operation": "DeleteLifecyclePolicy",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetLifecyclePolicy",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lifecyclePolicyText": "",
+        "repositoryName": "app"
+      }
+    },
+    {
+      "operation": "StartLifecyclePolicyPreview",
+      "input": {
+        "repositoryName": "app",
+        "lifecyclePolicyText": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lifecyclePolicyText": "{}",
+        "registryId": "000000000000",
+        "repositoryName": "app",
+        "status": "COMPLETE"
+      }
+    },
+    {
+      "operation": "GetLifecyclePolicyPreview",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "previewResults": [],
+        "repositoryName": "app",
+        "status": "COMPLETE"
+      }
+    },
+    {
+      "operation": "CreatePullThroughCacheRule",
+      "input": {
+        "ecrRepositoryPrefix": "p",
+        "upstreamRegistryUrl": "public.ecr.aws"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ecrRepositoryPrefix": "p",
+        "upstreamRegistryUrl": "public.ecr.aws"
+      }
+    },
+    {
+      "operation": "DescribePullThroughCacheRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pullThroughCacheRules": [
+          {
+            "ecrRepositoryPrefix": "p",
+            "upstreamRegistryUrl": "public.ecr.aws"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ValidatePullThroughCacheRule",
+      "input": {
+        "ecrRepositoryPrefix": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ecrRepositoryPrefix": "p",
+        "isValid": true
+      }
+    },
+    {
+      "operation": "UpdatePullThroughCacheRule",
+      "input": {
+        "ecrRepositoryPrefix": "p",
+        "credentialArn": "arn:aws:iam::000000000000:role/cache"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "credentialArn": "arn:aws:iam::000000000000:role/cache",
+        "ecrRepositoryPrefix": "p"
+      }
+    },
+    {
+      "operation": "DescribePullThroughCacheRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pullThroughCacheRules": [
+          {
+            "credentialArn": "arn:aws:iam::000000000000:role/cache",
+            "ecrRepositoryPrefix": "p"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ValidatePullThroughCacheRule",
+      "input": {
+        "ecrRepositoryPrefix": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ecrRepositoryPrefix": "ghost",
+        "isValid": false
+      }
+    },
+    {
+      "operation": "DeletePullThroughCacheRule",
+      "input": {
+        "ecrRepositoryPrefix": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ValidatePullThroughCacheRule",
+      "input": {
+        "ecrRepositoryPrefix": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ecrRepositoryPrefix": "p",
+        "isValid": false
+      }
+    },
+    {
+      "operation": "CreateRepositoryCreationTemplate",
+      "input": {
+        "prefix": "tmpl",
+        "appliedFor": [
+          "PULL_THROUGH_CACHE"
+        ],
+        "description": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "registryId": "000000000000",
+        "repositoryCreationTemplate": {
+          "appliedFor": [
+            "PULL_THROUGH_CACHE"
+          ],
+          "description": "d",
+          "prefix": "tmpl"
+        }
+      }
+    },
+    {
+      "operation": "DescribeRepositoryCreationTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositoryCreationTemplates": [
+          {
+            "appliedFor": [
+              "PULL_THROUGH_CACHE"
+            ],
+            "description": "d",
+            "prefix": "tmpl"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateRepositoryCreationTemplate",
+      "input": {
+        "prefix": "tmpl",
+        "description": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "registryId": "000000000000",
+        "repositoryCreationTemplate": {
+          "description": "d2",
+          "prefix": "tmpl"
+        }
+      }
+    },
+    {
+      "operation": "DeleteRepositoryCreationTemplate",
+      "input": {
+        "prefix": "tmpl"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeRepositoryCreationTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositoryCreationTemplates": null
+      }
+    },
+    {
+      "operation": "DescribeRegistry",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "registryId": "000000000000",
+        "replicationConfiguration": {
+          "rules": []
+        }
+      }
+    },
+    {
+      "operation": "PutRegistryPolicy",
+      "input": {
+        "policyText": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyText": "{}",
+        "registryId": "000000000000"
+      }
+    },
+    {
+      "operation": "GetRegistryPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyText": "{}",
+        "registryId": "000000000000"
+      }
+    },
+    {
+      "operation": "DeleteRegistryPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetRegistryPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyText": "",
+        "registryId": "000000000000"
+      }
+    },
+    {
+      "operation": "PutRegistryScanningConfiguration",
+      "input": {
+        "scanType": "BASIC",
+        "rules": [
+          {
+            "repositoryFilters": [
+              {
+                "filter": "*",
+                "filterType": "WILDCARD"
+              }
+            ],
+            "scanFrequency": "SCAN_ON_PUSH"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "registryScanningConfiguration": {
+          "rules": [
+            {
+              "repositoryFilters": [
+                {
+                  "filter": "*",
+                  "filterType": "WILDCARD"
+                }
+              ],
+              "scanFrequency": "SCAN_ON_PUSH"
+            }
+          ],
+          "scanType": "BASIC"
+        }
+      }
+    },
+    {
+      "operation": "GetRegistryScanningConfiguration",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "registryScanningConfiguration": {
+          "rules": [
+            {
+              "repositoryFilters": [
+                {
+                  "filter": "*",
+                  "filterType": "WILDCARD"
+                }
+              ],
+              "scanFrequency": "SCAN_ON_PUSH"
+            }
+          ],
+          "scanType": "BASIC"
+        }
+      },
+      "superseded": "the pack answered registryScanningConfiguration, which GetRegistryScanningConfigurationResponse does not declare (it declares scanningConfiguration); the bundle answers the declared member with the same value"
+    },
+    {
+      "operation": "PutReplicationConfiguration",
+      "input": {
+        "replicationConfiguration": {
+          "rules": [
+            {
+              "destinations": [
+                {
+                  "region": "us-west-2",
+                  "registryId": "000000000000"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "replicationConfiguration": {
+          "rules": [
+            {
+              "destinations": [
+                {
+                  "region": "us-west-2",
+                  "registryId": "000000000000"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "PutSigningConfiguration",
+      "input": {
+        "signingConfiguration": {
+          "rules": [
+            {
+              "signingProfileArn": "arn:aws:signer:us-east-1:000000000000:/signing-profiles/ecr"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "signingConfiguration": {
+          "signingConfiguration": {
+            "rules": [
+              {
+                "signingProfileArn": "arn:aws:signer:us-east-1:000000000000:/signing-profiles/ecr"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "operation": "GetSigningConfiguration",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "signingConfiguration": {
+          "signingConfiguration": {
+            "rules": [
+              {
+                "signingProfileArn": "arn:aws:signer:us-east-1:000000000000:/signing-profiles/ecr"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "operation": "DeleteSigningConfiguration",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "GetSigningConfiguration",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "signingConfiguration": {}
+      }
+    },
+    {
+      "operation": "PutAccountSetting",
+      "input": {
+        "name": "BASIC_SCAN_TYPE_VERSION",
+        "value": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "name": "BASIC_SCAN_TYPE_VERSION",
+        "value": "1"
+      }
+    },
+    {
+      "operation": "GetAccountSetting",
+      "input": {
+        "name": "BASIC_SCAN_TYPE_VERSION"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "name": "BASIC_SCAN_TYPE_VERSION",
+        "value": "1"
+      }
+    },
+    {
+      "operation": "GetAccountSetting",
+      "input": {
+        "name": "MISSING_SETTING"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "name": "MISSING_SETTING",
+        "value": ""
+      }
+    },
+    {
+      "operation": "PutImageScanningConfiguration",
+      "input": {
+        "repositoryName": "app",
+        "imageScanningConfiguration": {
+          "scanOnPush": true
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageScanningConfiguration": {
+          "scanOnPush": true
+        },
+        "repositoryName": "app"
+      }
+    },
+    {
+      "operation": "BatchGetRepositoryScanningConfiguration",
+      "input": {
+        "repositoryNames": [
+          "app",
+          "ghost"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "scanningConfigurations": [
+          {
+            "imageScanningConfiguration": {
+              "scanOnPush": true
+            },
+            "repositoryName": "app"
+          },
+          {
+            "repositoryName": "ghost"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutImageTagMutability",
+      "input": {
+        "repositoryName": "app",
+        "imageTagMutability": "IMMUTABLE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageTagMutability": "IMMUTABLE",
+        "repositoryName": "app"
+      }
+    },
+    {
+      "operation": "PutImageTagMutability",
+      "input": {
+        "repositoryName": "stub",
+        "imageTagMutability": "IMMUTABLE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "imageTagMutability": "IMMUTABLE",
+        "repositoryName": "stub"
+      }
+    },
+    {
+      "operation": "DescribeRepositories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositories": [
+          {
+            "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/app",
+            "repositoryName": "app",
+            "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/app",
+            "registryId": "000000000000",
+            "imageTagMutability": "IMMUTABLE"
+          },
+          {
+            "imageTagMutability": "IMMUTABLE",
+            "repositoryName": "stub"
+          },
+          {
+            "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/zzz",
+            "repositoryName": "zzz",
+            "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/zzz",
+            "registryId": "000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateRepository",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repository": {
+          "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/app",
+          "repositoryName": "app",
+          "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/app",
+          "registryId": "000000000000"
+        }
+      }
+    },
+    {
+      "operation": "DescribeRepositories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositories": [
+          {
+            "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/app",
+            "repositoryName": "app",
+            "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/app",
+            "registryId": "000000000000"
+          },
+          {
+            "imageTagMutability": "IMMUTABLE",
+            "repositoryName": "stub"
+          },
+          {
+            "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/zzz",
+            "repositoryName": "zzz",
+            "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/zzz",
+            "registryId": "000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RegisterPullTimeUpdateExclusion",
+      "input": {
+        "principalArn": "arn:aws:iam::000000000000:root"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "principalArn": "arn:aws:iam::000000000000:root"
+      }
+    },
+    {
+      "operation": "ListPullTimeUpdateExclusions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "exclusions": [
+          {
+            "id": "arn:aws:iam::000000000000:root",
+            "value": "arn:aws:iam::000000000000:root"
+          }
+        ]
+      },
+      "superseded": "the pack answered an exclusions member the response shape does not declare (pullTimeUpdateExclusions is the declared one), with {id, value} rows because it stored the principal ARN as raw bytes, not JSON; the bundle answers the principal ARNs under the declared member"
+    },
+    {
+      "operation": "DeregisterPullTimeUpdateExclusion",
+      "input": {
+        "principalArn": "arn:aws:iam::000000000000:root"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListPullTimeUpdateExclusions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "exclusions": null
+      }
+    },
+    {
+      "operation": "DeleteRepository",
+      "input": {
+        "repositoryName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DeleteRepository",
+      "input": {
+        "repositoryName": "zzz"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "DescribeRepositories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositories": [
+          {
+            "repositoryArn": "arn:aws:ecr:us-east-1:000000000000:repository/app",
+            "repositoryName": "app",
+            "repositoryUri": "000000000000.dkr.ecr.us-east-1.amazonaws.com/app",
+            "registryId": "000000000000"
+          },
+          {
+            "imageTagMutability": "IMMUTABLE",
+            "repositoryName": "stub"
+          }
+        ]
+      }
+    }
+  ]
+}

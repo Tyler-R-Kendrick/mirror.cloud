@@ -89,7 +89,7 @@ func TestSharedEndpointPrefixesAreNamed(t *testing.T) {
 	want := map[string][]string{
 		"apigateway":       {"aws.apigateway", "aws.apigatewayv2"},
 		"email":            {"aws.ses", "aws.sesv2"},
-		"es":               {"aws.elasticsearch", "aws.es"},
+		"es":               {"aws.elasticsearch", "aws.es", "aws.opensearch"},
 		"kinesisanalytics": {"aws.kinesisanalytics", "aws.kinesisanalyticsv2"},
 		"rds":              {"aws.docdb", "aws.neptune", "aws.rds"},
 		"vercel":           {"vercel.api", "vercel.kv"},
@@ -138,6 +138,11 @@ func TestSharedEndpointPrefixesAreNamed(t *testing.T) {
 	indistinguishable := map[string]string{
 		"aws.docdb":   "a fork of the RDS API: same actions, same endpoint prefix",
 		"aws.neptune": "a fork of the RDS API: same actions, same endpoint prefix",
+		// aws.opensearch and aws.es are one vendored model under two IDs, so
+		// no request claims one and not the other, and the `opensearch`
+		// clientSpelling speaks for its host while the aws.es pack is the
+		// one serving.
+		"aws.opensearch": "the same vendored model as aws.es under a second ID: same actions, same endpoint prefix",
 	}
 	server := &Server{bundle: bundle}
 	for _, ids := range want {
@@ -163,6 +168,13 @@ func TestSharedEndpointPrefixesAreNamed(t *testing.T) {
 			if _, listed := indistinguishable[id]; !listed {
 				t.Errorf("%s is unreachable at the endpoint it shares: a request "+
 					"only it claims resolved to %s", id, serviceID(got))
+				continue
+			}
+			// A clientSpelling that claims the service's own name for another
+			// service -- `opensearch` for aws.es -- decides its host too, which
+			// is the deliberate routing the by-host check would misread as a
+			// failure.
+			if spelled, ok := clientSpellings[shortName(id)]; ok && spelled != id {
 				continue
 			}
 			byHost := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -320,6 +332,12 @@ func TestEveryServiceIsReachableByItsOwnName(t *testing.T) {
 		svc := &bundle.Services[i]
 		name := shortName(svc.ID)
 		if len(servicesAnsweringTo(bundle, name)) > 1 {
+			continue
+		}
+		// A clientSpelling claims the label for another service on purpose:
+		// `opensearch` goes to aws.es while that pack is the one serving, so
+		// aws.opensearch's own name is spoken for rather than unreachable.
+		if id, spelled := clientSpellings[name]; spelled && id != svc.ID {
 			continue
 		}
 		if got := server.serviceByLabel(nil, name); got == nil || got.ID != svc.ID {

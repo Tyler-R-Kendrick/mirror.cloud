@@ -1,0 +1,3622 @@
+{
+  "schema": "trace/1",
+  "service": "aws.logs",
+  "source": "pack:internal/services/aws/logs@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The pack never faults, so there are no fault expectations; reads of absent records answer empty bodies or stock defaults and are gated as such. Where the pack answered records under members the response shape does not declare -- the whole generic-handler family -- the bundle answers the declared member or shape and the step or member is superseded with that reason.",
+  "steps": [
+    {
+      "operation": "DescribeLogGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": null
+      }
+    },
+    {
+      "operation": "CreateLogGroup",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "CreateLogGroup",
+      "input": {
+        "logGroupName": "h"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeLogGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupName": "g"
+          },
+          {
+            "logGroupName": "h"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateLogStream",
+      "input": {
+        "logGroupName": "g",
+        "logStreamName": "s"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "CreateLogStream",
+      "input": {
+        "logGroupName": "g",
+        "logStreamName": "s2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeLogStreams",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logStreams": [
+          {
+            "logStreamName": "s"
+          },
+          {
+            "logStreamName": "s2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLogStreams",
+      "input": {
+        "logGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logStreams": null
+      }
+    },
+    {
+      "operation": "PutLogEvents",
+      "input": {
+        "logGroupName": "g",
+        "logStreamName": "s",
+        "logEvents": [
+          {
+            "timestamp": 1,
+            "message": "hello-logs"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nextSequenceToken": "1"
+      }
+    },
+    {
+      "operation": "PutLogEvents",
+      "input": {
+        "logGroupName": "g",
+        "logStreamName": "s",
+        "logEvents": [
+          {
+            "timestamp": 2,
+            "message": "second"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nextSequenceToken": "2"
+      }
+    },
+    {
+      "operation": "PutLogEvents",
+      "input": {
+        "logGroupName": "g",
+        "logStreamName": "s2",
+        "logEvents": [
+          {
+            "timestamp": 3,
+            "message": "other-stream"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "nextSequenceToken": "1"
+      }
+    },
+    {
+      "operation": "GetLogEvents",
+      "input": {
+        "logGroupName": "g",
+        "logStreamName": "s"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "events": [
+          {
+            "timestamp": 1,
+            "message": "hello-logs"
+          },
+          {
+            "timestamp": 2,
+            "message": "second"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetLogEvents",
+      "input": {
+        "logGroupName": "ghost",
+        "logStreamName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "events": []
+      }
+    },
+    {
+      "operation": "FilterLogEvents",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "events": [
+          {
+            "timestamp": 1,
+            "message": "hello-logs"
+          },
+          {
+            "timestamp": 2,
+            "message": "second"
+          },
+          {
+            "timestamp": 3,
+            "message": "other-stream"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "FilterLogEvents",
+      "input": {
+        "logGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "events": null
+      }
+    },
+    {
+      "operation": "PutRetentionPolicy",
+      "input": {
+        "logGroupName": "g",
+        "retentionInDays": 7
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteRetentionPolicy",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteRetentionPolicy",
+      "input": {
+        "logGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeLogGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupName": "g"
+          },
+          {
+            "logGroupName": "h"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutSubscriptionFilter",
+      "input": {
+        "logGroupName": "g",
+        "filterName": "f",
+        "filterPattern": "",
+        "destinationArn": "arn:aws:lambda:us-east-1:000000000000:function:x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeSubscriptionFilters",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscriptionFilters": [
+          {
+            "filterName": "f",
+            "filterPattern": "",
+            "destinationArn": "arn:aws:lambda:us-east-1:000000000000:function:x"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeSubscriptionFilters",
+      "input": {
+        "logGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscriptionFilters": null
+      }
+    },
+    {
+      "operation": "DeleteSubscriptionFilter",
+      "input": {
+        "logGroupName": "g",
+        "filterName": "f"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteSubscriptionFilter",
+      "input": {
+        "logGroupName": "g",
+        "filterName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeSubscriptionFilters",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subscriptionFilters": null
+      }
+    },
+    {
+      "operation": "PutMetricFilter",
+      "input": {
+        "logGroupName": "g",
+        "filterName": "mf",
+        "filterPattern": "",
+        "metricTransformations": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeMetricFilters",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "metricFilters": [
+          {
+            "filterName": "mf",
+            "filterPattern": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteMetricFilter",
+      "input": {
+        "logGroupName": "g",
+        "filterName": "mf"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteMetricFilter",
+      "input": {
+        "logGroupName": "g",
+        "filterName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "PutResourcePolicy",
+      "input": {
+        "policyName": "p",
+        "policyDocument": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyName": "p",
+        "policyDocument": "{}"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeResourcePolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourcePolicies": [
+          {
+            "policyName": "p",
+            "policyDocument": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteResourcePolicy",
+      "input": {
+        "policyName": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeResourcePolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourcePolicies": null
+      }
+    },
+    {
+      "operation": "TagLogGroup",
+      "input": {
+        "logGroupName": "g",
+        "tags": {
+          "k": "v"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "ListTagsLogGroup",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": {
+          "k": "v"
+        }
+      }
+    },
+    {
+      "operation": "UntagLogGroup",
+      "input": {
+        "logGroupName": "g",
+        "tags": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "ListTagsLogGroup",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": {}
+      }
+    },
+    {
+      "operation": "ListTagsLogGroup",
+      "input": {
+        "logGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": {}
+      }
+    },
+    {
+      "operation": "PutDestination",
+      "input": {
+        "destinationName": "d",
+        "targetArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+        "roleArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "destination": {
+          "destinationName": "d",
+          "targetArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+          "roleArn": "arn:aws:iam::000000000000:role/r"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDestinations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "destinations": [
+          {
+            "destinationName": "d",
+            "targetArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+            "roleArn": "arn:aws:iam::000000000000:role/r"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDestination",
+      "input": {
+        "destinationName": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeDestinations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "destinations": null
+      }
+    },
+    {
+      "operation": "PutQueryDefinition",
+      "input": {
+        "name": "q",
+        "queryString": "fields @message"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "queryDefinitionId": "aa00000000000001"
+      }
+    },
+    {
+      "operation": "DescribeQueryDefinitions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "queryDefinitions": [
+          {
+            "queryDefinitionId": "aa00000000000001",
+            "name": "q",
+            "queryString": "fields @message"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteQueryDefinition",
+      "input": {
+        "queryDefinitionId": {
+          "$fromStep": 42,
+          "$fromPath": "queryDefinitionId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "success": true
+      }
+    },
+    {
+      "operation": "DeleteQueryDefinition",
+      "input": {
+        "queryDefinitionId": "ghostquery"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "success": true
+      }
+    },
+    {
+      "operation": "DescribeQueryDefinitions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "queryDefinitions": null
+      }
+    },
+    {
+      "operation": "StartQuery",
+      "input": {
+        "logGroupName": "g",
+        "queryString": "fields @message",
+        "startTime": 1,
+        "endTime": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "queryId": "aa00000000000002"
+      }
+    },
+    {
+      "operation": "GetQueryResults",
+      "input": {
+        "queryId": {
+          "$fromStep": 47,
+          "$fromPath": "queryId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "queryId": "aa00000000000002",
+        "status": "Complete",
+        "queryString": "fields @message",
+        "results": []
+      },
+      "superseded": "the pack also answered queryId and queryString, which the response shape does not declare; the bundle drops them"
+    },
+    {
+      "operation": "StopQuery",
+      "input": {
+        "queryId": {
+          "$fromStep": 47,
+          "$fromPath": "queryId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "success": true
+      }
+    },
+    {
+      "operation": "GetQueryResults",
+      "input": {
+        "queryId": {
+          "$fromStep": 47,
+          "$fromPath": "queryId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "queryId": "aa00000000000002",
+        "status": "Complete",
+        "queryString": "fields @message",
+        "results": []
+      },
+      "superseded": "the pack also answered queryId and queryString, which the response shape does not declare; the bundle drops them"
+    },
+    {
+      "operation": "GetQueryResults",
+      "input": {
+        "queryId": "ghostquery"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "status": "Complete",
+        "results": []
+      }
+    },
+    {
+      "operation": "StopQuery",
+      "input": {
+        "queryId": "ghostquery"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "success": true
+      }
+    },
+    {
+      "operation": "AssociateKmsKey",
+      "input": {
+        "logGroupName": "g",
+        "kmsKeyId": "arn:aws:kms:us-east-1:000000000000:key/k"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DisassociateKmsKey",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteLogStream",
+      "input": {
+        "logGroupName": "g",
+        "logStreamName": "s"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "GetLogEvents",
+      "input": {
+        "logGroupName": "g",
+        "logStreamName": "s"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "events": []
+      }
+    },
+    {
+      "operation": "FilterLogEvents",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "events": [
+          {
+            "timestamp": 3,
+            "message": "other-stream"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteLogGroup",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeLogGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupName": "h"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLogStreams",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logStreams": [
+          {
+            "logStreamName": "s2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteLogGroup",
+      "input": {
+        "logGroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "CreateDelivery",
+      "input": {
+        "deliveryId": "dboot",
+        "deliveryDestinationArn": "arn:aws:logs:dest:d",
+        "deliverySourceName": "s"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "deliveryId": "dboot",
+          "deliveryDestinationArn": "arn:aws:logs:dest:d",
+          "deliverySourceName": "s"
+        },
+        "deliveryId": "dboot"
+      },
+      "superseded": "the pack also answered deliveryId at the top level; the response shape declares only 'delivery' and the bundle answers that"
+    },
+    {
+      "operation": "GetDelivery",
+      "input": {
+        "id": "dboot",
+        "deliveryId": "dboot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "deliveryId": "dboot",
+          "deliveryDestinationArn": "arn:aws:logs:dest:d",
+          "deliverySourceName": "s"
+        }
+      }
+    },
+    {
+      "operation": "GetDelivery",
+      "input": {
+        "id": "ghost",
+        "deliveryId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {}
+      }
+    },
+    {
+      "operation": "PutDeliveryDestination",
+      "input": {
+        "name": "dd",
+        "deliveryDestinationType": "S3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "name": "dd",
+          "deliveryDestinationType": "S3",
+          "deliveryId": "dd"
+        },
+        "deliveryId": "dd"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "GetDeliveryDestination",
+      "input": {
+        "name": "dd"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "name": "dd",
+          "deliveryDestinationType": "S3",
+          "deliveryId": "dd"
+        }
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "PutDeliverySource",
+      "input": {
+        "name": "ds",
+        "logType": "ACCESS_LOGS",
+        "resourceArn": "arn:aws:logs:r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "name": "ds",
+          "logType": "ACCESS_LOGS",
+          "resourceArn": "arn:aws:logs:r",
+          "deliveryId": "ds"
+        },
+        "deliveryId": "ds"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "GetDeliverySource",
+      "input": {
+        "name": "ds"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "name": "ds",
+          "logType": "ACCESS_LOGS",
+          "resourceArn": "arn:aws:logs:r",
+          "deliveryId": "ds"
+        }
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "PutDeliveryDestinationPolicy",
+      "input": {
+        "deliveryDestinationName": "dd",
+        "deliveryDestinationPolicy": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "deliveryDestinationName": "dd",
+          "deliveryDestinationPolicy": "{}",
+          "deliveryId": "aa00000000000003"
+        },
+        "deliveryId": "aa00000000000003"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape; the row is keyed by a generated id nothing can address"
+    },
+    {
+      "operation": "GetDeliveryDestinationPolicy",
+      "input": {
+        "deliveryDestinationName": "dd"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {}
+      }
+    },
+    {
+      "operation": "UpdateDeliveryConfiguration",
+      "input": {
+        "id": "dboot",
+        "fieldDelimiter": ","
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "id": "dboot",
+          "fieldDelimiter": ",",
+          "deliveryId": "aa00000000000004"
+        },
+        "deliveryId": "aa00000000000004"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape; the update wrote a phantom row -- the declared 'id' member is not in the handler's lookup chain"
+    },
+    {
+      "operation": "GetDelivery",
+      "input": {
+        "id": "dboot",
+        "deliveryId": "dboot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {
+          "deliveryId": "dboot",
+          "deliveryDestinationArn": "arn:aws:logs:dest:d",
+          "deliverySourceName": "s"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDeliveryDestinations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deliveries": [
+          {
+            "deliveryDestinationName": "dd",
+            "deliveryDestinationPolicy": "{}",
+            "deliveryId": "aa00000000000003"
+          },
+          {
+            "id": "dboot",
+            "fieldDelimiter": ",",
+            "deliveryId": "aa00000000000004"
+          },
+          {
+            "deliveryId": "dboot",
+            "deliveryDestinationArn": "arn:aws:logs:dest:d",
+            "deliverySourceName": "s"
+          },
+          {
+            "name": "dd",
+            "deliveryDestinationType": "S3",
+            "deliveryId": "dd"
+          },
+          {
+            "name": "ds",
+            "logType": "ACCESS_LOGS",
+            "resourceArn": "arn:aws:logs:r",
+            "deliveryId": "ds"
+          }
+        ]
+      },
+      "superseded": "the pack answered the delivery store under 'deliveries'; the model declares 'deliveryDestinations' and the bundle uses it"
+    },
+    {
+      "operation": "DeleteDeliveryDestination",
+      "input": {
+        "name": "dd"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteDeliverySource",
+      "input": {
+        "name": "ds"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteDeliveryDestinationPolicy",
+      "input": {
+        "deliveryDestinationName": "dd"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteDelivery",
+      "input": {
+        "id": "dboot",
+        "deliveryId": "dboot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "GetDelivery",
+      "input": {
+        "id": "dboot",
+        "deliveryId": "dboot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "delivery": {}
+      }
+    },
+    {
+      "operation": "DescribeDeliverySources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deliveries": [
+          {
+            "deliveryDestinationName": "dd",
+            "deliveryDestinationPolicy": "{}",
+            "deliveryId": "aa00000000000003"
+          },
+          {
+            "id": "dboot",
+            "fieldDelimiter": ",",
+            "deliveryId": "aa00000000000004"
+          }
+        ]
+      },
+      "superseded": "the pack answered the delivery store under 'deliveries'; the model declares 'deliverySources' and the bundle uses it"
+    },
+    {
+      "operation": "CreateExportTask",
+      "input": {
+        "logGroupName": "h",
+        "from": 1,
+        "to": 2,
+        "destination": "bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "exportTask": {
+          "destination": "bucket",
+          "from": 1,
+          "logGroupName": "h",
+          "to": 2,
+          "taskId": "h",
+          "status": "COMPLETED"
+        },
+        "taskId": "h"
+      },
+      "superseded": "the pack also answered the record wrapped under 'exportTask'; the response shape declares only 'taskId' (answered: the log group name) and the bundle answers that"
+    },
+    {
+      "operation": "DescribeExportTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "exportTasks": [
+          {
+            "destination": "bucket",
+            "from": 1,
+            "logGroupName": "h",
+            "to": 2,
+            "taskId": "h",
+            "status": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeExportTasks",
+      "input": {
+        "taskId": "h"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "exportTasks": [
+          {
+            "destination": "bucket",
+            "from": 1,
+            "logGroupName": "h",
+            "to": 2,
+            "taskId": "h",
+            "status": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeExportTasks",
+      "input": {
+        "taskId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "exportTasks": [
+          {
+            "destination": "bucket",
+            "from": 1,
+            "logGroupName": "h",
+            "to": 2,
+            "taskId": "h",
+            "status": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CancelExportTask",
+      "input": {
+        "taskId": "h"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeExportTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "exportTasks": []
+      }
+    },
+    {
+      "operation": "CancelExportTask",
+      "input": {
+        "taskId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "CreateImportTask",
+      "input": {
+        "importRoleArn": "arn:aws:iam::000000000000:role/r",
+        "importSourceArn": "arn:aws:s3:s"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "importTask": {
+          "importRoleArn": "arn:aws:iam::000000000000:role/r",
+          "importSourceArn": "arn:aws:s3:s",
+          "importId": "aa00000000000005",
+          "taskId": "aa00000000000005",
+          "status": "COMPLETED"
+        },
+        "importId": "aa00000000000005"
+      },
+      "superseded": "the pack also answered the record wrapped under 'importTask'; the bundle answers the declared importId"
+    },
+    {
+      "operation": "DescribeImportTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "importTasks": [
+          {
+            "importRoleArn": "arn:aws:iam::000000000000:role/r",
+            "importSourceArn": "arn:aws:s3:s",
+            "importId": "aa00000000000005",
+            "taskId": "aa00000000000005",
+            "status": "COMPLETED"
+          }
+        ]
+      },
+      "superseded": "the pack answered under 'importTasks'; the model declares 'imports'"
+    },
+    {
+      "operation": "DescribeImportTasks",
+      "input": {
+        "importId": {
+          "$fromStep": 87,
+          "$fromPath": "importId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "importTasks": [
+          {
+            "importRoleArn": "arn:aws:iam::000000000000:role/r",
+            "importSourceArn": "arn:aws:s3:s",
+            "importId": "aa00000000000005",
+            "taskId": "aa00000000000005",
+            "status": "COMPLETED"
+          }
+        ]
+      },
+      "superseded": "the pack answered under 'importTasks'; the model declares 'imports'"
+    },
+    {
+      "operation": "DescribeImportTaskBatches",
+      "input": {
+        "importId": {
+          "$fromStep": 87,
+          "$fromPath": "importId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "importTasks": [
+          {
+            "importRoleArn": "arn:aws:iam::000000000000:role/r",
+            "importSourceArn": "arn:aws:s3:s",
+            "importId": "aa00000000000005",
+            "taskId": "aa00000000000005",
+            "status": "COMPLETED"
+          }
+        ]
+      },
+      "superseded": "the pack answered the import task under 'importTasks'; the model declares 'importBatches'"
+    },
+    {
+      "operation": "CancelImportTask",
+      "input": {
+        "importId": {
+          "$fromStep": 87,
+          "$fromPath": "importId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeImportTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "importTasks": []
+      }
+    },
+    {
+      "operation": "CreateLogAnomalyDetector",
+      "input": {
+        "logGroupArnList": [
+          "arn:aws:logs:us-east-1:000000000000:log-group:h"
+        ],
+        "detectorName": "ad",
+        "filterPattern": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "anomalyDetector": {
+          "logGroupArnList": [
+            "arn:aws:logs:us-east-1:000000000000:log-group:h"
+          ],
+          "detectorName": "ad",
+          "filterPattern": "",
+          "anomalyDetectorArn": "aa00000000000006"
+        },
+        "anomalyDetectorArn": "aa00000000000006"
+      },
+      "superseded": "the pack also answered the record wrapped under 'anomalyDetector'; the bundle answers the declared anomalyDetectorArn"
+    },
+    {
+      "operation": "ListLogAnomalyDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "anomalyDetectors": [
+          {
+            "logGroupArnList": [
+              "arn:aws:logs:us-east-1:000000000000:log-group:h"
+            ],
+            "detectorName": "ad",
+            "filterPattern": "",
+            "anomalyDetectorArn": "aa00000000000006"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetLogAnomalyDetector",
+      "input": {
+        "anomalyDetectorArn": {
+          "$fromStep": 93,
+          "$fromPath": "anomalyDetectorArn"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "anomalyDetector": {
+          "logGroupArnList": [
+            "arn:aws:logs:us-east-1:000000000000:log-group:h"
+          ],
+          "detectorName": "ad",
+          "filterPattern": "",
+          "anomalyDetectorArn": "aa00000000000006"
+        }
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "UpdateLogAnomalyDetector",
+      "input": {
+        "anomalyDetectorArn": {
+          "$fromStep": 93,
+          "$fromPath": "anomalyDetectorArn"
+        },
+        "enabled": false
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "anomalyDetector": {
+          "anomalyDetectorArn": "aa00000000000006",
+          "enabled": false
+        },
+        "anomalyDetectorArn": "aa00000000000006"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListLogAnomalyDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "anomalyDetectors": [
+          {
+            "anomalyDetectorArn": "aa00000000000006",
+            "enabled": false
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateAnomaly",
+      "input": {
+        "anomalyDetectorArn": {
+          "$fromStep": 93,
+          "$fromPath": "anomalyDetectorArn"
+        },
+        "suppressionType": "ALL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "anomalyDetector": {
+          "anomalyDetectorArn": "aa00000000000006",
+          "suppressionType": "ALL"
+        },
+        "anomalyDetectorArn": "aa00000000000006"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "DeleteLogAnomalyDetector",
+      "input": {
+        "anomalyDetectorArn": {
+          "$fromStep": 93,
+          "$fromPath": "anomalyDetectorArn"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "ListLogAnomalyDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "anomalyDetectors": []
+      }
+    },
+    {
+      "operation": "CreateLookupTable",
+      "input": {
+        "lookupTableName": "lut",
+        "description": "d",
+        "tableBody": {
+          "cols": [
+            "a"
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lookupTable": {
+          "lookupTableName": "lut",
+          "description": "d",
+          "tableBody": {
+            "cols": [
+              "a"
+            ]
+          }
+        },
+        "lookupTableName": "lut"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeLookupTables",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lookupTables": [
+          {
+            "lookupTableName": "lut",
+            "description": "d",
+            "tableBody": {
+              "cols": [
+                "a"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetLookupTable",
+      "input": {
+        "lookupTableArn": "arn:aws:logs:lut"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lookupTable": {}
+      }
+    },
+    {
+      "operation": "GetLookupTable",
+      "input": {
+        "lookupTableArn": "arn:aws:logs:lut",
+        "lookupTableName": "lut"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lookupTable": {
+          "lookupTableName": "lut",
+          "description": "d",
+          "tableBody": {
+            "cols": [
+              "a"
+            ]
+          }
+        }
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "UpdateLookupTable",
+      "input": {
+        "lookupTableArn": "arn:aws:logs:lut",
+        "description": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lookupTable": {
+          "lookupTableArn": "arn:aws:logs:lut",
+          "description": "d2",
+          "lookupTableName": "aa00000000000007"
+        },
+        "lookupTableName": "aa00000000000007"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape; the update wrote a phantom row under a generated name"
+    },
+    {
+      "operation": "DeleteLookupTable",
+      "input": {
+        "lookupTableArn": "arn:aws:logs:lut"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeLookupTables",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "lookupTables": [
+          {
+            "lookupTableArn": "arn:aws:logs:lut",
+            "description": "d2",
+            "lookupTableName": "aa00000000000007"
+          },
+          {
+            "lookupTableName": "lut",
+            "description": "d",
+            "tableBody": {
+              "cols": [
+                "a"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateScheduledQuery",
+      "input": {
+        "name": "sq",
+        "queryLanguage": "CWLI",
+        "queryString": "fields @message",
+        "scheduleExpression": "rate(1 hour)",
+        "executionRoleArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "scheduledQuery": {
+          "name": "sq",
+          "queryLanguage": "CWLI",
+          "queryString": "fields @message",
+          "scheduleExpression": "rate(1 hour)",
+          "executionRoleArn": "arn:aws:iam::000000000000:role/r",
+          "scheduledQueryArn": "sq"
+        },
+        "scheduledQueryArn": "sq"
+      },
+      "superseded": "the pack also answered the record wrapped under 'scheduledQuery'; the bundle answers the declared scheduledQueryArn (the query's name, per the pack's chain)"
+    },
+    {
+      "operation": "GetScheduledQuery",
+      "input": {
+        "identifier": "sq"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "scheduledQuery": {}
+      }
+    },
+    {
+      "operation": "GetScheduledQuery",
+      "input": {
+        "identifier": "sq",
+        "scheduledQueryArn": "sq"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "scheduledQuery": {
+          "name": "sq",
+          "queryLanguage": "CWLI",
+          "queryString": "fields @message",
+          "scheduleExpression": "rate(1 hour)",
+          "executionRoleArn": "arn:aws:iam::000000000000:role/r",
+          "scheduledQueryArn": "sq"
+        }
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "GetScheduledQueryHistory",
+      "input": {
+        "identifier": "sq",
+        "startTime": 1,
+        "endTime": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "scheduledQuery": {}
+      }
+    },
+    {
+      "operation": "UpdateScheduledQuery",
+      "input": {
+        "identifier": "sq",
+        "queryLanguage": "CWLI",
+        "queryString": "fields @message",
+        "scheduleExpression": "rate(5 minutes)",
+        "executionRoleArn": "arn:aws:iam::000000000000:role/r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "scheduledQuery": {
+          "identifier": "sq",
+          "queryLanguage": "CWLI",
+          "queryString": "fields @message",
+          "scheduleExpression": "rate(5 minutes)",
+          "executionRoleArn": "arn:aws:iam::000000000000:role/r",
+          "scheduledQueryArn": "aa00000000000008"
+        },
+        "scheduledQueryArn": "aa00000000000008"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape; the update wrote a phantom row under a generated arn"
+    },
+    {
+      "operation": "DeleteScheduledQuery",
+      "input": {
+        "identifier": "sq"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "GetScheduledQuery",
+      "input": {
+        "identifier": "sq",
+        "scheduledQueryArn": "sq"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "scheduledQuery": {
+          "name": "sq",
+          "queryLanguage": "CWLI",
+          "queryString": "fields @message",
+          "scheduleExpression": "rate(1 hour)",
+          "executionRoleArn": "arn:aws:iam::000000000000:role/r",
+          "scheduledQueryArn": "sq"
+        }
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "PutIntegration",
+      "input": {
+        "integrationName": "int",
+        "integrationType": "OPENSEARCH",
+        "resourceConfig": {
+          "kind": "x"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "integration": {
+          "integrationName": "int",
+          "integrationType": "OPENSEARCH",
+          "resourceConfig": {
+            "kind": "x"
+          }
+        },
+        "integrationName": "int"
+      },
+      "superseded": "the pack also answered the record wrapped under 'integration'; the bundle answers the declared integrationName"
+    },
+    {
+      "operation": "ListIntegrations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "integrations": [
+          {
+            "integrationName": "int",
+            "integrationType": "OPENSEARCH",
+            "resourceConfig": {
+              "kind": "x"
+            }
+          }
+        ]
+      },
+      "superseded": "the pack answered under 'integrations'; the model declares 'integrationSummaries'"
+    },
+    {
+      "operation": "GetIntegration",
+      "input": {
+        "integrationName": "int"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "integration": {
+          "integrationName": "int",
+          "integrationType": "OPENSEARCH",
+          "resourceConfig": {
+            "kind": "x"
+          }
+        }
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "AssociateSourceToS3TableIntegration",
+      "input": {
+        "dataSource": "logs",
+        "integrationArn": "arn:aws:logs:int"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "integration": {
+          "dataSource": "logs",
+          "integrationArn": "arn:aws:logs:int",
+          "integrationName": "aa00000000000009"
+        },
+        "integrationName": "aa00000000000009"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListSourcesForS3TableIntegration",
+      "input": {
+        "integrationArn": "arn:aws:logs:int"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "integrations": [
+          {
+            "dataSource": "logs",
+            "integrationArn": "arn:aws:logs:int",
+            "integrationName": "aa00000000000009"
+          },
+          {
+            "integrationName": "int",
+            "integrationType": "OPENSEARCH",
+            "resourceConfig": {
+              "kind": "x"
+            }
+          }
+        ]
+      },
+      "superseded": "the pack answered the integration store under 'integrations'; the model declares 'sources'"
+    },
+    {
+      "operation": "DisassociateSourceFromS3TableIntegration",
+      "input": {
+        "identifier": "x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DeleteIntegration",
+      "input": {
+        "integrationName": "int"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "GetIntegration",
+      "input": {
+        "integrationName": "int"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "integration": {}
+      }
+    },
+    {
+      "operation": "PutTransformer",
+      "input": {
+        "logGroupIdentifier": "lg",
+        "transformerConfig": [
+          {
+            "type": "x"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "transformer": {
+          "logGroupIdentifier": "lg",
+          "transformerConfig": [
+            {
+              "type": "x"
+            }
+          ]
+        },
+        "logGroupIdentifier": "lg"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "GetTransformer",
+      "input": {
+        "logGroupIdentifier": "lg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "transformer": {
+          "logGroupIdentifier": "lg",
+          "transformerConfig": [
+            {
+              "type": "x"
+            }
+          ]
+        }
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "TestTransformer",
+      "input": {
+        "transformerConfig": [
+          {
+            "type": "x"
+          }
+        ],
+        "logEventMessages": [
+          "m"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "transformer": {
+          "transformerConfig": [
+            {
+              "type": "x"
+            }
+          ],
+          "logEventMessages": [
+            "m"
+          ],
+          "logGroupIdentifier": "aa00000000000010",
+          "matches": []
+        },
+        "logGroupIdentifier": "aa00000000000010"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "DeleteTransformer",
+      "input": {
+        "logGroupIdentifier": "lg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "GetTransformer",
+      "input": {
+        "logGroupIdentifier": "lg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "transformer": {}
+      }
+    },
+    {
+      "operation": "PutSyslogConfiguration",
+      "input": {
+        "logGroupIdentifier": "lg",
+        "vpcEndpointId": "vpc-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroupIdentifier": "lg",
+        "vpcEndpointId": "vpc-1",
+        "syslogConfigurationName": "aa00000000000011"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListSyslogConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "syslogConfigurations": [
+          {
+            "logGroupIdentifier": "lg",
+            "vpcEndpointId": "vpc-1",
+            "syslogConfigurationName": "aa00000000000011"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteSyslogConfiguration",
+      "input": {
+        "logGroupIdentifier": "lg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "ListSyslogConfigurations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "syslogConfigurations": [
+          {
+            "logGroupIdentifier": "lg",
+            "vpcEndpointId": "vpc-1",
+            "syslogConfigurationName": "aa00000000000011"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutIndexPolicy",
+      "input": {
+        "logGroupIdentifier": "lg",
+        "policyDocument": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroupIdentifier": "lg",
+        "policyDocument": "{}"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "DescribeIndexPolicies",
+      "input": {
+        "logGroupIdentifiers": [
+          "lg"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "indexPolicies": [
+          {
+            "logGroupIdentifier": "lg",
+            "policyDocument": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeFieldIndexes",
+      "input": {
+        "logGroupIdentifiers": [
+          "lg"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "indexPolicies": [
+          {
+            "logGroupIdentifier": "lg",
+            "policyDocument": "{}"
+          }
+        ]
+      },
+      "superseded": "the pack answered the index-policy store under 'indexPolicies'; the model declares 'fieldIndexes'"
+    },
+    {
+      "operation": "DeleteIndexPolicy",
+      "input": {
+        "logGroupIdentifier": "lg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "DescribeIndexPolicies",
+      "input": {
+        "logGroupIdentifiers": [
+          "lg"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "indexPolicies": []
+      }
+    },
+    {
+      "operation": "PutDataProtectionPolicy",
+      "input": {
+        "logGroupIdentifier": "lg",
+        "policyDocument": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroupIdentifier": "lg",
+        "policyDocument": "{}"
+      }
+    },
+    {
+      "operation": "GetDataProtectionPolicy",
+      "input": {
+        "logGroupIdentifier": "lg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroupIdentifier": "lg",
+        "policyDocument": "{}"
+      }
+    },
+    {
+      "operation": "DeleteDataProtectionPolicy",
+      "input": {
+        "logGroupIdentifier": "lg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "GetDataProtectionPolicy",
+      "input": {
+        "logGroupIdentifier": "lg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutAccountPolicy",
+      "input": {
+        "policyName": "ap",
+        "policyDocument": "{}",
+        "policyType": "SUBSCRIPTION_FILTER_POLICY"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "policyName": "ap",
+        "policyDocument": "{}",
+        "policyType": "SUBSCRIPTION_FILTER_POLICY"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "DeleteAccountPolicy",
+      "input": {
+        "policyName": "ap",
+        "policyType": "SUBSCRIPTION_FILTER_POLICY"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "PutStorageTierPolicy",
+      "input": {
+        "storageTier": "ARCHIVE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "storageTier": "ARCHIVE",
+        "logGroupIdentifier": "aa00000000000012"
+      },
+      "superseded": "the pack also answered the generated id under logGroupIdentifier; the response shape declares only lastUpdatedTime and storageTier"
+    },
+    {
+      "operation": "GetStorageTierPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListLogGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": []
+      }
+    },
+    {
+      "operation": "PutBearerTokenAuthentication",
+      "input": {
+        "logGroupIdentifier": "lg",
+        "bearerTokenAuthenticationEnabled": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroupIdentifier": "lg",
+        "bearerTokenAuthenticationEnabled": true,
+        "name": "aa00000000000013"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "ListLogGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutLogGroupDeletionProtection",
+      "input": {
+        "logGroupIdentifier": "lg",
+        "deletionProtectionEnabled": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroupIdentifier": "lg",
+        "deletionProtectionEnabled": true,
+        "name": "aa00000000000014"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "PutDestinationPolicy",
+      "input": {
+        "destinationName": "d",
+        "accessPolicy": "{}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "destinationName": "d",
+        "accessPolicy": "{}",
+        "name": "aa00000000000015"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+        "tags": {
+          "k": "v"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+        "tags": {
+          "k": "v"
+        },
+        "name": "aa00000000000016"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "StartLiveTail",
+      "input": {
+        "logGroupIdentifiers": [
+          "lg"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroupIdentifiers": [
+          "lg"
+        ],
+        "name": "aa00000000000017",
+        "sessionId": "aa00000000000017"
+      },
+      "superseded": "the pack answered the stored record flat (or wrapped under a member the response shape does not declare); the bundle answers the declared shape"
+    },
+    {
+      "operation": "TestMetricFilter",
+      "input": {
+        "filterPattern": "",
+        "logEventMessages": [
+          "m"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "filterPattern": "",
+        "logEventMessages": [
+          "m"
+        ],
+        "matches": [],
+        "name": "aa00000000000018"
+      },
+      "superseded": "the pack echoed the request and its generated row id beside 'matches'; the response shape declares only 'matches'"
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+        "tagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": null
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it"
+    },
+    {
+      "operation": "ListLogGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the rows are keyed by generated ids and answer in key order, which is the draw's order, not the caller's"
+    },
+    {
+      "operation": "DescribeDeliveries",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it; 'Deliveries' does not contain the substring 'Delivery', so the op never reads the delivery store"
+    },
+    {
+      "operation": "DescribeConfigurationTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it"
+    },
+    {
+      "operation": "DescribeQueries",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it"
+    },
+    {
+      "operation": "DescribeAccountPolicies",
+      "input": {
+        "policyType": "SUBSCRIPTION_FILTER_POLICY"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it; account policies are stored in their own store, so they never appear here at all"
+    },
+    {
+      "operation": "ListAnomalies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it"
+    },
+    {
+      "operation": "ListScheduledQueries",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it"
+    },
+    {
+      "operation": "ListLogGroupsForQuery",
+      "input": {
+        "queryId": "q"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it"
+    },
+    {
+      "operation": "ListAggregateLogGroupSummaries",
+      "input": {
+        "groupBy": "logGroupName"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "logGroups": [
+          {
+            "logGroupIdentifier": "lg",
+            "bearerTokenAuthenticationEnabled": true,
+            "name": "aa00000000000013"
+          },
+          {
+            "logGroupIdentifier": "lg",
+            "deletionProtectionEnabled": true,
+            "name": "aa00000000000014"
+          },
+          {
+            "destinationName": "d",
+            "accessPolicy": "{}",
+            "name": "aa00000000000015"
+          },
+          {
+            "resourceArn": "arn:aws:logs:us-east-1:000000000000:log-group:g",
+            "tags": {
+              "k": "v"
+            },
+            "name": "aa00000000000016"
+          },
+          {
+            "logGroupIdentifiers": [
+              "lg"
+            ],
+            "name": "aa00000000000017",
+            "sessionId": "aa00000000000017"
+          },
+          {
+            "filterPattern": "",
+            "logEventMessages": [
+              "m"
+            ],
+            "matches": [],
+            "name": "aa00000000000018"
+          }
+        ]
+      },
+      "superseded": "the pack listed the generic misc store under the member 'logGroups'; the model declares a different member for this operation and the bundle lists the same rows under it"
+    },
+    {
+      "operation": "GetLogFields",
+      "input": {
+        "dataSourceName": "s",
+        "dataSourceType": "t"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetLogGroupFields",
+      "input": {
+        "logGroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetLogObject",
+      "input": {
+        "logObjectPointer": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetLogRecord",
+      "input": {
+        "logRecordPointer": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

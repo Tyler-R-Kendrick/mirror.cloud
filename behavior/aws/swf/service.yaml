@@ -1,0 +1,205 @@
+schema: bir/1
+service: aws.swf
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No workflow ever runs: an execution is OPEN the moment it starts,
+# PollForActivityTask always answers empty, and deprecating a domain deletes
+# it outright.
+provenance: authored
+
+# The pack answered an empty domain name with UnknownResourceFault; the model
+# marks the member required, and the service's own vocabulary for an absent
+# required input is that fault.
+missing_input_error: Unknown
+
+resources:
+  domain:
+    collection: swfdom
+    id:
+      input_members: [name]
+    record:
+      name: id
+      status: "'REGISTERED'"
+      description: "'description' in input ? string(input.description) : ''"
+
+  workflow_type:
+    collection: swfwf
+    id:
+      derive: "string(input.domain) + '/' + string(input.name) + '/' + string(input.version)"
+    record:
+      domain: "string(input.domain)"
+      name: "string(input.name)"
+      version: "string(input.version)"
+      status: "'REGISTERED'"
+
+  activity_type:
+    collection: swfact
+    id:
+      derive: "string(input.domain) + '/' + string(input.name) + '/' + string(input.version)"
+    record:
+      domain: "string(input.domain)"
+      name: "string(input.name)"
+      version: "string(input.version)"
+      status: "'REGISTERED'"
+
+  # The pack scoped executions to a per-domain collection; a composite key
+  # over one collection is the same containment, and the listing narrows by
+  # the recorded domain. The record is written by StartWorkflowExecution,
+  # where the run binding exists.
+  execution:
+    collection: swfex
+    id:
+      derive: "string(input.domain) + '/' + string(input.workflowId)"
+
+errors:
+  Unknown:
+    code: UnknownResourceFault
+    http: 400
+    fault: client
+
+operations:
+  RegisterDomain:
+    effects:
+      - put: { resource: domain }
+    output: {}
+
+  DescribeDomain:
+    reads:
+      d: { resource: domain }
+    require:
+      - { cond: d_found, error: Unknown }
+    output:
+      domainInfo: d
+
+  ListDomains:
+    list: { resource: domain, member: domainInfos, paginate: model }
+
+  # Deprecating deletes the domain outright; nothing is marked DEPRECATED.
+  DeprecateDomain:
+    effects:
+      - delete: { resource: domain, missing: ignore }
+    output: {}
+
+  RegisterWorkflowType:
+    effects:
+      - put: { resource: workflow_type }
+    output: {}
+
+  # The pack did not fault on an unknown type: it answered the name and
+  # version it was asked about, whether or not they were registered.
+  # The pack answered the flat record (or, for an unknown type, a flat echo
+  # of the ask); the codec drops what the shape does not declare either way.
+  DescribeWorkflowType:
+    reads:
+      t: { resource: workflow_type, key: "string(input.domain) + '/' + string(input.workflowType.name) + '/' + string(input.workflowType.version)" }
+    output:
+      typeInfo: "t_found ? t : {'name': string(input.workflowType.name), 'version': string(input.workflowType.version)}"
+
+  ListWorkflowTypes:
+    list:
+      resource: workflow_type
+      member: typeInfos
+      paginate: model
+    output:
+      typeInfos: "items.map(t, {'workflowType': {'name': t.name, 'version': t.version}, 'status': t.status})"
+
+  RegisterActivityType:
+    effects:
+      - put: { resource: activity_type }
+    output: {}
+
+  DescribeActivityType:
+    reads:
+      t: { resource: activity_type, key: "string(input.domain) + '/' + string(input.activityType.name) + '/' + string(input.activityType.version)" }
+    output:
+      typeInfo: "t_found ? t : {'name': string(input.activityType.name), 'version': string(input.activityType.version)}"
+
+  ListActivityTypes:
+    list:
+      resource: activity_type
+      member: typeInfos
+      paginate: model
+    output:
+      typeInfos: "items.map(t, {'activityType': {'name': t.name, 'version': t.version}, 'status': t.status})"
+
+  StartWorkflowExecution:
+    effects:
+      - generate: { bind: run, kind: hex, bytes: 8 }
+      - put:
+          resource: execution
+          record:
+            workflowId: "string(input.workflowId)"
+            runId: fx.run
+            domain: "string(input.domain)"
+            executionStatus: "'OPEN'"
+    output:
+      runId: rec.runId
+
+  DescribeWorkflowExecution:
+    reads:
+      e: { resource: execution, key: "string(input.domain) + '/' + string(input.execution.workflowId)" }
+    require:
+      - { cond: e_found, error: Unknown }
+    output:
+      executionInfo: e
+
+  # Terminating deletes the execution, so a terminated execution reads as
+  # unknown rather than CLOSED.
+  TerminateWorkflowExecution:
+    effects:
+      - delete: { resource: execution, missing: ignore }
+    output: {}
+
+  ListOpenWorkflowExecutions:
+    list:
+      resource: execution
+      member: executionInfos
+      paginate: model
+      filter: "item.domain == string(input.domain)"
+    output:
+      executionInfos: "items.map(e, {'execution': {'workflowId': e.workflowId, 'runId': e.runId}, 'executionStatus': e.executionStatus})"
+
+  # ponytail: no activity workers; the pack's poll answered empty, and so
+  # does this bundle.
+  PollForActivityTask:
+    output: {}
+
+quirks:
+  - operation: RegisterDomain
+    note: >
+      The model requires workflowExecutionRetentionPeriodInDays and the engine
+      now rejects a request that omits it, which the pack accepted; the pack
+      never stored it, so a registered domain has no retention period.
+      Registering over an existing name overwrites the description and leaves
+      the status REGISTERED, where the real service answers
+      DomainAlreadyExistsFault.
+  - operation: DeprecateDomain
+    note: >
+      Deprecating a domain deletes it rather than marking it DEPRECATED, so a
+      deprecated domain cannot be described or listed afterwards and its
+      workflow and activity types survive it in their own collections.
+  - operation: DescribeWorkflowType
+    note: >
+      An unknown type is not a fault: the answer echoes the name and version
+      asked about, registered or not. DescribeActivityType does the same. The
+      real service answers UnknownResourceFault; a probe settles that before
+      any repair.
+  - operation: ListWorkflowTypes
+    note: >
+      The listing ignores the domain it is asked about: every registered type
+      in the account and region is returned, whatever domain the request
+      names. ListActivityTypes is the same. The pack keyed those collections
+      per account, not per domain, and the transcription keeps that.
+  - operation: StartWorkflowExecution
+    note: >
+      The execution is OPEN the moment it starts and nothing ever closes it;
+      the workflow type named in the request is not checked to exist, and
+      taskList is not stored. The pack generated a workflowId when the caller
+      omitted one; the model marks workflowId required and the engine rejects
+      its absence now, so that path is gone.
+  - operation: TerminateWorkflowExecution
+    note: >
+      The pack fell back to execution.workflowId when the top-level
+      workflowId was absent; the model requires workflowId and the engine
+      rejects its absence, so the fallback is unreachable and is not
+      transcribed. Terminating an execution that was never started succeeds.

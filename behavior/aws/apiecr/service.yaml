@@ -1,0 +1,771 @@
+schema: bir/1
+service: aws.api.ecr
+
+# Transcribed from the hand-written pack, not established against the real
+# service. This is not a registry daemon: a repository is a row of metadata,
+# an image is its manifest string stored under a tag, a layer upload is a list
+# of part descriptors that is never assembled into a blob, and every scan
+# completes the moment it starts.
+provenance: authored
+
+resources:
+  repository:
+    collection: ecrrepo
+    id:
+      input_members: [repositoryName]
+
+  # Images live in one collection per repository, keyed by tag; a put without
+  # a tag lands on "latest".
+  image:
+    collection: "ecrimg:{repository.id}"
+    parent: repository
+    id:
+      derive: "'imageTag' in input && string(input.imageTag) != '' ? string(input.imageTag) : 'latest'"
+
+  upload:
+    collection: ecrlayer
+    id:
+      input_members: [uploadId]
+
+  # Completed layers, one collection per repository keyed by digest; existence
+  # is the only thing BatchCheckLayerAvailability asks of them.
+  layer:
+    collection: "ecrlayerdone:{repository.id}"
+    parent: repository
+
+  # One scan result per tag, written by StartImageScan. The tag falls back to
+  # imageId.imageTag and then to "latest", which is the pack's imageTag().
+  scan:
+    collection: "ecrscan:{repository.id}"
+    parent: repository
+    id:
+      derive: >-
+        'imageTag' in input && string(input.imageTag) != '' ? string(input.imageTag)
+        : 'imageId' in input && 'imageTag' in input.imageId && string(input.imageId.imageTag) != ''
+        ? string(input.imageId.imageTag) : 'latest'
+
+  repo_policy:
+    collection: ecrpol
+    id:
+      input_members: [repositoryName]
+
+  lifecycle_policy:
+    collection: ecrlc
+    id:
+      input_members: [repositoryName]
+
+  # The preview id StartLifecyclePolicyPreview mints and nothing ever reads.
+  lifecycle_preview:
+    collection: ecrlcprev
+    id:
+      input_members: [repositoryName]
+
+  cache_rule:
+    collection: ecrptc
+    id:
+      input_members: [ecrRepositoryPrefix]
+
+  template:
+    collection: ecrtmpl
+    id:
+      input_members: [prefix]
+
+  # The pack kept four unrelated values in one collection under fixed keys.
+  registry_policy:
+    collection: ecrreg
+    singleton: policy
+  registry_scan:
+    collection: ecrreg
+    singleton: scan
+  registry_replication:
+    collection: ecrreg
+    singleton: repl
+  registry_signing:
+    collection: ecrreg
+    singleton: sign
+
+  account_setting:
+    collection: ecracct
+    id:
+      input_members: [name]
+
+  # The per-repository scanOnPush flag, in one flat collection -- a different
+  # collection from the per-repository "ecrscan:" scan results above.
+  scan_config:
+    collection: ecrscan
+    id:
+      input_members: [repositoryName]
+
+  exclusion:
+    collection: ecrexcl
+    id:
+      input_members: [principalArn, exclusion]
+
+  resource_tags:
+    collection: ecrtags
+    id:
+      input_members: [resourceArn]
+
+errors:
+  PolicyNotFound:
+    code: RepositoryPolicyNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateRepository:
+    effects:
+      # create, not put: the pack built a fresh four-member record and
+      # overwrote, so re-creating a repository drops anything a later
+      # PutImageTagMutability added.
+      - create:
+          resource: repository
+          record:
+            repositoryName: id
+            repositoryArn: "'arn:aws:ecr:' + identity.region + ':' + identity.account + ':repository/' + id"
+            repositoryUri: "identity.account + '.dkr.ecr.' + identity.region + '.amazonaws.com/' + id"
+            registryId: identity.account
+    output:
+      repository: rec
+
+  # The pack ignored repositoryNames: every repository in the account and
+  # region is listed, whatever the request names.
+  DescribeRepositories:
+    list: { resource: repository, member: repositories, paginate: model }
+
+  DeleteRepository:
+    effects:
+      - delete: { resource: repository, missing: ignore }
+    output: {}
+
+  PutImage:
+    reads:
+      repository: { resource: repository }
+    effects:
+      - generate: { bind: digest, kind: hex, bytes: 16 }
+      - create:
+          resource: image
+          record:
+            imageTag: id
+            imageDigest: "'sha256:' + fx.digest"
+            imageManifest: input.imageManifest
+    output:
+      image: rec
+
+  # The pack looked each id up by imageTag and silently skipped the misses;
+  # failures is always empty and an imageDigest-only id finds nothing.
+  BatchGetImage:
+    reads:
+      repository: { resource: repository }
+    list:
+      resource: image
+      member: images
+      paginate: model
+    output:
+      images: "items.filter(x, input.imageIds.exists(i, 'imageTag' in i && string(i.imageTag) == x.imageTag))"
+      failures: "[]"
+
+  ListImages:
+    reads:
+      repository: { resource: repository }
+    list:
+      resource: image
+      member: imageIds
+      paginate: model
+    output:
+      imageIds: "items.map(x, {'imageTag': x.imageTag, 'imageDigest': x.imageDigest})"
+
+  BatchDeleteImage:
+    reads:
+      repository: { resource: repository }
+    effects:
+      - delete:
+          resource: image
+          where: "input.imageIds.exists(i, 'imageTag' in i && string(i.imageTag) == item.imageTag)"
+    output:
+      imageIds: "input.imageIds"
+      failures: "[]"
+
+  GetAuthorizationToken:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 16 }
+    output:
+      authorizationData: "[{'authorizationToken': fx.token, 'proxyEndpoint': 'https://' + identity.account + '.dkr.ecr.' + identity.region + '.amazonaws.com'}]"
+
+  SetRepositoryPolicy:
+    effects:
+      - put:
+          resource: repo_policy
+          record:
+            policyText: string(input.policyText)
+    output:
+      policyText: rec.policyText
+
+  GetRepositoryPolicy:
+    reads:
+      p: { resource: repo_policy }
+    require:
+      - { cond: p_found, error: PolicyNotFound }
+    output:
+      policyText: p.policyText
+
+  DeleteRepositoryPolicy:
+    effects:
+      - delete: { resource: repo_policy, missing: ignore }
+    output: {}
+
+  TagResource:
+    effects:
+      - put:
+          resource: resource_tags
+          record:
+            tags: input.tags
+    output: {}
+
+  ListTagsForResource:
+    reads:
+      t: { resource: resource_tags }
+    output:
+      tags: "t_found ? t.tags : []"
+
+  # The pack deleted the whole tag set and never looked at tagKeys.
+  UntagResource:
+    effects:
+      - delete: { resource: resource_tags, missing: ignore }
+    output: {}
+
+  InitiateLayerUpload:
+    effects:
+      - generate: { bind: uid, kind: hex, bytes: 8 }
+      - create:
+          resource: upload
+          key: fx.uid
+          record:
+            uploadId: id
+            repositoryName: string(input.repositoryName)
+            parts: []
+    output:
+      uploadId: id
+      partSize: "5242880"
+
+  # An uploadId that was never initiated still succeeds: the pack started a
+  # fresh record and appended the part.
+  UploadLayerPart:
+    reads:
+      u: { resource: upload }
+    effects:
+      - put:
+          resource: upload
+          record:
+            uploadId: string(input.uploadId)
+            parts: "('parts' in u ? u.parts : []) + [{'partFirstByte': input.partFirstByte, 'partLastByte': input.partLastByte, 'layerPartBlob': input.layerPartBlob}]"
+    output:
+      uploadId: string(input.uploadId)
+      lastByteReceived: input.partLastByte
+
+  CompleteLayerUpload:
+    reads:
+      repository: { resource: repository }
+      u: { resource: upload }
+    effects:
+      # The pack read a singular layerDigest member the model does not declare
+      # (the required member is the layerDigests list, which is ignored), so a
+      # conformant request always lands on the minted digest.
+      - generate:
+          bind: digest
+          kind: hex
+          bytes: 16
+          prefix: "sha256:"
+          when: "!('layerDigest' in input) || string(input.layerDigest) == ''"
+      - put:
+          resource: upload
+          record:
+            uploadId: string(input.uploadId)
+            layerDigest: "'layerDigest' in input && string(input.layerDigest) != '' ? string(input.layerDigest) : fx.digest"
+            status: "'COMPLETE'"
+      - put:
+          resource: layer
+          key: "'layerDigest' in input && string(input.layerDigest) != '' ? string(input.layerDigest) : fx.digest"
+          record:
+            uploadId: string(input.uploadId)
+            layerDigest: "'layerDigest' in input && string(input.layerDigest) != '' ? string(input.layerDigest) : fx.digest"
+            status: "'COMPLETE'"
+    output:
+      layerDigest: "'layerDigest' in input && string(input.layerDigest) != '' ? string(input.layerDigest) : fx.digest"
+      uploadId: string(input.uploadId)
+      registryId: identity.account
+
+  BatchCheckLayerAvailability:
+    reads:
+      repository: { resource: repository }
+    list:
+      resource: layer
+      member: layers
+      paginate: model
+    output:
+      layers: "input.layerDigests.map(d, {'layerDigest': string(d), 'layerAvailability': items.exists(x, x.layerDigest == string(d)) ? 'AVAILABLE' : 'UNAVAILABLE'})"
+      failures: "[]"
+
+  GetDownloadUrlForLayer:
+    output:
+      downloadUrl: "'http://127.0.0.1/ecr-layers/' + string(input.layerDigest)"
+      layerDigest: string(input.layerDigest)
+
+  # The pack answered the raw stored records: imageTag, imageDigest,
+  # imageManifest and whatever UpdateImageStorageClass added -- not the
+  # ImageDetail shape the model declares.
+  DescribeImages:
+    reads:
+      repository: { resource: repository }
+    list:
+      resource: image
+      member: imageDetails
+      paginate: model
+    output:
+      imageDetails: items
+
+  StartImageScan:
+    reads:
+      repository: { resource: repository }
+    effects:
+      - put:
+          resource: scan
+          record:
+            imageTag: id
+            status: "'COMPLETE'"
+            findings: []
+    # The pack also answered imageScanFindings here, which
+    # StartImageScanResponse does not declare; the bundle answers the declared
+    # members and the recording marks the step superseded.
+    output:
+      imageScanStatus: "{'status': 'COMPLETE'}"
+      imageId: "{'imageTag': id}"
+
+  # A tag with a stored scan answers that record under imageScanFindings and
+  # omits imageScanStatus; any other tag answers the canned COMPLETE result.
+  DescribeImageScanFindings:
+    reads:
+      repository: { resource: repository }
+      s: { resource: scan }
+    output:
+      imageScanFindings: "s_found ? s : {'findings': [], 'findingSeverityCounts': {}}"
+      imageScanStatus: "!s_found ? dyn({'status': 'COMPLETE'}) : null"
+      imageId: "{'imageTag': 'imageTag' in input && string(input.imageTag) != '' ? string(input.imageTag) : 'imageId' in input && 'imageTag' in input.imageId && string(input.imageId.imageTag) != '' ? string(input.imageId.imageTag) : 'latest'}"
+
+  # The pack answered a singular replicationStatus string, which the response
+  # shape does not declare (it declares the replicationStatuses list); the
+  # codec could never carry it, so the bundle answers repositoryName only and
+  # the recording marks the step superseded.
+  DescribeImageReplicationStatus:
+    output:
+      repositoryName: string(input.repositoryName)
+
+  # Same shape as DescribeImageReplicationStatus: signingStatus is not the
+  # declared signingStatuses.
+  DescribeImageSigningStatus:
+    output:
+      repositoryName: string(input.repositoryName)
+
+  ListImageReferrers:
+    output:
+      referrers: "[]"
+
+  # The pack answered {"image": rec}; UpdateImageStorageClassResponse declares
+  # no image member, so the bundle answers nothing and the step is superseded.
+  # The write is real either way: an unknown tag gets a stub image record.
+  UpdateImageStorageClass:
+    reads:
+      repository: { resource: repository }
+    effects:
+      - put:
+          resource: image
+          key: "'imageTag' in input && string(input.imageTag) != '' ? string(input.imageTag) : 'imageId' in input && 'imageTag' in input.imageId && string(input.imageId.imageTag) != '' ? string(input.imageId.imageTag) : 'latest'"
+          record:
+            imageTag: id
+            imageStorageClass: "string(input.targetStorageClass) != '' ? string(input.targetStorageClass) : 'imageStorageClass' in input ? string(input.imageStorageClass) : ''"
+    output: {}
+
+  PutLifecyclePolicy:
+    effects:
+      - put:
+          resource: lifecycle_policy
+          record:
+            lifecyclePolicyText: string(input.lifecyclePolicyText)
+    output:
+      lifecyclePolicyText: rec.lifecyclePolicyText
+      repositoryName: id
+
+  # An absent policy is an empty string, not a fault.
+  GetLifecyclePolicy:
+    reads:
+      lc: { resource: lifecycle_policy }
+    output:
+      lifecyclePolicyText: "lc_found ? lc.lifecyclePolicyText : ''"
+      repositoryName: string(input.repositoryName)
+
+  DeleteLifecyclePolicy:
+    effects:
+      - delete: { resource: lifecycle_policy, missing: ignore }
+    output: {}
+
+  StartLifecyclePolicyPreview:
+    effects:
+      - generate: { bind: preview, kind: hex, bytes: 8 }
+      - put:
+          resource: lifecycle_preview
+          record:
+            previewId: fx.preview
+    output:
+      registryId: identity.account
+      repositoryName: string(input.repositoryName)
+      lifecyclePolicyText: "'lifecyclePolicyText' in input ? string(input.lifecyclePolicyText) : ''"
+      status: "'COMPLETE'"
+
+  GetLifecyclePolicyPreview:
+    output:
+      status: "'COMPLETE'"
+      previewResults: "[]"
+      repositoryName: string(input.repositoryName)
+
+  # Both writes spread the whole request, so the stored rule is exactly what
+  # the caller sent; an update replaces rather than merges, which is why these
+  # are create effects.
+  CreatePullThroughCacheRule:
+    effects:
+      - create: { resource: cache_rule, spread: input }
+    output:
+      ecrRepositoryPrefix: string(input.ecrRepositoryPrefix)
+      upstreamRegistryUrl: string(input.upstreamRegistryUrl)
+      credentialArn: "'credentialArn' in input ? input.credentialArn : null"
+      customRoleArn: "'customRoleArn' in input ? input.customRoleArn : null"
+      registryId: "'registryId' in input ? input.registryId : null"
+      upstreamRegistry: "'upstreamRegistry' in input ? input.upstreamRegistry : null"
+      upstreamRepositoryPrefix: "'upstreamRepositoryPrefix' in input ? input.upstreamRepositoryPrefix : null"
+
+  UpdatePullThroughCacheRule:
+    effects:
+      - create: { resource: cache_rule, spread: input }
+    output:
+      ecrRepositoryPrefix: string(input.ecrRepositoryPrefix)
+      credentialArn: "'credentialArn' in input ? input.credentialArn : null"
+      customRoleArn: "'customRoleArn' in input ? input.customRoleArn : null"
+      registryId: "'registryId' in input ? input.registryId : null"
+      upstreamRepositoryPrefix: "'upstreamRepositoryPrefix' in input ? input.upstreamRepositoryPrefix : null"
+
+  # The pack ignored ecrRepositoryPrefixes and listed every rule.
+  DescribePullThroughCacheRules:
+    list: { resource: cache_rule, member: pullThroughCacheRules, paginate: model }
+
+  DeletePullThroughCacheRule:
+    effects:
+      - delete: { resource: cache_rule, missing: ignore }
+    output: {}
+
+  ValidatePullThroughCacheRule:
+    reads:
+      c: { resource: cache_rule }
+    output:
+      ecrRepositoryPrefix: string(input.ecrRepositoryPrefix)
+      isValid: c_found
+
+  CreateRepositoryCreationTemplate:
+    effects:
+      - create: { resource: template, spread: input }
+    output:
+      registryId: identity.account
+      repositoryCreationTemplate: rec
+
+  UpdateRepositoryCreationTemplate:
+    effects:
+      - create: { resource: template, spread: input }
+    output:
+      registryId: identity.account
+      repositoryCreationTemplate: rec
+
+  # The pack ignored prefixes and listed every template.
+  DescribeRepositoryCreationTemplates:
+    list: { resource: template, member: repositoryCreationTemplates, paginate: model }
+
+  DeleteRepositoryCreationTemplate:
+    effects:
+      - delete: { resource: template, missing: ignore }
+    output: {}
+
+  DescribeRegistry:
+    output:
+      registryId: identity.account
+      replicationConfiguration: "{'rules': []}"
+
+  PutRegistryPolicy:
+    effects:
+      - put:
+          resource: registry_policy
+          record:
+            policyText: string(input.policyText)
+    output:
+      registryId: identity.account
+      policyText: rec.policyText
+
+  GetRegistryPolicy:
+    reads:
+      rp: { resource: registry_policy }
+    output:
+      registryId: identity.account
+      policyText: "rp_found ? rp.policyText : ''"
+
+  DeleteRegistryPolicy:
+    effects:
+      - delete: { resource: registry_policy, missing: ignore }
+    output: {}
+
+  PutRegistryScanningConfiguration:
+    effects:
+      - put: { resource: registry_scan, spread: input }
+    output:
+      registryScanningConfiguration: input
+
+  # The pack answered registryScanningConfiguration, but the response shape
+  # declares scanningConfiguration -- the put and the get disagree on the
+  # member name. The bundle answers the declared one; the recording marks the
+  # step superseded.
+  GetRegistryScanningConfiguration:
+    reads:
+      rs: { resource: registry_scan }
+    output:
+      scanningConfiguration: "rs_found ? rs : {}"
+
+  PutReplicationConfiguration:
+    effects:
+      - put: { resource: registry_replication, spread: input.replicationConfiguration }
+    output:
+      replicationConfiguration: input.replicationConfiguration
+
+  # The pack stored the whole request -- signingConfiguration member and all --
+  # and answered it under signingConfiguration, so the value is double-wrapped.
+  PutSigningConfiguration:
+    effects:
+      - put: { resource: registry_signing, spread: input }
+    output:
+      signingConfiguration: input
+
+  GetSigningConfiguration:
+    reads:
+      sc: { resource: registry_signing }
+    output:
+      signingConfiguration: "sc_found ? sc : {}"
+
+  DeleteSigningConfiguration:
+    effects:
+      - delete: { resource: registry_signing, missing: ignore }
+    output: {}
+
+  PutAccountSetting:
+    effects:
+      - put:
+          resource: account_setting
+          record:
+            value: string(input.value)
+    output:
+      name: id
+      value: rec.value
+
+  GetAccountSetting:
+    reads:
+      setting: { resource: account_setting }
+    output:
+      name: string(input.name)
+      value: "setting_found ? setting.value : ''"
+
+  # repositoryName rides along on the stored record so the batch get can
+  # correlate; the pack stored the configuration alone and keyed by name.
+  PutImageScanningConfiguration:
+    effects:
+      - put:
+          resource: scan_config
+          spread: input.imageScanningConfiguration
+          record:
+            repositoryName: id
+    output:
+      repositoryName: id
+      imageScanningConfiguration: input.imageScanningConfiguration
+
+  BatchGetRepositoryScanningConfiguration:
+    list:
+      resource: scan_config
+      member: scanningConfigurations
+      paginate: model
+    output:
+      scanningConfigurations: "input.repositoryNames.map(n, items.filter(x, x.repositoryName == string(n)).size() > 0 ? merge({'repositoryName': string(n)}, {'imageScanningConfiguration': without(items.filter(x, x.repositoryName == string(n))[0], ['repositoryName'])}) : {'repositoryName': string(n)})"
+      failures: "[]"
+
+  # On a repository that exists this overlays imageTagMutability; on one that
+  # does not it conjures a stub record holding only the name and mutability,
+  # which DescribeRepositories then lists.
+  PutImageTagMutability:
+    effects:
+      - put:
+          resource: repository
+          record:
+            repositoryName: id
+            imageTagMutability: string(input.imageTagMutability)
+    output:
+      repositoryName: id
+      imageTagMutability: string(input.imageTagMutability)
+
+  RegisterPullTimeUpdateExclusion:
+    effects:
+      - put:
+          resource: exclusion
+          record:
+            principalArn: id
+    output:
+      principalArn: id
+
+  DeregisterPullTimeUpdateExclusion:
+    effects:
+      - delete: { resource: exclusion, missing: ignore }
+    output: {}
+
+  # The pack answered an `exclusions` member the response shape does not
+  # declare (pullTimeUpdateExclusions is the declared one), with {id, value}
+  # rows because it stored the principal ARN as raw bytes rather than JSON.
+  # The bundle answers the declared member with the principal ARNs, and the
+  # recording marks the step superseded.
+  ListPullTimeUpdateExclusions:
+    list:
+      resource: exclusion
+      member: pullTimeUpdateExclusions
+      paginate: model
+    output:
+      pullTimeUpdateExclusions: "items.map(x, string(x.principalArn))"
+
+quirks:
+  - operation: CreateRepository
+    note: >
+      Creating over an existing name overwrites the record, where the real
+      service faults RepositoryAlreadyExistsException; because the record is
+      rebuilt from scratch, a re-create also drops an imageTagMutability set
+      by PutImageTagMutability. tags, encryptionConfiguration and
+      imageScanningConfiguration are accepted and discarded. The engine now
+      rejects a request with no repositoryName, which the pack accepted --
+      it stored a repository named "".
+  - operation: DescribeRepositories
+    note: >
+      The repositoryNames filter is ignored: every repository in the account
+      and region is listed. PutImageTagMutability can have created stub
+      records that carry only a name and a mutability -- no ARN, URI or
+      registryId -- and they list alongside real repositories.
+  - operation: DeleteRepository
+    note: >
+      Deleting answers an empty body where the model declares the deleted
+      repository, and deleting an absent name succeeds. Images, policies,
+      lifecycle policies, scans and tags all survive in their own
+      collections.
+  - operation: PutImage
+    note: >
+      A caller-supplied imageDigest is ignored and a fresh one is minted on
+      every put; a missing imageTag stores under "latest". The repository is
+      never checked to exist, and neither is the manifest well-formed.
+  - operation: BatchGetImage
+    note: >
+      Lookups are by imageTag only -- an id carrying only imageDigest finds
+      nothing -- and misses are skipped silently with failures always empty,
+      where the real service reports an ImageNotFound failure per miss.
+  - operation: BatchDeleteImage
+    note: >
+      Deletes by imageTag only and echoes the requested ids back whether or
+      not anything was deleted; failures is always empty.
+  - operation: GetAuthorizationToken
+    note: >
+      The token is random hex with no expiry and no relationship to any
+      credential; proxyEndpoint is fabricated from the account and region.
+  - operation: GetRepositoryPolicy
+    note: >
+      This is the only read in the service that faults on an absent record
+      (RepositoryPolicyNotFoundException). The lifecycle policy, registry
+      policy, account setting and scanning configuration reads all answer
+      empty strings or empty maps instead.
+  - operation: UntagResource
+    note: >
+      tagKeys is ignored: untagging deletes the resource's whole tag set.
+  - operation: UploadLayerPart
+    note: >
+      An uploadId that was never initiated succeeds, starting a fresh record
+      with no repositoryName. Parts are accumulated but never assembled, and
+      partFirstByte/partLastByte are not checked for continuity.
+  - operation: CompleteLayerUpload
+    note: >
+      The pack read a singular layerDigest member, which the model does not
+      declare -- the required member is the layerDigests list, and it is
+      ignored entirely, so the request's own digests are never recorded. A
+      request carrying no layerDigest member mints a random one, which is
+      every request a conformant SDK can send.
+  - operation: BatchCheckLayerAvailability
+    note: >
+      Unknown digests answer UNAVAILABLE in the layers list rather than
+      appearing in failures, which is always empty.
+  - operation: DescribeImages
+    note: >
+      The answer is the raw stored records -- imageTag, imageDigest,
+      imageManifest -- not the ImageDetail shape the model declares, which
+      has imageTags as a list and no imageManifest. DescribeImages's own
+      imageIds filter is ignored.
+  - operation: StartImageScan
+    note: >
+      The scan completes the moment it starts, with zero findings. The tag
+      falls back to imageId.imageTag and then to "latest", so a scan started
+      by digest-only id lands on latest. DescribeImageScanFindings answers
+      the stored record for a scanned tag and a canned COMPLETE result for
+      any other, never a fault.
+  - operation: DescribeImageReplicationStatus
+    note: >
+      The pack answered a singular replicationStatus string, which the
+      response shape does not declare (it declares replicationStatuses), so
+      no SDK could read it; the bundle answers repositoryName only.
+      DescribeImageSigningStatus is the same with signingStatus.
+  - operation: UpdateImageStorageClass
+    note: >
+      The pack answered {"image": rec}, and UpdateImageStorageClassResponse
+      declares no image member, so the answer was un readable on the wire;
+      the bundle answers an empty body. The write still happens, and on an
+      unknown tag it conjures an image record holding only the tag and the
+      storage class.
+  - operation: GetLifecyclePolicy
+    note: >
+      An absent lifecycle policy answers an empty lifecyclePolicyText, not
+      LifecyclePolicyNotFoundException, and GetLifecyclePolicyPreview always
+      answers COMPLETE with no results: the preview id that
+      StartLifecyclePolicyPreview mints and stores is never read.
+  - operation: DescribePullThroughCacheRules
+    note: >
+      The ecrRepositoryPrefixes filter is ignored and every rule is listed.
+      CreatePullThroughCacheRule and UpdatePullThroughCacheRule both store
+      the whole request and echo it back, so an update replaces the rule
+      wholesale -- updating one member drops the others.
+      DescribeRepositoryCreationTemplates is the same shape over prefixes.
+  - operation: PutSigningConfiguration
+    note: >
+      The whole request -- the signingConfiguration member included -- is
+      stored and answered back under signingConfiguration, so the value is
+      double-wrapped: signingConfiguration.signingConfiguration.rules.
+      GetSigningConfiguration answers the same double wrap.
+  - operation: GetRegistryScanningConfiguration
+    note: >
+      The pack answered registryScanningConfiguration, which
+      GetRegistryScanningConfigurationResponse does not declare -- it declares
+      scanningConfiguration, so the put and the get disagree on the member
+      name and no SDK could read the get's answer. The bundle answers the
+      declared member; the recording marks the step superseded.
+  - operation: PutImageTagMutability
+    note: >
+      On a repository that was never created this succeeds and conjures a
+      stub repository record, where the real service faults
+      RepositoryNotFoundException.
+  - operation: ListPullTimeUpdateExclusions
+    note: >
+      The pack answered an exclusions member the response shape does not
+      declare (pullTimeUpdateExclusions is the declared one), and because
+      RegisterPullTimeUpdateExclusion stored the principal ARN as raw bytes
+      rather than JSON, each row was {"id": arn, "value": arn} -- the
+      lister's fallback for an unmarshal failure. The bundle stores and
+      answers the principal ARNs under the declared member.

@@ -1,0 +1,213 @@
+schema: bir/1
+service: aws.timestream
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing here is a time-series engine: a database or a table is a
+# name plus an ARN, a written record set is stored verbatim and never read by
+# any operation the bundle can express, and Query is a substring match, not
+# SQL.
+provenance: authored
+
+# Query is served from the hand-authored catalog with no input or output
+# shape (the vendored specification for aws.timestream covers only the
+# timestream-write namespace), so a bundle cannot declare the Rows and
+# ColumnInfo members the pack answers with: the loader requires every output
+# member to resolve against the generated model, and there is no output shape
+# to resolve against. The pack keeps serving until the model carries the
+# query shapes or the engine gains an escape; the recording's Query steps are
+# superseded with this reason.
+shadow: >
+  Query's output is not expressible: the served model carries the operation
+  from the catalog with empty input and output shapes, and the loader forbids
+  output members an output shape does not declare, so the bundle can answer
+  Query with nothing but an empty body where the pack answered Rows and
+  ColumnInfo. Every other operation is transcribed and gated.
+
+# The pack answered an absent or empty DatabaseName on the create/update paths
+# with ValidationException; that is also the service's vocabulary for the
+# required members the model now enforces.
+missing_input_error: Validation
+
+resources:
+  database:
+    collection: tsdb
+    id:
+      input_members: [DatabaseName]
+    arn: "arn:{partition}:timestream:{region}:{account}:database/{id}"
+    record:
+      DatabaseName: id
+      Arn: arn
+
+  # The pack scoped tables to a per-database collection; a composite key over
+  # one collection is the same containment, and the listing narrows by the
+  # recorded DatabaseName.
+  table:
+    collection: tstab
+    id:
+      derive: "string(input.DatabaseName) + '/' + string(input.TableName)"
+    record:
+      DatabaseName: "string(input.DatabaseName)"
+      TableName: "string(input.TableName)"
+      Arn: "'arn:aws:timestream:' + identity.region + ':' + identity.account + ':database/' + string(input.DatabaseName) + '/table/' + string(input.TableName)"
+
+  # The pack stored the request's Records array verbatim under the database
+  # and table name, overwriting whatever a previous WriteRecords put there.
+  # Only Query ever read it, and Query's output is the unexpressible one, so
+  # in this bundle the write is state nothing reads -- kept because it is what
+  # the pack does, and so the day Query is expressible the data is there.
+  records:
+    collection: tsrec
+    id:
+      derive: "string(input.DatabaseName) + '/' + string(input.TableName)"
+    record:
+      Records: "input.Records"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateDatabase:
+    require:
+      - { cond: "string(input.DatabaseName) != ''", error: Validation }
+    effects:
+      - put: { resource: database }
+    output:
+      Database: rec
+
+  DescribeDatabase:
+    reads:
+      d: { resource: database }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      Database: d
+
+  ListDatabases:
+    list: { resource: database, member: Databases, paginate: model }
+
+  # Updating is the pack's create path with another name: an upsert that
+  # overwrites the record, storing nothing the update carried.
+  UpdateDatabase:
+    require:
+      - { cond: "string(input.DatabaseName) != ''", error: Validation }
+    effects:
+      - put: { resource: database }
+    output:
+      Database: rec
+
+  DeleteDatabase:
+    effects:
+      - delete: { resource: database, missing: ignore }
+    output: {}
+
+  CreateTable:
+    require:
+      - { cond: "string(input.DatabaseName) != '' && string(input.TableName) != ''", error: Validation }
+    effects:
+      - put: { resource: table }
+    output:
+      Table: rec
+
+  DescribeTable:
+    reads:
+      t: { resource: table }
+    require:
+      - { cond: t_found, error: NotFound }
+    output:
+      Table: t
+
+  ListTables:
+    list:
+      resource: table
+      member: Tables
+      paginate: model
+      filter: "item.DatabaseName == ('DatabaseName' in input ? string(input.DatabaseName) : '')"
+
+  DeleteTable:
+    effects:
+      - delete: { resource: table, missing: ignore }
+    output: {}
+
+  WriteRecords:
+    effects:
+      - put: { resource: records }
+    output:
+      RecordsIngested: "{'Total': size(input.Records)}"
+
+  # See the shadow note: the pack's answer (a ColumnInfo header and one row
+  # per stored record whose database or table name is a substring of
+  # QueryString) cannot be declared against a shapeless catalog operation.
+  Query:
+    output: {}
+
+  DescribeEndpoints:
+    output:
+      Endpoints: "[{'Address': '127.0.0.1', 'CachePeriodInMinutes': 60}]"
+
+quirks:
+  - operation: CreateDatabase
+    note: >
+      Creating over an existing name overwrites the record, where the real
+      service answers ConflictException. The pack faulted an absent or empty
+      DatabaseName with ValidationException; the model marks the member
+      required, so the engine rejects its absence before the bundle runs and
+      only the empty-string refusal is the bundle's own.
+  - operation: UpdateDatabase
+    note: >
+      Updating a database that was never created creates it, where the real
+      service answers ResourceNotFoundException. The model also requires
+      KmsKeyId and the engine now rejects a request that omits it, which the
+      pack accepted; the key is never stored either way, so a database has a
+      name and an ARN and nothing else -- no CreationTime, no TableCount, none
+      of what Database declares.
+  - operation: DescribeDatabase
+    note: >
+      The pack answered an absent DatabaseName with ResourceNotFoundException
+      (its lookup of the empty name missed); the engine answers
+      ValidationException first, because the model marks the member required.
+      DeleteDatabase's pack answered the same request with success, and
+      DescribeTable, DeleteTable and WriteRecords likewise behaved rather than
+      faulting; all of those paths are now the engine's missing-input refusal.
+  - operation: DeleteDatabase
+    note: >
+      Deleting a database that does not exist succeeds, and deleting one that
+      does leaves its tables and records behind: nothing cascades, so
+      ListTables still answers them afterwards.
+  - operation: ListDatabases
+    note: >
+      The pack ignored MaxResults and NextToken and answered every database;
+      the bundle paginates from the model's pagination trait, which no
+      recorded step exercises. ListTables is the same.
+  - operation: ListTables
+    note: >
+      A request naming no database lists the collection the pack wrote tables
+      under the empty database name into, which is always empty: CreateTable
+      refuses an empty DatabaseName, so the listing answers empty too.
+  - operation: WriteRecords
+    note: >
+      Nothing about a record is checked -- a record with no MeasureName is
+      stored as happily as any other -- CommonAttributes is ignored, and a
+      second write to the same table replaces the first batch outright.
+      RecordsIngested.Total is the request's record count, nothing measured.
+  - operation: Query
+    note: >
+      Not SQL: a stored batch is answered when any nonempty part of its
+      database/table storage key is a substring of QueryString, so
+      "SELECT * FROM metrics" answers every table whose database name happens
+      to appear in the string, and an absent QueryString matches everything.
+      Each row is one stored record, JSON-marshalled into a single ScalarValue
+      under a fixed one-column header. None of this is transcribed: the
+      catalog carries the operation with no output shape, the loader forbids
+      output members a shape does not declare, and that is why the bundle is
+      shadowed.
+  - operation: DescribeEndpoints
+    note: >
+      The endpoint is a constant: 127.0.0.1 with a sixty-minute cache period,
+      whatever the account or region.

@@ -1,0 +1,362 @@
+schema: bir/1
+service: aws.s3tables
+
+# Transcribed from the hand-written pack, not established against the real
+# service. The pack is a control plane over three flat collections: buckets,
+# namespaces and tables. The row engine behind it (ApplyRows/TableRows) is a
+# set of Go methods no served operation dispatches to, so no table ever has
+# rows through the API.
+provenance: authored
+
+# The pack answered CreateTableBucket's absent or empty name with
+# ValidationException; the model marks name required, and that is the service's
+# own vocabulary for an absent required input. Every other operation accepted
+# absent required members silently (addressing the empty key); the engine now
+# rejects those requests, and the pack's fallback paths are dead.
+missing_input_error: Validation
+
+shadow: >
+  Complete and gated, but not yet serving: firehose's Iceberg delivery and the
+  athena tests call the pack's Go-only row engine (ApplyRows/RowMutation),
+  which no spi operation reaches, so deleting the pack would orphan them. The
+  bundle takes over when the row engine moves behind an operation or a shared
+  store contract.
+
+resources:
+  table_bucket:
+    collection: s3tb
+    id:
+      # The pack reads `name` (then `Name`) on every bucket operation, even
+      # where the model addresses buckets by tableBucketARN.
+      input_members: [name, Name]
+    arn: "arn:{partition}:s3tables:{region}:{account}:bucket/{id}"
+    record:
+      name: id
+      arn: arn
+
+  namespace:
+    collection: s3tns
+    id:
+      # first(namespace, Namespace), strings only: the model declares
+      # namespace as a list of strings, and a list-typed value does not
+      # address anything -- the pack stored such a namespace under the empty
+      # key.
+      derive: >
+        ('namespace' in input && type(input.namespace) == string && input.namespace != '' ? string(input.namespace)
+        : ('Namespace' in input && type(input.Namespace) == string && input.Namespace != '' ? string(input.Namespace)
+        : ''))
+    record:
+      namespace: id
+      # The pack's spelling; the model calls the member tableBucketARN.
+      tableBucketArn: >
+        ('tableBucketARN' in input && type(input.tableBucketARN) == string && input.tableBucketARN != '' ? string(input.tableBucketARN)
+        : ('tableBucketArn' in input && type(input.tableBucketArn) == string && input.tableBucketArn != '' ? string(input.tableBucketArn)
+        : ''))
+
+  table:
+    collection: s3tt
+    id:
+      # bucket/namespace/name, where the bucket is the last '/'-segment of
+      # the first non-empty of tableBucketARN/tableBucketArn/tableBucketName
+      # and the namespace falls back to the first element of a list-typed
+      # namespace member.
+      derive: >
+        lastSegment(
+          ('tableBucketARN' in input && type(input.tableBucketARN) == string && input.tableBucketARN != '' ? string(input.tableBucketARN)
+          : ('tableBucketArn' in input && type(input.tableBucketArn) == string && input.tableBucketArn != '' ? string(input.tableBucketArn)
+          : ('tableBucketName' in input && type(input.tableBucketName) == string && input.tableBucketName != '' ? string(input.tableBucketName)
+          : ''))),
+          '/')
+        + '/' +
+        ('namespace' in input && type(input.namespace) == string && input.namespace != '' ? string(input.namespace)
+        : ('Namespace' in input && type(input.Namespace) == string && input.Namespace != '' ? string(input.Namespace)
+        : ('namespace' in input && type(input.namespace) == list && size(input.namespace) > 0 && type(input.namespace[0]) == string && input.namespace[0] != '' ? string(input.namespace[0])
+        : '')))
+        + '/' +
+        ('name' in input && type(input.name) == string && input.name != '' ? string(input.name)
+        : ('Name' in input && type(input.Name) == string && input.Name != '' ? string(input.Name)
+        : ''))
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateTableBucket:
+    require:
+      # Present-but-empty is the case the model's required check passes and
+      # the pack still refused.
+      - cond: >
+          'name' in input && type(input.name) == string && input.name != ''
+          || 'Name' in input && type(input.Name) == string && input.Name != ''
+        error: Validation
+    effects:
+      - put: { resource: table_bucket }
+    output:
+      arn: rec.arn
+
+  GetTableBucket:
+    reads:
+      b: { resource: table_bucket }
+    require:
+      - { cond: b_found, error: NotFound }
+    output:
+      name: b.name
+      arn: b.arn
+    addressing:
+      table_bucket: >
+        the pack reads the bucket by its `name` member, which GetTableBucket
+        does not declare -- a request naming only tableBucketARN resolves the
+        empty key and misses a bucket that exists.
+
+  ListTableBuckets:
+    list: { resource: table_bucket, member: tableBuckets, paginate: model }
+
+  DeleteTableBucket:
+    effects:
+      - delete: { resource: table_bucket, missing: ignore }
+    output: {}
+    addressing:
+      table_bucket: >
+        same name-member addressing as GetTableBucket: the pack deletes by
+        `name`, a member DeleteTableBucket does not declare, so a request
+        naming only tableBucketARN deletes nothing and reports success.
+
+  CreateNamespace:
+    effects:
+      - put: { resource: namespace }
+    output:
+      namespace: rec.namespace
+      tableBucketARN: rec.tableBucketArn
+
+  # The pack ignored the request entirely: every namespace in the account and
+  # region is listed, whichever bucket the request names.
+  ListNamespaces:
+    list:
+      resource: namespace
+      member: namespaces
+      paginate: model
+    output:
+      namespaces: "items.map(n, {'namespace': n.namespace})"
+
+  CreateTable:
+    effects:
+      - put:
+          resource: table
+          record:
+            # The pack's stored record holds no key; _key keeps the store key
+            # on the record so the listing can prefix-match exactly as the
+            # pack's per-key prefix listing did. It never leaves the record:
+            # every output names its members.
+            _key: id
+            name: >
+              ('name' in input && type(input.name) == string && input.name != '' ? string(input.name)
+              : ('Name' in input && type(input.Name) == string && input.Name != '' ? string(input.Name)
+              : ''))
+            # Stored verbatim, unlike everywhere else it is read: a
+            # list-typed namespace is stored as a list.
+            namespace: "'namespace' in input ? input.namespace : null"
+            tableBucketARN: >
+              ('tableBucketARN' in input && type(input.tableBucketARN) == string && input.tableBucketARN != '' ? string(input.tableBucketARN)
+              : ('tableBucketArn' in input && type(input.tableBucketArn) == string && input.tableBucketArn != '' ? string(input.tableBucketArn)
+              : ''))
+            format: >
+              ('format' in input && type(input.format) == string && input.format != '' ? string(input.format)
+              : ('Format' in input && type(input.Format) == string && input.Format != '' ? string(input.Format)
+              : ''))
+            metadataLocation: >
+              ('metadataLocation' in input && type(input.metadataLocation) == string && input.metadataLocation != '' ? string(input.metadataLocation)
+              : ('MetadataLocation' in input && type(input.MetadataLocation) == string && input.MetadataLocation != '' ? string(input.MetadataLocation)
+              : ''))
+    # The pack answered the stored record; CreateTableResponse declares only
+    # tableARN and versionToken, which the pack never computed.
+    output: {}
+
+  GetTable:
+    reads:
+      t: { resource: table }
+    require:
+      - { cond: t_found, error: NotFound }
+    output:
+      name: t.name
+      namespace: t.namespace
+      format: t.format
+      metadataLocation: t.metadataLocation
+
+  ListTables:
+    list:
+      resource: table
+      member: tables
+      paginate: model
+      filter: >
+        string(item._key).startsWith(
+          lastSegment(
+            ('tableBucketARN' in input && type(input.tableBucketARN) == string && input.tableBucketARN != '' ? string(input.tableBucketARN)
+            : ('tableBucketArn' in input && type(input.tableBucketArn) == string && input.tableBucketArn != '' ? string(input.tableBucketArn)
+            : ('tableBucketName' in input && type(input.tableBucketName) == string && input.tableBucketName != '' ? string(input.tableBucketName)
+            : ''))),
+            '/')
+          + '/' +
+          ('namespace' in input && type(input.namespace) == string && input.namespace != '' ? string(input.namespace)
+          : ('Namespace' in input && type(input.Namespace) == string && input.Namespace != '' ? string(input.Namespace)
+          : ('namespace' in input && type(input.namespace) == list && size(input.namespace) > 0 && type(input.namespace[0]) == string && input.namespace[0] != '' ? string(input.namespace[0])
+          : '')))
+          + '/')
+    output:
+      tables: "items.map(t, {'name': t.name, 'namespace': t.namespace})"
+
+  DeleteTable:
+    effects:
+      - delete: { resource: table, missing: ignore }
+    output: {}
+
+  RenameTable:
+    reads:
+      t: { resource: table }
+    let:
+      old_key: id
+      old_name: >
+        ('name' in input && type(input.name) == string && input.name != '' ? string(input.name)
+        : ('Name' in input && type(input.Name) == string && input.Name != '' ? string(input.Name)
+        : ''))
+      new_name: >
+        ('newName' in input && type(input.newName) == string && input.newName != '' ? string(input.newName)
+        : ('NewName' in input && type(input.NewName) == string && input.NewName != '' ? string(input.NewName)
+        : ''))
+    require:
+      - { cond: t_found, error: NotFound }
+    effects:
+      # The pack's newKey is TrimSuffix(oldKey, name) + newName; the key ends
+      # with the name by construction, so the two are the same string.
+      - put:
+          resource: table
+          key: "substr(old_key, 0, blen(old_key) - blen(old_name)) + new_name"
+          record:
+            _key: id
+            name: new_name
+            namespace: t.namespace
+            tableBucketARN: t.tableBucketARN
+            format: t.format
+            metadataLocation: t.metadataLocation
+      - delete: { resource: table, key: old_key }
+    output: {}
+
+  GetTableMetadataLocation:
+    reads:
+      t: { resource: table }
+    require:
+      - { cond: t_found, error: NotFound }
+    output:
+      metadataLocation: t.metadataLocation
+
+  UpdateTableMetadataLocation:
+    reads:
+      t: { resource: table }
+    require:
+      - { cond: t_found, error: NotFound }
+    effects:
+      - patch:
+          resource: table
+          record:
+            metadataLocation: >
+              ('metadataLocation' in input && type(input.metadataLocation) == string && input.metadataLocation != '' ? string(input.metadataLocation)
+              : ('MetadataLocation' in input && type(input.MetadataLocation) == string && input.MetadataLocation != '' ? string(input.MetadataLocation)
+              : ''))
+    output: {}
+
+quirks:
+  - operation: CreateTableBucket
+    note: >
+      The pack faults an absent OR empty name with ValidationException; the
+      model marks name required, so the engine answers the same fault for the
+      absent case and the bundle keeps the pack's own check for the empty one.
+      Creating a bucket that already exists overwrites it, where the real
+      service answers ConflictException. Only name and arn are ever stored, so
+      a bucket never has the createdAt, ownerAccountId, tableBucketId or type
+      the response shape declares.
+  - operation: GetTableBucket
+    note: >
+      The model addresses buckets by tableBucketARN; the pack reads only the
+      `name` member (which GetTableBucket does not declare), so a request
+      naming only the ARN misses a bucket that exists and answers
+      NotFoundException. DeleteTableBucket has the same defect and reports
+      success having deleted nothing. Both are recorded under `addressing`.
+  - operation: CreateNamespace
+    note: >
+      The bucket the namespace is named under is not checked to exist. The
+      model declares namespace as a list of strings; the pack reads it as one
+      string, so a list-typed namespace is stored under the empty key. The
+      pack's response spells the bucket member tableBucketArn where the model
+      declares tableBucketARN; the bundle answers the declared name and the
+      recording is superseded with that reason. There is no DeleteNamespace:
+      a namespace, once created, is listed forever.
+  - operation: ListNamespaces
+    note: >
+      The request is ignored entirely: every namespace in the account and
+      region is listed, whichever tableBucketARN the request names -- the
+      pack listed the whole collection rather than scoping to the bucket.
+      The bundle projects each item to the members NamespaceSummary declares,
+      dropping the pack's tableBucketArn spelling, and the recording is
+      superseded with that reason.
+  - operation: CreateTable
+    note: >
+      Neither the bucket nor the namespace is checked to exist. The pack
+      answered the stored record (name, namespace, tableBucketARN, format,
+      metadataLocation); CreateTableResponse declares only tableARN and
+      versionToken, which the pack never computed, so the bundle answers
+      nothing and the recording is superseded. The namespace member is stored
+      verbatim -- a list-typed namespace is stored as a list -- while the key
+      is derived from its first element.
+  - operation: GetTable
+    note: >
+      The pack answered the raw stored record, which carries tableBucketARN --
+      a member GetTableResponse does not declare -- alongside name, namespace,
+      format and metadataLocation. The bundle answers the four declared
+      members and the recording is superseded. The declared members the pack
+      never set (createdAt, createdBy, modifiedAt, modifiedBy, ownerAccountId,
+      tableARN, type, versionToken, warehouseLocation) are absent either way.
+      The model's tableArn member is never consulted: a GetTable naming only
+      it resolves the empty bucket and misses. A list-typed namespace is
+      addressed by its first element, which the pack's namespaceName helper
+      did and the derive transcribes.
+  - operation: ListTables
+    note: >
+      The pack listed by store-key prefix bucket/namespace/; the bundle keeps
+      the store key on the record (_key) and filters on it, which is the same
+      containment. Items are projected to the members TableSummary declares
+      (name, namespace), dropping format, metadataLocation and the pack's
+      tableBucketARN, and the recording is superseded with that reason. The
+      declared `prefix` request member is ignored, as the pack ignored it.
+  - operation: RenameTable
+    note: >
+      newNamespaceName is ignored: a rename never moves a table between
+      namespaces. Renaming a table to its own name deletes it -- the pack put
+      the record under the new key and then deleted the old key, which is the
+      same key. Renaming a table that does not exist answers
+      NotFoundException.
+  - operation: UpdateTableMetadataLocation
+    note: >
+      The model requires versionToken; the pack never read it, so any token
+      updates the location. The operation answers with nothing where the
+      model declares metadataLocation, name, namespace, tableARN and
+      versionToken. Updating a table that does not exist answers
+      NotFoundException.
+  - operation: DeleteTable
+    note: >
+      Deleting a table that does not exist succeeds. The pack also deleted the
+      table's rows from the row collection, but no served operation writes
+      rows -- the pack's row engine (the CreateTable/ApplyRows/TableRows Go
+      methods) is never dispatched through Invoke -- so that delete is
+      unreachable and is not transcribed.
+  - operation: ListTableBuckets
+    note: >
+      The pack ignored pagination and the prefix and type filters on every
+      list operation (ListTableBuckets, ListNamespaces, ListTables); the
+      bundle binds continuation tokens and page caps from the model instead.
+      The recording never carries them, so the divergence is unexercised.

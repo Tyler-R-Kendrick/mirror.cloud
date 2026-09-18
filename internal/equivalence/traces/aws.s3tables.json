@@ -1,0 +1,274 @@
+{
+  "schema": "trace/1",
+  "service": "aws.s3tables",
+  "source": "pack:internal/services/aws/s3tables@1f8076ed",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Where the pack answered members the model does not declare (the tableBucketArn spelling on namespaces, the whole stored record on CreateTable, tableBucketARN on GetTable, and unprojected list items), the bundle answers the declared shape and those steps are superseded with that reason.",
+  "steps": [
+    {
+      "operation": "ListTableBuckets",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"tableBuckets": null}
+    },
+    {
+      "operation": "CreateTableBucket",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateTableBucket",
+      "input": {"name": ""},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateTableBucket",
+      "input": {"name": "warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"arn": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"}
+    },
+    {
+      "operation": "CreateTableBucket",
+      "input": {"name": "warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"arn": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"}
+    },
+    {
+      "operation": "GetTableBucket",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "GetTableBucket",
+      "input": {"name": "warehouse", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"name": "warehouse", "arn": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"}
+    },
+    {
+      "operation": "GetTableBucket",
+      "input": {"name": "absent", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "ListTableBuckets",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"tableBuckets": [{"name": "warehouse", "arn": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"}]}
+    },
+    {
+      "operation": "CreateNamespace",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"namespace": "analytics", "tableBucketArn": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+      "superseded": "the pack spelled the bucket member tableBucketArn; CreateNamespaceResponse declares tableBucketARN, and the bundle answers the declared name"
+    },
+    {
+      "operation": "CreateNamespace",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost", "namespace": "ghostns"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"namespace": "ghostns", "tableBucketArn": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost"},
+      "superseded": "the pack spelled the bucket member tableBucketArn; CreateNamespaceResponse declares tableBucketARN, and the bundle answers the declared name. The pack also did not check that the bucket exists: ghost is never created and the namespace is stored anyway"
+    },
+    {
+      "operation": "ListNamespaces",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"namespaces": [
+        {"namespace": "analytics", "tableBucketArn": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+        {"namespace": "ghostns", "tableBucketArn": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost"}
+      ]},
+      "superseded": "the pack listed the stored records with their tableBucketArn spelling; NamespaceSummary declares namespace (and no tableBucketArn), and the bundle projects to the declared shape"
+    },
+    {
+      "operation": "ListNamespaces",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"namespaces": [
+        {"namespace": "analytics", "tableBucketArn": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+        {"namespace": "ghostns", "tableBucketArn": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost"}
+      ]},
+      "superseded": "same projection as above; the step also records that the pack ignored tableBucketARN entirely -- asking about the ghost bucket lists every namespace in the account"
+    },
+    {
+      "operation": "CreateTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "events", "format": "ICEBERG", "metadataLocation": "s3://warehouse/v1.metadata.json"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"name": "events", "namespace": "analytics", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "format": "ICEBERG", "metadataLocation": "s3://warehouse/v1.metadata.json"},
+      "superseded": "the pack answered the stored record; CreateTableResponse declares only tableARN and versionToken, which the pack never computed, so the bundle answers nothing"
+    },
+    {
+      "operation": "CreateTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost", "namespace": "n", "name": "t", "format": "ICEBERG"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"name": "t", "namespace": "n", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost", "format": "ICEBERG", "metadataLocation": ""},
+      "superseded": "same declared-shape divergence as above; the step also records that neither the bucket nor the namespace is checked to exist"
+    },
+    {
+      "operation": "GetTable",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "GetTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "events"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"name": "events", "namespace": "analytics", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "format": "ICEBERG", "metadataLocation": "s3://warehouse/v1.metadata.json"},
+      "superseded": "the pack answered the raw record, which carries tableBucketARN -- a member GetTableResponse does not declare; the bundle answers name, namespace, format and metadataLocation"
+    },
+    {
+      "operation": "GetTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": ["analytics"], "name": "events"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"name": "events", "namespace": "analytics", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "format": "ICEBERG", "metadataLocation": "s3://warehouse/v1.metadata.json"},
+      "superseded": "same tableBucketARN divergence as above; the step also records that a list-typed namespace is addressed by its first element"
+    },
+    {
+      "operation": "GetTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "ListTables",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"tables": [
+        {"name": "events", "namespace": "analytics", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "format": "ICEBERG", "metadataLocation": "s3://warehouse/v1.metadata.json"}
+      ]},
+      "superseded": "the pack listed the stored records; TableSummary declares name and namespace (not tableBucketARN, format or metadataLocation), and the bundle projects to the declared shape"
+    },
+    {
+      "operation": "ListTables",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"tables": []}
+    },
+    {
+      "operation": "ListTables",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost", "namespace": "n"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"tables": [
+        {"name": "t", "namespace": "n", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost", "format": "ICEBERG", "metadataLocation": ""}
+      ]},
+      "superseded": "same projection as above; the step also records that a table created under a bucket that does not exist is listed under it"
+    },
+    {
+      "operation": "GetTableMetadataLocation",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "events"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"metadataLocation": "s3://warehouse/v1.metadata.json"}
+    },
+    {
+      "operation": "UpdateTableMetadataLocation",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "events", "metadataLocation": "s3://warehouse/v2.metadata.json", "versionToken": "tok-1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "UpdateTableMetadataLocation",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "absent", "metadataLocation": "s3://warehouse/v3.metadata.json", "versionToken": "tok-2"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "GetTableMetadataLocation",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "events"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"metadataLocation": "s3://warehouse/v2.metadata.json"}
+    },
+    {
+      "operation": "RenameTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "events", "newName": "renamed"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "RenameTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "absent", "newName": "x"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "GetTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "events"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "GetTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "renamed"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"name": "renamed", "namespace": "analytics", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "format": "ICEBERG", "metadataLocation": "s3://warehouse/v2.metadata.json"},
+      "superseded": "same tableBucketARN divergence as every GetTable; the rest of the record (renamed name, updated metadataLocation) moved with the rename"
+    },
+    {
+      "operation": "RenameTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "renamed", "newName": "double", "newNamespaceName": "other"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "GetTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "other", "name": "double"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "GetTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "double"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"name": "double", "namespace": "analytics", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "format": "ICEBERG", "metadataLocation": "s3://warehouse/v2.metadata.json"},
+      "superseded": "same tableBucketARN divergence as every GetTable; this and the previous step record that newNamespaceName is ignored -- the table stayed in analytics"
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "double"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "double"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/ghost", "namespace": "n", "name": "t"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "ListTables",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"tables": []}
+    },
+    {
+      "operation": "GetTable",
+      "input": {"tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse", "namespace": "analytics", "name": "double"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "DeleteTableBucket",
+      "input": {"name": "warehouse", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "DeleteTableBucket",
+      "input": {"name": "warehouse", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""}
+    },
+    {
+      "operation": "GetTableBucket",
+      "input": {"name": "warehouse", "tableBucketARN": "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "NotFoundException", "http_status": 404, "fault": "client"}
+    },
+    {
+      "operation": "ListTableBuckets",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"tableBuckets": null}
+    }
+  ]
+}

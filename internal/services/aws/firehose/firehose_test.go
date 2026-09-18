@@ -30,7 +30,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
@@ -3080,7 +3080,7 @@ func TestFirehoseLambdaProcessing(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	p, function, logService := New(deps), lambda.New(deps), logs.New(deps)
+	p, function, logService := New(deps), lambda.New(deps), bundled.Handler("aws.logs", deps)
 	for operation, input := range map[string]map[string]any{
 		"CreateLogGroup":  {"logGroupName": "firehose"},
 		"CreateLogStream": {"logGroupName": "firehose", "logStreamName": "errors"},
@@ -3525,7 +3525,7 @@ func TestFirehoseCloudWatchLoggingValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.logDeliveryError(context.Background(), &spi.Request{Identity: id}, map[string]any{"CloudWatchLoggingOptions": map[string]any{"Enabled": false, "LogGroupName": "disabled", "LogStreamName": "errors"}}, "logging-disabled", "ignored", time.Unix(0, 0))
-	logged, err := logs.New(deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetLogEvents", Input: map[string]any{"logGroupName": "disabled", "logStreamName": "errors"}})
+	logged, err := bundled.Handler("aws.logs", deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetLogEvents", Input: map[string]any{"logGroupName": "disabled", "logStreamName": "errors"}})
 	if err != nil || len(logged.Output["events"].([]any)) != 0 {
 		t.Fatalf("disabled CloudWatch logging %#v %v", logged, err)
 	}

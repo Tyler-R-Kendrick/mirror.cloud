@@ -11,6 +11,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 )
 
 // TestEveryBundleLoads is the gate that keeps behavior data honest: every
@@ -47,8 +48,19 @@ func TestEveryBundleLoads(t *testing.T) {
 // generatedModel reads the committed model for a service straight from
 // internal/generated, so this test exercises the same artifact the runtime
 // will consume rather than a fixture.
+//
+// Almost: what the runtime consumes is the booted model, which is that file
+// for every service whose ID is the specification's, and the servedAs mapping
+// plus the catalog's extra operations for the ones it is not -- aws.opensearch
+// is vendored under its endpoint prefix aws.es, and its bundle declares the
+// four data-plane operations only the catalog carries. Asking the file alone
+// fails those bundles on operations the runtime does serve, so the booted
+// model answers first and the file is the fallback.
 func generatedModel(t *testing.T, serviceID string) *model.Service {
 	t.Helper()
+	if svc := specboot.Bundle().ServiceByID(serviceID); svc != nil && len(svc.Shapes) > 0 {
+		return svc
+	}
 	provider, pkg := generated.ServicePath(serviceID)
 	path := filepath.Join("..", "internal", "generated", provider, pkg, "model.json.gz")
 	f, err := os.Open(path)

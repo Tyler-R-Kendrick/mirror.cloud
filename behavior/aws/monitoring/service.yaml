@@ -1,0 +1,683 @@
+schema: bir/1
+service: aws.monitoring
+
+# Transcribed from the hand-written pack, not established against the real
+# service. CloudWatch metrics-lite: datapoints are kept as running aggregates
+# per namespace/metric, alarms and dashboards store the request that created
+# them verbatim, and no operation ever faults -- an absent record reads as an
+# empty answer, and the pack had no validation at all (the engine's model
+# check now rejects requests missing required members first).
+provenance: authored
+
+resources:
+  # One row per namespace/metric holding running aggregates. The pack stored
+  # one row per datapoint (key namespace/name/seq, a per-metric counter) and
+  # aggregated at read time; the answers are identical for any sequence of
+  # requests that each carry one metric name -- the one shape a for_each write
+  # cannot reproduce is the PutMetricData quirk below.
+  metric:
+    collection: metrics
+
+  alarm:
+    collection: alarms
+    id:
+      input_members: [AlarmName]
+
+  # History rows are append-only, keyed name/random-hex; the key never
+  # surfaces in any answer, so the resource has no input addressing.
+  history:
+    collection: cwhist
+
+  dashboard:
+    collection: cwdash
+    id:
+      input_members: [DashboardName]
+
+  anomaly:
+    collection: cwanom
+    id:
+      input_members: [MetricName, Namespace]
+
+  insight:
+    collection: cwins
+    id:
+      input_members: [RuleName, Name]
+
+  stream:
+    collection: cwstream
+    id:
+      input_members: [Name]
+
+  # The pack addresses mute rules by AlarmName or Name; GetAlarmMuteRule and
+  # DeleteAlarmMuteRule declare only AlarmMuteRuleName, so those operations
+  # carry an addressing exemption recording the defect.
+  mute:
+    collection: cwmute
+    id:
+      input_members: [AlarmName, Name]
+
+  # Datasets are always written under an explicit key (generated when the
+  # request carries neither Name nor DatasetName -- and the model declares
+  # neither, so under a valid request it always generates).
+  dataset:
+    collection: cwds
+    id:
+      input_members: [Name, DatasetName]
+
+  otel:
+    collection: cwotel
+    id:
+      input_members: [Name]
+
+  tag:
+    collection: cwtags
+    id:
+      input_members: [ResourceARN, ResourceArn]
+
+operations:
+  # --- metrics -------------------------------------------------------------
+
+  PutMetricData:
+    reads:
+      # The first element's metric row: element 0 aggregates onto it, and each
+      # later element chains onto the record the previous element just wrote
+      # (`rec` after a write is the record just written). Exact whenever one
+      # request carries one metric name; see the quirk for the mixed case.
+      rec:
+        resource: metric
+        key: "'MetricData' in input && size(input.MetricData) > 0 ? string(input.Namespace) + '/' + string(input.MetricData[0].MetricName) : ''"
+    effects:
+      - patch:
+          resource: metric
+          for_each: input.MetricData
+          key: "string(input.Namespace) + '/' + string(item.MetricName)"
+          record:
+            Namespace: "string(input.Namespace)"
+            MetricName: "string(item.MetricName)"
+            SampleCount: "'SampleCount' in rec ? double(rec.SampleCount) + 1.0 : 1.0"
+            Sum: >-
+              'Sum' in rec
+              ? double(rec.Sum) + (('Values' in item && size(item.Values) > 0) ? double(item.Values[0]) : (('Value' in item && item.Value != null) ? double(item.Value) : 0.0))
+              : (('Values' in item && size(item.Values) > 0) ? double(item.Values[0]) : (('Value' in item && item.Value != null) ? double(item.Value) : 0.0))
+            Minimum: >-
+              'Minimum' in rec
+              ? ((('Values' in item && size(item.Values) > 0) ? double(item.Values[0]) : (('Value' in item && item.Value != null) ? double(item.Value) : 0.0)) < double(rec.Minimum)
+                ? (('Values' in item && size(item.Values) > 0) ? double(item.Values[0]) : (('Value' in item && item.Value != null) ? double(item.Value) : 0.0))
+                : double(rec.Minimum))
+              : (('Values' in item && size(item.Values) > 0) ? double(item.Values[0]) : (('Value' in item && item.Value != null) ? double(item.Value) : 0.0))
+            Maximum: >-
+              'Maximum' in rec
+              ? ((('Values' in item && size(item.Values) > 0) ? double(item.Values[0]) : (('Value' in item && item.Value != null) ? double(item.Value) : 0.0)) > double(rec.Maximum)
+                ? (('Values' in item && size(item.Values) > 0) ? double(item.Values[0]) : (('Value' in item && item.Value != null) ? double(item.Value) : 0.0))
+                : double(rec.Maximum))
+              : (('Values' in item && size(item.Values) > 0) ? double(item.Values[0]) : (('Value' in item && item.Value != null) ? double(item.Value) : 0.0))
+    output: {}
+
+  ListMetrics:
+    list:
+      resource: metric
+      member: Metrics
+      paginate: model
+      # The pack listed by key prefix on the namespace argument, which is a
+      # prefix match on the stored namespace, not an equality.
+      filter: "!('Namespace' in input) || string(input.Namespace) == '' || item.Namespace.startsWith(string(input.Namespace))"
+    output:
+      # The pack echoes the namespace it was asked about, not the stored one;
+      # asked about nothing, it derived the namespace from the record key.
+      Metrics: >-
+        items.map(m, {
+          'Namespace': ('Namespace' in input && string(input.Namespace) != '') ? string(input.Namespace) : m.Namespace,
+          'MetricName': m.MetricName
+        })
+
+  GetMetricStatistics:
+    reads:
+      m:
+        resource: metric
+        key: "string(input.Namespace) + '/' + string(input.MetricName)"
+    output:
+      Label: "string(input.MetricName)"
+      Datapoints: "m_found ? dyn([{'SampleCount': m.SampleCount, 'Sum': m.Sum, 'Minimum': m.Minimum, 'Maximum': m.Maximum, 'Average': m.Sum / m.SampleCount, 'Timestamp': '2020-01-01T00:00:00Z'}]) : null"
+
+  # The pack delegates to the GetMetricStatistics code with the whole request,
+  # reading Namespace and MetricName members the model does not declare on
+  # this operation; the declared MetricDataQueries are never looked at.
+  GetMetricData:
+    reads:
+      m:
+        resource: metric
+        key: "('Namespace' in input ? string(input.Namespace) : '') + '/' + ('MetricName' in input ? string(input.MetricName) : '')"
+    output:
+      MetricDataResults: >-
+        [{
+          'Id': 'm1',
+          'Label': ('MetricName' in input ? string(input.MetricName) : ''),
+          'Values': [m_found ? dyn([{'SampleCount': m.SampleCount, 'Sum': m.Sum, 'Minimum': m.Minimum, 'Maximum': m.Maximum, 'Average': m.Sum / m.SampleCount, 'Timestamp': '2020-01-01T00:00:00Z'}]) : null]
+        }]
+
+  GetMetricWidgetImage:
+    output:
+      MetricWidgetImage: "'iVBORw0KGgo='"
+
+  # --- alarms ----------------------------------------------------------------
+
+  # The pack stores the request verbatim, replacing whatever was there, so
+  # this is a create (no merge) with a spread, not a put.
+  PutMetricAlarm:
+    effects:
+      - create: { resource: alarm, spread: input }
+    output: {}
+
+  PutCompositeAlarm:
+    effects:
+      - create: { resource: alarm, spread: input }
+    output: {}
+
+  PutLogAlarm:
+    effects:
+      - create: { resource: alarm, spread: input }
+    output: {}
+
+  # Every alarm comes back under MetricAlarms, composite and log alarms
+  # included, as the raw stored request; every filter member is ignored.
+  DescribeAlarms:
+    list: { resource: alarm, member: MetricAlarms, paginate: model }
+
+  DescribeAlarmsForMetric:
+    list:
+      resource: alarm
+      member: MetricAlarms
+      paginate: model
+      filter: "string(input.MetricName) == '' || ('MetricName' in item && string(item.MetricName) == string(input.MetricName))"
+
+  DeleteAlarms:
+    effects:
+      # The pack deleted by record key per name. A delete has no for_each, so
+      # this matches on the stored AlarmName member instead -- identical for
+      # every record that carries one, which is every record but the phantom
+      # row an Enable/Disable on an unknown name writes (see quirks).
+      - delete:
+          resource: alarm
+          where: "input.AlarmNames.exists(n, string(n) == ('AlarmName' in item ? string(item.AlarmName) : ''))"
+    output: {}
+
+  SetAlarmState:
+    effects:
+      - generate: { bind: h, kind: hex, bytes: 4 }
+      # A put, not a create: the pack merges the new state onto the stored
+      # alarm, and conjures a bare record when the name was never put.
+      - put:
+          resource: alarm
+          record:
+            AlarmName: "string(input.AlarmName)"
+            StateValue: input.StateValue
+            StateReason: "string(input.StateReason)"
+      - put:
+          resource: history
+          key: "string(input.AlarmName) + '/' + string(fx.h)"
+          record:
+            AlarmName: "string(input.AlarmName)"
+            HistoryItemType: "'StateUpdate'"
+            HistorySummary: input.StateValue
+    output: {}
+
+  EnableAlarmActions:
+    effects:
+      - patch:
+          resource: alarm
+          for_each: input.AlarmNames
+          key: "string(item)"
+          record: { Enabled: "true" }
+    output: {}
+
+  DisableAlarmActions:
+    effects:
+      - patch:
+          resource: alarm
+          for_each: input.AlarmNames
+          key: "string(item)"
+          record: { Enabled: "false" }
+    output: {}
+
+  DescribeAlarmHistory:
+    list: { resource: history, member: AlarmHistoryItems, paginate: model }
+
+  DescribeAlarmContributors:
+    output:
+      AlarmContributors: "[]"
+
+  # --- dashboards --------------------------------------------------------------
+
+  PutDashboard:
+    effects:
+      - create: { resource: dashboard, spread: input }
+    output:
+      DashboardValidationMessages: "[]"
+
+  # An absent dashboard is an empty answer, not a fault -- here and on every
+  # other Get in this service.
+  GetDashboard:
+    reads:
+      d: { resource: dashboard }
+    output:
+      DashboardArn: "'DashboardArn' in d ? d.DashboardArn : null"
+      DashboardBody: "'DashboardBody' in d ? d.DashboardBody : null"
+      DashboardName: "'DashboardName' in d ? d.DashboardName : null"
+
+  ListDashboards:
+    list: { resource: dashboard, member: DashboardEntries, paginate: model }
+
+  DeleteDashboards:
+    effects:
+      - delete:
+          resource: dashboard
+          where: "input.DashboardNames.exists(n, string(n) == ('DashboardName' in item ? string(item.DashboardName) : ''))"
+    output: {}
+
+  # --- anomaly detectors -------------------------------------------------------
+
+  PutAnomalyDetector:
+    effects:
+      # The pack generates the id only when the request names neither member;
+      # drawing it unconditionally changes no answer, and the draw order is
+      # the equivalence gate's to unify, not the bundle's to match.
+      - generate: { bind: gen, kind: hex, bytes: 8 }
+      - create:
+          resource: anomaly
+          key: "('MetricName' in input && string(input.MetricName) != '') ? string(input.MetricName) : (('Namespace' in input && string(input.Namespace) != '') ? string(input.Namespace) : string(fx.gen))"
+          spread: input
+    # The pack answered {Name: id}; the output shape declares only
+    # AnomalyDetectorId, which the pack never set. Recorded as superseded.
+    output: {}
+
+  DescribeAnomalyDetectors:
+    list: { resource: anomaly, member: AnomalyDetectors, paginate: model }
+
+  DeleteAnomalyDetector:
+    effects:
+      - delete: { resource: anomaly, missing: ignore }
+    output: {}
+
+  # --- insight rules -----------------------------------------------------------
+
+  PutInsightRule:
+    effects:
+      - create: { resource: insight, spread: input }
+    # Pack answered {Name: id}; PutInsightRuleOutput declares no members.
+    output: {}
+
+  # The input carries no rule name the pack reads (it looked for RuleName or
+  # Name, and ManagedRules is all the model declares), so every call stores
+  # the request under a fresh generated id.
+  PutManagedInsightRules:
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8 }
+      - create:
+          resource: insight
+          key: "string(fx.gen)"
+          spread: input
+    output: {}
+
+  DescribeInsightRules:
+    list: { resource: insight, member: InsightRules, paginate: model }
+
+  # The pack answered this listing under InsightRules too; the model declares
+  # ManagedRules, and the bundle answers the declared member. Recorded steps
+  # are superseded with that reason.
+  ListManagedInsightRules:
+    list: { resource: insight, member: ManagedRules, paginate: model }
+
+  DeleteInsightRules:
+    effects:
+      - delete:
+          resource: insight
+          where: "input.RuleNames.exists(n, string(n) == ('RuleName' in item ? string(item.RuleName) : ''))"
+    output: {}
+
+  EnableInsightRules:
+    effects:
+      - patch:
+          resource: insight
+          for_each: input.RuleNames
+          key: "string(item)"
+          record: { Enabled: "true" }
+    output: {}
+
+  DisableInsightRules:
+    effects:
+      - patch:
+          resource: insight
+          for_each: input.RuleNames
+          key: "string(item)"
+          record: { Enabled: "false" }
+    output: {}
+
+  GetInsightRuleReport:
+    output:
+      KeyLabels: "[]"
+      AggregationStatistic: "'Sum'"
+      AggregateValue: "0"
+
+  # --- metric streams ----------------------------------------------------------
+
+  PutMetricStream:
+    effects:
+      - create: { resource: stream, spread: input }
+    # Pack answered {Name: id}; the output shape declares only Arn, which the
+    # pack never computed. Recorded as superseded.
+    output: {}
+
+  GetMetricStream:
+    reads:
+      s: { resource: stream }
+    output:
+      Arn: "'Arn' in s ? s.Arn : null"
+      CreationDate: "'CreationDate' in s ? s.CreationDate : null"
+      ExcludeFilters: "'ExcludeFilters' in s ? s.ExcludeFilters : null"
+      FirehoseArn: "'FirehoseArn' in s ? s.FirehoseArn : null"
+      IncludeFilters: "'IncludeFilters' in s ? s.IncludeFilters : null"
+      IncludeLinkedAccountsMetrics: "'IncludeLinkedAccountsMetrics' in s ? s.IncludeLinkedAccountsMetrics : null"
+      LastUpdateDate: "'LastUpdateDate' in s ? s.LastUpdateDate : null"
+      Name: "'Name' in s ? s.Name : null"
+      OutputFormat: "'OutputFormat' in s ? s.OutputFormat : null"
+      RoleArn: "'RoleArn' in s ? s.RoleArn : null"
+      State: "'State' in s ? s.State : null"
+      StatisticsConfigurations: "'StatisticsConfigurations' in s ? s.StatisticsConfigurations : null"
+
+  ListMetricStreams:
+    list: { resource: stream, member: Entries, paginate: model }
+
+  DeleteMetricStream:
+    effects:
+      - delete: { resource: stream, missing: ignore }
+    output: {}
+
+  StartMetricStreams:
+    effects:
+      - patch:
+          resource: stream
+          for_each: input.Names
+          key: "string(item)"
+          record: { Enabled: "true" }
+    output: {}
+
+  StopMetricStreams:
+    effects:
+      - patch:
+          resource: stream
+          for_each: input.Names
+          key: "string(item)"
+          record: { Enabled: "false" }
+    output: {}
+
+  # --- alarm mute rules --------------------------------------------------------
+
+  PutAlarmMuteRule:
+    effects:
+      - create: { resource: mute, spread: input }
+    # Pack answered {Name: id}; the output shape declares no members.
+    output: {}
+
+  GetAlarmMuteRule:
+    addressing:
+      mute: "the pack looks a mute rule up by AlarmName or Name, but GetAlarmMuteRule declares only AlarmMuteRuleName, so a rule put with declared members alone can never be read back; a request that also carries the undeclared AlarmName finds it"
+    reads:
+      g: { resource: mute }
+    output:
+      AlarmMuteRuleArn: "'AlarmMuteRuleArn' in g ? g.AlarmMuteRuleArn : null"
+      Description: "'Description' in g ? g.Description : null"
+      ExpireDate: "'ExpireDate' in g ? g.ExpireDate : null"
+      LastUpdatedTimestamp: "'LastUpdatedTimestamp' in g ? g.LastUpdatedTimestamp : null"
+      MuteTargets: "'MuteTargets' in g ? g.MuteTargets : null"
+      MuteType: "'MuteType' in g ? g.MuteType : null"
+      Name: "'Name' in g ? g.Name : null"
+      Rule: "'Rule' in g ? g.Rule : null"
+      StartDate: "'StartDate' in g ? g.StartDate : null"
+      Status: "'Status' in g ? g.Status : null"
+
+  # The pack answered this listing under MuteRules; the model declares
+  # AlarmMuteRuleSummaries, and the bundle answers the declared member.
+  # Recorded steps are superseded with that reason.
+  ListAlarmMuteRules:
+    list: { resource: mute, member: AlarmMuteRuleSummaries, paginate: model }
+
+  DeleteAlarmMuteRule:
+    addressing:
+      mute: "the pack deletes a mute rule by AlarmName or Name, but DeleteAlarmMuteRule declares only AlarmMuteRuleName, so a valid request resolves the empty key and deletes nothing"
+    effects:
+      - delete: { resource: mute, missing: ignore }
+    output: {}
+
+  # --- datasets ----------------------------------------------------------------
+
+  # The pack reads Name or DatasetName, which Associate and Disassociate do
+  # not declare (DatasetIdentifier is the required member), so every valid
+  # call stores the request under a generated id nothing can address again.
+  # Disassociate writes a record exactly the way Associate does.
+  AssociateDatasetKmsKey:
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8 }
+      - create:
+          resource: dataset
+          key: "('Name' in input && string(input.Name) != '') ? string(input.Name) : (('DatasetName' in input && string(input.DatasetName) != '') ? string(input.DatasetName) : string(fx.gen))"
+          spread: input
+    # Pack answered {Name: id}; the output shape declares no members.
+    output: {}
+
+  DisassociateDatasetKmsKey:
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8 }
+      - create:
+          resource: dataset
+          key: "('Name' in input && string(input.Name) != '') ? string(input.Name) : (('DatasetName' in input && string(input.DatasetName) != '') ? string(input.DatasetName) : string(fx.gen))"
+          spread: input
+    output: {}
+
+  GetDataset:
+    addressing:
+      dataset: "the pack looks a dataset up by Name or DatasetName, but GetDataset declares only DatasetIdentifier, so the lookup resolves the empty key and always answers empty"
+    reads:
+      ds: { resource: dataset }
+    output:
+      Arn: "'Arn' in ds ? ds.Arn : null"
+      DatasetId: "'DatasetId' in ds ? ds.DatasetId : null"
+      KmsKeyArn: "'KmsKeyArn' in ds ? ds.KmsKeyArn : null"
+
+  # --- OTel enrichment ---------------------------------------------------------
+
+  # The input shapes declare no members at all; the pack honors an undeclared
+  # Name when one is sent and generates otherwise. Start and Stop both simply
+  # store the request.
+  StartOTelEnrichment:
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8 }
+      - create:
+          resource: otel
+          key: "('Name' in input && string(input.Name) != '') ? string(input.Name) : string(fx.gen)"
+          spread: input
+    # Pack answered {Name: id}; the output shape declares no members.
+    output: {}
+
+  StopOTelEnrichment:
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8 }
+      - create:
+          resource: otel
+          key: "('Name' in input && string(input.Name) != '') ? string(input.Name) : string(fx.gen)"
+          spread: input
+    output: {}
+
+  GetOTelEnrichment:
+    reads:
+      o: { resource: otel }
+    output:
+      Status: "'Status' in o ? o.Status : null"
+
+  # --- tags --------------------------------------------------------------------
+
+  TagResource:
+    effects:
+      - create:
+          resource: tag
+          record:
+            Tags: input.Tags
+    output: {}
+
+  # The pack stored the whole tag list under the ARN; UntagResource deletes
+  # all of it, ignoring the TagKeys it was given.
+  UntagResource:
+    effects:
+      - delete: { resource: tag, missing: ignore }
+    output: {}
+
+  ListTagsForResource:
+    reads:
+      t: { resource: tag }
+    output:
+      Tags: "t_found && 'Tags' in t ? t.Tags : []"
+
+quirks:
+  - operation: PutMetricData
+    note: >
+      The pack stored one record per datapoint under namespace/name/seq with a
+      per-metric counter and aggregated at read time; the bundle keeps running
+      aggregates on one record per namespace/metric, which answers identically
+      for any sequence of requests that each carry a single metric name. The
+      shape it cannot reproduce is one request mixing metric names: a for_each
+      write sees the previous element's record as `rec`, not the stored record
+      of its own key, so elements after the first aggregate onto the previous
+      element's metric where the pack kept them independent (the write still
+      lands under the correct key). This is the one place the transcription is
+      not exact, and the recorded mixed-metric GetMetricStatistics step is
+      superseded saying so. Separately: a datum with neither Value nor Values
+      counts as 0; a datum with Values contributes only Values[0]; a
+      MetricName containing '/' made the pack's prefix scans blur metric
+      boundaries, which the member-keyed bundle does not.
+  - operation: GetMetricStatistics
+    note: >
+      Statistics, ExtendedStatistics, Unit, Dimensions, Period and the time
+      range are all ignored: the answer is one aggregate datapoint with a
+      constant timestamp '2020-01-01T00:00:00Z', or no datapoints when the
+      metric was never put. The pack scanned datapoint keys by prefix, so a
+      MetricName that is a strict prefix of another ('Latency' vs
+      'Latency/p99', when names contain '/') aggregated both; the bundle
+      reads the one record keyed namespace/name exactly.
+  - operation: GetMetricData
+    note: >
+      The pack delegates to the GetMetricStatistics code with the whole
+      request, so it reads Namespace and MetricName members the model does
+      not declare on this operation and never looks at MetricDataQueries at
+      all: a request carrying only declared members always answers Label ''
+      with Values [null]. Values wraps the entire Datapoints list as a single
+      element rather than flattening it, and Id is always the constant 'm1'.
+  - operation: ListMetrics
+    note: >
+      The namespace argument is a key prefix, not an equality: asking for
+      namespace 'N' also lists metrics stored under 'N2', each echoed with
+      Namespace 'N' and deduplicated against the real 'N' entries, which the
+      bundle cannot reproduce -- with per-metric records both survive. With no
+      namespace the pack derived each namespace from the record key up to the
+      first '/', truncating namespaces that contain one; the bundle answers
+      the stored namespace in full. MetricName, Dimensions, RecentlyActive
+      and the other declared filters are all ignored.
+  - operation: DescribeAlarms
+    note: >
+      Composite and log alarms are listed under MetricAlarms alongside metric
+      alarms, as the raw stored request, and AlarmNames, StateValue,
+      AlarmTypes and every other declared filter are ignored. Records carry
+      members the item shape does not declare -- Enabled after an
+      Enable/DisableAlarmActions call -- and the listing answers them anyway;
+      the transcription keeps that.
+  - operation: EnableAlarmActions
+    note: >
+      Flagging an unknown name conjures a record holding only Enabled, which
+      DescribeAlarms then answers; DisableAlarmActions, EnableInsightRules,
+      DisableInsightRules, StartMetricStreams and StopMetricStreams do the
+      same on their collections. When the name list was empty the pack fell
+      back to a Name or AlarmName member, both undeclared on these
+      operations; that path is not transcribed. The Enabled member is not one
+      the alarm, stream or rule shapes declare, so GetMetricStream cannot
+      echo it and the recorded member is superseded there.
+  - operation: DeleteAlarms
+    note: >
+      The pack deleted each named key whether or not the record carried an
+      AlarmName member. A delete has no for_each, so the bundle matches on the
+      stored member: identical for everything except the phantom row an
+      Enable/Disable on an unknown name writes, which the pack would delete
+      and the bundle keeps. DeleteDashboards and DeleteInsightRules are the
+      same, and for insight rules the rows PutManagedInsightRules writes carry
+      no RuleName at all, so DeleteInsightRules can never match them -- in the
+      pack it could, because it deleted by key.
+  - operation: SetAlarmState
+    note: >
+      Setting state on an alarm that was never put conjures a bare record
+      holding AlarmName, StateValue and StateReason. Every call appends a
+      history row keyed name/random-hex that nothing ever deletes, whose
+      HistorySummary is the StateValue verbatim. DescribeAlarmHistory ignores
+      its AlarmName, HistoryItemType and time-range filters and lists every
+      row.
+  - operation: GetAlarmMuteRule
+    note: >
+      Mute rules are addressed by AlarmName or Name, but GetAlarmMuteRule and
+      DeleteAlarmMuteRule declare only AlarmMuteRuleName: a rule put with
+      declared members alone can never be read or deleted, and a valid request
+      reads or deletes the empty key. Sending the undeclared AlarmName member
+      alongside finds it. ListAlarmMuteRules answers under MuteRules, which
+      the model does not declare (it declares AlarmMuteRuleSummaries), so the
+      recorded listings are superseded and the bundle answers the declared
+      member.
+  - operation: ListManagedInsightRules
+    note: >
+      The pack answered with InsightRules, which ListManagedInsightRulesOutput
+      does not declare (it declares ManagedRules); the bundle answers the
+      declared member and the recorded steps are superseded. Both operations
+      list the same collection, so managed rules also appear in
+      DescribeInsightRules, as raw stored requests. PutManagedInsightRules
+      reads a RuleName or Name the input does not carry, so every call is
+      stored under a generated id and answers {Name: id}, a member the output
+      shape does not declare.
+  - operation: AssociateDatasetKmsKey
+    note: >
+      The pack addresses datasets by Name or DatasetName, which neither
+      Associate nor Disassociate declares (DatasetIdentifier is the required
+      member), so every valid call stores the request under a generated id
+      that no operation can ever address again, and GetDataset always answers
+      empty. DisassociateDatasetKmsKey writes a record exactly the way
+      Associate does -- nothing is disassociated.
+  - operation: StartOTelEnrichment
+    note: >
+      The OTel input shapes declare no members at all; the pack honors an
+      undeclared Name when one is sent and generates an id otherwise. Start
+      and Stop both just store the request, and Get answers the raw stored
+      record -- including the Name member the output shape does not declare.
+      All three answer {Name: id} on write, likewise undeclared, and the
+      recorded members are superseded.
+  - operation: PutMetricStream
+    note: >
+      The pack answers {Name: id} on PutMetricStream, PutAnomalyDetector,
+      PutInsightRule and PutAlarmMuteRule, and none of those output shapes
+      declare a Name member (PutMetricStream declares Arn, PutAnomalyDetector
+      AnomalyDetectorId, the rest nothing), so the recorded members are
+      superseded. Every put stores the request verbatim and every get answers
+      it verbatim, so a put carrying members the get's output shape does not
+      declare (Tags on a dashboard, say) echoes them where the bundle cannot.
+  - operation: UntagResource
+    note: >
+      TagResource replaces the whole tag list stored under the resource ARN
+      and UntagResource deletes all of it, ignoring the TagKeys it was given.
+      ListTagsForResource answers an empty list for an ARN that was never
+      tagged rather than faulting.
+  - operation: GetInsightRuleReport
+    note: >
+      The answer is constant -- empty KeyLabels, AggregationStatistic 'Sum',
+      AggregateValue 0 -- regardless of the rule named or whether it exists.
+      DescribeAlarmContributors likewise always answers an empty list, and
+      GetMetricWidgetImage a constant one-pixel PNG.
+  - operation: PutMetricAlarm
+    note: >
+      The pack never faults: an absent dashboard, stream, mute rule, dataset
+      or enrichment reads as an empty answer, deleting anything absent
+      succeeds, and no input was ever validated -- a PutMetricAlarm without an
+      AlarmName stored the request under the empty-string key. The model marks
+      such members required and the engine rejects their absence now, so those
+      paths are dead; the recording carries only requests the model accepts.

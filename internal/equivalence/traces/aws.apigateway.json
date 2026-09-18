@@ -1,0 +1,3863 @@
+{
+  "schema": "trace/1",
+  "service": "aws.apigateway",
+  "source": "pack:internal/services/aws/apigateway@0007c84f",
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service. The recording covers the pack's expressible surface: ExecuteApi, the Lambda AWS_PROXY invocation, is the bundle's shadow reason and is deliberately not recorded.",
+  "steps": [
+    {
+      "operation": "GetRestApis",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": null
+      }
+    },
+    {
+      "operation": "CreateRestApi",
+      "input": {
+        "name": "demo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "7c589129",
+        "name": "demo",
+        "rootResourceId": "root"
+      }
+    },
+    {
+      "operation": "GetRestApi",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "7c589129",
+        "name": "demo",
+        "rootResourceId": "root"
+      }
+    },
+    {
+      "operation": "GetRestApi",
+      "input": {
+        "restApiId": "ffffffff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateRestApi",
+      "input": {
+        "name": "demo2",
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "7c589129",
+        "name": "demo2",
+        "rootResourceId": "root"
+      }
+    },
+    {
+      "operation": "UpdateRestApi",
+      "input": {
+        "name": "x",
+        "restApiId": "ffffffff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetRestApis",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": [
+          {
+            "id": "7c589129",
+            "name": "demo2",
+            "rootResourceId": "root"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateResource",
+      "input": {
+        "parentId": "root",
+        "pathPart": "pets",
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "5f59f223",
+        "parentId": "root",
+        "path": "/pets",
+        "pathPart": "pets"
+      }
+    },
+    {
+      "operation": "CreateResource",
+      "input": {
+        "parentId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "pathPart": "dogs",
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "9c8e2cb0",
+        "parentId": "5f59f223",
+        "path": "/pets/dogs",
+        "pathPart": "dogs"
+      }
+    },
+    {
+      "operation": "GetResource",
+      "input": {
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 8
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "9c8e2cb0",
+        "parentId": "5f59f223",
+        "path": "/pets/dogs",
+        "pathPart": "dogs"
+      }
+    },
+    {
+      "operation": "GetResource",
+      "input": {
+        "resourceId": "ffffffff",
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetResources",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": [
+          {
+            "id": "5f59f223",
+            "parentId": "root",
+            "path": "/pets",
+            "pathPart": "pets"
+          },
+          {
+            "id": "9c8e2cb0",
+            "parentId": "5f59f223",
+            "path": "/pets/dogs",
+            "pathPart": "dogs"
+          },
+          {
+            "id": "root",
+            "parentId": "",
+            "path": "/",
+            "pathPart": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutMethod",
+      "input": {
+        "authorizationType": "NONE",
+        "httpMethod": "get",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "authorizationType": "NONE",
+        "httpMethod": "GET"
+      }
+    },
+    {
+      "operation": "GetMethod",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "authorizationType": "NONE",
+        "httpMethod": "GET"
+      }
+    },
+    {
+      "operation": "GetMethod",
+      "input": {
+        "httpMethod": "POST",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutIntegration",
+      "input": {
+        "httpMethod": "get",
+        "integrationHttpMethod": "POST",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "type": "AWS_PROXY",
+        "uri": "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:echo/invocations"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "httpMethod": "POST",
+        "type": "AWS_PROXY",
+        "uri": "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:echo/invocations"
+      }
+    },
+    {
+      "operation": "GetIntegration",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "httpMethod": "POST",
+        "type": "AWS_PROXY",
+        "uri": "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:echo/invocations"
+      }
+    },
+    {
+      "operation": "GetIntegration",
+      "input": {
+        "httpMethod": "DELETE",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutMethodResponse",
+      "input": {
+        "httpMethod": "get",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "statusCode": "200"
+      }
+    },
+    {
+      "operation": "GetMethodResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "statusCode": "200"
+      }
+    },
+    {
+      "operation": "GetMethodResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "404"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutIntegrationResponse",
+      "input": {
+        "httpMethod": "get",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "selectionPattern": "ok",
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "selectionPattern": "ok",
+        "statusCode": "200"
+      }
+    },
+    {
+      "operation": "GetIntegrationResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "selectionPattern": "ok",
+        "statusCode": "200"
+      }
+    },
+    {
+      "operation": "GetIntegrationResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "404"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "33f6fc5d",
+        "stageName": "prod"
+      },
+      "superseded": "The Deployment output shape declares id but not stageName; the pack answered the stored record, which carries the stage it named. The write itself is gated by the later GetStage step that reads it."
+    },
+    {
+      "operation": "GetDeployments",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": [
+          {
+            "id": "33f6fc5d",
+            "stageName": "prod"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "33f6fc5d",
+        "stageName": "prod"
+      },
+      "superseded": "GetDeployment answers the stored record, whose stageName the Deployment shape does not declare; the bundle answers the declared id only."
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "deploymentId": "ffffffff",
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetStage",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentId": "33f6fc5d",
+        "stageName": "prod"
+      }
+    },
+    {
+      "operation": "UpdateStage",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentId": "33f6fc5d",
+        "stageName": "prod"
+      }
+    },
+    {
+      "operation": "CreateStage",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "dev"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentId": "33f6fc5d",
+        "stageName": "dev"
+      }
+    },
+    {
+      "operation": "GetStage",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "dev"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentId": "33f6fc5d",
+        "stageName": "dev"
+      }
+    },
+    {
+      "operation": "GetStage",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateStage",
+      "input": {
+        "deploymentId": "",
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentId": "",
+        "stageName": "ghost"
+      }
+    },
+    {
+      "operation": "CreateAuthorizer",
+      "input": {
+        "name": "a1",
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "type": "TOKEN"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "83d4958a",
+        "name": "a1",
+        "type": "TOKEN"
+      }
+    },
+    {
+      "operation": "GetAuthorizer",
+      "input": {
+        "authorizerId": {
+          "$fromPath": "id",
+          "$fromStep": 34
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "83d4958a",
+        "name": "a1",
+        "type": "TOKEN"
+      }
+    },
+    {
+      "operation": "GetAuthorizer",
+      "input": {
+        "authorizerId": "ffffffff",
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetAuthorizers",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": [
+          {
+            "id": "83d4958a",
+            "name": "a1",
+            "type": "TOKEN"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateApiKey",
+      "input": {
+        "name": "k1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "enabled": true,
+        "id": "100aa4e6",
+        "name": "k1",
+        "value": "3ed10eca83a29db2d365"
+      }
+    },
+    {
+      "operation": "GetApiKey",
+      "input": {
+        "apiKey": {
+          "$fromPath": "id",
+          "$fromStep": 38
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "enabled": true,
+        "id": "100aa4e6",
+        "name": "k1",
+        "value": "3ed10eca83a29db2d365"
+      }
+    },
+    {
+      "operation": "GetApiKey",
+      "input": {
+        "apiKey": "ffffffff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetApiKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": [
+          {
+            "enabled": true,
+            "id": "100aa4e6",
+            "name": "k1",
+            "value": "3ed10eca83a29db2d365"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateUsagePlan",
+      "input": {
+        "name": "u1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "4da7b6a4",
+        "name": "u1"
+      }
+    },
+    {
+      "operation": "GetUsagePlan",
+      "input": {
+        "usagePlanId": {
+          "$fromPath": "id",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "4da7b6a4",
+        "name": "u1"
+      }
+    },
+    {
+      "operation": "GetUsagePlan",
+      "input": {
+        "usagePlanId": "ffffffff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetUsagePlans",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": [
+          {
+            "id": "4da7b6a4",
+            "name": "u1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteMethodResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteMethodResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteIntegrationResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteIntegrationResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetIntegrationResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteIntegration",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteIntegration",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetIntegration",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteMethod",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteMethod",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetMethod",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 7
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteStage",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "dev"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteStage",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "dev"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetStage",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        },
+        "stageName": "dev"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDeployment",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDeployment",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "id",
+          "$fromStep": 24
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteAuthorizer",
+      "input": {
+        "authorizerId": {
+          "$fromPath": "id",
+          "$fromStep": 34
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAuthorizer",
+      "input": {
+        "authorizerId": {
+          "$fromPath": "id",
+          "$fromStep": 34
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAuthorizer",
+      "input": {
+        "authorizerId": {
+          "$fromPath": "id",
+          "$fromStep": 34
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteApiKey",
+      "input": {
+        "apiKey": {
+          "$fromPath": "id",
+          "$fromStep": 38
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteApiKey",
+      "input": {
+        "apiKey": {
+          "$fromPath": "id",
+          "$fromStep": 38
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetApiKey",
+      "input": {
+        "apiKey": {
+          "$fromPath": "id",
+          "$fromStep": 38
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteUsagePlan",
+      "input": {
+        "usagePlanId": {
+          "$fromPath": "id",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteUsagePlan",
+      "input": {
+        "usagePlanId": {
+          "$fromPath": "id",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetUsagePlan",
+      "input": {
+        "usagePlanId": {
+          "$fromPath": "id",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteResource",
+      "input": {
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 8
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteResource",
+      "input": {
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 8
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetResource",
+      "input": {
+        "resourceId": {
+          "$fromPath": "id",
+          "$fromStep": 8
+        },
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteRestApi",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteRestApi",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetRestApi",
+      "input": {
+        "restApiId": {
+          "$fromPath": "id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetSdkTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": []
+      }
+    },
+    {
+      "operation": "GetStages",
+      "input": {
+        "restApiId": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": []
+      }
+    },
+    {
+      "operation": "GetAccount",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cloudwatchRoleArn": ""
+      }
+    },
+    {
+      "operation": "GetExport",
+      "input": {
+        "exportType": "swagger",
+        "restApiId": "r-x",
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": ""
+      }
+    },
+    {
+      "operation": "GetSdk",
+      "input": {
+        "restApiId": "r-x",
+        "sdkType": "java",
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": ""
+      }
+    },
+    {
+      "operation": "GetTags",
+      "input": {
+        "resourceArn": "arn:aws:apigateway:us-east-1::/restapis/r-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "item": []
+      }
+    },
+    {
+      "operation": "GetUsage",
+      "input": {
+        "endDate": "2026-01-01",
+        "startDate": "2026-01-01",
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetSdkType",
+      "input": {
+        "id": "java"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDomainNameAccessAssociations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": []
+      }
+    },
+    {
+      "operation": "CreateDomainName",
+      "input": {
+        "domainName": "ex.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domainName": "ex.com"
+      }
+    },
+    {
+      "operation": "GetDomainName",
+      "input": {
+        "domainName": "ex.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domainName": "ex.com"
+      }
+    },
+    {
+      "operation": "GetDomainNames",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "domainName": "ex.com"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateDomainName",
+      "input": {
+        "domainName": "ex.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domainName": "ex.com"
+      }
+    },
+    {
+      "operation": "CreateDomainNameAccessAssociation",
+      "input": {
+        "accessAssociationSource": "arn:aws:s3:::bucket",
+        "accessAssociationSourceType": "S3",
+        "domainNameArn": "arn:aws:apigateway:us-east-1::/domainnames/ex.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "accessAssociationSource": "arn:aws:s3:::bucket",
+        "accessAssociationSourceType": "S3",
+        "domainName": "e7175ec1",
+        "domainNameArn": "arn:aws:apigateway:us-east-1::/domainnames/ex.com"
+      },
+      "superseded": "The pack answered the whole stored record; DomainNameAccessAssociation declares none of the echoed members, and the generated id the pack stored as domainName is not token-addressable in an output the shape forbids."
+    },
+    {
+      "operation": "GetDomainNameAccessAssociations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "accessAssociationSource": "arn:aws:s3:::bucket",
+            "accessAssociationSourceType": "S3",
+            "domainName": "e7175ec1",
+            "domainNameArn": "arn:aws:apigateway:us-east-1::/domainnames/ex.com"
+          },
+          {
+            "domainName": "ex.com"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RejectDomainNameAccessAssociation",
+      "input": {
+        "domainNameAccessAssociationArn": "arn:aws:apigateway:us-east-1::/domainnameaccessassociations/x",
+        "domainNameArn": "arn:aws:apigateway:us-east-1::/domainnames/ex.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDomainNameAccessAssociation",
+      "input": {
+        "domainNameAccessAssociationArn": "arn:aws:apigateway:us-east-1::/domainnameaccessassociations/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDomainNameAccessAssociation",
+      "input": {
+        "domainNameAccessAssociationArn": "arn:aws:apigateway:us-east-1::/domainnameaccessassociations/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDomainNameAccessAssociations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "accessAssociationSource": "arn:aws:s3:::bucket",
+            "accessAssociationSourceType": "S3",
+            "domainName": "e7175ec1",
+            "domainNameArn": "arn:aws:apigateway:us-east-1::/domainnames/ex.com"
+          },
+          {
+            "domainName": "ex.com"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDomainName",
+      "input": {
+        "domainName": "ex.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDomainName",
+      "input": {
+        "domainName": "ex.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDomainName",
+      "input": {
+        "domainName": "ex.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDomainNames",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "accessAssociationSource": "arn:aws:s3:::bucket",
+            "accessAssociationSourceType": "S3",
+            "domainName": "e7175ec1",
+            "domainNameArn": "arn:aws:apigateway:us-east-1::/domainnames/ex.com"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateBasePathMapping",
+      "input": {
+        "basePath": "v1",
+        "domainName": "ex2.com",
+        "restApiId": "r-bp",
+        "stage": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "basePath": "v1",
+        "domainName": "ex2.com",
+        "restApiId": "r-bp",
+        "stage": "prod"
+      },
+      "superseded": "The pack answered the whole echoed request; BasePathMapping does not declare domainName, so the bundle cannot carry it."
+    },
+    {
+      "operation": "GetBasePathMapping",
+      "input": {
+        "basePath": "v1",
+        "domainName": "ex2.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "basePath": "v1",
+        "domainName": "ex2.com",
+        "restApiId": "r-bp",
+        "stage": "prod"
+      },
+      "superseded": "Same declared-shape divergence as the create: the hit answer echoes domainName, which BasePathMapping does not declare."
+    },
+    {
+      "operation": "GetBasePathMappings",
+      "input": {
+        "domainName": "ex2.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "basePath": "v1",
+            "domainName": "ex2.com",
+            "restApiId": "r-bp",
+            "stage": "prod"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateBasePathMapping",
+      "input": {
+        "basePath": "v1",
+        "domainName": "ex2.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "basePath": "v1",
+        "domainName": "ex2.com"
+      },
+      "superseded": "Same declared-shape divergence as the create: the update's answer echoes domainName, which BasePathMapping does not declare."
+    },
+    {
+      "operation": "DeleteBasePathMapping",
+      "input": {
+        "basePath": "v1",
+        "domainName": "ex2.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteBasePathMapping",
+      "input": {
+        "basePath": "v1",
+        "domainName": "ex2.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetBasePathMappings",
+      "input": {
+        "domainName": "ex2.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": []
+      }
+    },
+    {
+      "operation": "CreateVpcLink",
+      "input": {
+        "name": "v1",
+        "targetArns": [
+          "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/net/x/1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "v1",
+        "name": "v1",
+        "targetArns": [
+          "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/net/x/1"
+        ]
+      }
+    },
+    {
+      "operation": "GetVpcLink",
+      "input": {
+        "vpcLinkId": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetVpcLinks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "v1",
+            "name": "v1",
+            "targetArns": [
+              "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/net/x/1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateVpcLink",
+      "input": {
+        "vpcLinkId": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "77df676f",
+        "vpcLinkId": "v1"
+      },
+      "superseded": "The pack answered the echoed request; VpcLink does not declare vpcLinkId, and the record is stored under a generated id the answer also cannot name beyond id."
+    },
+    {
+      "operation": "GetVpcLinks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "77df676f",
+            "vpcLinkId": "v1"
+          },
+          {
+            "id": "v1",
+            "name": "v1",
+            "targetArns": [
+              "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/net/x/1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteVpcLink",
+      "input": {
+        "vpcLinkId": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteVpcLink",
+      "input": {
+        "vpcLinkId": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetVpcLinks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "77df676f",
+            "vpcLinkId": "v1"
+          },
+          {
+            "id": "v1",
+            "name": "v1",
+            "targetArns": [
+              "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/net/x/1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateModel",
+      "input": {
+        "contentType": "application/json",
+        "name": "m1",
+        "restApiId": "r-mod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "contentType": "application/json",
+        "name": "m1",
+        "restApiId": "r-mod"
+      },
+      "superseded": "The pack answered the echoed request; Model does not declare restApiId, so the bundle cannot carry it."
+    },
+    {
+      "operation": "GetModel",
+      "input": {
+        "modelName": "m1",
+        "restApiId": "r-mod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetModelTemplate",
+      "input": {
+        "modelName": "m1",
+        "restApiId": "r-mod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UpdateModel",
+      "input": {
+        "modelName": "m1",
+        "restApiId": "r-modu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "modelName": "m1",
+        "name": "r-modu",
+        "restApiId": "r-modu"
+      },
+      "superseded": "Same declared-shape divergence as CreateModel: the echoed restApiId is undeclared, and the record's name member is the restApiId the pack's key fallback resolved to."
+    },
+    {
+      "operation": "GetModels",
+      "input": {
+        "restApiId": "r-mod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "contentType": "application/json",
+            "name": "m1",
+            "restApiId": "r-mod"
+          },
+          {
+            "modelName": "m1",
+            "name": "r-modu",
+            "restApiId": "r-modu"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteModel",
+      "input": {
+        "modelName": "m1",
+        "restApiId": "r-mod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteModel",
+      "input": {
+        "modelName": "m1",
+        "restApiId": "r-mod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetModels",
+      "input": {
+        "restApiId": "r-mod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "contentType": "application/json",
+            "name": "m1",
+            "restApiId": "r-mod"
+          },
+          {
+            "modelName": "m1",
+            "name": "r-modu",
+            "restApiId": "r-modu"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateDocumentationPart",
+      "input": {
+        "location": {
+          "type": "RESOURCE"
+        },
+        "properties": "{}",
+        "restApiId": "r-doc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "r-doc",
+        "location": {
+          "type": "RESOURCE"
+        },
+        "properties": "{}",
+        "restApiId": "r-doc"
+      },
+      "superseded": "The pack answered the echoed request; DocumentationPart does not declare restApiId, so the bundle cannot carry it."
+    },
+    {
+      "operation": "GetDocumentationPart",
+      "input": {
+        "documentationPartId": "d1",
+        "restApiId": "r-doc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "r-doc",
+        "location": {
+          "type": "RESOURCE"
+        },
+        "properties": "{}",
+        "restApiId": "r-doc"
+      },
+      "superseded": "Same declared-shape divergence as the create: the hit answer echoes restApiId, which DocumentationPart does not declare."
+    },
+    {
+      "operation": "CreateDocumentationVersion",
+      "input": {
+        "documentationVersion": "1.0",
+        "restApiId": "r-docv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "documentationVersion": "1.0",
+        "id": "r-docv",
+        "restApiId": "r-docv"
+      },
+      "superseded": "The pack answered the echoed request; DocumentationVersion declares version, not documentationVersion, and not restApiId."
+    },
+    {
+      "operation": "GetDocumentationVersion",
+      "input": {
+        "documentationVersion": "1.0",
+        "restApiId": "r-docv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "documentationVersion": "1.0",
+        "id": "r-docv",
+        "restApiId": "r-docv"
+      },
+      "superseded": "Same declared-shape divergence as the create: the hit answer echoes documentationVersion and restApiId, neither declared."
+    },
+    {
+      "operation": "ImportDocumentationParts",
+      "input": {
+        "body": "{}",
+        "restApiId": "r-doci"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": "{}",
+        "id": "r-doci",
+        "restApiId": "r-doci"
+      },
+      "superseded": "The pack answered the echoed request; ImportDocumentationParts declares only ids and warnings."
+    },
+    {
+      "operation": "UpdateDocumentationPart",
+      "input": {
+        "documentationPartId": "d1",
+        "restApiId": "r-docu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "documentationPartId": "d1",
+        "id": "r-docu",
+        "restApiId": "r-docu"
+      },
+      "superseded": "Same declared-shape divergence as CreateDocumentationPart: the echoed documentationPartId and restApiId are undeclared."
+    },
+    {
+      "operation": "UpdateDocumentationVersion",
+      "input": {
+        "documentationVersion": "2.0",
+        "restApiId": "r-docuv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "documentationVersion": "2.0",
+        "id": "r-docuv",
+        "restApiId": "r-docuv"
+      },
+      "superseded": "Same declared-shape divergence as CreateDocumentationVersion: the echoed documentationVersion and restApiId are undeclared."
+    },
+    {
+      "operation": "GetDocumentationParts",
+      "input": {
+        "restApiId": "r-doc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "r-doc",
+            "location": {
+              "type": "RESOURCE"
+            },
+            "properties": "{}",
+            "restApiId": "r-doc"
+          },
+          {
+            "body": "{}",
+            "id": "r-doci",
+            "restApiId": "r-doci"
+          },
+          {
+            "documentationPartId": "d1",
+            "id": "r-docu",
+            "restApiId": "r-docu"
+          },
+          {
+            "documentationVersion": "2.0",
+            "id": "r-docuv",
+            "restApiId": "r-docuv"
+          },
+          {
+            "documentationVersion": "1.0",
+            "id": "r-docv",
+            "restApiId": "r-docv"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetDocumentationVersions",
+      "input": {
+        "restApiId": "r-doc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "r-doc",
+            "location": {
+              "type": "RESOURCE"
+            },
+            "properties": "{}",
+            "restApiId": "r-doc"
+          },
+          {
+            "body": "{}",
+            "id": "r-doci",
+            "restApiId": "r-doci"
+          },
+          {
+            "documentationPartId": "d1",
+            "id": "r-docu",
+            "restApiId": "r-docu"
+          },
+          {
+            "documentationVersion": "2.0",
+            "id": "r-docuv",
+            "restApiId": "r-docuv"
+          },
+          {
+            "documentationVersion": "1.0",
+            "id": "r-docv",
+            "restApiId": "r-docv"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDocumentationPart",
+      "input": {
+        "documentationPartId": "d1",
+        "restApiId": "r-doc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDocumentationPart",
+      "input": {
+        "documentationPartId": "d1",
+        "restApiId": "r-doc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDocumentationParts",
+      "input": {
+        "restApiId": "r-doc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "body": "{}",
+            "id": "r-doci",
+            "restApiId": "r-doci"
+          },
+          {
+            "documentationPartId": "d1",
+            "id": "r-docu",
+            "restApiId": "r-docu"
+          },
+          {
+            "documentationVersion": "2.0",
+            "id": "r-docuv",
+            "restApiId": "r-docuv"
+          },
+          {
+            "documentationVersion": "1.0",
+            "id": "r-docv",
+            "restApiId": "r-docv"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDocumentationVersion",
+      "input": {
+        "documentationVersion": "1.0",
+        "restApiId": "r-docv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDocumentationVersion",
+      "input": {
+        "documentationVersion": "1.0",
+        "restApiId": "r-docv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDocumentationVersions",
+      "input": {
+        "restApiId": "r-doc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "body": "{}",
+            "id": "r-doci",
+            "restApiId": "r-doci"
+          },
+          {
+            "documentationPartId": "d1",
+            "id": "r-docu",
+            "restApiId": "r-docu"
+          },
+          {
+            "documentationVersion": "2.0",
+            "id": "r-docuv",
+            "restApiId": "r-docuv"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateRequestValidator",
+      "input": {
+        "name": "rv1",
+        "restApiId": "r-rv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "rv1",
+        "name": "rv1",
+        "restApiId": "r-rv"
+      },
+      "superseded": "The pack answered the echoed request; RequestValidator does not declare restApiId, so the bundle cannot carry it."
+    },
+    {
+      "operation": "GetRequestValidator",
+      "input": {
+        "requestValidatorId": "rv1",
+        "restApiId": "r-rv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UpdateRequestValidator",
+      "input": {
+        "requestValidatorId": "rv1",
+        "restApiId": "r-rvu"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "r-rvu",
+        "requestValidatorId": "rv1",
+        "restApiId": "r-rvu"
+      },
+      "superseded": "Same declared-shape divergence as the create: the echoed requestValidatorId and restApiId are undeclared."
+    },
+    {
+      "operation": "GetRequestValidators",
+      "input": {
+        "restApiId": "r-rv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "r-rvu",
+            "requestValidatorId": "rv1",
+            "restApiId": "r-rvu"
+          },
+          {
+            "id": "rv1",
+            "name": "rv1",
+            "restApiId": "r-rv"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteRequestValidator",
+      "input": {
+        "requestValidatorId": "rv1",
+        "restApiId": "r-rv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteRequestValidator",
+      "input": {
+        "requestValidatorId": "rv1",
+        "restApiId": "r-rv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetRequestValidators",
+      "input": {
+        "restApiId": "r-rv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "r-rvu",
+            "requestValidatorId": "rv1",
+            "restApiId": "r-rvu"
+          },
+          {
+            "id": "rv1",
+            "name": "rv1",
+            "restApiId": "r-rv"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateUsagePlanKey",
+      "input": {
+        "keyId": "k1",
+        "keyType": "API_KEY",
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "9045051b",
+        "keyId": "k1",
+        "keyType": "API_KEY",
+        "usagePlanId": "u-x"
+      },
+      "superseded": "The pack answered the echoed request under a generated id; UsagePlanKey declares id, name, type and value, none of which the echo carries."
+    },
+    {
+      "operation": "GetUsagePlanKey",
+      "input": {
+        "keyId": "k1",
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetUsagePlanKeys",
+      "input": {
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "9045051b",
+            "keyId": "k1",
+            "keyType": "API_KEY",
+            "usagePlanId": "u-x"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUsagePlanKey",
+      "input": {
+        "keyId": "k1",
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteUsagePlanKey",
+      "input": {
+        "keyId": "k1",
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetUsagePlanKeys",
+      "input": {
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "id": "9045051b",
+            "keyId": "k1",
+            "keyType": "API_KEY",
+            "usagePlanId": "u-x"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutGatewayResponse",
+      "input": {
+        "responseType": "DEFAULT_4XX",
+        "restApiId": "r-gr",
+        "statusCode": "400"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "responseType": "DEFAULT_4XX",
+        "restApiId": "r-gr",
+        "statusCode": "400"
+      },
+      "superseded": "The pack answered the echoed request; GatewayResponse does not declare restApiId, so the bundle cannot carry it."
+    },
+    {
+      "operation": "GetGatewayResponse",
+      "input": {
+        "responseType": "DEFAULT_4XX",
+        "restApiId": "r-gr"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "responseType": "DEFAULT_4XX",
+        "restApiId": "r-gr",
+        "statusCode": "400"
+      },
+      "superseded": "Same declared-shape divergence as the put: the hit answer echoes restApiId, which GatewayResponse does not declare."
+    },
+    {
+      "operation": "UpdateGatewayResponse",
+      "input": {
+        "responseType": "DEFAULT_5XX",
+        "restApiId": "r-gr2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "responseType": "DEFAULT_5XX",
+        "restApiId": "r-gr2"
+      },
+      "superseded": "Same declared-shape divergence as the put: the update's answer echoes restApiId, which GatewayResponse does not declare."
+    },
+    {
+      "operation": "GetGatewayResponses",
+      "input": {
+        "restApiId": "r-gr"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "responseType": "DEFAULT_4XX",
+            "restApiId": "r-gr",
+            "statusCode": "400"
+          },
+          {
+            "responseType": "DEFAULT_5XX",
+            "restApiId": "r-gr2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteGatewayResponse",
+      "input": {
+        "responseType": "DEFAULT_4XX",
+        "restApiId": "r-gr"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteGatewayResponse",
+      "input": {
+        "responseType": "DEFAULT_4XX",
+        "restApiId": "r-gr"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetGatewayResponses",
+      "input": {
+        "restApiId": "r-gr"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "responseType": "DEFAULT_5XX",
+            "restApiId": "r-gr2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GenerateClientCertificate",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clientCertificateId": "ac1d53d8",
+        "pemEncodedCertificate": "-----BEGIN CERTIFICATE-----\nM\n-----END CERTIFICATE-----"
+      }
+    },
+    {
+      "operation": "GetClientCertificate",
+      "input": {
+        "clientCertificateId": {
+          "$fromPath": "clientCertificateId",
+          "$fromStep": 159
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clientCertificateId": "ac1d53d8",
+        "pemEncodedCertificate": "-----BEGIN CERTIFICATE-----\nM\n-----END CERTIFICATE-----"
+      }
+    },
+    {
+      "operation": "UpdateClientCertificate",
+      "input": {
+        "clientCertificateId": {
+          "$fromPath": "clientCertificateId",
+          "$fromStep": 159
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clientCertificateId": "ac1d53d8"
+      }
+    },
+    {
+      "operation": "GetClientCertificate",
+      "input": {
+        "clientCertificateId": {
+          "$fromPath": "clientCertificateId",
+          "$fromStep": 159
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clientCertificateId": "ac1d53d8"
+      }
+    },
+    {
+      "operation": "GetClientCertificates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "clientCertificateId": "ac1d53d8"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteClientCertificate",
+      "input": {
+        "clientCertificateId": {
+          "$fromPath": "clientCertificateId",
+          "$fromStep": 159
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteClientCertificate",
+      "input": {
+        "clientCertificateId": {
+          "$fromPath": "clientCertificateId",
+          "$fromStep": 159
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetClientCertificate",
+      "input": {
+        "clientCertificateId": {
+          "$fromPath": "clientCertificateId",
+          "$fromStep": 159
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutRestApi",
+      "input": {
+        "body": "{\"swagger\":\"2.0\"}",
+        "restApiId": "r-put"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": "{\"swagger\":\"2.0\"}",
+        "id": "r-put",
+        "restApiId": "r-put"
+      },
+      "superseded": "The pack answered the echoed request; the RestApi shape does not declare body, so the bundle cannot carry it."
+    },
+    {
+      "operation": "ImportRestApi",
+      "input": {
+        "body": "{\"swagger\":\"2.0\"}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": "{\"swagger\":\"2.0\"}",
+        "id": "71a868c4"
+      },
+      "superseded": "The pack answered the echoed request; the RestApi shape does not declare body, so the bundle cannot carry it."
+    },
+    {
+      "operation": "ImportApiKeys",
+      "input": {
+        "body": "k1,Key1",
+        "format": "csv"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": "k1,Key1",
+        "format": "csv",
+        "id": "34ee9203"
+      },
+      "superseded": "The pack answered the echoed request; ImportApiKeys declares only ids and warnings."
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "resourceArn": "arn:aws:apigateway:us-east-1::/restapis/r-put",
+        "tags": {
+          "env": "dev"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "39bb7163",
+        "resourceArn": "arn:aws:apigateway:us-east-1::/restapis/r-put",
+        "tags": {
+          "env": "dev"
+        }
+      },
+      "superseded": "The pack answered the echoed request with a 201; TagResource declares no output members at all."
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "resourceArn": "arn:aws:apigateway:us-east-1::/restapis/r-put",
+        "tagKeys": [
+          "env"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "resourceArn": "arn:aws:apigateway:us-east-1::/restapis/r-put",
+        "tagKeys": [
+          "env"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TestInvokeAuthorizer",
+      "input": {
+        "authorizerId": "a1",
+        "restApiId": "r-tia"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "authorizerId": "a1",
+        "body": "{}",
+        "id": "r-tia",
+        "restApiId": "r-tia",
+        "status": 200
+      },
+      "superseded": "The pack answered the stored record flat, including the echoed request members and the canned status/body; TestInvokeAuthorizerResult declares neither authorizerId nor restApiId."
+    },
+    {
+      "operation": "TestInvokeMethod",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": "r1",
+        "restApiId": "r-tim"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "body": "{}",
+        "httpMethod": "GET",
+        "id": "r-tim",
+        "resourceId": "r1",
+        "restApiId": "r-tim",
+        "status": 200
+      },
+      "superseded": "The pack answered the stored record flat, including the echoed request members and the canned status/body; TestInvokeMethodResult declares neither httpMethod, resourceId nor restApiId."
+    },
+    {
+      "operation": "UpdateAccount",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "842605a0"
+      },
+      "superseded": "The pack answered the stored record; Account declares none of the echoed members (the record is the empty request plus a generated id)."
+    },
+    {
+      "operation": "UpdateApiKey",
+      "input": {
+        "apiKey": "k-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apiKey": "k-x",
+        "id": "a0e8b560"
+      },
+      "superseded": "The pack answered the echoed request; ApiKey does not declare apiKey, and the record sits under a generated id."
+    },
+    {
+      "operation": "UpdateAuthorizer",
+      "input": {
+        "authorizerId": "a1",
+        "restApiId": "r-ua"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "authorizerId": "a1",
+        "id": "r-ua",
+        "restApiId": "r-ua"
+      },
+      "superseded": "The pack answered the echoed request; Authorizer does not declare authorizerId or restApiId."
+    },
+    {
+      "operation": "UpdateDeployment",
+      "input": {
+        "deploymentId": "d1",
+        "restApiId": "r-ud"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentId": "d1",
+        "id": "r-ud",
+        "restApiId": "r-ud"
+      },
+      "superseded": "The pack answered the echoed request; Deployment does not declare deploymentId."
+    },
+    {
+      "operation": "UpdateIntegration",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": "r1",
+        "restApiId": "r-ui"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "httpMethod": "GET",
+        "id": "r-ui",
+        "resourceId": "r1",
+        "restApiId": "r-ui"
+      },
+      "superseded": "The pack answered the echoed request; Integration does not declare resourceId or restApiId."
+    },
+    {
+      "operation": "UpdateIntegrationResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": "r1",
+        "restApiId": "r-uir",
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "httpMethod": "GET",
+        "id": "r-uir",
+        "resourceId": "r1",
+        "restApiId": "r-uir",
+        "statusCode": "200"
+      },
+      "superseded": "The pack answered the echoed request; IntegrationResponse does not declare httpMethod, resourceId or restApiId."
+    },
+    {
+      "operation": "UpdateMethod",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": "r1",
+        "restApiId": "r-um"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "httpMethod": "GET",
+        "id": "r-um",
+        "resourceId": "r1",
+        "restApiId": "r-um"
+      },
+      "superseded": "The pack answered the echoed request; Method does not declare resourceId or restApiId."
+    },
+    {
+      "operation": "UpdateMethodResponse",
+      "input": {
+        "httpMethod": "GET",
+        "resourceId": "r1",
+        "restApiId": "r-umr",
+        "statusCode": "200"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "httpMethod": "GET",
+        "id": "r-umr",
+        "resourceId": "r1",
+        "restApiId": "r-umr",
+        "statusCode": "200"
+      },
+      "superseded": "The pack answered the echoed request; MethodResponse does not declare httpMethod, resourceId or restApiId."
+    },
+    {
+      "operation": "UpdateResource",
+      "input": {
+        "resourceId": "r1",
+        "restApiId": "r-ur"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "r-ur",
+        "resourceId": "r1",
+        "restApiId": "r-ur"
+      },
+      "superseded": "The pack answered the echoed request; Resource does not declare resourceId or restApiId."
+    },
+    {
+      "operation": "UpdateUsage",
+      "input": {
+        "keyId": "k1",
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "9434407c",
+        "keyId": "k1",
+        "usagePlanId": "u-x"
+      },
+      "superseded": "The pack answered the echoed request; Usage does not declare keyId."
+    },
+    {
+      "operation": "UpdateUsagePlan",
+      "input": {
+        "usagePlanId": "u-x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "id": "ca25a423",
+        "usagePlanId": "u-x"
+      },
+      "superseded": "The pack answered the echoed request; UsagePlan does not declare usagePlanId."
+    },
+    {
+      "operation": "FlushStageCache",
+      "input": {
+        "restApiId": "r-flush",
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "FlushStageCache",
+      "input": {
+        "restApiId": "r-flush",
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "FlushStageAuthorizersCache",
+      "input": {
+        "restApiId": "r-flush",
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "FlushStageAuthorizersCache",
+      "input": {
+        "restApiId": "r-flush",
+        "stageName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

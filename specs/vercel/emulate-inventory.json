@@ -1,0 +1,286 @@
+{
+  "oracle": "vercel-labs/emulate",
+  "source": "https://github.com/vercel-labs/emulate",
+  "ref": "afddfabb28f18190758203c98d8739dfd156dccf",
+  "audited": "2026-09-18",
+  "scope": "packages/@emulators/vercel only (the monorepo also emulates github, google, stripe, aws and nine others; they are not the Vercel denominator)",
+  "countRule": "routes = .get/.post/.put/.patch/.delete registrations with a literal leading-slash path in src/routes/*.ts (middleware name registrations excluded); tests = direct it()/test() calls in src/__tests__/*.ts, parametrized cases not expanded",
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/v1/api-keys",
+      "file": "api-keys.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/api-keys",
+      "file": "api-keys.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/api-keys/:keyId",
+      "file": "api-keys.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/blob",
+      "file": "blob.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/blob/",
+      "file": "blob.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/blob",
+      "file": "blob.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/blob/",
+      "file": "blob.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blob/delete",
+      "file": "blob.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blob/mpu",
+      "file": "blob.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/blob/mpu",
+      "file": "blob.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/blob/:storeId/:pathname{.+}",
+      "file": "blob.ts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v12/deployments/:id/cancel",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v2/deployments/:id/aliases",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v3/deployments/:idOrUrl/events",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v6/deployments/:id/files",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v13/deployments",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v6/deployments",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v7/deployments",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v13/deployments/:id",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v13/deployments/:idOrUrl",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v2/files",
+      "file": "deployments.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v10/projects/:idOrName/domains",
+      "file": "domains.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v9/projects/:idOrName/domains",
+      "file": "domains.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v9/projects/:idOrName/domains/:domain/verify",
+      "file": "domains.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v9/projects/:idOrName/domains/:domain",
+      "file": "domains.ts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v9/projects/:idOrName/domains/:domain",
+      "file": "domains.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v9/projects/:idOrName/domains/:domain",
+      "file": "domains.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v10/projects/:idOrName/env",
+      "file": "env.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v10/projects/:idOrName/env",
+      "file": "env.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v10/projects/:idOrName/env/:id",
+      "file": "env.ts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v9/projects/:idOrName/env/:id",
+      "file": "env.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v9/projects/:idOrName/env/:id",
+      "file": "env.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/oauth/authorize",
+      "file": "oauth.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/authorize/callback",
+      "file": "oauth.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/login/oauth/token",
+      "file": "oauth.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/login/oauth/userinfo",
+      "file": "oauth.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v11/projects",
+      "file": "projects.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v10/projects",
+      "file": "projects.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v9/projects/:idOrName",
+      "file": "projects.ts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v9/projects/:idOrName",
+      "file": "projects.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v9/projects/:idOrName",
+      "file": "projects.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/projects/:projectId/promote/aliases",
+      "file": "projects.ts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/projects/:idOrName/protection-bypass",
+      "file": "projects.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/registration",
+      "file": "user.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v2/user",
+      "file": "user.ts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v2/user",
+      "file": "user.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v2/teams",
+      "file": "user.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v2/teams/:teamId",
+      "file": "user.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v2/teams",
+      "file": "user.ts"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v2/teams/:teamId",
+      "file": "user.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v2/teams/:teamId/members",
+      "file": "user.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v2/teams/:teamId/members",
+      "file": "user.ts"
+    }
+  ],
+  "routeCount": 52,
+  "routeCountByFile": {
+    "api-keys.ts": 3,
+    "blob.ts": 8,
+    "deployments.ts": 10,
+    "domains.ts": 6,
+    "env.ts": 5,
+    "oauth.ts": 4,
+    "projects.ts": 7,
+    "user.ts": 9
+  },
+  "tests": {
+    "blob.test.ts": 19,
+    "vercel.test.ts": 7
+  },
+  "testCount": 26
+}

@@ -1466,6 +1466,33 @@ Routing is the model's now, which widens the surface rather than narrowing it. T
 | Vercel faults vs AWS faults | Two envelopes, because they are two documents' answers. The REST API answers `{error: {code, message}}` and KV the bare `{error: "..."}` Upstash answers; neither carries `x-amzn-errortype`. Mutant `vercel-kv-encodes-the-rest-fault` |
 | Routing | `FuzzVercelRoute` drives `httpuri.Match` over the generated model, seeded with both the document's versions and the four the pack answered. `TestVercelRoutesFromItsGeneratedModel` asserts nineteen routes, five operations beyond what the table knew, and that each of the four moved versions is now unserved. `vercel-kv-host-falls-through` covers the host split |
 
+### The vendor-authored oracle: vercel-labs/emulate
+
+Vercel Labs publishes its own emulator, [emulate](https://github.com/vercel-labs/emulate) — stateful, production-fidelity, and maintained by the vendor, which makes it the same class of oracle Azurite is for Azure: the behavior denominator is what *it* serves, not what we guessed. Pinned at `afddfabb28f18190758203c98d8739dfd156dccf` (2026-09-16) in `specs/vercel/emulate-inventory.json`; `scripts/count-emulate-vercel.py --check` reproduces the census, and `TestVercelCensusDenominators` dies if the numbers drift.
+
+The monorepo emulates fourteen providers; only `packages/@emulators/vercel` is the Vercel denominator.
+
+| Denominator | Count |
+|---|---:|
+| emulate Vercel routes (vendor-authored oracle) | 52 |
+| emulate Vercel test functions | 26 |
+| emulate Vercel routes served by mirror | 20 / 52 |
+
+Serve state per emulate route group (method+path from `src/routes/*.ts`):
+
+| emulate route file | Routes | mirror serves | Missing |
+|---|---:|---:|---|
+| `projects.ts` | 7 | 5 | `GET /v1/projects/{projectId}/promote/aliases`, `PATCH /v1/projects/{idOrName}/protection-bypass` |
+| `deployments.ts` | 10 | 4 | `GET /v6/deployments` (mirror answers `/v7` — the version the document declares), `GET /v2/deployments/{id}/aliases`, `GET /v3/deployments/{idOrUrl}/events`, `GET /v6/deployments/{id}/files`, `PATCH /v12/deployments/{id}/cancel`, `POST /v2/files` |
+| `domains.ts` (project domains) | 6 | 6 | — |
+| `env.ts` | 5 | 4 | `GET /v10/projects/{idOrName}/env/{id}` (get-one; mirror lists and edits) |
+| `user.ts` | 9 | 1 | `PATCH /v2/user`, `GET /registration`, and all six `/v2/teams` routes |
+| `api-keys.ts` | 3 | 0 | the whole token lifecycle |
+| `oauth.ts` | 4 | 0 | authorize/callback/token/userinfo |
+| `blob.ts` | 8 | 0 | Vercel Blob is a separate product mirror does not serve at all (KV is Upstash Redis, not Blob) |
+
+The 32-route gap is the expansion backlog, in order: deployment sub-resources (events/files/aliases/cancel/uploads), teams and user patch, api-keys, the get-one env, promote-aliases and protection-bypass, oauth, then Blob as a new `vercel.blob` service. Every addition lands as B-IR data on `behavior/vercel/` — no Go — and the parity claims here stay traceable to the oracle's route list.
+
 ## SNS baseline
 
 Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-08.

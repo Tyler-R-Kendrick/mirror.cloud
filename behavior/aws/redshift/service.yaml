@@ -1,0 +1,1575 @@
+schema: bir/1
+service: aws.redshift
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Redshift-lite: clusters, snapshots, subnet and parameter groups,
+# copy grants, event subscriptions and tags are flat control-plane records
+# that are "available" the moment they are written; the 109 remaining
+# operations are a generic keyed store over the request, classified by name.
+# No SQL ever runs -- the pack's data plane is a Firehose COPY row store
+# reached only from Go, which is the shadow reason below.
+provenance: authored
+
+# The pack never named absent input with a fault of its own: its first()
+# helper folds a missing member to the empty string and proceeds -- a create
+# with no ClusterIdentifier stored the record under the empty key and
+# succeeded. The engine's model check now rejects the absence first with the
+# default ValidationException, so those empty-key paths are dead; see quirks.
+
+# Complete and gated, but not yet serving: aws.firehose's Redshift COPY
+# destination does not reach this service over HTTP. It builds the pack with
+# redshift.New(deps) and calls the Go-only CreateTable, Copy and TableRows
+# methods -- Copy parses delimited and JSON row bodies in a transaction,
+# checks the stored credential's SHA-256, and appends to a whole-table JSON
+# document under rstable. None of that has an HTTP operation, and B-IR has no
+# cross-service invocation, no []byte row parsing, and no primitive registry
+# (the engine's prim dispatch reports none registered). Deleting the pack
+# would orphan firehose's destination and its retry loop; registering both
+# would describe one service twice. The bundle takes over when an
+# aws.redshift/copy primitive carries CreateTable/Copy/TableRows, moved
+# verbatim, and firehose routes through it.
+shadow: >
+  aws.firehose calls the pack's Go-only CreateTable/Copy/TableRows data plane
+  (COPY row parsing and credential checks over the rstable/rscredential
+  collections) -- no HTTP operation reaches it and no B-IR primitive exists
+  for it yet. Everything the HTTP surface does is transcribed and gated below.
+
+resources:
+  cluster:
+    collection: rscluster
+    id:
+      input_members: [ClusterIdentifier]
+
+  # Written by CreateCluster when the request carries MasterUserPassword; only
+  # the Go-only COPY data plane (the shadow reason above) ever reads it.
+  credential:
+    collection: rscredential
+    id:
+      input_members: [ClusterIdentifier]
+
+  snapshot:
+    collection: rssnap
+    id:
+      input_members: [SnapshotIdentifier]
+
+  subnet:
+    collection: rssubnet
+    id:
+      input_members: [ClusterSubnetGroupName]
+
+  param_group:
+    collection: rspg
+    id:
+      input_members: [ParameterGroupName]
+
+  # The pack stores the whole Modify/ResetClusterParameterGroup request here
+  # and DescribeClusterParameters answers it back as a single "parameter".
+  pg_params:
+    collection: rspg-params
+    id:
+      input_members: [ParameterGroupName]
+
+  copy_grant:
+    collection: rscopygrant
+    id:
+      input_members: [SnapshotCopyGrantName]
+
+  event_sub:
+    collection: rsev
+    id:
+      input_members: [SubscriptionName]
+
+  # The pack stored the bare tag list under the resource name; the bundle
+  # wraps it in a record member, which no answer can tell apart.
+  tag:
+    collection: rstags
+    id:
+      input_members: [ResourceName]
+
+  # --- the generic leftover store -------------------------------------------
+  # The pack's remaining 109 operations all share one dispatch: a kind chosen
+  # by substring of the operation name, an id read from the kind's own member
+  # and then the shared fallbacks below (first present non-empty wins), a
+  # generated hex id when all are absent, and one store collection. The
+  # bundle gives each kind its own collection, which no answer can tell
+  # apart: the pack's per-kind key prefix is the same partition.
+
+  datashare:
+    collection: rsl-datashare
+    id:
+      derive: >-
+        ('DataShareArn' in input && string(input.DataShareArn) != '') ? string(input.DataShareArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  reserved_node:
+    collection: rsl-reserved
+    id:
+      derive: >-
+        ('ReservedNodeId' in input && string(input.ReservedNodeId) != '') ? string(input.ReservedNodeId) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  auth_profile:
+    collection: rsl-auth
+    id:
+      derive: >-
+        ('AuthenticationProfileName' in input && string(input.AuthenticationProfileName) != '') ? string(input.AuthenticationProfileName) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  secgroup:
+    collection: rsl-secgroup
+    id:
+      derive: >-
+        ('ClusterSecurityGroupName' in input && string(input.ClusterSecurityGroupName) != '') ? string(input.ClusterSecurityGroupName) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  custom_domain:
+    collection: rsl-customdom
+    id:
+      derive: >-
+        ('CustomDomainName' in input && string(input.CustomDomainName) != '') ? string(input.CustomDomainName) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  endpoint_access:
+    collection: rsl-endpoint
+    id:
+      derive: >-
+        ('EndpointName' in input && string(input.EndpointName) != '') ? string(input.EndpointName) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  hsm_client:
+    collection: rsl-hsmclient
+    id:
+      derive: >-
+        ('HsmClientCertificateIdentifier' in input && string(input.HsmClientCertificateIdentifier) != '') ? string(input.HsmClientCertificateIdentifier) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  hsm_conf:
+    collection: rsl-hsmconf
+    id:
+      derive: >-
+        ('HsmConfigurationIdentifier' in input && string(input.HsmConfigurationIdentifier) != '') ? string(input.HsmConfigurationIdentifier) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  integration:
+    collection: rsl-integration
+    id:
+      derive: >-
+        ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  idc_app:
+    collection: rsl-idc
+    id:
+      derive: >-
+        ('IdcApplicationArn' in input && string(input.IdcApplicationArn) != '') ? string(input.IdcApplicationArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  sched_action:
+    collection: rsl-schedaction
+    id:
+      derive: >-
+        ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  snap_schedule:
+    collection: rsl-snapsched
+    id:
+      derive: >-
+        ('ScheduleIdentifier' in input && string(input.ScheduleIdentifier) != '') ? string(input.ScheduleIdentifier) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  usage_limit:
+    collection: rsl-usagelimit
+    id:
+      derive: >-
+        ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  partner:
+    collection: rsl-partner
+    id:
+      derive: >-
+        ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ''
+
+  resource_policy:
+    collection: rsl-respolicy
+    id:
+      derive: >-
+        ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  namespace:
+    collection: rsl-namespace
+    id:
+      derive: >-
+        ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  logging:
+    collection: rsl-logging
+    id:
+      derive: >-
+        ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  recommendation:
+    collection: rsl-reco
+    id:
+      derive: >-
+        ('RecommendationId' in input && string(input.RecommendationId) != '') ? string(input.RecommendationId) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+  misc:
+    collection: rsl-misc
+    id:
+      derive: >-
+        ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+
+errors:
+  # listOrGet answered every named-and-missing describe with this fault,
+  # whatever the resource -- a missing snapshot is ClusterNotFound too.
+  NotFound:
+    code: ClusterNotFound
+    http: 404
+    fault: client
+
+operations:
+  CreateCluster:
+    effects:
+      # The credential write comes first: `rec` is the last write's record,
+      # and the output's record is the cluster's. The stores are independent,
+      # so the order is unobservable anywhere else.
+      - create:
+          resource: credential
+          when: "'MasterUserPassword' in input && string(input.MasterUserPassword) != ''"
+          record:
+            Username: "string(input.MasterUsername)"
+            PasswordHash: "sha256hex(string(input.MasterUserPassword))"
+      - create:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterStatus: "'available'"
+            NodeType: "string(input.NodeType)"
+            MasterUsername: "string(input.MasterUsername)"
+            DBName: "'DBName' in input && string(input.DBName) != '' ? string(input.DBName) : 'dev'"
+            Endpoint: "{'Address': id + '.' + identity.region + '.redshift.amazonaws.com', 'Port': 5439}"
+    output:
+      Cluster: rec
+
+  DescribeClusters:
+    reads:
+      c: { resource: cluster }
+    require:
+      - { cond: "id == '' || c_found", error: NotFound }
+    list:
+      resource: cluster
+      member: Clusters
+      paginate: model
+      key: id
+
+  # The pack merged the status change onto the stored record (or conjured a
+  # bare one for an unknown identifier); every other request member is
+  # ignored -- a ModifyCluster with a new NodeType changes nothing.
+  ModifyCluster:
+    effects:
+      - put:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterStatus: "'available'"
+    output:
+      Cluster: rec
+
+  RebootCluster:
+    effects:
+      - put:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterStatus: "'available'"
+    output:
+      Cluster: rec
+
+  PauseCluster:
+    effects:
+      - put:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterStatus: "'paused'"
+    output:
+      Cluster: rec
+
+  ResumeCluster:
+    effects:
+      - put:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterStatus: "'available'"
+    output:
+      Cluster: rec
+
+  ResizeCluster:
+    reads:
+      c: { resource: cluster }
+    effects:
+      - put:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterStatus: "'resizing'"
+            NodeType: "'NodeType' in input && string(input.NodeType) != '' ? string(input.NodeType) : ('NodeType' in c ? c.NodeType : null)"
+    output:
+      Cluster: rec
+
+  # The pack deleted the cluster, its credential, and every COPY table row
+  # under it; the row store is the shadow's, so only the first two are here.
+  DeleteCluster:
+    effects:
+      - delete: { resource: cluster, missing: ignore }
+      - delete: { resource: credential, missing: ignore }
+    output:
+      Cluster: "{'ClusterIdentifier': string(input.ClusterIdentifier), 'ClusterStatus': 'deleting'}"
+
+  # Replaces the record wholesale -- a restored cluster loses its NodeType,
+  # MasterUsername and DBName. The SnapshotIdentifier is never read.
+  RestoreFromClusterSnapshot:
+    effects:
+      - create:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterStatus: "'available'"
+            Endpoint: "{'Address': id + '.' + identity.region + '.redshift.amazonaws.com', 'Port': 5439}"
+    output:
+      Cluster: rec
+
+  CreateClusterSnapshot:
+    effects:
+      - create:
+          resource: snapshot
+          record:
+            SnapshotIdentifier: id
+            ClusterIdentifier: "string(input.ClusterIdentifier)"
+            Status: "'available'"
+    output:
+      Snapshot: rec
+
+  DescribeClusterSnapshots:
+    reads:
+      s: { resource: snapshot }
+    require:
+      - { cond: "id == '' || s_found", error: NotFound }
+    list:
+      resource: snapshot
+      member: Snapshots
+      paginate: model
+      key: id
+
+  DeleteClusterSnapshot:
+    effects:
+      - delete: { resource: snapshot, missing: ignore }
+    output: {}
+
+  # The copy inherits every member of the source record (its Status too) and
+  # is re-keyed to the target; copying a missing source yields a bare
+  # {SnapshotIdentifier, Status: available} record, not a fault.
+  CopyClusterSnapshot:
+    reads:
+      s: { resource: snapshot, key: "string(input.SourceSnapshotIdentifier)" }
+    effects:
+      - create:
+          resource: snapshot
+          key: "string(input.TargetSnapshotIdentifier)"
+          record:
+            SnapshotIdentifier: id
+            Status: "s_found && 'Status' in s ? s.Status : 'available'"
+            ClusterIdentifier: "s_found && 'ClusterIdentifier' in s ? s.ClusterIdentifier : null"
+    output:
+      Snapshot: rec
+
+  # Only the name is stored: Description and the required SubnetIds are read
+  # off the request and dropped.
+  CreateClusterSubnetGroup:
+    effects:
+      - create:
+          resource: subnet
+          record:
+            ClusterSubnetGroupName: id
+    output:
+      ClusterSubnetGroup: rec
+
+  DescribeClusterSubnetGroups:
+    reads:
+      s: { resource: subnet }
+    require:
+      - { cond: "id == '' || s_found", error: NotFound }
+    list:
+      resource: subnet
+      member: ClusterSubnetGroups
+      paginate: model
+      key: id
+
+  DeleteClusterSubnetGroup:
+    effects:
+      - delete: { resource: subnet, missing: ignore }
+    output: {}
+
+  # Merges the name back over the stored record; the required SubnetIds are
+  # ignored, exactly as Create dropped them.
+  ModifyClusterSubnetGroup:
+    effects:
+      - put:
+          resource: subnet
+          record:
+            ClusterSubnetGroupName: id
+    output:
+      ClusterSubnetGroup: rec
+
+  # Description is required by the model and dropped by the pack.
+  CreateClusterParameterGroup:
+    effects:
+      - create:
+          resource: param_group
+          record:
+            ParameterGroupName: id
+            ParameterGroupFamily: "string(input.ParameterGroupFamily)"
+    output:
+      ClusterParameterGroup: rec
+
+  DescribeClusterParameterGroups:
+    reads:
+      p: { resource: param_group }
+    require:
+      - { cond: "id == '' || p_found", error: NotFound }
+    list:
+      resource: param_group
+      member: ParameterGroups
+      paginate: model
+      key: id
+
+  # Deleting the group leaves its stored parameters behind in pg_params.
+  DeleteClusterParameterGroup:
+    effects:
+      - delete: { resource: param_group, missing: ignore }
+    output: {}
+
+  ModifyClusterParameterGroup:
+    effects:
+      - create: { resource: pg_params, spread: input }
+    output: {}
+
+  ResetClusterParameterGroup:
+    effects:
+      - create: { resource: pg_params, spread: input }
+    output: {}
+
+  # Answers the raw stored request as one element of Parameters -- the
+  # "parameters" are the Modify/Reset request verbatim, not a parameter list.
+  DescribeClusterParameters:
+    reads:
+      p: { resource: pg_params }
+    output:
+      Parameters: "p_found ? [p] : dyn([])"
+
+  EnableSnapshotCopy:
+    effects:
+      - put:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterSnapshotCopyStatus: "{'DestinationRegion': string(input.DestinationRegion)}"
+    output:
+      Cluster: rec
+
+  # The one member removal in the pack: the record is rebuilt without
+  # ClusterSnapshotCopyStatus, so this is a create (replace), not a merge.
+  DisableSnapshotCopy:
+    reads:
+      c: { resource: cluster }
+    effects:
+      - create:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            ClusterStatus: "'ClusterStatus' in c ? c.ClusterStatus : null"
+            NodeType: "'NodeType' in c ? c.NodeType : null"
+            MasterUsername: "'MasterUsername' in c ? c.MasterUsername : null"
+            DBName: "'DBName' in c ? c.DBName : null"
+            Endpoint: "'Endpoint' in c ? c.Endpoint : null"
+            IamRoles: "'IamRoles' in c ? dyn(c.IamRoles) : null"
+    output:
+      Cluster: rec
+
+  CreateSnapshotCopyGrant:
+    effects:
+      - create:
+          resource: copy_grant
+          record:
+            SnapshotCopyGrantName: id
+            KmsKeyId: "'KmsKeyId' in input ? string(input.KmsKeyId) : ''"
+    output:
+      SnapshotCopyGrant: rec
+
+  DescribeSnapshotCopyGrants:
+    reads:
+      g: { resource: copy_grant }
+    require:
+      - { cond: "id == '' || g_found", error: NotFound }
+    list:
+      resource: copy_grant
+      member: SnapshotCopyGrants
+      paginate: model
+      key: id
+
+  DeleteSnapshotCopyGrant:
+    effects:
+      - delete: { resource: copy_grant, missing: ignore }
+    output: {}
+
+  CreateEventSubscription:
+    effects:
+      - create:
+          resource: event_sub
+          record:
+            CustSubscriptionId: id
+            SnsTopicArn: "string(input.SnsTopicArn)"
+            Status: "'active'"
+    output:
+      EventSubscription: rec
+
+  DescribeEventSubscriptions:
+    reads:
+      e: { resource: event_sub }
+    require:
+      - { cond: "id == '' || e_found", error: NotFound }
+    list:
+      resource: event_sub
+      member: EventSubscriptionsList
+      paginate: model
+      key: id
+
+  DeleteEventSubscription:
+    effects:
+      - delete: { resource: event_sub, missing: ignore }
+    output: {}
+
+  # The pack derived the password deterministically from the DbUser; the
+  # bundle draws it fresh. Nothing stored, nothing checked -- ClusterIdentifier
+  # is accepted and ignored.
+  GetClusterCredentials:
+    effects:
+      - generate: { bind: pw, kind: hex, bytes: 16 }
+    output:
+      DbUser: "'IAM:' + string(input.DbUser)"
+      DbPassword: fx.pw
+      Expiration: "'2099-01-01T00:00:00Z'"
+
+  # AddIamRoles replaces the whole IamRoles member; an absent list stores null.
+  ModifyClusterIamRoles:
+    effects:
+      - put:
+          resource: cluster
+          record:
+            ClusterIdentifier: id
+            IamRoles: "'AddIamRoles' in input ? dyn(input.AddIamRoles) : null"
+    output:
+      Cluster: rec
+
+  CreateTags:
+    effects:
+      - create:
+          resource: tag
+          record:
+            Tags: input.Tags
+    output: {}
+
+  # An ARN that was never tagged answers one TaggedResources entry holding an
+  # empty Tags list, not a fault.
+  DescribeTags:
+    reads:
+      t: { resource: tag }
+    output:
+      TaggedResources: "[{'Tags': t_found && 'Tags' in t ? t.Tags : dyn([])}]"
+
+  # The TagKeys named in the request are not read: the whole list goes away.
+  DeleteTags:
+    effects:
+      - delete: { resource: tag, missing: ignore }
+    output: {}
+  AcceptReservedNodeExchange:
+    effects:
+      - create:
+          resource: reserved_node
+          spread: input
+          record:
+            ReservedNodeId: id
+    output: {}
+
+  AddPartner:
+    effects:
+      - create:
+          resource: partner
+          spread: input
+          record:
+            PartnerName: id
+    output:
+      PartnerName: id
+
+  AssociateDataShareConsumer:
+    effects:
+      - create:
+          resource: datashare
+          spread: input
+          record:
+            DataShareArn: id
+    output:
+      DataShareArn: id
+
+  AuthorizeClusterSecurityGroupIngress:
+    effects:
+      - create:
+          resource: secgroup
+          spread: input
+          record:
+            ClusterSecurityGroupName: id
+    output:
+      ClusterSecurityGroup: rec
+
+  AuthorizeDataShare:
+    effects:
+      - create:
+          resource: datashare
+          spread: input
+          record:
+            DataShareArn: id
+    output:
+      DataShareArn: id
+
+  AuthorizeEndpointAccess:
+    let:
+      rid: >-
+        ('EndpointName' in input && string(input.EndpointName) != '') ? string(input.EndpointName) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: endpoint_access
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            EndpointName: id
+    output: {}
+
+  AuthorizeSnapshotAccess:
+    let:
+      rid: >-
+        ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: misc
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output: {}
+
+  BatchDeleteClusterSnapshots:
+    addressing:
+      misc: "the pack resolves the record by ClusterIdentifier, then ClusterIdentifier, SnapshotIdentifier, ResourceArn, ScheduledActionName, UsageLimitId, IntegrationArn, NamespaceArn, PartnerName; BatchDeleteClusterSnapshots declares none of them, so a valid request resolves the empty key"
+    effects:
+      - delete: { resource: misc, missing: ignore }
+    output: {}
+
+  BatchModifyClusterSnapshots:
+    let:
+      rid: >-
+        ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: misc
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output: {}
+
+  CancelResize:
+    effects:
+      - delete: { resource: misc, missing: ignore }
+    output: {}
+
+  CreateAuthenticationProfile:
+    effects:
+      - create:
+          resource: auth_profile
+          spread: input
+          record:
+            AuthenticationProfileName: id
+    output:
+      AuthenticationProfileName: id
+
+  CreateClusterSecurityGroup:
+    effects:
+      - create:
+          resource: secgroup
+          spread: input
+          record:
+            ClusterSecurityGroupName: id
+    output:
+      ClusterSecurityGroup: rec
+
+  CreateCustomDomainAssociation:
+    effects:
+      - create:
+          resource: custom_domain
+          spread: input
+          record:
+            CustomDomainName: id
+    output:
+      CustomDomainName: id
+
+  CreateEndpointAccess:
+    effects:
+      - create:
+          resource: endpoint_access
+          spread: input
+          record:
+            EndpointName: id
+    output:
+      EndpointName: id
+
+  CreateHsmClientCertificate:
+    effects:
+      - create:
+          resource: hsm_client
+          spread: input
+          record:
+            HsmClientCertificateIdentifier: id
+    output:
+      HsmClientCertificate: rec
+
+  CreateHsmConfiguration:
+    effects:
+      - create:
+          resource: hsm_conf
+          spread: input
+          record:
+            HsmConfigurationIdentifier: id
+    output:
+      HsmConfiguration: rec
+
+  CreateIntegration:
+    let:
+      rid: >-
+        ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: integration
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            IntegrationArn: id
+    output:
+      IntegrationArn: id
+
+  CreateQev2IdcApplication:
+    let:
+      rid: >-
+        ('IdcApplicationArn' in input && string(input.IdcApplicationArn) != '') ? string(input.IdcApplicationArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: idc_app
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            IdcApplicationArn: id
+    output: {}
+
+  CreateRedshiftIdcApplication:
+    let:
+      rid: >-
+        ('IdcApplicationArn' in input && string(input.IdcApplicationArn) != '') ? string(input.IdcApplicationArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: idc_app
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            IdcApplicationArn: id
+    output: {}
+
+  CreateScheduledAction:
+    effects:
+      - create:
+          resource: sched_action
+          spread: input
+          record:
+            ScheduledActionName: id
+    output:
+      ScheduledActionName: id
+
+  CreateSnapshotSchedule:
+    let:
+      rid: >-
+        ('ScheduleIdentifier' in input && string(input.ScheduleIdentifier) != '') ? string(input.ScheduleIdentifier) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: snap_schedule
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            ScheduleIdentifier: id
+    output:
+      ScheduleIdentifier: id
+
+  CreateUsageLimit:
+    effects:
+      - create:
+          resource: usage_limit
+          spread: input
+          record:
+            UsageLimitId: id
+    output:
+      UsageLimitId: id
+
+  DeauthorizeDataShare:
+    effects:
+      - delete: { resource: datashare, missing: ignore }
+    output: {}
+
+  DeleteAuthenticationProfile:
+    effects:
+      - delete: { resource: auth_profile, missing: ignore }
+    output: {}
+
+  DeleteClusterSecurityGroup:
+    effects:
+      - delete: { resource: secgroup, missing: ignore }
+    output: {}
+
+  DeleteCustomDomainAssociation:
+    effects:
+      - delete: { resource: custom_domain, missing: ignore }
+    output: {}
+
+  DeleteEndpointAccess:
+    effects:
+      - delete: { resource: endpoint_access, missing: ignore }
+    output: {}
+
+  DeleteHsmClientCertificate:
+    effects:
+      - delete: { resource: hsm_client, missing: ignore }
+    output: {}
+
+  DeleteHsmConfiguration:
+    effects:
+      - delete: { resource: hsm_conf, missing: ignore }
+    output: {}
+
+  DeleteIntegration:
+    effects:
+      - delete: { resource: integration, missing: ignore }
+    output: {}
+
+  DeletePartner:
+    effects:
+      - delete: { resource: partner, missing: ignore }
+    output: {}
+
+  DeleteQev2IdcApplication:
+    addressing:
+      idc_app: "the pack resolves the record by IdcApplicationArn, then ClusterIdentifier, SnapshotIdentifier, ResourceArn, ScheduledActionName, UsageLimitId, IntegrationArn, NamespaceArn, PartnerName; DeleteQev2IdcApplication declares none of them, so a valid request resolves the empty key"
+    effects:
+      - delete: { resource: idc_app, missing: ignore }
+    output: {}
+
+  DeleteRedshiftIdcApplication:
+    addressing:
+      idc_app: "the pack resolves the record by IdcApplicationArn, then ClusterIdentifier, SnapshotIdentifier, ResourceArn, ScheduledActionName, UsageLimitId, IntegrationArn, NamespaceArn, PartnerName; DeleteRedshiftIdcApplication declares none of them, so a valid request resolves the empty key"
+    effects:
+      - delete: { resource: idc_app, missing: ignore }
+    output: {}
+
+  DeleteResourcePolicy:
+    effects:
+      - delete: { resource: resource_policy, missing: ignore }
+    output: {}
+
+  DeleteScheduledAction:
+    effects:
+      - delete: { resource: sched_action, missing: ignore }
+    output: {}
+
+  DeleteSnapshotSchedule:
+    effects:
+      - delete: { resource: snap_schedule, missing: ignore }
+    output: {}
+
+  DeleteUsageLimit:
+    effects:
+      - delete: { resource: usage_limit, missing: ignore }
+    output: {}
+
+  DeregisterNamespace:
+    addressing:
+      namespace: "the pack resolves the record by NamespaceArn, then ClusterIdentifier, SnapshotIdentifier, ResourceArn, ScheduledActionName, UsageLimitId, IntegrationArn, NamespaceArn, PartnerName; DeregisterNamespace declares none of them, so a valid request resolves the empty key"
+    effects:
+      - delete: { resource: namespace, missing: ignore }
+    output: {}
+
+  DescribeAccountAttributes:
+    output: {}
+
+  DescribeAuthenticationProfiles:
+    reads:
+      named: { resource: auth_profile }
+    select:
+      binding: cands
+      resource: auth_profile
+      filter: "id == '' || !named_found || item.AuthenticationProfileName == id"
+    output:
+      AuthenticationProfiles: cands
+
+  DescribeClusterDbRevisions:
+    output: {}
+
+  DescribeClusterSecurityGroups:
+    reads:
+      named: { resource: secgroup }
+    select:
+      binding: cands
+      resource: secgroup
+      filter: "id == '' || !named_found || item.ClusterSecurityGroupName == id"
+    output:
+      ClusterSecurityGroups: cands
+
+  DescribeClusterTracks:
+    output: {}
+
+  DescribeClusterVersions:
+    output: {}
+
+  DescribeCustomDomainAssociations:
+    reads:
+      named: { resource: custom_domain }
+    select:
+      binding: cands
+      resource: custom_domain
+      filter: "id == '' || !named_found || item.CustomDomainName == id"
+    output:
+      Associations: cands
+
+  DescribeDataShares:
+    reads:
+      named: { resource: datashare }
+    select:
+      binding: cands
+      resource: datashare
+      filter: "id == '' || !named_found || item.DataShareArn == id"
+    output:
+      DataShares: cands
+
+  DescribeDataSharesForConsumer:
+    addressing:
+      datashare: "the pack resolves the record by DataShareArn, then ClusterIdentifier, SnapshotIdentifier, ResourceArn, ScheduledActionName, UsageLimitId, IntegrationArn, NamespaceArn, PartnerName; DescribeDataSharesForConsumer declares none of them, so a valid request resolves the empty key"
+    reads:
+      named: { resource: datashare }
+    select:
+      binding: cands
+      resource: datashare
+      filter: "id == '' || !named_found || item.DataShareArn == id"
+    output:
+      DataShares: cands
+
+  DescribeDataSharesForProducer:
+    addressing:
+      datashare: "the pack resolves the record by DataShareArn, then ClusterIdentifier, SnapshotIdentifier, ResourceArn, ScheduledActionName, UsageLimitId, IntegrationArn, NamespaceArn, PartnerName; DescribeDataSharesForProducer declares none of them, so a valid request resolves the empty key"
+    reads:
+      named: { resource: datashare }
+    select:
+      binding: cands
+      resource: datashare
+      filter: "id == '' || !named_found || item.DataShareArn == id"
+    output:
+      DataShares: cands
+
+  DescribeDefaultClusterParameters:
+    output: {}
+
+  DescribeEndpointAccess:
+    reads:
+      named: { resource: endpoint_access }
+    select:
+      binding: cands
+      resource: endpoint_access
+      filter: "id == '' || !named_found || item.EndpointName == id"
+    output:
+      EndpointAccessList: cands
+
+  DescribeEndpointAuthorization:
+    output: {}
+
+  DescribeEventCategories:
+    output: {}
+
+  DescribeEvents:
+    output: {}
+
+  DescribeHsmClientCertificates:
+    reads:
+      named: { resource: hsm_client }
+    select:
+      binding: cands
+      resource: hsm_client
+      filter: "id == '' || !named_found || item.HsmClientCertificateIdentifier == id"
+    output:
+      HsmClientCertificates: cands
+
+  DescribeHsmConfigurations:
+    reads:
+      named: { resource: hsm_conf }
+    select:
+      binding: cands
+      resource: hsm_conf
+      filter: "id == '' || !named_found || item.HsmConfigurationIdentifier == id"
+    output:
+      HsmConfigurations: cands
+
+  DescribeInboundIntegrations:
+    output: {}
+
+  DescribeIntegrations:
+    reads:
+      named: { resource: integration }
+    select:
+      binding: cands
+      resource: integration
+      filter: "id == '' || !named_found || item.IntegrationArn == id"
+    output:
+      Integrations: cands
+
+  DescribeLoggingStatus:
+    output: {}
+
+  DescribeNodeConfigurationOptions:
+    output: {}
+
+  DescribeOrderableClusterOptions:
+    output: {}
+
+  DescribePartners:
+    output: {}
+
+  DescribeQev2IdcApplications:
+    output: {}
+
+  DescribeRedshiftIdcApplications:
+    output: {}
+
+  DescribeReservedNodeExchangeStatus:
+    output: {}
+
+  DescribeReservedNodeOfferings:
+    output: {}
+
+  DescribeReservedNodes:
+    reads:
+      named: { resource: reserved_node }
+    select:
+      binding: cands
+      resource: reserved_node
+      filter: "id == '' || !named_found || item.ReservedNodeId == id"
+    output:
+      ReservedNodes: cands
+
+  DescribeResize:
+    output: {}
+
+  DescribeScheduledActions:
+    reads:
+      named: { resource: sched_action }
+    select:
+      binding: cands
+      resource: sched_action
+      filter: "id == '' || !named_found || item.ScheduledActionName == id"
+    output:
+      ScheduledActions: cands
+
+  DescribeSnapshotSchedules:
+    reads:
+      named: { resource: snap_schedule }
+    select:
+      binding: cands
+      resource: snap_schedule
+      filter: "id == '' || !named_found || item.ScheduleIdentifier == id"
+    output:
+      SnapshotSchedules: cands
+
+  DescribeStorage:
+    output: {}
+
+  DescribeTableRestoreStatus:
+    output: {}
+
+  DescribeUsageLimits:
+    reads:
+      named: { resource: usage_limit }
+    select:
+      binding: cands
+      resource: usage_limit
+      filter: "id == '' || !named_found || item.UsageLimitId == id"
+    output:
+      UsageLimits: cands
+
+  DisableLogging:
+    effects:
+      - delete: { resource: logging, missing: ignore }
+    output: {}
+
+  DisassociateDataShareConsumer:
+    effects:
+      - delete: { resource: datashare, missing: ignore }
+    output: {}
+
+  EnableLogging:
+    effects:
+      - create:
+          resource: logging
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output:
+      BucketName: "'BucketName' in rec ? rec.BucketName : null"
+      LogDestinationType: "'LogDestinationType' in rec ? rec.LogDestinationType : null"
+      LogExports: "'LogExports' in rec ? rec.LogExports : null"
+      S3KeyPrefix: "'S3KeyPrefix' in rec ? rec.S3KeyPrefix : null"
+
+  FailoverPrimaryCompute:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output:
+      Cluster: rec
+
+
+  # Reads the misc collection (where RotateEncryptionKey and friends write):
+  # a found record answers it under Cluster, which the output shape does not
+  # declare -- the wire carries nothing then, and the recorded step is
+  # superseded. A miss mints credentials for the named user.
+  GetClusterCredentialsWithIAM:
+    reads:
+      m: { resource: misc }
+    effects:
+      - generate: { bind: pw, kind: hex, bytes: 16 }
+    output:
+      DbUser: "m_found ? null : dyn('IAM:' + ('DbUser' in input ? string(input.DbUser) : ''))"
+      DbPassword: "m_found ? null : dyn(fx.pw)"
+
+
+  # The pack answered {Cluster: {}, AuthToken: <hex>}; both members are absent
+  # from the output shape (which declares ExpirationTime and Token), so the
+  # wire carries nothing and the recorded step is superseded. The token came
+  # from a deterministic derive, not a draw.
+  GetIdentityCenterAuthToken:
+    output: {}
+
+
+  # Found or not, the answer is {ReservedNode: ...} -- a member the output
+  # shape does not declare, so the wire carries nothing.
+  GetReservedNodeExchangeConfigurationOptions:
+    output: {}
+
+
+  # Same shape as GetReservedNodeExchangeConfigurationOptions: the answer
+  # lands in an undeclared member and the wire carries nothing.
+  GetReservedNodeExchangeOfferings:
+    output: {}
+
+
+  # The one default-branch operation whose wrapper member the model declares.
+  # A policy that was never put answers an empty ResourcePolicy, not a fault.
+  GetResourcePolicy:
+    reads:
+      pol: { resource: resource_policy }
+    output:
+      ResourcePolicy: pol
+
+  ListRecommendations:
+    reads:
+      named: { resource: recommendation }
+    select:
+      binding: cands
+      resource: recommendation
+      filter: "id == '' || !named_found || item.RecommendationId == id"
+    output:
+      Recommendations: cands
+
+  ModifyAquaConfiguration:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output: {}
+
+  ModifyAuthenticationProfile:
+    effects:
+      - create:
+          resource: auth_profile
+          spread: input
+          record:
+            AuthenticationProfileName: id
+    output:
+      AuthenticationProfileName: id
+
+  ModifyClusterDbRevision:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output:
+      Cluster: rec
+
+  ModifyClusterMaintenance:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output:
+      Cluster: rec
+
+  ModifyClusterSnapshot:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output: {}
+
+  ModifyClusterSnapshotSchedule:
+    effects:
+      - create:
+          resource: snap_schedule
+          spread: input
+          record:
+            ScheduleIdentifier: id
+    output: {}
+
+  ModifyCustomDomainAssociation:
+    effects:
+      - create:
+          resource: custom_domain
+          spread: input
+          record:
+            CustomDomainName: id
+    output:
+      CustomDomainName: id
+
+  ModifyEndpointAccess:
+    effects:
+      - create:
+          resource: endpoint_access
+          spread: input
+          record:
+            EndpointName: id
+    output:
+      EndpointName: id
+
+  ModifyEventSubscription:
+    let:
+      rid: >-
+        ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: misc
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output: {}
+
+  ModifyIntegration:
+    effects:
+      - create:
+          resource: integration
+          spread: input
+          record:
+            IntegrationArn: id
+    output:
+      IntegrationArn: id
+
+  ModifyLakehouseConfiguration:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output:
+      ClusterIdentifier: id
+
+  ModifyQev2IdcApplication:
+    let:
+      rid: >-
+        ('IdcApplicationArn' in input && string(input.IdcApplicationArn) != '') ? string(input.IdcApplicationArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: idc_app
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            IdcApplicationArn: id
+    output: {}
+
+  ModifyRedshiftIdcApplication:
+    let:
+      rid: >-
+        ('IdcApplicationArn' in input && string(input.IdcApplicationArn) != '') ? string(input.IdcApplicationArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: idc_app
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            IdcApplicationArn: id
+    output: {}
+
+  ModifyScheduledAction:
+    effects:
+      - create:
+          resource: sched_action
+          spread: input
+          record:
+            ScheduledActionName: id
+    output:
+      ScheduledActionName: id
+
+  ModifySnapshotCopyRetentionPeriod:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output:
+      Cluster: rec
+
+  ModifySnapshotSchedule:
+    effects:
+      - create:
+          resource: snap_schedule
+          spread: input
+          record:
+            ScheduleIdentifier: id
+    output:
+      ScheduleIdentifier: id
+
+  ModifyUsageLimit:
+    effects:
+      - create:
+          resource: usage_limit
+          spread: input
+          record:
+            UsageLimitId: id
+    output:
+      UsageLimitId: id
+
+  PurchaseReservedNodeOffering:
+    let:
+      rid: >-
+        ('ReservedNodeId' in input && string(input.ReservedNodeId) != '') ? string(input.ReservedNodeId) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: reserved_node
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            ReservedNodeId: id
+    output:
+      ReservedNode: rec
+
+  PutResourcePolicy:
+    effects:
+      - create:
+          resource: resource_policy
+          spread: input
+          record:
+            ResourceArn: id
+    output:
+      ResourcePolicy: rec
+
+  RegisterNamespace:
+    let:
+      rid: >-
+        ('NamespaceArn' in input && string(input.NamespaceArn) != '') ? string(input.NamespaceArn) : ('ClusterIdentifier' in input && string(input.ClusterIdentifier) != '') ? string(input.ClusterIdentifier) : ('SnapshotIdentifier' in input && string(input.SnapshotIdentifier) != '') ? string(input.SnapshotIdentifier) : ('ResourceArn' in input && string(input.ResourceArn) != '') ? string(input.ResourceArn) : ('ScheduledActionName' in input && string(input.ScheduledActionName) != '') ? string(input.ScheduledActionName) : ('UsageLimitId' in input && string(input.UsageLimitId) != '') ? string(input.UsageLimitId) : ('IntegrationArn' in input && string(input.IntegrationArn) != '') ? string(input.IntegrationArn) : ('PartnerName' in input && string(input.PartnerName) != '') ? string(input.PartnerName) : ''
+    effects:
+      - generate: { bind: g, kind: hex, bytes: 8, when: "rid == ''" }
+      - create:
+          resource: namespace
+          key: "rid != '' ? rid : fx.g"
+          spread: input
+          record:
+            NamespaceArn: id
+    output: {}
+
+  RejectDataShare:
+    effects:
+      - delete: { resource: datashare, missing: ignore }
+    output: {}
+
+  RestoreTableFromClusterSnapshot:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output: {}
+
+  RevokeClusterSecurityGroupIngress:
+    effects:
+      - delete: { resource: secgroup, missing: ignore }
+    output: {}
+
+  RevokeEndpointAccess:
+    effects:
+      - delete: { resource: endpoint_access, missing: ignore }
+    output: {}
+
+  RevokeSnapshotAccess:
+    effects:
+      - delete: { resource: misc, missing: ignore }
+    output: {}
+
+  RotateEncryptionKey:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            ClusterIdentifier: id
+    output:
+      Cluster: rec
+
+  UpdatePartnerStatus:
+    effects:
+      - create:
+          resource: partner
+          spread: input
+          record:
+            PartnerName: id
+    output:
+      PartnerName: id
+
+quirks:
+  - operation: DescribeClusters
+    note: >
+      Every named-and-missing describe in the pack's core -- DescribeClusters,
+      DescribeClusterSnapshots, DescribeClusterSubnetGroups,
+      DescribeClusterParameterGroups, DescribeSnapshotCopyGrants and
+      DescribeEventSubscriptions -- answered the same ClusterNotFound fault
+      through a shared helper, so a missing snapshot or subnet group reads as
+      a missing cluster. Listing with no name never faults.
+  - operation: ModifyCluster
+    note: >
+      ModifyCluster, RebootCluster, PauseCluster and ResumeCluster merge only
+      a ClusterStatus onto the record -- ModifyCluster applies nothing else
+      from the request, not even NodeType -- and naming an unknown cluster
+      conjures a bare record that DescribeClusters then answers. ResizeCluster
+      always sets resizing and honors NodeType; PauseCluster sets paused;
+      everything else sets available.
+  - operation: DeleteCluster
+    note: >
+      Deleting is idempotent and answers {ClusterIdentifier, deleting} whether
+      or not the cluster existed. The pack also removed the credential and
+      every COPY table row under the cluster; the row store belongs to the
+      shadowed data plane, so the bundle deletes only the credential.
+  - operation: CreateCluster
+    note: >
+      DBName defaults to dev and the endpoint is synthesized from the
+      identifier and region. MasterUserPassword is never stored on the
+      cluster record; it lands (hashed) in the credential collection the
+      shadowed COPY data plane reads. The model requires ClusterIdentifier,
+      MasterUsername and NodeType; the pack accepted their absence and stored
+      empty strings, which the engine now rejects.
+  - operation: CopyClusterSnapshot
+    note: >
+      The copy inherits every member of the source record -- including its
+      Status -- under the target identifier, and copying a source that does
+      not exist succeeds with a bare {SnapshotIdentifier, Status: available}
+      record.
+  - operation: RestoreFromClusterSnapshot
+    note: >
+      The snapshot named in the request is never read: the cluster record is
+      rebuilt from the identifier alone, wholesale, dropping any NodeType,
+      MasterUsername and DBName the cluster had.
+  - operation: CreateClusterSubnetGroup
+    note: >
+      Only the name is stored. Description and the required SubnetIds are
+      dropped at create, and ModifyClusterSubnetGroup ignores them too.
+      CreateClusterParameterGroup likewise drops the required Description.
+  - operation: DescribeClusterParameters
+    note: >
+      The answer is the raw Modify/ResetClusterParameterGroup request as a
+      single Parameters element -- not a parameter list. A group whose
+      parameters were never set answers an empty list, and
+      DeleteClusterParameterGroup does not remove them.
+  - operation: GetClusterCredentials
+    note: >
+      The pack derived the password deterministically from the DbUser, so two
+      calls for one user answered the same password; the bundle draws it
+      fresh each call. Expiration is the constant 2099-01-01T00:00:00Z, the
+      user is always IAM:-prefixed, and ClusterIdentifier is ignored.
+  - operation: ModifyClusterIamRoles
+    note: >
+      AddIamRoles replaces the whole IamRoles member and RemoveIamRoles is
+      never read; calling it with neither stores a null IamRoles.
+  - operation: CreateTags
+    note: >
+      CreateTags replaces the whole tag list stored under the resource name,
+      DeleteTags deletes all of it ignoring TagKeys, and DescribeTags wraps
+      whatever list it finds in one TaggedResources entry -- an untagged ARN
+      answers {Tags: []}, not a fault.
+  - operation: DisableSnapshotCopy
+    note: >
+      The record is rebuilt without ClusterSnapshotCopyStatus; every other
+      member survives. EnableSnapshotCopy sets that member to
+      {DestinationRegion} and nothing else, merging over the stored record.
+  - operation: EnableLogging
+    note: >
+      The 109 remaining operations are one generic keyed store in the pack:
+      writes spread the request and force an id member, deletes drop the row,
+      and describes answer the named record or -- this is the pack's actual
+      behavior, transcribed -- the whole list of that kind when the named
+      record is absent. Writes also echo the id member at the top level of
+      the answer and the record under a wrapper member, most of which the
+      operations' output shapes do not declare; the bundle answers the
+      declared members and the recorded steps are superseded with that
+      reason. When no id member is present the pack mints a hex id, so
+      ModifyEventSubscription, RegisterNamespace, the IDC application
+      operations, PurchaseReservedNodeOffering and others write records no
+      other operation can address.
+  - operation: DescribeLoggingStatus
+    note: >
+      Answers under LoggingStatus, a member the output shape does not declare
+      (it declares BucketName, LoggingEnabled and friends), so the wire
+      carries nothing; the recorded steps are superseded. DescribeEvents,
+      DescribeStorage, DescribeResize and the other misc describes answer the
+      same undeclared Clusters member, listing the records RotateEncryptionKey
+      and its siblings write. The pack's dead branches -- a Status: available
+      fallback for these three describes and write-path special cases for
+      GetClusterCredentialsWithIAM and GetIdentityCenterAuthToken -- are
+      unreachable behind the name-prefix dispatch and are not transcribed.
+  - operation: GetIdentityCenterAuthToken
+    note: >
+      The token and the Cluster wrapper are both undeclared on the output
+      shape, so nothing reaches the wire; the recorded step is superseded.
+      GetReservedNodeExchangeConfigurationOptions and
+      GetReservedNodeExchangeOfferings are the same shape. GetResourcePolicy
+      is the exception: its ResourcePolicy member is declared, so it is
+      transcribed and gated.

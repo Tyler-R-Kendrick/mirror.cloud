@@ -1,0 +1,2134 @@
+{
+  "schema": "trace/1",
+  "service": "aws.cloudformation",
+  "source": "pack:internal/services/aws/cloudformation@77fba2e7",
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service. The recording covers the pack's expressible surface only: CreateStack, UpdateStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary and ListExports are the template engine (parsing, intrinsic functions, cross-service provisioning, blob reads) and are the bundle's shadow reason. The stack records here are written by the rollback family, so Resources and Outputs are always empty.",
+  "steps": [
+    {
+      "operation": "ListStacks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSummaries": null
+      }
+    },
+    {
+      "operation": "DescribeStacks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Stacks": null
+      }
+    },
+    {
+      "operation": "DescribeStacks",
+      "input": {
+        "StackName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetTemplate",
+      "input": {
+        "StackName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListStackResources",
+      "input": {
+        "StackName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeStackEvents",
+      "input": {
+        "StackName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeStackResource",
+      "input": {
+        "LogicalResourceId": "B",
+        "StackName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateTerminationProtection",
+      "input": {
+        "EnableTerminationProtection": true,
+        "StackName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteStack",
+      "input": {
+        "StackName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "RollbackStack",
+      "input": {
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackId": ""
+      }
+    },
+    {
+      "operation": "DescribeStacks",
+      "input": {
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Stacks": [
+          {
+            "Outputs": null,
+            "StackId": "",
+            "StackName": "s1",
+            "StackStatus": "ROLLBACK_COMPLETE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListStacks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSummaries": [
+          {
+            "StackId": "",
+            "StackName": "s1",
+            "StackStatus": "ROLLBACK_COMPLETE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetTemplate",
+      "input": {
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StagesAvailable": [
+          "Original"
+        ],
+        "TemplateBody": ""
+      }
+    },
+    {
+      "operation": "ListStackResources",
+      "input": {
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackResourceSummaries": null
+      }
+    },
+    {
+      "operation": "DescribeStackEvents",
+      "input": {
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackEvents": [
+          {
+            "LogicalResourceId": "s1",
+            "ResourceStatus": "ROLLBACK_COMPLETE",
+            "ResourceType": "AWS::CloudFormation::Stack",
+            "StackId": "",
+            "StackName": "s1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeStackResource",
+      "input": {
+        "LogicalResourceId": "B",
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateTerminationProtection",
+      "input": {
+        "EnableTerminationProtection": true,
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackId": ""
+      }
+    },
+    {
+      "operation": "DeleteStack",
+      "input": {
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateTerminationProtection",
+      "input": {
+        "EnableTerminationProtection": false,
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackId": ""
+      }
+    },
+    {
+      "operation": "CancelUpdateStack",
+      "input": {
+        "StackName": "s2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackId": ""
+      },
+      "superseded": "CancelUpdateStack answers StackId, which its Unit output shape does not declare; the bundle writes the record the same way and answers the declared empty body."
+    },
+    {
+      "operation": "ContinueUpdateRollback",
+      "input": {
+        "StackName": "s2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackId": ""
+      },
+      "superseded": "ContinueUpdateRollback answers StackId, which its output shape does not declare (no members); the bundle writes the record the same way and answers the declared empty body."
+    },
+    {
+      "operation": "DescribeStacks",
+      "input": {
+        "StackName": "s2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Stacks": [
+          {
+            "Outputs": null,
+            "StackId": "",
+            "StackName": "s2",
+            "StackStatus": "ROLLBACK_COMPLETE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteStack",
+      "input": {
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeStacks",
+      "input": {
+        "StackName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateChangeSet",
+      "input": {
+        "ChangeSetName": "cs1",
+        "StackName": "rem",
+        "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
+        "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem"
+      }
+    },
+    {
+      "operation": "DescribeChangeSet",
+      "input": {
+        "ChangeSetName": "cs1",
+        "StackName": "rem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChangeSetId": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
+        "ChangeSetName": "cs1",
+        "StackName": "rem",
+        "Status": "CREATE_COMPLETE",
+        "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}"
+      },
+      "superseded": "The pack answers the whole change-set record including TemplateBody, which the response shape does not declare; the bundle answers the declared members (ChangeSetId, ChangeSetName, StackName, Status)."
+    },
+    {
+      "operation": "ListChangeSets",
+      "input": {
+        "StackName": "rem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Summaries": [
+          {
+            "ChangeSetId": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
+            "ChangeSetName": "cs1",
+            "StackName": "rem",
+            "Status": "CREATE_COMPLETE",
+            "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeChangeSet",
+      "input": {
+        "ChangeSetName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ChangeSetNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteChangeSet",
+      "input": {
+        "ChangeSetName": "cs1",
+        "StackName": "rem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeChangeSet",
+      "input": {
+        "ChangeSetName": "cs1",
+        "StackName": "rem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ChangeSetNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteChangeSet",
+      "input": {
+        "ChangeSetName": "cs1",
+        "StackName": "rem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateChangeSet",
+      "input": {
+        "ChangeSetName": "cs2",
+        "StackName": "rem"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SignalResource",
+      "input": {
+        "LogicalResourceId": "B",
+        "StackName": "rem",
+        "Status": "SUCCESS",
+        "UniqueId": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateStackSet",
+      "input": {
+        "StackSetName": "ss1",
+        "TemplateBody": "tb"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSetId": "ss1"
+      }
+    },
+    {
+      "operation": "DescribeStackSet",
+      "input": {
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSet": {
+          "StackSetName": "ss1",
+          "Status": "ACTIVE",
+          "TemplateBody": "tb"
+        }
+      }
+    },
+    {
+      "operation": "DescribeStackSet",
+      "input": {
+        "StackSetName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSet": {}
+      }
+    },
+    {
+      "operation": "ListStackSets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Summaries": [
+          {
+            "StackSetName": "ss1",
+            "Status": "ACTIVE",
+            "TemplateBody": "tb"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateStackSet",
+      "input": {
+        "Description": "d",
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSetId": "ss1"
+      },
+      "superseded": "UpdateStackSet answers StackSetId where the shape declares OperationId; the bundle performs the same full-replace write and answers the declared empty body."
+    },
+    {
+      "operation": "DescribeStackSet",
+      "input": {
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSet": {
+          "Description": "d",
+          "StackSetName": "ss1",
+          "Status": "ACTIVE",
+          "TemplateBody": ""
+        }
+      }
+    },
+    {
+      "operation": "DeleteStackSet",
+      "input": {
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeStackSet",
+      "input": {
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSet": {}
+      }
+    },
+    {
+      "operation": "DeleteStackSet",
+      "input": {
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateStackInstances",
+      "input": {
+        "Regions": [
+          "us-east-1"
+        ],
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OperationId": "5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeStackSetOperation",
+      "input": {
+        "OperationId": {
+          "$fromPath": "OperationId",
+          "$fromStep": 42
+        },
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSetOperation": {
+          "Action": "CreateStackInstances",
+          "OperationId": "5f59f223",
+          "StackSetName": "ss1",
+          "Status": "SUCCEEDED"
+        }
+      }
+    },
+    {
+      "operation": "DescribeStackInstance",
+      "input": {
+        "StackInstanceAccount": {
+          "$fromPath": "OperationId",
+          "$fromStep": 42
+        },
+        "StackInstanceRegion": "us-east-1",
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackInstance": {
+          "Action": "CreateStackInstances",
+          "OperationId": "5f59f223",
+          "StackSetName": "ss1",
+          "Status": "SUCCEEDED"
+        }
+      }
+    },
+    {
+      "operation": "ListStackInstances",
+      "input": {
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Summaries": [
+          {
+            "Action": "CreateStackInstances",
+            "OperationId": "5f59f223",
+            "StackSetName": "ss1",
+            "Status": "SUCCEEDED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListStackSetOperations",
+      "input": {
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Summaries": [
+          {
+            "Action": "CreateStackInstances",
+            "OperationId": "5f59f223",
+            "StackSetName": "ss1",
+            "Status": "SUCCEEDED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListStackSetOperationResults",
+      "input": {
+        "OperationId": "opx",
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Summaries": [
+          {
+            "Action": "CreateStackInstances",
+            "OperationId": "5f59f223",
+            "StackSetName": "ss1",
+            "Status": "SUCCEEDED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListStackSetAutoDeploymentTargets",
+      "input": {
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Summaries": [
+          {
+            "Action": "CreateStackInstances",
+            "OperationId": "5f59f223",
+            "StackSetName": "ss1",
+            "Status": "SUCCEEDED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StopStackSetOperation",
+      "input": {
+        "OperationId": {
+          "$fromPath": "OperationId",
+          "$fromStep": 42
+        },
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeStackSetOperation",
+      "input": {
+        "OperationId": {
+          "$fromPath": "OperationId",
+          "$fromStep": 42
+        },
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSetOperation": {
+          "Action": "CreateStackInstances",
+          "OperationId": "5f59f223",
+          "StackSetName": "ss1",
+          "Status": "STOPPED"
+        }
+      }
+    },
+    {
+      "operation": "StopStackSetOperation",
+      "input": {
+        "OperationId": "unknownop",
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeStackSetOperation",
+      "input": {
+        "OperationId": "unknownop",
+        "StackSetName": "ss1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackSetOperation": {
+          "OperationId": "unknownop",
+          "Status": "STOPPED"
+        }
+      }
+    },
+    {
+      "operation": "ListTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TypeSummaries": null
+      }
+    },
+    {
+      "operation": "RegisterType",
+      "input": {
+        "SchemaHandlerPackage": "pkg",
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressToken": "9c8e2cb0",
+        "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing"
+      },
+      "superseded": "RegisterType answers TypeArn and a minted-and-forgotten ProgressToken; the shape declares RegistrationToken, which the bundle answers."
+    },
+    {
+      "operation": "ListTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TypeSummaries": [
+          {
+            "SchemaHandlerPackage": "pkg",
+            "Status": "COMPLETE",
+            "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing",
+            "TypeName": "AWS::Test::Thing"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeType",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Type": {
+          "SchemaHandlerPackage": "pkg",
+          "Status": "COMPLETE",
+          "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing",
+          "TypeName": "AWS::Test::Thing"
+        }
+      },
+      "superseded": "DescribeType wraps the record in a Type member the response shape does not declare; the bundle answers the declared body instead."
+    },
+    {
+      "operation": "DescribeType",
+      "input": {
+        "TypeName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Type": {}
+      }
+    },
+    {
+      "operation": "PublishType",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressToken": "33f6fc5d",
+        "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing"
+      },
+      "superseded": "PublishType answers TypeArn and ProgressToken; the shape declares PublicTypeArn, which the bundle answers."
+    },
+    {
+      "operation": "ActivateType",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressToken": "83d4958a",
+        "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing"
+      },
+      "superseded": "ActivateType answers TypeArn and ProgressToken; the shape declares Arn, which the bundle answers."
+    },
+    {
+      "operation": "ListTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TypeSummaries": [
+          {
+            "Status": "COMPLETE",
+            "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing",
+            "TypeName": "AWS::Test::Thing"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTypeVersions",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TypeSummaries": [
+          {
+            "Status": "COMPLETE",
+            "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing",
+            "TypeName": "AWS::Test::Thing"
+          }
+        ]
+      },
+      "superseded": "The pack lists type records under TypeSummaries; ListTypeVersions declares TypeVersionSummaries, which the bundle answers with the same records."
+    },
+    {
+      "operation": "ListTypeRegistrations",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TypeSummaries": [
+          {
+            "Status": "COMPLETE",
+            "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing",
+            "TypeName": "AWS::Test::Thing"
+          }
+        ]
+      },
+      "superseded": "The pack lists type records under TypeSummaries; ListTypeRegistrations declares RegistrationTokenList, which the bundle answers with the same records."
+    },
+    {
+      "operation": "BatchDescribeTypeConfigurations",
+      "input": {
+        "TypeConfigurationIdentifiers": [
+          {
+            "TypeName": "AWS::Test::Thing"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TypeSummaries": [
+          {
+            "Status": "COMPLETE",
+            "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing",
+            "TypeName": "AWS::Test::Thing"
+          }
+        ]
+      },
+      "superseded": "The pack lists type records under TypeSummaries; BatchDescribeTypeConfigurations declares TypeConfigurations, which the bundle answers with the same records."
+    },
+    {
+      "operation": "SetTypeConfiguration",
+      "input": {
+        "Configuration": "{}",
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressToken": "100aa4e6",
+        "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing"
+      },
+      "superseded": "SetTypeConfiguration answers TypeArn and ProgressToken; the shape declares ConfigurationArn, which the bundle answers."
+    },
+    {
+      "operation": "SetTypeDefaultVersion",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressToken": "3ed10eca",
+        "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing"
+      },
+      "superseded": "SetTypeDefaultVersion answers TypeArn and ProgressToken, neither of which its empty output shape declares; the bundle answers the declared empty body."
+    },
+    {
+      "operation": "TestType",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressToken": "4da7b6a4",
+        "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing"
+      },
+      "superseded": "TestType answers TypeArn and ProgressToken; the shape declares TypeVersionArn, which the bundle answers."
+    },
+    {
+      "operation": "DeactivateType",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressToken": "e7175ec1",
+        "TypeArn": "arn:aws:cloudformation:us-east-1::type/AWS::Test::Thing"
+      },
+      "superseded": "DeactivateType answers TypeArn and ProgressToken, neither of which its empty output shape declares; the bundle answers the declared empty body."
+    },
+    {
+      "operation": "DescribeTypeRegistration",
+      "input": {
+        "RegistrationToken": "tok"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Type": {}
+      }
+    },
+    {
+      "operation": "DeregisterType",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTypes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TypeSummaries": null
+      }
+    },
+    {
+      "operation": "DeregisterType",
+      "input": {
+        "TypeName": "AWS::Test::Thing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DetectStackDrift",
+      "input": {
+        "StackName": "s9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackDriftDetectionId": "77df676f"
+      }
+    },
+    {
+      "operation": "DescribeStackDriftDetectionStatus",
+      "input": {
+        "StackDriftDetectionId": {
+          "$fromPath": "StackDriftDetectionId",
+          "$fromStep": 72
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectionStatus": "DETECTION_COMPLETE",
+        "StackDriftDetectionId": "77df676f",
+        "StackDriftStatus": "IN_SYNC"
+      }
+    },
+    {
+      "operation": "DescribeStackDriftDetectionStatus",
+      "input": {
+        "StackDriftDetectionId": "unknowndrift"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DetectionStatus": "DETECTION_COMPLETE",
+        "StackDriftDetectionId": "unknowndrift",
+        "StackDriftStatus": "IN_SYNC"
+      }
+    },
+    {
+      "operation": "DetectStackSetDrift",
+      "input": {
+        "StackSetName": "ss9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackDriftDetectionId": "9045051b"
+      },
+      "superseded": "DetectStackSetDrift answers StackDriftDetectionId where the shape declares OperationId; the bundle answers the same minted id under the declared name."
+    },
+    {
+      "operation": "DetectStackResourceDrift",
+      "input": {
+        "LogicalResourceId": "B",
+        "StackName": "s9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackResourceDrift": {
+          "StackResourceDriftStatus": "IN_SYNC"
+        }
+      }
+    },
+    {
+      "operation": "DescribeStackResourceDrifts",
+      "input": {
+        "StackName": "s9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackResourceDrifts": []
+      }
+    },
+    {
+      "operation": "ListStackInstanceResourceDrifts",
+      "input": {
+        "OperationId": "opx",
+        "StackInstanceAccount": "000000000000",
+        "StackInstanceRegion": "us-east-1",
+        "StackSetName": "ss9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackResourceDrifts": []
+      }
+    },
+    {
+      "operation": "CreateGeneratedTemplate",
+      "input": {
+        "GeneratedTemplateName": "gt1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GeneratedTemplateId": "gt1"
+      }
+    },
+    {
+      "operation": "ListGeneratedTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Summaries": [
+          {
+            "GeneratedTemplateName": "gt1",
+            "Status": "COMPLETE",
+            "TemplateBody": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeGeneratedTemplate",
+      "input": {
+        "GeneratedTemplateName": "gt1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GeneratedTemplate": {
+          "GeneratedTemplateName": "gt1",
+          "Status": "COMPLETE",
+          "TemplateBody": "{}"
+        }
+      },
+      "superseded": "DescribeGeneratedTemplate wraps the record in a GeneratedTemplate member the response shape does not declare; the bundle answers the declared body instead."
+    },
+    {
+      "operation": "GetGeneratedTemplate",
+      "input": {
+        "GeneratedTemplateName": "gt1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GeneratedTemplate": {
+          "GeneratedTemplateName": "gt1",
+          "Status": "COMPLETE",
+          "TemplateBody": "{}"
+        }
+      },
+      "superseded": "GetGeneratedTemplate wraps the record in a GeneratedTemplate member the response shape does not declare; the bundle answers the declared body instead."
+    },
+    {
+      "operation": "DescribeGeneratedTemplate",
+      "input": {
+        "GeneratedTemplateName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GeneratedTemplate": {}
+      }
+    },
+    {
+      "operation": "UpdateGeneratedTemplate",
+      "input": {
+        "GeneratedTemplateName": "gt1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GeneratedTemplateId": "gt1"
+      }
+    },
+    {
+      "operation": "DeleteGeneratedTemplate",
+      "input": {
+        "GeneratedTemplateName": "gt1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListGeneratedTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Summaries": null
+      }
+    },
+    {
+      "operation": "DeleteGeneratedTemplate",
+      "input": {
+        "GeneratedTemplateName": "gt1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "StartResourceScan",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceScanId": "71a868c4"
+      }
+    },
+    {
+      "operation": "DescribeResourceScan",
+      "input": {
+        "ResourceScanId": {
+          "$fromPath": "ResourceScanId",
+          "$fromStep": 88
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceScan": {
+          "ResourceScanId": "71a868c4",
+          "Status": "COMPLETE"
+        }
+      },
+      "superseded": "DescribeResourceScan wraps the record in a ResourceScan member the response shape does not declare; the bundle answers the declared body instead."
+    },
+    {
+      "operation": "DescribeResourceScan",
+      "input": {
+        "ResourceScanId": "absentscan"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceScan": {}
+      }
+    },
+    {
+      "operation": "ListResourceScans",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceScans": [
+          {
+            "ResourceScanId": "71a868c4",
+            "Status": "COMPLETE"
+          }
+        ]
+      },
+      "superseded": "The pack lists scans under ResourceScans; ListResourceScans declares ResourceScanSummaries, which the bundle answers with the same records."
+    },
+    {
+      "operation": "ListResourceScanResources",
+      "input": {
+        "ResourceScanId": "absentscan"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceScans": [
+          {
+            "ResourceScanId": "71a868c4",
+            "Status": "COMPLETE"
+          }
+        ]
+      },
+      "superseded": "The pack lists scans under ResourceScans; ListResourceScanResources declares Resources, which the bundle answers with the same records."
+    },
+    {
+      "operation": "ListResourceScanRelatedResources",
+      "input": {
+        "ResourceScanId": "absentscan",
+        "Resources": [
+          "r"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceScans": [
+          {
+            "ResourceScanId": "71a868c4",
+            "Status": "COMPLETE"
+          }
+        ]
+      },
+      "superseded": "The pack lists scans under ResourceScans; ListResourceScanRelatedResources declares RelatedResources, which the bundle answers with the same records."
+    },
+    {
+      "operation": "CreateStackRefactor",
+      "input": {
+        "StackDefinitions": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackRefactorId": "34ee9203"
+      }
+    },
+    {
+      "operation": "DescribeStackRefactor",
+      "input": {
+        "StackRefactorId": {
+          "$fromPath": "StackRefactorId",
+          "$fromStep": 94
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackRefactor": {
+          "StackRefactorId": "34ee9203",
+          "Status": "COMPLETE"
+        }
+      },
+      "superseded": "DescribeStackRefactor wraps the record in a StackRefactor member the response shape does not declare; the bundle answers the declared body instead."
+    },
+    {
+      "operation": "DescribeStackRefactor",
+      "input": {
+        "StackRefactorId": "absentref"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackRefactor": {}
+      }
+    },
+    {
+      "operation": "ListStackRefactors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackRefactorSummaries": [
+          {
+            "StackRefactorId": "34ee9203",
+            "Status": "COMPLETE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListStackRefactorActions",
+      "input": {
+        "StackRefactorId": "absentref"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackRefactorSummaries": [
+          {
+            "StackRefactorId": "34ee9203",
+            "Status": "COMPLETE"
+          }
+        ]
+      },
+      "superseded": "The pack lists refactors under StackRefactorSummaries; ListStackRefactorActions declares StackRefactorActions, which the bundle answers with the same records."
+    },
+    {
+      "operation": "ExecuteStackRefactor",
+      "input": {
+        "StackRefactorId": "absentref"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackRefactorId": "39bb7163"
+      },
+      "superseded": "ExecuteStackRefactor mints and answers a fresh StackRefactorId, which its Unit output shape does not declare; the bundle performs the same write and answers the declared empty body."
+    },
+    {
+      "operation": "GetStackPolicy",
+      "input": {
+        "StackName": "s9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackPolicyBody": "{}"
+      }
+    },
+    {
+      "operation": "SetStackPolicy",
+      "input": {
+        "StackName": "s9",
+        "StackPolicyBody": "{\"Statement\":[]}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetStackPolicy",
+      "input": {
+        "StackName": "s9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StackPolicyBody": "{\"Statement\":[]}"
+      }
+    },
+    {
+      "operation": "DescribeOrganizationsAccess",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": "DISABLED"
+      }
+    },
+    {
+      "operation": "ActivateOrganizationsAccess",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeOrganizationsAccess",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": "ENABLED"
+      }
+    },
+    {
+      "operation": "DeactivateOrganizationsAccess",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeOrganizationsAccess",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": "DISABLED"
+      }
+    },
+    {
+      "operation": "DescribePublisher",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PublisherId": "",
+        "PublisherStatus": "VERIFIED"
+      }
+    },
+    {
+      "operation": "RegisterPublisher",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PublisherId": "842605a0"
+      }
+    },
+    {
+      "operation": "DescribePublisher",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PublisherId": "842605a0",
+        "PublisherStatus": "VERIFIED"
+      }
+    },
+    {
+      "operation": "DescribeAccountLimits",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountLimits": [
+          {
+            "Name": "StackLimit",
+            "Value": 200
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeChangeSetHooks",
+      "input": {
+        "ChangeSetName": "cs1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Hooks": []
+      }
+    },
+    {
+      "operation": "ListHookResults",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Hooks": []
+      }
+    },
+    {
+      "operation": "GetHookResult",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HookStatus": "HOOK_COMPLETE_SUCCEEDED"
+      },
+      "superseded": "GetHookResult answers HookStatus: HOOK_COMPLETE_SUCCEEDED, which the response shape does not declare; the bundle answers the declared empty body."
+    },
+    {
+      "operation": "DescribeEvents",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OperationEvents": []
+      }
+    },
+    {
+      "operation": "EstimateTemplateCost",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Url": "http://127.0.0.1/cfn-cost"
+      }
+    },
+    {
+      "operation": "ListImports",
+      "input": {
+        "ExportName": "exp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Imports": []
+      }
+    },
+    {
+      "operation": "RecordHandlerProgress",
+      "input": {
+        "BearerToken": "tok",
+        "OperationStatus": "SUCCESS"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

@@ -43,26 +43,35 @@ func init() {
 // ServiceIDs lists the services actually served from bundles, sorted. A shadow
 // bundle is proven but not yet serving, so it is not here; ShadowIDs lists
 // those.
-func ServiceIDs() []string {
-	var out []string
+//
+// Both are computed once: the answer is a fact of the embedded behavior/ tree,
+// which cannot change after process start, and recomputing it re-parses and
+// re-validates every bundle (about half a second, paid per test binary --
+// which is where a mutation shard's budget goes).
+var serviceLists = sync.OnceValues(func() ([]string, map[string]string) {
+	var serving []string
+	shadow := map[string]string{}
 	for _, id := range behaviors.ServiceIDs() {
-		if reason, _ := shadowOf(id); reason == "" {
-			out = append(out, id)
+		reason, err := shadowOf(id)
+		if err == nil && reason != "" {
+			shadow[id] = reason
+			continue
 		}
+		serving = append(serving, id)
 	}
-	return out
+	return serving, shadow
+})
+
+func ServiceIDs() []string {
+	serving, _ := serviceLists()
+	return serving
 }
 
 // ShadowIDs lists the bundles that are gated but not yet serving, each with
 // the reason it is not.
 func ShadowIDs() map[string]string {
-	out := map[string]string{}
-	for _, id := range behaviors.ServiceIDs() {
-		if reason, err := shadowOf(id); err == nil && reason != "" {
-			out[id] = reason
-		}
-	}
-	return out
+	_, shadow := serviceLists()
+	return shadow
 }
 
 // servedModel returns the model a bundle is built against: the one the runtime

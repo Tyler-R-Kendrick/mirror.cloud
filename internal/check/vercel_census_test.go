@@ -49,6 +49,21 @@ func TestVercelCensusDenominators(t *testing.T) {
 		t.Fatalf("authored kv document = %d paths, want 1 (POST /)", len(kvPaths))
 	}
 
+	// The vendor-authored oracle: vercel-labs/emulate, pinned in
+	// specs/vercel/emulate-inventory.json. Its Vercel service is the behavior
+	// denominator the way Azurite's test suite is Azure's.
+	inv := vercelLoadJSON(t, filepath.Join(root, "specs", "vercel", "emulate-inventory.json"))
+	if got := int(inv["routeCount"].(float64)); got != 52 {
+		t.Fatalf("emulate-inventory routeCount = %d, want 52", got)
+	}
+	if got := int(inv["testCount"].(float64)); got != 26 {
+		t.Fatalf("emulate-inventory testCount = %d, want 26", got)
+	}
+	routes, ok := inv["routes"].([]any)
+	if !ok || len(routes) != 52 {
+		t.Fatalf("emulate-inventory routes = %d, want 52", len(routes))
+	}
+
 	parity, err := os.ReadFile(filepath.Join(root, "docs", "PARITY.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +73,9 @@ func TestVercelCensusDenominators(t *testing.T) {
 		"| Vercel REST document operations (vendored) | 417 |",
 		"| Vercel REST document paths (vendored) | 297 |",
 		"| Narrowed `vercel.api` model operations | 26 |",
+		"| emulate Vercel routes (vendor-authored oracle) | 52 |",
+		"| emulate Vercel test functions | 26 |",
+		"| emulate Vercel routes served by mirror | 20 / 52 |",
 	} {
 		if !strings.Contains(doc2, needle) {
 			t.Fatalf("PARITY.md is missing the Vercel denominator row %q", needle)

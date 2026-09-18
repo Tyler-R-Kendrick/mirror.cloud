@@ -1,0 +1,397 @@
+schema: bir/1
+service: aws.scheduler
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Schedules and groups are plain CRUD with validation; nothing ever
+# fires on its own in this bundle.
+provenance: authored
+
+# Complete and gated for the CRUD surface, but not yet serving: the pack's
+# reason to exist is the delivery worker, and none of it is expressible. A
+# background loop wakes on the clock, walks every account/region scope,
+# parses cron/rate/at expressions (internal/services/aws/scheduleexpr) to find
+# due schedules, offsets flexible-window invocations by a Rand.Derive draw,
+# renders <aws.scheduler.*> template tokens into the payload, and delivers
+# through events.DeliverTarget to arbitrary targets -- SQS, Lambda, HTTP API
+# destinations -- with exponential-backoff retries and dead-lettering into
+# aws.sqs via a cross-service SendMessage. That is a time-driven effect, a
+# cross-scope iteration, several cross-service calls, and a cron parser; the
+# effect vocabulary has none of them and no primitive registry exists. Even
+# CreateSchedule's stored record carries _mirrorNextInvocation, computed from
+# the expression parser, the clock and the flexible-window draw, so the
+# record below omits it -- it is stripped from every answer the pack gives,
+# so the omission is unobservable over the API. The bundle takes over when
+# deadlines can fire cross-service delivery and an aws.scheduler/schedule
+# primitive carries the expression arithmetic, moved verbatim.
+shadow: >
+  The delivery worker is the service: a clock-driven loop across every scope
+  parses schedule expressions, draws flexible-window offsets from the
+  deterministic Rand, and delivers to arbitrary targets through
+  events.DeliverTarget with retries and SQS dead-lettering. None of that is
+  expressible without time-triggered cross-service effects and a schedule
+  expression primitive, and no primitive registry exists yet. The CRUD and
+  validation surface is transcribed and gated below; CreateSchedule no longer
+  rejects an unparseable ScheduleExpression, which is the same gap.
+
+resources:
+  schedule_group:
+    collection: schg
+    id:
+      input_members: [Name]
+    record:
+      Name: id
+      Arn: "'arn:aws:scheduler:' + identity.region + ':' + identity.account + ':schedule-group/' + string(input.Name)"
+      State: "'ACTIVE'"
+
+  # The pack scoped schedules to a per-group collection; a composite key over
+  # one collection is the same containment, and the listing narrows by the
+  # recorded GroupName. A cross-group ListSchedules answers in group-name
+  # order -- the pack sorts the default group in with the named ones -- which
+  # is the flat key's sort order exactly.
+  schedule:
+    collection: sch
+    id:
+      derive: >
+        ('GroupName' in input && string(input.GroupName) != '' ? string(input.GroupName) : 'default')
+          + '/' + string(input.Name)
+    record:
+      Name: "string(input.Name)"
+      GroupName: "'GroupName' in input && string(input.GroupName) != '' ? string(input.GroupName) : 'default'"
+      Arn: "'arn:aws:scheduler:' + identity.region + ':' + identity.account + ':schedule/' + ('GroupName' in input && string(input.GroupName) != '' ? string(input.GroupName) : 'default') + '/' + string(input.Name)"
+      State: "'State' in input && string(input.State) != '' ? string(input.State) : 'ENABLED'"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+  Conflict:
+    code: ConflictException
+    http: 409
+    fault: client
+
+operations:
+  CreateSchedule:
+    reads:
+      g: { resource: schedule_group, key: "'GroupName' in input && string(input.GroupName) != '' ? string(input.GroupName) : 'default'" }
+      s: { resource: schedule }
+    require:
+      - cond: >
+          !('GroupName' in input) || string(input.GroupName) == ''
+            || string(input.GroupName) == 'default' || g_found
+        error: NotFound
+        message: Schedule group does not exist.
+      - { cond: "!s_found", error: Conflict, message: Schedule already exists. }
+      - cond: >
+          'Arn' in input.Target && string(input.Target.Arn) != ''
+            && 'RoleArn' in input.Target
+            && string(input.Target.RoleArn).matches('^arn:aws(-[^:]*)?:iam::[0-9]{12}:role/.+$')
+        error: Validation
+        message: Target Arn and RoleArn are required.
+      - { cond: "blen(string(input.Target.Arn)) <= 1600", error: Validation, message: Target Arn exceeds 1600 characters. }
+      - cond: >
+          !('Input' in input.Target)
+            || (blen(string(input.Target.Input)) <= 262144
+                && (string(input.Target.Input) == ''
+                    || string(input.Target.Arn).contains(':scheduler:::aws-sdk:')
+                    || !(string(input.Target.Arn).contains(':lambda:')
+                         || string(input.Target.Arn).contains(':states:')
+                         || string(input.Target.Arn).contains(':events:'))
+                    || parseJSON(string(input.Target.Input)) != null))
+        error: Validation
+        message: Target Input must meet the target format and 256 KB limit.
+      - cond: >
+          'Mode' in input.FlexibleTimeWindow
+            && (string(input.FlexibleTimeWindow.Mode) == 'OFF'
+                || string(input.FlexibleTimeWindow.Mode) == 'FLEXIBLE')
+        error: Validation
+        message: FlexibleTimeWindow Mode must be OFF or FLEXIBLE.
+      - cond: >
+          string(input.FlexibleTimeWindow.Mode) != 'FLEXIBLE'
+            || ('MaximumWindowInMinutes' in input.FlexibleTimeWindow
+                && double(input.FlexibleTimeWindow.MaximumWindowInMinutes) >= 1.0
+                && double(input.FlexibleTimeWindow.MaximumWindowInMinutes) <= 1440.0
+                && double(input.FlexibleTimeWindow.MaximumWindowInMinutes) == double(int(input.FlexibleTimeWindow.MaximumWindowInMinutes)))
+        error: Validation
+        message: MaximumWindowInMinutes must be between 1 and 1440.
+      - cond: >
+          !('State' in input) || string(input.State) == ''
+            || string(input.State) == 'ENABLED' || string(input.State) == 'DISABLED'
+        error: Validation
+        message: State must be ENABLED or DISABLED.
+      - cond: >
+          !('ActionAfterCompletion' in input)
+            || string(input.ActionAfterCompletion) in ['', 'NONE', 'DELETE']
+        error: Validation
+        message: ActionAfterCompletion must be NONE or DELETE.
+      - cond: >
+          !('RetryPolicy' in input.Target)
+            || !('MaximumEventAgeInSeconds' in input.Target.RetryPolicy)
+            || (double(input.Target.RetryPolicy.MaximumEventAgeInSeconds) == double(int(input.Target.RetryPolicy.MaximumEventAgeInSeconds))
+                && double(input.Target.RetryPolicy.MaximumEventAgeInSeconds) >= 60.0
+                && double(input.Target.RetryPolicy.MaximumEventAgeInSeconds) <= 86400.0)
+        error: Validation
+        message: MaximumEventAgeInSeconds must be between 60 and 86400.
+      - cond: >
+          !('RetryPolicy' in input.Target)
+            || !('MaximumRetryAttempts' in input.Target.RetryPolicy)
+            || (double(input.Target.RetryPolicy.MaximumRetryAttempts) == double(int(input.Target.RetryPolicy.MaximumRetryAttempts))
+                && double(input.Target.RetryPolicy.MaximumRetryAttempts) >= 0.0
+                && double(input.Target.RetryPolicy.MaximumRetryAttempts) <= 185.0)
+        error: Validation
+        message: MaximumRetryAttempts must be between 0 and 185.
+      - cond: >
+          !('DeadLetterConfig' in input.Target)
+            || !('Arn' in input.Target.DeadLetterConfig)
+            || string(input.Target.DeadLetterConfig.Arn) == ''
+            || (string(input.Target.DeadLetterConfig.Arn).matches('^arn:aws(-[^:]*)?:sqs:[^:]+:[0-9]{12}:.+$')
+                && !string(input.Target.DeadLetterConfig.Arn).endsWith('.fifo'))
+        error: Validation
+        message: DeadLetterConfig Arn must identify a standard SQS queue.
+      - cond: >
+          !('EndDate' in input) || !('StartDate' in input)
+            || !string(input.EndDate).matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$')
+            || !string(input.StartDate).matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$')
+            || timestamp(string(input.EndDate)) >= timestamp(string(input.StartDate))
+        error: Validation
+        message: EndDate must not precede StartDate.
+    effects:
+      # The pack stored the request verbatim, so this is a create (no merge)
+      # with a spread; Name, GroupName, Arn and State are forced back on top.
+      - create: { resource: schedule, spread: input }
+    output:
+      ScheduleArn: rec.Arn
+
+  GetSchedule:
+    reads:
+      s: { resource: schedule }
+    require:
+      - { cond: s_found, error: NotFound, message: Schedule does not exist. }
+    output:
+      Name: s.Name
+      GroupName: s.GroupName
+      Arn: s.Arn
+      State: s.State
+      ScheduleExpression: s.ScheduleExpression
+      FlexibleTimeWindow: s.FlexibleTimeWindow
+      Target: s.Target
+      ActionAfterCompletion: "'ActionAfterCompletion' in s ? s.ActionAfterCompletion : null"
+      Description: "'Description' in s ? s.Description : null"
+      EndDate: "'EndDate' in s ? s.EndDate : null"
+      KmsKeyArn: "'KmsKeyArn' in s ? s.KmsKeyArn : null"
+      ScheduleExpressionTimezone: "'ScheduleExpressionTimezone' in s ? s.ScheduleExpressionTimezone : null"
+      StartDate: "'StartDate' in s ? s.StartDate : null"
+
+  ListSchedules:
+    list:
+      resource: schedule
+      member: Schedules
+      paginate: model
+      filter: "!('GroupName' in input) || string(input.GroupName) == '' || string(item.GroupName) == string(input.GroupName)"
+
+  # The pack never checked that the group an update names exists, and an
+  # update naming a different group writes the record under the new group
+  # while keeping the old record and the old ARN.
+  UpdateSchedule:
+    reads:
+      s: { resource: schedule }
+    require:
+      - { cond: s_found, error: NotFound, message: Schedule does not exist. }
+      - cond: >
+          'Arn' in input.Target && string(input.Target.Arn) != ''
+            && 'RoleArn' in input.Target
+            && string(input.Target.RoleArn).matches('^arn:aws(-[^:]*)?:iam::[0-9]{12}:role/.+$')
+        error: Validation
+        message: Target Arn and RoleArn are required.
+      - { cond: "blen(string(input.Target.Arn)) <= 1600", error: Validation, message: Target Arn exceeds 1600 characters. }
+      - cond: >
+          !('Input' in input.Target)
+            || (blen(string(input.Target.Input)) <= 262144
+                && (string(input.Target.Input) == ''
+                    || string(input.Target.Arn).contains(':scheduler:::aws-sdk:')
+                    || !(string(input.Target.Arn).contains(':lambda:')
+                         || string(input.Target.Arn).contains(':states:')
+                         || string(input.Target.Arn).contains(':events:'))
+                    || parseJSON(string(input.Target.Input)) != null))
+        error: Validation
+        message: Target Input must meet the target format and 256 KB limit.
+      - cond: >
+          'Mode' in input.FlexibleTimeWindow
+            && (string(input.FlexibleTimeWindow.Mode) == 'OFF'
+                || string(input.FlexibleTimeWindow.Mode) == 'FLEXIBLE')
+        error: Validation
+        message: FlexibleTimeWindow Mode must be OFF or FLEXIBLE.
+      - cond: >
+          string(input.FlexibleTimeWindow.Mode) != 'FLEXIBLE'
+            || ('MaximumWindowInMinutes' in input.FlexibleTimeWindow
+                && double(input.FlexibleTimeWindow.MaximumWindowInMinutes) >= 1.0
+                && double(input.FlexibleTimeWindow.MaximumWindowInMinutes) <= 1440.0
+                && double(input.FlexibleTimeWindow.MaximumWindowInMinutes) == double(int(input.FlexibleTimeWindow.MaximumWindowInMinutes)))
+        error: Validation
+        message: MaximumWindowInMinutes must be between 1 and 1440.
+      - cond: >
+          !('State' in input) || string(input.State) == ''
+            || string(input.State) == 'ENABLED' || string(input.State) == 'DISABLED'
+        error: Validation
+        message: State must be ENABLED or DISABLED.
+      - cond: >
+          !('ActionAfterCompletion' in input)
+            || string(input.ActionAfterCompletion) in ['', 'NONE', 'DELETE']
+        error: Validation
+        message: ActionAfterCompletion must be NONE or DELETE.
+      - cond: >
+          !('RetryPolicy' in input.Target)
+            || !('MaximumEventAgeInSeconds' in input.Target.RetryPolicy)
+            || (double(input.Target.RetryPolicy.MaximumEventAgeInSeconds) == double(int(input.Target.RetryPolicy.MaximumEventAgeInSeconds))
+                && double(input.Target.RetryPolicy.MaximumEventAgeInSeconds) >= 60.0
+                && double(input.Target.RetryPolicy.MaximumEventAgeInSeconds) <= 86400.0)
+        error: Validation
+        message: MaximumEventAgeInSeconds must be between 60 and 86400.
+      - cond: >
+          !('RetryPolicy' in input.Target)
+            || !('MaximumRetryAttempts' in input.Target.RetryPolicy)
+            || (double(input.Target.RetryPolicy.MaximumRetryAttempts) == double(int(input.Target.RetryPolicy.MaximumRetryAttempts))
+                && double(input.Target.RetryPolicy.MaximumRetryAttempts) >= 0.0
+                && double(input.Target.RetryPolicy.MaximumRetryAttempts) <= 185.0)
+        error: Validation
+        message: MaximumRetryAttempts must be between 0 and 185.
+      - cond: >
+          !('DeadLetterConfig' in input.Target)
+            || !('Arn' in input.Target.DeadLetterConfig)
+            || string(input.Target.DeadLetterConfig.Arn) == ''
+            || (string(input.Target.DeadLetterConfig.Arn).matches('^arn:aws(-[^:]*)?:sqs:[^:]+:[0-9]{12}:.+$')
+                && !string(input.Target.DeadLetterConfig.Arn).endsWith('.fifo'))
+        error: Validation
+        message: DeadLetterConfig Arn must identify a standard SQS queue.
+      - cond: >
+          !('EndDate' in input) || !('StartDate' in input)
+            || !string(input.EndDate).matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$')
+            || !string(input.StartDate).matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$')
+            || timestamp(string(input.EndDate)) >= timestamp(string(input.StartDate))
+        error: Validation
+        message: EndDate must not precede StartDate.
+    effects:
+      # A create, not a put: the pack replaces the record with the new request,
+      # keeping only the ARN the schedule was created with.
+      - create:
+          resource: schedule
+          spread: input
+          record:
+            Arn: s.Arn
+    output:
+      ScheduleArn: s.Arn
+
+  # Deleting an absent schedule is a fault, not an idempotent success.
+  DeleteSchedule:
+    reads:
+      s: { resource: schedule }
+    require:
+      - { cond: s_found, error: NotFound, message: Schedule does not exist. }
+    effects:
+      - delete: { resource: schedule }
+    output: {}
+
+  CreateScheduleGroup:
+    reads:
+      g: { resource: schedule_group }
+    require:
+      - { cond: "string(input.Name) != 'default'", error: Validation, message: A non-default Name is required. }
+      - { cond: "!g_found", error: Conflict, message: Schedule group already exists. }
+    effects:
+      # Tags are accepted and discarded; the record is Name, Arn and State.
+      - create: { resource: schedule_group }
+    output:
+      ScheduleGroupArn: rec.Arn
+
+  # The default group is virtual: it answers without ever being stored.
+  GetScheduleGroup:
+    reads:
+      g: { resource: schedule_group }
+    require:
+      - { cond: "string(input.Name) == 'default' || g_found", error: NotFound, message: Schedule group does not exist. }
+    output:
+      Name: "string(input.Name)"
+      Arn: "string(input.Name) == 'default' ? 'arn:aws:scheduler:' + identity.region + ':' + identity.account + ':schedule-group/default' : g.Arn"
+      State: "string(input.Name) == 'default' ? 'ACTIVE' : g.State"
+
+  # The listing prepends the virtual default group to the stored ones.
+  ListScheduleGroups:
+    list: { resource: schedule_group, member: ScheduleGroups, paginate: model }
+    output:
+      ScheduleGroups: >
+        [{'Name': 'default',
+          'Arn': 'arn:aws:scheduler:' + identity.region + ':' + identity.account + ':schedule-group/default',
+          'State': 'ACTIVE'}] + items
+
+  DeleteScheduleGroup:
+    reads:
+      g: { resource: schedule_group }
+    select:
+      binding: occupants
+      resource: schedule
+      filter: "item.GroupName == string(input.Name)"
+    require:
+      - { cond: "string(input.Name) != 'default'", error: Conflict, message: The default schedule group cannot be deleted. }
+      - { cond: g_found, error: NotFound, message: Schedule group does not exist. }
+      - { cond: "occupants.size() == 0", error: Conflict, message: Schedule group is not empty. }
+    effects:
+      - delete: { resource: schedule_group }
+    output: {}
+
+quirks:
+  - operation: CreateSchedule
+    note: >
+      The pack validates ScheduleExpression by parsing it (rate/cron/at, with
+      ScheduleExpressionTimezone); that parser is scheduleexpr, not CEL, so an
+      unparseable expression is accepted here and stored. The same parse
+      computed the hidden _mirrorNextInvocation/_mirrorScheduledTime members
+      (with a Rand.Derive flexible-window offset), which the record omits --
+      the pack strips them from every answer, so the omission is unobservable.
+      A Target.Input of the literal JSON 'null' is valid to the pack and
+      rejected here, because parseJSON cannot distinguish 'null' from invalid.
+      A CreateSchedule that omits Name, ScheduleExpression, Target or
+      FlexibleTimeWindow is rejected by the engine's model check, which the
+      pack answered with its own 'Name is required.'-style ValidationException
+      -- same code and status, different message.
+  - operation: UpdateSchedule
+    note: >
+      Updating replaces the record with the request verbatim, keeping only the
+      original ARN; members set at creation and omitted from the update are
+      dropped. The group named in the request is not checked to exist, and
+      naming a different group moves the record under it while the ARN still
+      names the old group.
+  - operation: GetSchedule
+    note: >
+      The pack stripped ClientToken from its answers; the bundle's record is
+      the spread request, so a ClientToken sent at creation is stored and
+      answered here and in ListSchedules.
+  - operation: ListSchedules
+    note: >
+      NamePrefix and State are accepted and ignored. The pack paginated
+      nothing; the bundle paginates per the model, so a MaxResults the pack
+      would have ignored now pages. A cross-group listing answers in plain
+      group-name order -- the pack sorts the default group in with the named
+      ones, unlike ListScheduleGroups, which prepends it -- and the bundle's
+      composite key reproduces that order exactly.
+  - operation: ListScheduleGroups
+    note: >
+      The virtual default group is prepended to the page whatever NextToken or
+      MaxResults says, so it appears on every page; the pack had no pagination
+      at all.
+  - operation: DeleteScheduleGroup
+    note: >
+      Deleting the default group is a ConflictException, an absent group a
+      ResourceNotFoundException, and a group still holding schedules a
+      ConflictException -- in that precedence order.
+  - note: >
+      Every member lookup in the pack also tried the lower-camel spelling
+      (name, groupName, scheduleExpression, a target's arn and roleArn); only
+      the model's own spellings resolve here, so a request written in
+      lower-camel faults where the pack accepted it. StartDate and EndDate may
+      also be epoch numbers to the pack; only RFC3339 strings are compared
+      here. The schedule-expression grammar faults the pack raises for
+      malformed rate/cron/at expressions are not transcribed -- see shadow.

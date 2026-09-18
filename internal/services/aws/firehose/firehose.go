@@ -38,7 +38,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -2749,7 +2748,7 @@ func (p *Pack) deliverRedshiftRecords(ctx context.Context, req *spi.Request, des
 func (p *Pack) redshiftCredentials(ctx context.Context, req *spi.Request, destination map[string]any) (string, string, error) {
 	username, password := first(destination, "Username"), first(destination, "Password")
 	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
+		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
 		var secret string
 		var ok bool
 		if response != nil {
@@ -3955,7 +3954,7 @@ func (p *Pack) deliverSnowflake(ctx context.Context, req *spi.Request, destinati
 
 func (p *Pack) validateSnowflakeCredentials(ctx context.Context, req *spi.Request, destination map[string]any) error {
 	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
+		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
 		var secret string
 		var ok bool
 		if response != nil {
@@ -3996,7 +3995,7 @@ func (p *Pack) deliverSnowflakeFailure(ctx context.Context, req *spi.Request, s3
 func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination map[string]any, requestID string, data [][]byte) (bool, bool, string, string) {
 	token := first(destination, "HECToken")
 	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
+		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
 		var secret string
 		var ok bool
 		if response != nil {
@@ -4146,7 +4145,7 @@ func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destin
 	endpoint, _ := destination["EndpointConfiguration"].(map[string]any)
 	accessKey, hasAccessKey := endpoint["AccessKey"].(string)
 	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
+		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
 		var secret string
 		var ok bool
 		if response != nil {

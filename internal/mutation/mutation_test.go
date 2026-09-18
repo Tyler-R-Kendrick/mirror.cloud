@@ -4390,44 +4390,62 @@ var mutants = []mutant{
 		run:  "TestEncryptDecryptRoundTrip",
 	},
 	{
+		// The pack stripped everything up to the last ':secret:' so an ARN-form
+		// SecretId resolves by its tail; the bundle says that with lastSegment
+		// in the secret resource's id derive, and this is the function doing
+		// the strip. The recorded trace reads a secret back by its ARN.
 		name: "secretsmanager-reject-secret-arn",
-		file: filepath.Join("internal", "services", "aws", "secretsmanager", "secrets.go"),
-		old:  `if i := strings.LastIndex(name, ":secret:"); i >= 0 {`,
-		new:  `if i := strings.LastIndex(name, ":secret:"); false {`,
-		pkg:  "./internal/services/aws/secretsmanager",
-		run:  "TestCreateGetDeleteRestore",
+		file: filepath.Join("internal", "engine", "compile.go"),
+		old: `				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))
+				return types.String(parts[len(parts)-1])`,
+		new: `				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))
+				return types.String(parts[0])`,
+		pkg:  "./internal/equivalence",
+		run:  "TestBundlesMatchRecordedPacks/aws.secretsmanager",
 	},
 	{
-		name: "secretsmanager-leak-secret-in-description",
-		file: filepath.Join("internal", "services", "aws", "secretsmanager", "secrets.go"),
-		old:  `out := map[string]any{"ARN": m["ARN"], "Name": m["Name"], "VersionIdsToStages": stagesByID(m), "Tags": m["Tags"]}`,
-		new:  `out := map[string]any{"ARN": m["ARN"], "Name": m["Name"], "VersionIdsToStages": stagesByID(m), "Tags": m["Tags"], "SecretString": m["SecretString"]}`,
-		pkg:  "./internal/services/aws/secretsmanager",
-		run:  "TestSecretsManagerOperationsAndMetadata",
-	},
-	{
+		// The pack skipped records marked Deleted unless the request opted in;
+		// the bundle says that as the list's filter, which is this branch.
 		name: "secretsmanager-list-planned-deletion",
-		file: filepath.Join("internal", "services", "aws", "secretsmanager", "secrets.go"),
-		old:  `if deleted, _ := m["Deleted"].(bool); deleted && !truthy(req.Input["IncludePlannedDeletion"]) {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/secretsmanager",
-		run:  "TestSecretsManagerOperationsAndMetadata",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old: `		if op.List.Filter != "" {
+			ev.binds["item"] = rec`,
+		new: `		if false && op.List.Filter != "" {
+			ev.binds["item"] = rec`,
+		pkg:  "./internal/equivalence",
+		run:  "TestBundlesMatchRecordedPacks/aws.secretsmanager",
 	},
 	{
+		// UntagResource's put keeps every member it did not name; that is the
+		// engine's update merging onto the stored record now. An update that
+		// drops the stored record loses the versions and tags the recording
+		// reads back afterwards.
 		name: "secretsmanager-untag-all-tags",
-		file: filepath.Join("internal", "services", "aws", "secretsmanager", "secrets.go"),
-		old:  `if !drop[first(asMap(tag), "Key")] {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/secretsmanager",
-		run:  "TestSecretsManagerOperationsAndMetadata",
-	},
-	{
-		name: "secretsmanager-ignore-tag-update",
-		file: filepath.Join("internal", "services", "aws", "secretsmanager", "secrets.go"),
-		old:  `tags[index] = tag`,
-		new:  `tags[index] = tags[index]`,
-		pkg:  "./internal/services/aws/secretsmanager",
-		run:  "TestSecretsManagerOperationsAndMetadata",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old: `		if !found && w.Missing == "ignore" {
+			// An update that declines to create is a no-op, not a fault: the
+			// operations that need this are batch updates over ids the caller
+			// supplied, and the pack they came from skipped what was absent.
+			return nil
+		}
+		if found {
+			if err := unmarshal(raw, &rec); err != nil {
+				return err
+			}
+		}`,
+		new: `		if !found && w.Missing == "ignore" {
+			// An update that declines to create is a no-op, not a fault: the
+			// operations that need this are batch updates over ids the caller
+			// supplied, and the pack they came from skipped what was absent.
+			return nil
+		}
+		if found && false {
+			if err := unmarshal(raw, &rec); err != nil {
+				return err
+			}
+		}`,
+		pkg:  "./internal/equivalence",
+		run:  "TestBundlesMatchRecordedPacks/aws.secretsmanager",
 	},
 	{
 		name: "dynamodb-ignore-tag-update",

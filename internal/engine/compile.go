@@ -269,6 +269,26 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
+		// rollup builds a map from a list of records, each element contributing
+		// element[keyMember] -> element[valueMember]. CEL comprehensions turn a
+		// list into another list, never into a map keyed by an element's member,
+		// which is the shape of every "ids to their X" answer -- Secrets
+		// Manager's VersionIdsToStages is the first one transcribed. Later
+		// duplicates overwrite earlier ones, matching the map assignment the
+		// packs wrote.
+		cel.Function("rollup", cel.Overload("rollup_3", []*cel.Type{dyn, str, str}, dyn,
+			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+				list, _ := fromCEL(args[0]).([]any)
+				key, val := fmt.Sprint(args[1].Value()), fmt.Sprint(args[2].Value())
+				out := map[string]any{}
+				for _, e := range list {
+					if m, ok := e.(map[string]any); ok {
+						out[fmt.Sprint(m[key])] = m[val]
+					}
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
 		cel.Function("lastSegment", cel.Overload("lastSegment_2", []*cel.Type{str, str}, str,
 			cel.BinaryBinding(func(s, sep ref.Val) ref.Val {
 				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))

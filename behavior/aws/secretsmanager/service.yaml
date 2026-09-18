@@ -1,0 +1,550 @@
+schema: bir/1
+service: aws.secretsmanager
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A secret is one record holding its whole version history; a write
+# moves AWSCURRENT to AWSPREVIOUS on every older version and appends the new
+# one. Nothing rotates on a clock and no Lambda ever runs.
+provenance: authored
+
+# A secret is named by Name on create and SecretId everywhere else, and either
+# may be a full ARN -- the pack strips everything up to the last ':secret:'.
+# First-present-wins input_members cannot express the two-member fallback, so
+# the key is a derive.
+missing_input_error: NotFound
+
+resources:
+  secret:
+    collection: secrets
+    id:
+      derive: "lastSegment(coalesce(coalesce('Name' in input ? input.Name : null, 'SecretId' in input ? input.SecretId : null), ''), ':secret:')"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+  InvalidRequest:
+    code: InvalidRequestException
+    http: 400
+    fault: client
+  MalformedPolicy:
+    code: MalformedPolicyDocumentException
+    http: 400
+    fault: client
+
+operations:
+  # CreateSecret, PutSecretValue and UpdateSecret are one code path in the
+  # pack: merge onto the record if it exists, rotate AWSCURRENT to
+  # AWSPREVIOUS on every older version, append the new version as AWSCURRENT,
+  # and undelete. A put that was never created creates.
+  CreateSecret:
+    reads:
+      s: { resource: secret }
+    let:
+      val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
+      prior: "'Versions' in s ? s.Versions : []"
+    effects:
+      - generate: { bind: ver, kind: hex, bytes: 8 }
+      - put:
+          resource: secret
+          record:
+            Name: id
+            ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
+            Versions: >-
+              prior.map(v, merge(v, {'VersionStages':
+                ('VersionStages' in v ? v.VersionStages : []).filter(st, st != 'AWSCURRENT' && st != 'AWSPREVIOUS')
+                + (('VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')) ? ['AWSPREVIOUS'] : [])}))
+              + [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]
+            VersionId: fx.ver
+            SecretString: val
+            VersionStages: "['AWSCURRENT']"
+            Deleted: "false"
+    output:
+      ARN: rec.ARN
+      Name: rec.Name
+      VersionId: fx.ver
+
+  PutSecretValue:
+    reads:
+      s: { resource: secret }
+    let:
+      val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
+      prior: "'Versions' in s ? s.Versions : []"
+    effects:
+      - generate: { bind: ver, kind: hex, bytes: 8 }
+      - put:
+          resource: secret
+          record:
+            Name: id
+            ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
+            Versions: >-
+              prior.map(v, merge(v, {'VersionStages':
+                ('VersionStages' in v ? v.VersionStages : []).filter(st, st != 'AWSCURRENT' && st != 'AWSPREVIOUS')
+                + (('VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')) ? ['AWSPREVIOUS'] : [])}))
+              + [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]
+            VersionId: fx.ver
+            SecretString: val
+            VersionStages: "['AWSCURRENT']"
+            Deleted: "false"
+    output:
+      ARN: rec.ARN
+      Name: rec.Name
+      VersionId: fx.ver
+
+  UpdateSecret:
+    reads:
+      s: { resource: secret }
+    let:
+      val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
+      prior: "'Versions' in s ? s.Versions : []"
+    effects:
+      - generate: { bind: ver, kind: hex, bytes: 8 }
+      - put:
+          resource: secret
+          record:
+            Name: id
+            ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
+            Versions: >-
+              prior.map(v, merge(v, {'VersionStages':
+                ('VersionStages' in v ? v.VersionStages : []).filter(st, st != 'AWSCURRENT' && st != 'AWSPREVIOUS')
+                + (('VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')) ? ['AWSPREVIOUS'] : [])}))
+              + [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]
+            VersionId: fx.ver
+            SecretString: val
+            VersionStages: "['AWSCURRENT']"
+            Deleted: "false"
+    output:
+      ARN: rec.ARN
+      Name: rec.Name
+      VersionId: fx.ver
+
+  # The pack's RotateSecret is PutSecretValue with the value defaulted to the
+  # current one: it re-seats the same SecretString under a fresh version. On a
+  # secret that does not exist that means it creates one, holding "".
+  RotateSecret:
+    reads:
+      s: { resource: secret }
+    let:
+      vers: "'Versions' in s ? s.Versions : []"
+      cur: >-
+        s_found
+        ? (vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))
+          ? vers.filter(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))[0]
+          : s)
+        : {}
+      val: "coalesce(coalesce('SecretString' in input && input.SecretString != '' ? input.SecretString : null, 'SecretString' in cur ? cur.SecretString : null), '')"
+    effects:
+      - generate: { bind: ver, kind: hex, bytes: 8 }
+      - put:
+          resource: secret
+          record:
+            Name: id
+            ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
+            Versions: >-
+              vers.map(v, merge(v, {'VersionStages':
+                ('VersionStages' in v ? v.VersionStages : []).filter(st, st != 'AWSCURRENT' && st != 'AWSPREVIOUS')
+                + (('VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')) ? ['AWSPREVIOUS'] : [])}))
+              + [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]
+            VersionId: fx.ver
+            SecretString: val
+            VersionStages: "['AWSCURRENT']"
+            Deleted: "false"
+    output:
+      ARN: rec.ARN
+      Name: rec.Name
+      VersionId: fx.ver
+
+  CancelRotateSecret:
+    reads:
+      s: { resource: secret }
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - patch:
+          resource: secret
+          record: { RotationInProgress: "false" }
+    output:
+      ARN: s.ARN
+      Name: id
+      VersionId: "'VersionId' in s ? s.VersionId : null"
+
+  GetSecretValue:
+    reads:
+      s: { resource: secret }
+    let:
+      vid: "'VersionId' in input && input.VersionId != null ? string(input.VersionId) : ''"
+      vstage: "'VersionStage' in input && input.VersionStage != null ? string(input.VersionStage) : ''"
+      # The pack defaults the stage to AWSCURRENT only when neither member is
+      # given; a VersionId answers by id alone.
+      effstage: "vstage == '' && vid == '' ? 'AWSCURRENT' : vstage"
+      vers: "'Versions' in s ? s.Versions : []"
+      # No matching version is not a fault: the pack falls back to the record
+      # itself, whose top-level members answer as the current version.
+      picked: >-
+        vid != ''
+        ? (vers.exists(v, 'VersionId' in v && string(v.VersionId) == vid) ? vers.filter(v, 'VersionId' in v && string(v.VersionId) == vid)[0] : s)
+        : (vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == effstage)) ? vers.filter(v, 'VersionStages' in v && v.VersionStages.exists(st, st == effstage))[0] : s)
+    require:
+      - { cond: s_found, error: NotFound }
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "secret scheduled for deletion"
+    output:
+      ARN: s.ARN
+      Name: s.Name
+      SecretString: "'SecretString' in picked ? picked.SecretString : null"
+      VersionId: "'VersionId' in picked ? picked.VersionId : null"
+      VersionStages: "'VersionStages' in picked ? picked.VersionStages : null"
+
+  DescribeSecret:
+    reads:
+      s: { resource: secret }
+    require:
+      - { cond: s_found, error: NotFound }
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "secret scheduled for deletion"
+    output:
+      ARN: s.ARN
+      Name: s.Name
+      VersionIdsToStages: "rollup('Versions' in s ? s.Versions : [], 'VersionId', 'VersionStages')"
+      Tags: "'Tags' in s ? s.Tags : null"
+      ReplicationStatus: "'ReplicaRegions' in s ? s.ReplicaRegions : null"
+      RotationEnabled: "'RotationEnabled' in s ? s.RotationEnabled : null"
+      RotationLambdaARN: "'RotationLambdaARN' in s ? s.RotationLambdaARN : null"
+      RotationRules: "'RotationRules' in s ? s.RotationRules : null"
+
+  # The listing skips secrets marked for deletion unless asked (the pack's
+  # truthy accepts the string forms too), and projects each record rather than
+  # answering it: no version values leave through here.
+  ListSecrets:
+    list:
+      resource: secret
+      member: SecretList
+      paginate: model
+      filter: >-
+        !('Deleted' in item && item.Deleted == true)
+        || ('IncludePlannedDeletion' in input
+            && (input.IncludePlannedDeletion == true || input.IncludePlannedDeletion == 'true'
+                || input.IncludePlannedDeletion == 'True' || input.IncludePlannedDeletion == '1'))
+    output:
+      SecretList: >-
+        items.map(m, {
+          'ARN': m.ARN,
+          'Name': m.Name,
+          'Tags': 'Tags' in m ? m.Tags : null,
+          'SecretVersionsToStages': rollup('Versions' in m ? m.Versions : [], 'VersionId', 'VersionStages')
+        })
+
+  # Force delete drops the record; otherwise it is marked Deleted and keeps
+  # answering to RestoreSecret. The output never carries ARN, and DeletionDate
+  # only in the soft case.
+  DeleteSecret:
+    reads:
+      s: { resource: secret }
+    let:
+      force: >-
+        'ForceDeleteWithoutRecovery' in input
+        && (input.ForceDeleteWithoutRecovery == true || input.ForceDeleteWithoutRecovery == 'true'
+            || input.ForceDeleteWithoutRecovery == 'True' || input.ForceDeleteWithoutRecovery == '1')
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - delete: { resource: secret, when: force }
+      - patch:
+          resource: secret
+          when: "!force"
+          record: { Deleted: "true" }
+    output:
+      Name: id
+      DeletionDate: "force ? dyn(null) : string(now)"
+
+  RestoreSecret:
+    reads:
+      s: { resource: secret }
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - patch:
+          resource: secret
+          record: { Deleted: "false" }
+    output:
+      Name: id
+
+  # An unknown secret is not a fault here: the pack answers an empty version
+  # list and the name it was asked about.
+  ListSecretVersionIds:
+    reads:
+      s: { resource: secret }
+    output:
+      Versions: "s_found && 'Versions' in s ? s.Versions.map(v, {'VersionId': v.VersionId, 'VersionStages': ('VersionStages' in v ? v.VersionStages : null)}) : dyn(null)"
+      Name: id
+
+  # Tags upsert by key: an existing key is replaced in place, a new one
+  # appended in request order.
+  TagResource:
+    reads:
+      s: { resource: secret }
+    let:
+      newtags: "'Tags' in input && input.Tags != null ? input.Tags : []"
+      oldtags: "'Tags' in s && s.Tags != null ? s.Tags : []"
+      newkeys: "newtags.map(t, 'Key' in t && t.Key != null ? string(t.Key) : '')"
+      oldkeys: "oldtags.map(t, 'Key' in t && t.Key != null ? string(t.Key) : '')"
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - put:
+          resource: secret
+          record:
+            Tags: >-
+              oldtags.map(t,
+                (('Key' in t && t.Key != null ? string(t.Key) : '') in newkeys)
+                ? newtags.filter(n, ('Key' in n && n.Key != null ? string(n.Key) : '') == ('Key' in t && t.Key != null ? string(t.Key) : ''))[0]
+                : t)
+              + newtags.filter(n, !(('Key' in n && n.Key != null ? string(n.Key) : '') in oldkeys))
+    output: {}
+
+  UntagResource:
+    reads:
+      s: { resource: secret }
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - put:
+          resource: secret
+          record:
+            Tags: >-
+              ('Tags' in s && s.Tags != null ? s.Tags : []).filter(t,
+                !(('Key' in t && t.Key != null ? string(t.Key) : '')
+                  in ('TagKeys' in input && input.TagKeys != null ? input.TagKeys : [])))
+    output: {}
+
+  GetRandomPassword:
+    effects:
+      - generate: { bind: pw, kind: hex, bytes: 32 }
+    output:
+      RandomPassword: fx.pw
+
+  # Every id is looked up in request order; an unknown one is an Errors row,
+  # not a fault. The pack reads the id as a raw store key -- an ARN does not
+  # resolve here, unlike everywhere else.
+  BatchGetSecretValue:
+    let:
+      bids: >-
+        ('SecretIdList' in input && input.SecretIdList != null && size(input.SecretIdList) > 0)
+        ? input.SecretIdList
+        : (('SecretId' in input && input.SecretId != null && input.SecretId != '') ? [input.SecretId] : [])
+    select:
+      binding: bs
+      resource: secret
+      filter: "'Name' in item && bids.exists(b, string(b) == string(item.Name))"
+    output:
+      SecretValues: >-
+        bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b)))
+            .map(b, bs.filter(x, 'Name' in x && string(x.Name) == string(b))[0])
+            .map(m, {'m': m, 'p': (('Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))) ? m.Versions.filter(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))[0] : m)})
+            .map(pair, {'ARN': pair.m.ARN, 'Name': pair.m.Name, 'SecretString': pair.p.SecretString, 'VersionId': pair.p.VersionId})
+      Errors: >-
+        bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)))
+            .map(b, {'SecretId': string(b), 'ErrorCode': 'ResourceNotFoundException'})
+
+  PutResourcePolicy:
+    reads:
+      s: { resource: secret }
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - patch:
+          resource: secret
+          record: { ResourcePolicy: "string(input.ResourcePolicy)" }
+    output:
+      ARN: rec.ARN
+      Name: id
+
+  GetResourcePolicy:
+    reads:
+      s: { resource: secret }
+    require:
+      - { cond: s_found, error: NotFound }
+    output:
+      ARN: s.ARN
+      Name: id
+      ResourcePolicy: "'ResourcePolicy' in s ? s.ResourcePolicy : null"
+
+  # The pack deletes the member; the engine's patch can only overwrite, so the
+  # member is nulled -- null and absent are indistinguishable on the wire.
+  DeleteResourcePolicy:
+    reads:
+      s: { resource: secret }
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - patch:
+          resource: secret
+          record: { ResourcePolicy: "null" }
+    output:
+      ARN: rec.ARN
+      Name: id
+
+  # Validation is "is it JSON": the pack parses the document and faults if it
+  # does not parse; nothing is checked beyond that.
+  ValidateResourcePolicy:
+    require:
+      - cond: "'ResourcePolicy' in input && input.ResourcePolicy != null && string(input.ResourcePolicy) != '' && parseJSON(string(input.ResourcePolicy)) != null"
+        error: MalformedPolicy
+    output:
+      ValidationErrors: "[]"
+
+  ReplicateSecretToRegions:
+    reads:
+      s: { resource: secret }
+    let:
+      reps: "'ReplicaRegions' in s && s.ReplicaRegions != null ? s.ReplicaRegions : []"
+      addrs: "'AddReplicaRegions' in input && input.AddReplicaRegions != null ? input.AddReplicaRegions : []"
+      # The pack also honors a singular Region member the model does not
+      # declare on this operation.
+      extra: "('Region' in input && input.Region != null && string(input.Region) != '') ? [{'Region': string(input.Region), 'Status': 'InSync'}] : []"
+      newreps: >-
+        reps
+        + addrs.filter(r, 'Region' in r && r.Region != null && string(r.Region) != '').map(r, {'Region': string(r.Region), 'Status': 'InSync'})
+        + extra
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - patch:
+          resource: secret
+          record: { ReplicaRegions: newreps }
+    output:
+      ARN: rec.ARN
+      ReplicationStatus: newreps
+
+  RemoveRegionsFromReplication:
+    reads:
+      s: { resource: secret }
+    let:
+      kept: >-
+        ('ReplicaRegions' in s && s.ReplicaRegions != null ? s.ReplicaRegions : []).filter(r,
+          !((('Region' in r && r.Region != null) ? string(r.Region) : '')
+            in ('RemoveReplicaRegions' in input && input.RemoveReplicaRegions != null ? input.RemoveReplicaRegions : [])))
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - patch:
+          resource: secret
+          record: { ReplicaRegions: kept }
+    output:
+      ARN: rec.ARN
+      ReplicationStatus: kept
+
+  # Reads nothing, faults on nothing: the answer is the ARN of the name asked
+  # about, whether or not the secret exists.
+  StopReplicationToReplica:
+    reads:
+      s: { resource: secret }
+    output:
+      ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
+
+  UpdateSecretVersionStage:
+    reads:
+      s: { resource: secret }
+    let:
+      stage: "('VersionStage' in input && input.VersionStage != null && string(input.VersionStage) != '') ? string(input.VersionStage) : 'AWSCURRENT'"
+      moveTo: "'MoveToVersionId' in input && input.MoveToVersionId != null ? string(input.MoveToVersionId) : ''"
+      removeFrom: "'RemoveFromVersionId' in input && input.RemoveFromVersionId != null ? string(input.RemoveFromVersionId) : ''"
+      uvers: "'Versions' in s ? s.Versions : []"
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - patch:
+          resource: secret
+          record:
+            Versions: >-
+              uvers.map(v, merge(v, {'VersionStages':
+                (((removeFrom != '' && 'VersionId' in v && string(v.VersionId) == removeFrom)
+                    || (removeFrom == '' && moveTo != '' && string(v.VersionId) != moveTo))
+                  ? ('VersionStages' in v ? v.VersionStages : []).filter(st, st != stage)
+                  : ('VersionStages' in v ? v.VersionStages : []))
+                + (('VersionId' in v && string(v.VersionId) == moveTo && moveTo != '') ? [stage] : [])}))
+    output:
+      ARN: s.ARN
+      Name: id
+
+quirks:
+  - operation: CreateSecret
+    note: >
+      CreateSecret, PutSecretValue and UpdateSecret are one code path: a put
+      against a name that was never created creates the secret, where the real
+      service answers ResourceNotFoundException. The value stored is the first
+      of SecretString or SecretBinary, so a binary-only write answers its
+      bytes through the SecretString member everywhere. A write to a secret
+      scheduled for deletion undeletes it (Deleted flips back to false), which
+      the real service refuses. The pack answered an absent Name by storing a
+      record keyed ""; the model requires Name and the engine rejects its
+      absence now, so that row is unreachable.
+  - operation: GetSecretValue
+    note: >
+      A VersionId or VersionStage that matches no stored version is not a
+      fault: the pack falls back to the record's top-level members, answering
+      the current version as though asked for it. A secret scheduled for
+      deletion reads as InvalidRequestException here and on DescribeSecret.
+  - operation: ListSecrets
+    note: >
+      The pack skipped records whose key ends in ':tags' -- a sidecar record
+      nothing it serves ever wrote (only a direct store write in its own test
+      created one) -- and TagResource migrated such a sidecar into the
+      record's Tags and deleted it. No served operation produces a ':tags'
+      record, so the migration is not transcribed; if one exists the listing
+      fails rather than skipping it.
+  - operation: DeleteSecret
+    note: >
+      Deleting a secret already scheduled for deletion succeeds again, where
+      the real service answers InvalidRequestException. The pack's truthy
+      accepts ForceDeleteWithoutRecovery as the strings 'true', 'True' and '1'
+      as well as the boolean; the transcription keeps all four. The answer
+      never carries ARN, and carries DeletionDate only when the record is
+      kept.
+  - operation: TagResource
+    note: >
+      A request carrying the same tag key twice resolves first-wins here; the
+      pack replaced the first occurrence with each later one, so last-wins.
+      The model requires Tags and the engine rejects its absence now, where
+      the pack answered an empty merge as success.
+  - operation: BatchGetSecretValue
+    note: >
+      Ids are raw store keys: an ARN-form id does not resolve (every other
+      operation strips the ARN prefix), so it lands in Errors. A secret
+      scheduled for deletion is answered normally. When SecretIdList is absent
+      or empty the pack falls back to a singular SecretId member the model
+      does not declare on this operation; the transcription keeps that.
+  - operation: ValidateResourcePolicy
+    note: >
+      Validation is only 'does it parse as JSON'. A document whose text is a
+      bare JSON null parses in the pack but faults here, and an absent
+      ResourcePolicy is the model's required-member fault (ResourceNotFound,
+      the service's name for absent input) where the pack answered
+      MalformedPolicyDocumentException.
+  - operation: ReplicateSecretToRegions
+    note: >
+      The pack also honors a top-level Region member, which the model does not
+      declare on this operation; the transcription keeps it. Entries without a
+      Region are skipped, replicas are never deduplicated, and every reported
+      replica is Status InSync without anything replicating.
+  - operation: RotateSecret
+    note: >
+      No rotation ever runs: the current value is re-seated under a fresh
+      version id, and RotationLambdaARN, RotationRules and RotateImmediately
+      are accepted and discarded. Rotating a secret that does not exist
+      creates it, holding the empty string. The pack read a SecretString
+      member the model does not declare on this operation; kept.
+  - operation: UpdateSecretVersionStage
+    note: >
+      With neither MoveToVersionId nor RemoveFromVersionId the call is a
+      no-op that succeeds. An empty VersionStage means AWSCURRENT. The
+      record's top-level VersionId and VersionStages are not updated, so
+      DescribeSecret's stage map and the top-level current version can
+      disagree afterwards.
+  - operation: StopReplicationToReplica
+    note: >
+      Reads nothing and faults on nothing: the answer is the ARN of the name
+      asked about, whether or not the secret exists or was ever replicated.

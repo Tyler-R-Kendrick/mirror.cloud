@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
@@ -415,15 +415,16 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		assertWritesCovered(t, ssmP.Operations(), seen)
 
 		seen = map[string]bool{}
-		sm := secretsmanager.New(spitest.Deps(t))
+		sm := bundled.Handler("aws.secretsmanager", spitest.Deps(t))
 		inv(sm, "CreateSecret", map[string]any{"Name": "n", "SecretString": "v"})
 		inv(sm, "PutSecretValue", map[string]any{"SecretId": "n", "SecretString": "v2"})
 		inv(sm, "UpdateSecret", map[string]any{"SecretId": "n", "SecretString": "v3"})
 		inv(sm, "TagResource", map[string]any{"SecretId": "n", "Tags": []any{}})
-		inv(sm, "UntagResource", map[string]any{"SecretId": "n"})
+		inv(sm, "UntagResource", map[string]any{"SecretId": "n", "TagKeys": []any{}})
 		inv(sm, "DeleteSecret", map[string]any{"SecretId": "n"})
 		inv(sm, "RestoreSecret", map[string]any{"SecretId": "n"})
-		fatSM := map[string]any{"SecretId": "n", "Name": "n", "ResourcePolicy": `{"Version":"2012-10-17"}`}
+		fatSM := map[string]any{"SecretId": "n", "Name": "n", "ResourcePolicy": `{"Version":"2012-10-17"}`,
+			"AddReplicaRegions": []any{}, "RemoveReplicaRegions": []any{}, "VersionStage": "AWSCURRENT"}
 		for _, op := range sm.Operations() {
 			if isWriteOp(op) && !seen[op] {
 				inv(sm, op, fatSM)

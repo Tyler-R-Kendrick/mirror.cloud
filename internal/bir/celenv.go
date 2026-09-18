@@ -115,6 +115,10 @@ func celFuncs() []cel.EnvOption {
 		// needs one of these.
 		binaryDyn("without", dyn, dyn, dyn),
 		binaryDyn("merge", dyn, dyn, dyn),
+		// rollup turns a list of records into a map: element[key] ->
+		// element[value]. The map-shaped answer to a list-shaped store (Secrets
+		// Manager's VersionIdsToStages) has no comprehension form.
+		ternaryDyn("rollup", dyn, str, str, dyn),
 
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.

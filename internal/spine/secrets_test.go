@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -92,7 +92,7 @@ func TestBootedServerSecretsSection48(t *testing.T) {
 		t.Fatalf("list %v", ls)
 	}
 	call("TagResource", `{"SecretId":"n","Tags":[{"Key":"k","Value":"v"}]}`)
-	call("UntagResource", `{"SecretId":"n"}`)
+	call("UntagResource", `{"SecretId":"n","TagKeys":["k"]}`)
 	_, pw := call("GetRandomPassword", `{}`)
 	if str(pw["RandomPassword"]) == "" {
 		t.Fatalf("password %v", pw)
@@ -152,5 +152,5 @@ func TestSecretsHTTPProvenOps(t *testing.T) {
 		"ValidateResourcePolicy", "ReplicateSecretToRegions", "RemoveRegionsFromReplication",
 		"StopReplicationToReplica", "RotateSecret", "CancelRotateSecret", "UpdateSecretVersionStage"}
 
-	assertSame(t, "secrets", secretsmanager.New(spitest.Deps(t)).Operations(), want)
+	assertSame(t, "secrets", bundled.Handler("aws.secretsmanager", spitest.Deps(t)).Operations(), want)
 }

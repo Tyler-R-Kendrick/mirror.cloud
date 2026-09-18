@@ -34,7 +34,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -1284,7 +1283,7 @@ func TestFirehoseRedshiftPersistentRetry(t *testing.T) {
 	if err := redshift.CreateTable(context.Background(), id, "retry-warehouse", "analytics", "events", []string{"id", "payload"}); err != nil {
 		t.Fatal(err)
 	}
-	secretPack := secretsmanager.New(deps)
+	secretPack := bundled.Handler("aws.secretsmanager", deps)
 	secret, err := secretPack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{
 		"Name": "redshift-credentials", "SecretString": `{"username":"firehose","password":"wrong-password"}`,
 	}})
@@ -1725,7 +1724,7 @@ func TestFirehoseSnowflakeSecretAndPersistentBuffer(t *testing.T) {
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	secretBody := fmt.Sprintf(`{"user":"firehose","private_key":%q}`, base64.StdEncoding.EncodeToString(make([]byte, 192)))
-	secretPack := secretsmanager.New(deps)
+	secretPack := bundled.Handler("aws.secretsmanager", deps)
 	secret, err := secretPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "snowflake-key", "SecretString": secretBody}})
 	if err != nil {
 		t.Fatal(err)
@@ -2058,7 +2057,7 @@ func TestFirehoseSplunkSecretAndPersistentRetry(t *testing.T) {
 	defer server.Close()
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	secret, err := secretsmanager.New(deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "splunk-token", "SecretString": `{"hec_token":"from-secret"}`}})
+	secret, err := bundled.Handler("aws.secretsmanager", deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "splunk-token", "SecretString": `{"hec_token":"from-secret"}`}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4610,7 +4609,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatalf("HTTP AllData processing-failure backup %q", rawBackup)
 	}
 
-	secretPack := secretsmanager.New(deps)
+	secretPack := bundled.Handler("aws.secretsmanager", deps)
 	createdSecret, err := secretPack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "http-key", "SecretString": `{"api_key":"from-secret"}`}})
 	if err != nil {
 		t.Fatal(err)

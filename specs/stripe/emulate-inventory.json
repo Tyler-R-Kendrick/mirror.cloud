@@ -1,0 +1,161 @@
+{
+  "oracle": "vercel-labs/emulate",
+  "source": "https://github.com/vercel-labs/emulate",
+  "ref": "afddfabb28f18190758203c98d8739dfd156dccf",
+  "audited": "2026-09-19",
+  "scope": "packages/@emulators/stripe only",
+  "countRule": "routes = .get/.post/.put/.patch/.delete registrations with a literal leading-slash path in src/routes/*.ts; tests = direct it()/test() calls in src/__tests__/*.ts, parametrized cases not expanded",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v1/charges/:id",
+      "file": "charges.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/charges",
+      "file": "charges.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/checkout/sessions",
+      "file": "checkout-sessions.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/checkout/sessions/:id",
+      "file": "checkout-sessions.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/checkout/sessions/:id/expire",
+      "file": "checkout-sessions.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/checkout/sessions",
+      "file": "checkout-sessions.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/checkout/:id",
+      "file": "checkout-sessions.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/checkout/:id/complete",
+      "file": "checkout-sessions.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/customer_sessions",
+      "file": "customer-sessions.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/customers",
+      "file": "customers.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/customers/:id",
+      "file": "customers.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/customers/:id",
+      "file": "customers.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/customers/:id",
+      "file": "customers.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/customers",
+      "file": "customers.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "file": "payment-intents.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/payment_intents/:id",
+      "file": "payment-intents.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/payment_intents/:id",
+      "file": "payment-intents.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/payment_intents/:id/confirm",
+      "file": "payment-intents.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/payment_intents/:id/cancel",
+      "file": "payment-intents.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/payment_intents",
+      "file": "payment-intents.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/payment_methods",
+      "file": "payment-methods.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/prices",
+      "file": "prices.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/prices/:id",
+      "file": "prices.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/prices",
+      "file": "prices.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/products",
+      "file": "products.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/products/:id",
+      "file": "products.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/products",
+      "file": "products.ts"
+    }
+  ],
+  "routeCount": 27,
+  "routeCountByFile": {
+    "charges.ts": 2,
+    "checkout-sessions.ts": 6,
+    "customer-sessions.ts": 1,
+    "customers.ts": 5,
+    "payment-intents.ts": 6,
+    "payment-methods.ts": 1,
+    "prices.ts": 3,
+    "products.ts": 3
+  },
+  "tests": {
+    "stripe.test.ts": 23
+  },
+  "testCount": 23,
+  "webhooks": "config.webhooks dispatches events with Stripe-Signature: t=<unix>,v1=<HMAC-SHA256(secret, t + '.' + rawbody)> (src/index.ts stripeWebhookHeaders). No Idempotency-Key middleware exists in this package (that replay contract is resend's, not stripe's)."
+}

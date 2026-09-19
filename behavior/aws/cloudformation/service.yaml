@@ -1,0 +1,1143 @@
+schema: bir/1
+service: aws.cloudformation
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Stacks are records keyed by name; nothing ever fails
+# asynchronously, every create is COMPLETE the moment it is written, and the
+# describe family over stack sets, types, templates, scans and refactors
+# answers an empty record instead of faulting on an absent one.
+provenance: authored
+
+# The pack's own word for an absent name is ValidationError: CreateStack
+# faults "StackName required" and the stack reads fault "Stack [name] does
+# not exist" when the name folds to empty, both ValidationError/400. Where
+# the model marks a member required the engine now answers first, which makes
+# the pack's empty-name fallbacks dead (see quirks).
+missing_input_error: Validation
+
+# Gated but not serving. The bundle covers the whole bookkeeping surface --
+# stack records, change sets, stack sets and their operations, drift
+# detections, types, generated templates, scans, refactors, policies and the
+# static answers -- but the template engine is not expressible: CreateStack,
+# UpdateStack and ExecuteChangeSet parse a JSON or YAML-subset template,
+# resolve Ref/GetAtt/Join/Sub against pseudo-parameters, and provision
+# fourteen resource types into sibling services' collections (buckets,
+# queues, topics, tables, roles, parameters, secrets, keys, log groups,
+# rules, functions, streams, APIs), several of them as raw non-JSON bytes
+# those services read back; DeleteStack deprovisions them in reverse; and
+# TemplateURL reads object bodies out of the blob store. B-IR has no
+# cross-service write, no raw blob read and no template-parsing primitive.
+# The bundle takes over when a primitive registry carries the template
+# engine and the provisioning effects exist.
+shadow: >
+  CreateStack, UpdateStack, ExecuteChangeSet, ValidateTemplate,
+  GetTemplateSummary and ListExports are the template engine: parsing,
+  intrinsic-function resolution, cross-service provisioning into sibling
+  packs' collections (some as raw bytes), deprovisioning on DeleteStack, and
+  blob reads for TemplateURL. None of that is expressible without
+  cross-service effects and a template primitive, so the pack keeps serving.
+  Everything else the pack does is transcribed and gated below; DeleteStack
+  here drops the stack record without the deprovision loop, which no trace
+  step can see because the loop writes to other services' collections.
+
+resources:
+  # The stack record. In the bundle's world it is written only by the
+  # rollback family and patched by UpdateTerminationProtection; the
+  # provisioning writer is shadowed. Resources and Outputs are always empty
+  # here because nothing provisions.
+  stack:
+    collection: cfn
+    id:
+      input_members: [StackName]
+
+  # Change sets are keyed stack:changeset over one collection; ListChangeSets
+  # narrows by the recorded StackName. The composite key is derive-only:
+  # input_members are first-present-wins, which is not a composite.
+  changeset:
+    collection: cfn-cs
+    id:
+      derive: "('StackName' in input ? string(input.StackName) : '') + ':' + string(input.ChangeSetName)"
+
+  stackset:
+    collection: cfnss
+    id:
+      input_members: [StackSetName]
+
+  # Stack-set operations are minted ids; DescribeStackInstance reaches the
+  # same record through the instance collection under stackset/operation-id.
+  stackset_operation:
+    collection: cfnssop
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [OperationId]
+
+  stackset_instance:
+    collection: cfnssi
+    id:
+      derive: "string(input.StackSetName) + '/' + ('StackInstanceAccount' in input ? string(input.StackInstanceAccount) : ('OperationId' in input ? string(input.OperationId) : ''))"
+
+  drift:
+    collection: cfndrift
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [StackDriftDetectionId]
+
+  resource_type:
+    collection: cfntype
+    id:
+      input_members: [TypeName, Type]
+
+  generated_template:
+    collection: cfngen
+    id:
+      input_members: [GeneratedTemplateName, GeneratedTemplateId, TemplateName]
+
+  scan:
+    collection: cfnscan
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [ResourceScanId]
+    record:
+      ResourceScanId: id
+      Status: "'COMPLETE'"
+
+  refactor:
+    collection: cfnref
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [StackRefactorId]
+    record:
+      StackRefactorId: id
+      Status: "'COMPLETE'"
+
+  # The pack stored the policy body, the organizations-access flag and the
+  # publisher id as raw bytes, not JSON records. The record shapes here are
+  # wire-identical at the operation boundary; nothing else reads these
+  # collections.
+  stack_policy:
+    collection: cfnpol
+    id:
+      input_members: [StackName]
+
+  org_access:
+    collection: cfnorg
+    singleton: access
+
+  publisher:
+    collection: cfnpub
+    singleton: id
+
+errors:
+  Validation:
+    code: ValidationError
+    http: 400
+    fault: client
+  ChangeSetNotFound:
+    code: ChangeSetNotFound
+    http: 404
+    fault: client
+
+operations:
+  # --- stacks --------------------------------------------------------------
+  # CreateStack, UpdateStack and DeleteStack's deprovision loop are the
+  # shadow reason. What remains here is the record lifecycle the rollback
+  # family and the reads around it.
+
+  DescribeStacks:
+    reads:
+      s: { resource: stack }
+    require:
+      - cond: >-
+          !('StackName' in input) || string(input.StackName) == '' || s_found
+        error: Validation
+    list:
+      resource: stack
+      member: Stacks
+      paginate: model
+      key: "'StackName' in input ? string(input.StackName) : ''"
+    output:
+      Stacks: >-
+        items.map(s, {'StackName': s.Name, 'StackId': s.ID,
+          'StackStatus': s.Status, 'Outputs': s.Outputs})
+
+  ListStacks:
+    list:
+      resource: stack
+      member: StackSummaries
+      paginate: model
+    output:
+      StackSummaries: >-
+        items.map(s, {'StackName': s.Name, 'StackId': s.ID,
+          'StackStatus': s.Status})
+
+  GetTemplate:
+    reads:
+      s: { resource: stack }
+    require:
+      - { cond: s_found, error: Validation }
+    output:
+      TemplateBody: s.Template
+      StagesAvailable: "['Original']"
+
+  ListStackResources:
+    reads:
+      s: { resource: stack }
+    require:
+      - { cond: s_found, error: Validation }
+    output:
+      StackResourceSummaries: >-
+        s.Resources.map(r, {'LogicalResourceId': r.Logical,
+          'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
+          'ResourceStatus': 'CREATE_COMPLETE'})
+
+  DescribeStackEvents:
+    reads:
+      s: { resource: stack }
+    require:
+      - { cond: s_found, error: Validation }
+    output:
+      StackEvents: >-
+        s.Resources.map(r, {'LogicalResourceId': r.Logical,
+          'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
+          'ResourceStatus': 'CREATE_COMPLETE', 'StackName': s.Name,
+          'StackId': s.ID})
+        + [{'LogicalResourceId': s.Name,
+            'ResourceType': 'AWS::CloudFormation::Stack',
+            'ResourceStatus': s.Status, 'StackName': s.Name, 'StackId': s.ID}]
+
+  DescribeStackResource:
+    reads:
+      s: { resource: stack }
+    require:
+      - { cond: s_found, error: Validation }
+      - cond: "s.Resources.exists(r, r.Logical == string(input.LogicalResourceId))"
+        error: Validation
+    output:
+      StackResourceDetail: >-
+        s.Resources.filter(r, r.Logical ==
+          string(input.LogicalResourceId)).map(r, {'LogicalResourceId':
+          r.Logical, 'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
+          'ResourceStatus': 'CREATE_COMPLETE', 'StackName': s.Name,
+          'StackId': s.ID})[0]
+
+  UpdateTerminationProtection:
+    reads:
+      s: { resource: stack }
+    require:
+      - { cond: s_found, error: Validation }
+    effects:
+      - put:
+          resource: stack
+          record:
+            Protect: >-
+              input.EnableTerminationProtection == true
+              || input.EnableTerminationProtection == 'true'
+              || input.EnableTerminationProtection == 'True'
+    output:
+      StackId: s.ID
+
+  # The pack also deprovisions every stack resource into the sibling
+  # services' collections before deleting the record; that loop is the shadow
+  # reason and is not transcribed.
+  DeleteStack:
+    reads:
+      s: { resource: stack }
+    require:
+      - { cond: s_found, error: Validation }
+      - { cond: "!s.Protect", error: Validation }
+    effects:
+      - delete: { resource: stack }
+
+  # The rollback family conjures a fresh record for an absent stack rather
+  # than faulting, keeps whatever an existing record held, and sets only the
+  # status. CancelUpdateStack and ContinueUpdateRollback answer StackId,
+  # which their output shapes do not declare, so their trace steps are
+  # superseded.
+  RollbackStack:
+    reads:
+      s: { resource: stack }
+    effects:
+      - put:
+          resource: stack
+          record:
+            Name: id
+            ID: "s_found ? s.ID : dyn('')"
+            Status: "'ROLLBACK_COMPLETE'"
+            Template: "s_found ? s.Template : dyn('')"
+            Resources: "s_found ? s.Resources : dyn([])"
+            Outputs: "s_found ? s.Outputs : dyn([])"
+            Protect: "s_found ? s.Protect : dyn(false)"
+    output:
+      StackId: rec.ID
+
+  CancelUpdateStack:
+    reads:
+      s: { resource: stack }
+    effects:
+      - put:
+          resource: stack
+          record:
+            Name: id
+            ID: "s_found ? s.ID : dyn('')"
+            Status: "'UPDATE_ROLLBACK_COMPLETE'"
+            Template: "s_found ? s.Template : dyn('')"
+            Resources: "s_found ? s.Resources : dyn([])"
+            Outputs: "s_found ? s.Outputs : dyn([])"
+            Protect: "s_found ? s.Protect : dyn(false)"
+
+  ContinueUpdateRollback:
+    reads:
+      s: { resource: stack }
+    effects:
+      - put:
+          resource: stack
+          record:
+            Name: id
+            ID: "s_found ? s.ID : dyn('')"
+            Status: "'ROLLBACK_COMPLETE'"
+            Template: "s_found ? s.Template : dyn('')"
+            Resources: "s_found ? s.Resources : dyn([])"
+            Outputs: "s_found ? s.Outputs : dyn([])"
+            Protect: "s_found ? s.Protect : dyn(false)"
+
+  # --- change sets -----------------------------------------------------------
+  # ExecuteChangeSet is the shadow reason (it provisions the stored
+  # template). CreateChangeSet's TemplateURL path reads the blob store and is
+  # equally shadowed; only the inline TemplateBody path is transcribed, and
+  # the bundle faults ValidationError where the pack would have fetched.
+
+  CreateChangeSet:
+    require:
+      - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
+        error: Validation
+    effects:
+      - generate: { bind: csid, kind: hex, bytes: 8 }
+      - create:
+          resource: changeset
+          record:
+            ChangeSetName: string(input.ChangeSetName)
+            ChangeSetId: >-
+              'arn:aws:cloudformation:' + identity.region + ':'
+              + identity.account + ':changeSet/' + string(input.ChangeSetName)
+              + '/' + fx.csid
+            StackName: string(input.StackName)
+            Status: "'CREATE_COMPLETE'"
+            TemplateBody: string(input.TemplateBody)
+    output:
+      Id: rec.ChangeSetId
+      StackId: >-
+        'arn:aws:cloudformation:' + identity.region + ':' + identity.account
+        + ':stack/' + string(input.StackName)
+
+  # The pack answers the whole stored record, TemplateBody included; the
+  # response shape does not declare TemplateBody, so the bundle answers the
+  # declared members and the recorded happy path is superseded.
+  DescribeChangeSet:
+    reads:
+      cs: { resource: changeset }
+    require:
+      - { cond: cs_found, error: ChangeSetNotFound }
+    output:
+      ChangeSetId: cs.ChangeSetId
+      ChangeSetName: cs.ChangeSetName
+      StackName: cs.StackName
+      Status: cs.Status
+
+  ListChangeSets:
+    list:
+      resource: changeset
+      member: Summaries
+      paginate: model
+      filter: "item.StackName == string(input.StackName)"
+    output:
+      Summaries: items
+
+  DeleteChangeSet:
+    effects:
+      - delete: { resource: changeset, missing: ignore }
+
+  SignalResource:
+
+  # --- stack sets ------------------------------------------------------------
+
+  # Create and Update are the same full replace: the caller's request
+  # underneath, with the name, status and template body forced on top.
+  CreateStackSet:
+    effects:
+      - create:
+          resource: stackset
+          spread: input
+          record:
+            StackSetName: id
+            Status: "'Status' in input ? input.Status : 'ACTIVE'"
+            TemplateBody: "'TemplateBody' in input ? string(input.TemplateBody) : ''"
+    output:
+      StackSetId: id
+
+  # The pack answers StackSetId where the shape declares OperationId; the
+  # recorded step is superseded.
+  UpdateStackSet:
+    effects:
+      - create:
+          resource: stackset
+          spread: input
+          record:
+            StackSetName: id
+            Status: "'Status' in input ? input.Status : 'ACTIVE'"
+            TemplateBody: "'TemplateBody' in input ? string(input.TemplateBody) : ''"
+
+  # Never faults: an absent name answers an empty StackSet.
+  DescribeStackSet:
+    reads:
+      s: { resource: stackset }
+    output:
+      StackSet: s
+
+  ListStackSets:
+    list:
+      resource: stackset
+      member: Summaries
+      paginate: model
+    output:
+      Summaries: items
+
+  DeleteStackSet:
+    effects:
+      - delete: { resource: stackset, missing: ignore }
+
+  # The four instance operations are one behavior: mint an operation id,
+  # store the same record under the operation collection and the instance
+  # collection, answer the id.
+  CreateStackInstances:
+    effects:
+      - create:
+          resource: stackset_operation
+          record:
+            OperationId: id
+            Status: "'SUCCEEDED'"
+            Action: "'CreateStackInstances'"
+            StackSetName: string(input.StackSetName)
+      - create:
+          resource: stackset_instance
+          key: "string(input.StackSetName) + '/' + fx.create.OperationId"
+          record:
+            OperationId: fx.create.OperationId
+            Status: "'SUCCEEDED'"
+            Action: "'CreateStackInstances'"
+            StackSetName: string(input.StackSetName)
+    output:
+      OperationId: rec.OperationId
+
+  UpdateStackInstances:
+    effects:
+      - create:
+          resource: stackset_operation
+          record:
+            OperationId: id
+            Status: "'SUCCEEDED'"
+            Action: "'UpdateStackInstances'"
+            StackSetName: string(input.StackSetName)
+      - create:
+          resource: stackset_instance
+          key: "string(input.StackSetName) + '/' + fx.create.OperationId"
+          record:
+            OperationId: fx.create.OperationId
+            Status: "'SUCCEEDED'"
+            Action: "'UpdateStackInstances'"
+            StackSetName: string(input.StackSetName)
+    output:
+      OperationId: rec.OperationId
+
+  DeleteStackInstances:
+    effects:
+      - create:
+          resource: stackset_operation
+          record:
+            OperationId: id
+            Status: "'SUCCEEDED'"
+            Action: "'DeleteStackInstances'"
+            StackSetName: string(input.StackSetName)
+      - create:
+          resource: stackset_instance
+          key: "string(input.StackSetName) + '/' + fx.create.OperationId"
+          record:
+            OperationId: fx.create.OperationId
+            Status: "'SUCCEEDED'"
+            Action: "'DeleteStackInstances'"
+            StackSetName: string(input.StackSetName)
+    output:
+      OperationId: rec.OperationId
+
+  ImportStacksToStackSet:
+    effects:
+      - create:
+          resource: stackset_operation
+          record:
+            OperationId: id
+            Status: "'SUCCEEDED'"
+            Action: "'ImportStacksToStackSet'"
+            StackSetName: string(input.StackSetName)
+      - create:
+          resource: stackset_instance
+          key: "string(input.StackSetName) + '/' + fx.create.OperationId"
+          record:
+            OperationId: fx.create.OperationId
+            Status: "'SUCCEEDED'"
+            Action: "'ImportStacksToStackSet'"
+            StackSetName: string(input.StackSetName)
+    output:
+      OperationId: rec.OperationId
+
+  DescribeStackInstance:
+    reads:
+      i: { resource: stackset_instance }
+    output:
+      StackInstance: i
+
+  # The pack lists the whole collection: StackSetName is accepted and
+  # ignored.
+  ListStackInstances:
+    list:
+      resource: stackset_instance
+      member: Summaries
+      paginate: model
+    output:
+      Summaries: items
+
+  DescribeStackSetOperation:
+    reads:
+      o: { resource: stackset_operation }
+    output:
+      StackSetOperation: o
+
+  # All three list the operation collection; the StackSetName and
+  # OperationId they take narrow nothing.
+  ListStackSetOperations:
+    list:
+      resource: stackset_operation
+      member: Summaries
+      paginate: model
+    output:
+      Summaries: items
+
+  ListStackSetOperationResults:
+    list:
+      resource: stackset_operation
+      member: Summaries
+      paginate: model
+    output:
+      Summaries: items
+
+  ListStackSetAutoDeploymentTargets:
+    list:
+      resource: stackset_operation
+      member: Summaries
+      paginate: model
+    output:
+      Summaries: items
+
+  # Merges Status: STOPPED onto the record, and conjures a bare
+  # {OperationId, Status} row for an operation nobody created.
+  StopStackSetOperation:
+    reads:
+      o: { resource: stackset_operation }
+    effects:
+      - put:
+          resource: stackset_operation
+          record:
+            OperationId: id
+            Status: "'STOPPED'"
+
+  # --- drift -------------------------------------------------------------------
+  # Detection is instant and nothing is ever drifted; the detections are
+  # stored so DescribeStackDriftDetectionStatus can read them back.
+
+  DetectStackDrift:
+    effects:
+      - create:
+          resource: drift
+          record:
+            StackDriftDetectionId: id
+            DetectionStatus: "'DETECTION_COMPLETE'"
+            StackDriftStatus: "'IN_SYNC'"
+    output:
+      StackDriftDetectionId: id
+
+  # The pack answers StackDriftDetectionId where the shape declares
+  # OperationId; the recorded step is superseded.
+  DetectStackSetDrift:
+    effects:
+      - create:
+          resource: drift
+          record:
+            StackDriftDetectionId: id
+            DetectionStatus: "'DETECTION_COMPLETE'"
+            StackDriftStatus: "'IN_SYNC'"
+    output:
+      OperationId: id
+
+  DetectStackResourceDrift:
+    effects:
+      - create:
+          resource: drift
+          record:
+            StackDriftDetectionId: id
+            DetectionStatus: "'DETECTION_COMPLETE'"
+            StackDriftStatus: "'IN_SYNC'"
+    output:
+      StackResourceDrift: "{'StackResourceDriftStatus': 'IN_SYNC'}"
+
+  # Never faults: an unknown id answers a fresh COMPLETE/IN_SYNC record.
+  DescribeStackDriftDetectionStatus:
+    reads:
+      d: { resource: drift }
+    output:
+      StackDriftDetectionId: >-
+        d_found ? d.StackDriftDetectionId : string(input.StackDriftDetectionId)
+      DetectionStatus: "'DETECTION_COMPLETE'"
+      StackDriftStatus: "'IN_SYNC'"
+
+  # Nothing is ever drifted, so the drift listings are always empty. The pack
+  # answers both under StackResourceDrifts; ListStackInstanceResourceDrifts
+  # declares Summaries instead, and both empty answers compare blank.
+  DescribeStackResourceDrifts:
+    output:
+      StackResourceDrifts: "[]"
+
+  ListStackInstanceResourceDrifts:
+    output:
+      Summaries: "[]"
+
+  # --- types -------------------------------------------------------------------
+  # Seven operations share one write: the request spread over a forced
+  # {TypeName, TypeArn, Status} record, then an answer naming members the
+  # response shapes do not declare (TypeArn and a ProgressToken the pack
+  # mints and forgets). The bundle answers the declared member and the
+  # recorded steps are superseded; the minted token is still drawn so the
+  # deterministic Rand sequence matches the pack's.
+
+  RegisterType:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 8 }
+      - create:
+          resource: resource_type
+          spread: input
+          record:
+            TypeName: id
+            TypeArn: "'arn:aws:cloudformation:' + identity.region + '::type/' + id"
+            Status: "'COMPLETE'"
+    output:
+      RegistrationToken: fx.token
+
+  PublishType:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 8 }
+      - create:
+          resource: resource_type
+          spread: input
+          record:
+            TypeName: id
+            TypeArn: "'arn:aws:cloudformation:' + identity.region + '::type/' + id"
+            Status: "'COMPLETE'"
+    output:
+      PublicTypeArn: rec.TypeArn
+
+  ActivateType:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 8 }
+      - create:
+          resource: resource_type
+          spread: input
+          record:
+            TypeName: id
+            TypeArn: "'arn:aws:cloudformation:' + identity.region + '::type/' + id"
+            Status: "'COMPLETE'"
+    output:
+      Arn: rec.TypeArn
+
+  DeactivateType:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 8 }
+      - create:
+          resource: resource_type
+          spread: input
+          record:
+            TypeName: id
+            TypeArn: "'arn:aws:cloudformation:' + identity.region + '::type/' + id"
+            Status: "'COMPLETE'"
+
+  SetTypeConfiguration:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 8 }
+      - create:
+          resource: resource_type
+          spread: input
+          record:
+            TypeName: id
+            TypeArn: "'arn:aws:cloudformation:' + identity.region + '::type/' + id"
+            Status: "'COMPLETE'"
+    output:
+      ConfigurationArn: rec.TypeArn
+
+  SetTypeDefaultVersion:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 8 }
+      - create:
+          resource: resource_type
+          spread: input
+          record:
+            TypeName: id
+            TypeArn: "'arn:aws:cloudformation:' + identity.region + '::type/' + id"
+            Status: "'COMPLETE'"
+
+  TestType:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 8 }
+      - create:
+          resource: resource_type
+          spread: input
+          record:
+            TypeName: id
+            TypeArn: "'arn:aws:cloudformation:' + identity.region + '::type/' + id"
+            Status: "'COMPLETE'"
+    output:
+      TypeVersionArn: rec.TypeArn
+
+  # The pack wraps the record in a Type member no response shape declares;
+  # the bundle answers nothing rather than invent a member, and the recorded
+  # steps are superseded. Neither describe faults on an absent type.
+  DescribeType:
+    reads:
+      t: { resource: resource_type }
+
+  DescribeTypeRegistration:
+    reads:
+      t: { resource: resource_type }
+    addressing:
+      resource_type: >-
+        the pack reads first(TypeName, Type), which this operation does not
+        declare; the empty key misses every record and the answer is always
+        the empty Type wrapper
+    output: {}
+
+  ListTypes:
+    list:
+      resource: resource_type
+      member: TypeSummaries
+      paginate: model
+    output:
+      TypeSummaries: items
+
+  # The pack lists the type records under TypeSummaries on all three; the
+  # shapes declare other members, so the recorded steps are superseded.
+  ListTypeVersions:
+    list:
+      resource: resource_type
+      member: TypeVersionSummaries
+      paginate: model
+    output:
+      TypeVersionSummaries: items
+
+  ListTypeRegistrations:
+    list:
+      resource: resource_type
+      member: RegistrationTokenList
+      paginate: model
+    output:
+      RegistrationTokenList: items
+
+  # Ignores its TypeConfigurationIdentifiers and lists every type.
+  BatchDescribeTypeConfigurations:
+    list:
+      resource: resource_type
+      member: TypeConfigurations
+      paginate: model
+    output:
+      TypeConfigurations: items
+
+  # The pack deletes by TypeName alone: a request carrying only Type deletes
+  # the empty key.
+  DeregisterType:
+    effects:
+      - delete:
+          resource: resource_type
+          key: "'TypeName' in input ? string(input.TypeName) : ''"
+          missing: ignore
+
+  # --- generated templates -------------------------------------------------------
+
+  CreateGeneratedTemplate:
+    effects:
+      - create:
+          resource: generated_template
+          record:
+            GeneratedTemplateName: id
+            Status: "'COMPLETE'"
+            TemplateBody: "'{}'"
+    output:
+      GeneratedTemplateId: id
+
+  UpdateGeneratedTemplate:
+    effects:
+      - create:
+          resource: generated_template
+          record:
+            GeneratedTemplateName: id
+            Status: "'COMPLETE'"
+            TemplateBody: "'{}'"
+    output:
+      GeneratedTemplateId: id
+
+  # Both describes wrap the record in a GeneratedTemplate member the response
+  # shapes do not declare, and neither faults on an absent one.
+  DescribeGeneratedTemplate:
+    reads:
+      g: { resource: generated_template }
+    output: {}
+
+  GetGeneratedTemplate:
+    reads:
+      g: { resource: generated_template }
+    output: {}
+
+  ListGeneratedTemplates:
+    list:
+      resource: generated_template
+      member: Summaries
+      paginate: model
+    output:
+      Summaries: items
+
+  DeleteGeneratedTemplate:
+    effects:
+      - delete: { resource: generated_template, missing: ignore }
+
+  # --- resource scans ------------------------------------------------------------
+
+  StartResourceScan:
+    effects:
+      - create: { resource: scan }
+    output:
+      ResourceScanId: id
+
+  # Wraps the record in a ResourceScan member the shape does not declare.
+  DescribeResourceScan:
+    reads:
+      r: { resource: scan }
+    output: {}
+
+  # The pack lists scans under ResourceScans on all three; the shapes declare
+  # other members, so the recorded steps are superseded. The ResourceScanId
+  # and Resources the list operations take narrow nothing.
+  ListResourceScans:
+    list:
+      resource: scan
+      member: ResourceScanSummaries
+      paginate: model
+    output:
+      ResourceScanSummaries: items
+
+  ListResourceScanResources:
+    list:
+      resource: scan
+      member: Resources
+      paginate: model
+    output:
+      Resources: items
+
+  ListResourceScanRelatedResources:
+    list:
+      resource: scan
+      member: RelatedResources
+      paginate: model
+    output:
+      RelatedResources: items
+
+  # --- stack refactors -------------------------------------------------------------
+
+  CreateStackRefactor:
+    effects:
+      - create: { resource: refactor }
+    output:
+      StackRefactorId: id
+
+  # Mints and stores a fresh refactor rather than executing the named one;
+  # the answered StackRefactorId is one the Unit output shape cannot carry,
+  # so the recorded step is superseded.
+  ExecuteStackRefactor:
+    effects:
+      - create: { resource: refactor }
+
+  DescribeStackRefactor:
+    reads:
+      r: { resource: refactor }
+    output: {}
+
+  ListStackRefactors:
+    list:
+      resource: refactor
+      member: StackRefactorSummaries
+      paginate: model
+    output:
+      StackRefactorSummaries: items
+
+  # Lists the refactor records; the shape calls them StackRefactorActions, so
+  # the recorded step is superseded.
+  ListStackRefactorActions:
+    list:
+      resource: refactor
+      member: StackRefactorActions
+      paginate: model
+    output:
+      StackRefactorActions: items
+
+  # --- stack policy, organizations access, publisher -------------------------------
+
+  SetStackPolicy:
+    effects:
+      - create:
+          resource: stack_policy
+          record:
+            StackPolicyBody: "'StackPolicyBody' in input ? string(input.StackPolicyBody) : ''"
+
+  # An absent policy answers the empty-object document, not a fault.
+  GetStackPolicy:
+    reads:
+      p: { resource: stack_policy }
+    output:
+      StackPolicyBody: "p_found ? string(p.StackPolicyBody) : '{}'"
+
+  ActivateOrganizationsAccess:
+    effects:
+      - put:
+          resource: org_access
+          record:
+            Status: "'ENABLED'"
+
+  DeactivateOrganizationsAccess:
+    effects:
+      - put:
+          resource: org_access
+          record:
+            Status: "'DISABLED'"
+
+  DescribeOrganizationsAccess:
+    reads:
+      o: { resource: org_access }
+    output:
+      Status: "o_found ? string(o.Status) : 'DISABLED'"
+
+  RegisterPublisher:
+    effects:
+      - generate: { bind: pub, kind: hex, bytes: 8 }
+      - create:
+          resource: publisher
+          record:
+            PublisherId: fx.pub
+    output:
+      PublisherId: fx.pub
+
+  # An absent publisher answers an empty id, still VERIFIED.
+  DescribePublisher:
+    reads:
+      p: { resource: publisher }
+    output:
+      PublisherId: "p_found ? string(p.PublisherId) : ''"
+      PublisherStatus: "'VERIFIED'"
+
+  # --- static answers ----------------------------------------------------------
+
+  DescribeAccountLimits:
+    output:
+      AccountLimits: "[{'Name': 'StackLimit', 'Value': 200}]"
+
+  DescribeChangeSetHooks:
+    output:
+      Hooks: "[]"
+
+  # The pack answers Hooks; the shape declares HookResults, and both empty
+  # answers compare blank.
+  ListHookResults:
+    output:
+      HookResults: "[]"
+
+  # The pack answers HookStatus: HOOK_COMPLETE_SUCCEEDED, which the response
+  # shape does not declare; the recorded step is superseded.
+  GetHookResult:
+    output: {}
+
+  DescribeEvents:
+    output:
+      OperationEvents: "[]"
+
+  EstimateTemplateCost:
+    output:
+      Url: "'http://127.0.0.1/cfn-cost'"
+
+  ListImports:
+    output:
+      Imports: "[]"
+
+  RecordHandlerProgress:
+    output: {}
+
+quirks:
+  - operation: CreateStack
+    note: >
+      Shadowed: parses the template (JSON, or a YAML subset with
+      !Ref/!GetAtt/!Sub), merges Parameters.member.N form fields with
+      template defaults, resolves Ref/GetAtt/Join/Sub against
+      pseudo-parameters, and provisions fourteen resource types into the
+      sibling services' collections -- buckets with their versioning, tags
+      and eight bktcfg sub-records, queues, topics, tables, roles,
+      parameters, secrets, KMS keys with drawn key material, log groups,
+      rules, functions, streams, stream policies and APIs. TemplateURL
+      fetches the body from the blob store. None of it is expressible in
+      B-IR today. The engine rejects an absent StackName (model-required)
+      where the pack faulted ValidationError "StackName required" -- same
+      code and status -- and where the pack accepted an empty TemplateBody
+      with no TemplateURL as a fault of its own.
+  - operation: DeleteStack
+    note: >
+      The bundle drops the stack record only. The pack first deprovisions
+      every stack resource from the sibling collections (buckets plus their
+      versioning/tags/config records, queues, topics, tables, roles,
+      parameters, secrets, keys, groups, rules, functions, streams, policies,
+      APIs), which no trace step can observe from this service's answers.
+  - operation: CreateChangeSet
+    note: >
+      Only the inline TemplateBody path is transcribed. With TemplateURL the
+      pack reads the template out of the blob store (s3:// and
+      *.s3 host forms), which the bundle cannot express; the bundle faults
+      ValidationError where the pack would have fetched. The pack faults
+      "TemplateBody or TemplateURL required" when neither is present. The
+      model requires StackName and ChangeSetName, so the pack's empty-name
+      key (":name") is dead.
+  - operation: DescribeChangeSet
+    note: >
+      The pack answers the whole stored record, TemplateBody included, but
+      the response shape does not declare TemplateBody; the bundle answers
+      the declared members and the recorded happy path is superseded. The
+      pack reads StackName from the request even though the model does not
+      require it; a request without it looks the change set up under
+      ":name".
+  - operation: DescribeStacks
+    note: >
+      Naming a stack that does not exist faults ValidationError "Stack [name]
+      does not exist"; naming none lists every stack in the account and
+      region. The pack's record carries the provisioned Resources, Outputs,
+      Refs and Template, which only the shadowed CreateStack path can
+      produce, so here they are always empty.
+  - operation: RollbackStack
+    note: >
+      Rolling back a stack that does not exist conjures a fresh
+      ROLLBACK_COMPLETE record under the name rather than faulting, with an
+      empty StackId. CancelUpdateStack starts from UPDATE_ROLLBACK_COMPLETE
+      the same way. CancelUpdateStack and ContinueUpdateRollback answer
+      StackId, which their output shapes do not declare; those steps are
+      superseded.
+  - operation: UpdateTerminationProtection
+    note: >
+      The pack's truthy() accepts a boolean true or the strings "true" and
+      "True"; anything else, including the model-required member arriving
+      empty, stores false.
+  - operation: DescribeStackSet
+    note: >
+      Never faults: an absent stack set answers an empty StackSet record with
+      a 200. UpdateStackSet is a full replace (the request spread over the
+      forced name/status/template), so an update that omits a member drops it
+      from the record.
+  - operation: ListStackInstances
+    note: >
+      The StackSetName, StackInstanceAccount and StackInstanceRegion members
+      the model declares are accepted and ignored: the listing is every
+      instance row in the account and region. The same holds for
+      ListStackSetOperations, ListStackSetOperationResults and
+      ListStackSetAutoDeploymentTargets over the operation collection.
+  - operation: StopStackSetOperation
+    note: >
+      Stopping an operation id nobody created writes a bare {OperationId,
+      Status: STOPPED} row, which the operation lists then answer.
+  - operation: DetectStackDrift
+    note: >
+      Detection completes instantly and the stack is always IN_SYNC; the
+      named stack is never checked to exist. DetectStackSetDrift answers
+      StackDriftDetectionId where its shape declares OperationId (superseded),
+      and DetectStackResourceDrift answers a bare IN_SYNC drift record.
+  - operation: DescribeStackDriftDetectionStatus
+    note: >
+      Never faults: an unknown detection id answers a fresh
+      DETECTION_COMPLETE/IN_SYNC record built from the request's id.
+  - operation: RegisterType
+    note: >
+      The type family (RegisterType, PublishType, ActivateType,
+      DeactivateType, SetTypeConfiguration, SetTypeDefaultVersion, TestType)
+      shares one write: the request spread over a forced {TypeName, TypeArn,
+      Status: COMPLETE} record, a full replace each time. The pack answers
+      TypeArn and a minted-and-forgotten ProgressToken, none of which the
+      response shapes declare, so the bundle answers the declared member and
+      the recorded steps are superseded; the token draw is kept so the
+      deterministic Rand sequence matches the pack's. The TypeArn has an
+      empty account segment, as the pack built it. With neither TypeName nor
+      Type the pack mints a hex name; the bundle transcribes that as the
+      empty-key write the model's optionality permits.
+  - operation: DescribeType
+    note: >
+      Never faults, and the record arrives wrapped in a Type member the
+      response shape does not declare (superseded). DescribeTypeRegistration
+      reads the type collection by first(TypeName, Type) -- members the
+      operation does not declare -- so every call misses and answers the
+      empty wrapper; that transcribed defect is recorded under addressing.
+  - operation: DeregisterType
+    note: >
+      Deletes by TypeName alone: a request carrying only Type (which the
+      model declares) deletes the empty key and reports success.
+  - operation: GetGeneratedTemplate
+    note: >
+      Both generated-template describes wrap the record in a
+      GeneratedTemplate member the shapes do not declare (superseded) and
+      never fault on an absent template. The stored TemplateBody is always
+      "{}", whatever the request carried.
+  - operation: ListResourceScans
+    note: >
+      The scan lists answer the scan records under a ResourceScans member
+      none of the three shapes declare (ResourceScanSummaries, Resources and
+      RelatedResources are declared instead), so the recorded steps are
+      superseded. ResourceScanId and Resources narrow nothing.
+  - operation: ExecuteStackRefactor
+    note: >
+      Does not execute the named refactor: it mints and stores a fresh one
+      and answers the new id, which the Unit output shape cannot carry
+      (superseded). DescribeStackRefactor wraps the record in an undeclared
+      StackRefactor member (superseded) and never faults.
+  - operation: GetStackPolicy
+    note: >
+      The pack stores the policy body as raw bytes and answers "{}" when no
+      policy was set; the bundle stores a JSON record, wire-identical at the
+      operation boundary. The same raw-storage difference holds for the
+      organizations-access flag and the publisher id.
+  - operation: DescribePublisher
+    note: >
+      Never faults: before any RegisterPublisher the answer is an empty
+      PublisherId with PublisherStatus VERIFIED.
+  - operation: GetHookResult
+    note: >
+      The pack answers HookStatus: HOOK_COMPLETE_SUCCEEDED, which the
+      response shape does not declare, so the recorded step is superseded and
+      the bundle answers the empty object.
+  - operation: ListHookResults
+    note: >
+      The pack answers the empty list under Hooks; the shape declares
+      HookResults. Both empty answers compare blank, so nothing is
+      superseded.
+  - operation: ListExports
+    note: >
+      Shadowed with the template engine: exports are derived from stack
+      Outputs, which only the provisioning path can produce, so the
+      transcribed bundle would always answer empty.
+  - operation: ValidateTemplate
+    note: >
+      Shadowed: parses the template body and answers its declared parameters.
+      The engine's model check on absent required members does not apply --
+      none are declared -- and the pack's YAML subset parser is the shadow
+      reason.

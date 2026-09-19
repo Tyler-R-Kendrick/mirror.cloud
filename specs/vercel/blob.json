@@ -1,0 +1,240 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Vercel Blob",
+    "version": "authored-1",
+    "description": "The Vercel Blob data plane: uploads, heads, lists and deletes ride the API host, and blob content is served from a per-store subdomain.\n\nTHIS DOCUMENT IS AUTHORED, NOT VENDORED, like its sibling specs/vercel/kv.json. Vercel's published OpenAPI document describes blob-store management (create a store, change its access) and none of the data plane; the data plane is documented in prose and in the @vercel/blob SDK. What is transcribed here is the surface of the vendor-authored oracle, vercel-labs/emulate (pinned in specs/vercel/emulate-inventory.json), specifically packages/@emulators/vercel/src/routes/blob.ts -- its eight route registrations, its auth rule (a Bearer token of the form vercel_blob_rw_<prefix>_<storeId>_<suffix>, or an x-vercel-blob-store-id header when the Bearer token carries no store), and its exact response fields.\n\nTwo spellings in this document are mirror's, not any client's. GET /api/blob is one handler in the oracle, heading when ?url is present and listing otherwise; it is two path items here because an operation carries one response shape, and the ?url constraint is how the router tells them apart (a trailing-slash registration of the same handler needs no entry: routing trims it). And ServeBlob's response is an envelope that is not on the wire: the wire answer is the raw bytes plus ETag/Cache-Control/Content-Type headers, and the envelope's members are where a behavior bundle names those -- the codec unfolds it. The multipart routes are the oracle's own stubs: it answers every multipart call 400 bad_request, and so do the operations here."
+  },
+  "servers": [
+    {
+      "url": "https://blob.vercel-storage.com",
+      "description": "Vercel Blob API. Management calls ride this host; content is served from <storeId>.public.blob.vercel-storage.com, a per-store subdomain of this one."
+    }
+  ],
+  "paths": {
+    "/api/blob": {
+      "put": {
+        "operationId": "UploadBlob",
+        "summary": "Upload a blob (or copy one, with ?fromUrl=)",
+        "parameters": [
+          { "name": "pathname", "in": "query", "schema": { "type": "string" }, "description": "Where the blob lives. Absent is a 400 answered by the bundle, not a validation fault, because the oracle checks auth first." },
+          { "name": "fromUrl", "in": "query", "schema": { "type": "string" }, "description": "Copy: the source blob's URL or pathname instead of a request body." },
+          { "name": "authorization", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-vercel-blob-store-id", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-vercel-blob-access", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-add-random-suffix", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-allow-overwrite", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-if-match", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-content-type", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-cache-control-max-age", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": { "type": "string", "format": "binary" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The upload landed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UploadResult" } } }
+          },
+          "400": { "description": "Bad pathname, unsupported access, or the blob exists and overwrite was not allowed.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } },
+          "403": { "description": "No store could be resolved from the token or header.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } },
+          "404": { "description": "A fromUrl copy source does not exist.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } },
+          "412": { "description": "The x-if-match ETag precondition failed.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } }
+        }
+      },
+      "get": {
+        "operationId": "ListBlobs",
+        "summary": "List blobs, optionally folded by folder",
+        "parameters": [
+          { "name": "prefix", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "string" }, "description": "Arrives as a string like every query parameter; absent or unparsable means 1000." },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "mode", "in": "query", "schema": { "type": "string" } },
+          { "name": "authorization", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-vercel-blob-store-id", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobList" } } }
+          },
+          "403": { "description": "No store could be resolved.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } }
+        }
+      }
+    },
+    "/api/blob?url": {
+      "get": {
+        "operationId": "HeadBlob",
+        "summary": "Head one blob by url or pathname",
+        "description": "The oracle's GET handler heads when the url query parameter is present and lists otherwise; this path item is the head half, routed by the query constraint.",
+        "parameters": [
+          { "name": "url", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "authorization", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-vercel-blob-store-id", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The blob's metadata.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobHead" } } }
+          },
+          "403": { "description": "No store could be resolved.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } },
+          "404": { "description": "No such blob.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } }
+        }
+      }
+    },
+    "/api/blob/delete": {
+      "post": {
+        "operationId": "DeleteBlobs",
+        "summary": "Delete blobs by url or pathname",
+        "parameters": [
+          { "name": "authorization", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-vercel-blob-store-id", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-if-match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeleteRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON null, whatever was or was not deleted.",
+            "content": { "application/json": { "schema": { "type": "string", "nullable": true } } }
+          },
+          "403": { "description": "No store could be resolved.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } },
+          "412": { "description": "The x-if-match ETag precondition failed on a targeted blob.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } }
+        }
+      }
+    },
+    "/api/blob/mpu": {
+      "post": {
+        "operationId": "CreateMultipartUpload",
+        "summary": "The oracle does not support multipart uploads",
+        "parameters": [
+          { "name": "pathname", "in": "query", "schema": { "type": "string" } },
+          { "name": "authorization", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-vercel-blob-store-id", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "400": { "description": "Always: the oracle answers every multipart call 400 bad_request.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } }
+        }
+      },
+      "put": {
+        "operationId": "CompleteMultipartUpload",
+        "summary": "The oracle does not support multipart uploads",
+        "parameters": [
+          { "name": "pathname", "in": "query", "schema": { "type": "string" } },
+          { "name": "authorization", "in": "header", "schema": { "type": "string" } },
+          { "name": "x-vercel-blob-store-id", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "400": { "description": "Always: the oracle answers every multipart call 400 bad_request.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } }
+        }
+      }
+    },
+    "/blob/{storeId}/{pathname+}": {
+      "get": {
+        "operationId": "ServeBlob",
+        "summary": "Serve a blob's content, publicly, no authentication",
+        "description": "The `{pathname+}` greedy label is mirror's spelling of the oracle's `:pathname{.+}`: a blob pathname swallows the rest of the path, separators included.",
+        "parameters": [
+          { "name": "storeId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "pathname", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "download", "in": "query", "schema": { "type": "string" } },
+          { "name": "if-none-match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The blob's bytes. This schema is an envelope for the bundle, not the wire shape: the wire answer is `body` as the raw response with the other members unfolded into headers.",
+            "content": { "application/octet-stream": { "schema": { "$ref": "#/components/schemas/BlobContent" } } }
+          },
+          "304": { "description": "if-none-match equalled the blob's ETag; ETag and Cache-Control headers and no body." },
+          "404": { "description": "No such blob.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BlobError" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BlobError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      },
+      "UploadResult": {
+        "type": "object",
+        "description": "What the oracle's upload handler answers (its headResponse minus size, cacheControl and uploadedAt).",
+        "properties": {
+          "url": { "type": "string" },
+          "downloadUrl": { "type": "string" },
+          "pathname": { "type": "string" },
+          "contentType": { "type": "string" },
+          "contentDisposition": { "type": "string" },
+          "etag": { "type": "string" }
+        }
+      },
+      "BlobHead": {
+        "type": "object",
+        "description": "The oracle's headResponse, field for field.",
+        "properties": {
+          "url": { "type": "string" },
+          "downloadUrl": { "type": "string" },
+          "pathname": { "type": "string" },
+          "size": { "type": "integer" },
+          "contentType": { "type": "string" },
+          "contentDisposition": { "type": "string" },
+          "cacheControl": { "type": "string" },
+          "uploadedAt": { "type": "string" },
+          "etag": { "type": "string" }
+        }
+      },
+      "BlobListItem": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "downloadUrl": { "type": "string" },
+          "pathname": { "type": "string" },
+          "size": { "type": "integer" },
+          "uploadedAt": { "type": "string" },
+          "etag": { "type": "string" }
+        }
+      },
+      "BlobList": {
+        "type": "object",
+        "properties": {
+          "blobs": { "type": "array", "items": { "$ref": "#/components/schemas/BlobListItem" } },
+          "hasMore": { "type": "boolean" },
+          "cursor": { "type": "string", "nullable": true, "description": "The last pathname of the page; the oracle omits it unless hasMore, and the bundle answers null rather than omitting it." },
+          "folders": { "type": "array", "nullable": true, "items": { "type": "string" }, "description": "Folded folder prefixes when mode=folded; null otherwise, where the oracle omits the member." }
+        }
+      },
+      "DeleteRequest": {
+        "type": "object",
+        "properties": {
+          "urls": { "type": "array", "items": { "type": "string" }, "description": "Each entry is a blob URL or a bare pathname; entries naming other stores or nothing at all are skipped." }
+        }
+      },
+      "BlobContent": {
+        "type": "object",
+        "description": "Not a wire body: the serving route answers the raw bytes with headers, and this envelope is where a bundle names them. body is the content; not_modified turns the answer into a header-only 304.",
+        "properties": {
+          "body": { "type": "string", "format": "binary" },
+          "etag": { "type": "string" },
+          "cache_control": { "type": "string" },
+          "content_type": { "type": "string" },
+          "content_disposition": { "type": "string" },
+          "not_modified": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

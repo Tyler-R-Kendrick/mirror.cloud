@@ -1,0 +1,324 @@
+{
+  "schema": "trace/1",
+  "service": "aws.scheduler",
+  "source": "pack:internal/services/aws/scheduler@77fba2e7",
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The recording covers the CRUD and validation surface only: the delivery worker (due schedules firing on the clock, templated payloads, retries, dead-lettering) is the bundle's shadow reason and is deliberately not recorded. The pack issues no generated identifiers -- the ARNs it answers are deterministic functions of account, region, group and name -- so no step needs a $fromStep reference. The ScheduleExpression grammar faults are not exercised: the bundle cannot parse rate/cron/at, which is part of the shadow reason.",
+  "steps": [
+    {
+      "operation": "ListScheduleGroups",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ScheduleGroups": [
+        {"Name": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule-group/default", "State": "ACTIVE"}
+      ]}
+    },
+    {
+      "operation": "GetScheduleGroup",
+      "input": {"Name": "default"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Name": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule-group/default", "State": "ACTIVE"}
+    },
+    {
+      "operation": "GetScheduleGroup",
+      "input": {"Name": "absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "DeleteScheduleGroup",
+      "input": {"Name": "default"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ConflictException", "http_status": 409, "fault": "client"}
+    },
+    {
+      "operation": "DeleteScheduleGroup",
+      "input": {"Name": "absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateScheduleGroup",
+      "input": {"Name": "default"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateScheduleGroup",
+      "input": {"Name": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ScheduleGroupArn": "arn:aws:scheduler:us-east-1:000000000000:schedule-group/batch"}
+    },
+    {
+      "operation": "CreateScheduleGroup",
+      "input": {"Name": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ConflictException", "http_status": 409, "fault": "client"}
+    },
+    {
+      "operation": "GetScheduleGroup",
+      "input": {"Name": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Name": "batch", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule-group/batch", "State": "ACTIVE"}
+    },
+    {
+      "operation": "ListScheduleGroups",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ScheduleGroups": [
+        {"Name": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule-group/default", "State": "ACTIVE"},
+        {"Name": "batch", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule-group/batch", "State": "ACTIVE"}
+      ]}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "n1", "GroupName": "nosuch", "ScheduleExpression": "rate(1 minute)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "s1", "ScheduleExpression": "rate(1 minute)", "Description": "first", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ScheduleArn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "s1", "ScheduleExpression": "rate(1 minute)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ConflictException", "http_status": 409, "fault": "client"}
+    },
+    {
+      "operation": "GetSchedule",
+      "input": {"Name": "s1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
+        "State": "ENABLED", "ScheduleExpression": "rate(1 minute)", "Description": "first",
+        "FlexibleTimeWindow": {"Mode": "OFF"},
+        "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}
+      }
+    },
+    {
+      "operation": "GetSchedule",
+      "input": {"Name": "s1", "GroupName": "default"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
+        "State": "ENABLED", "ScheduleExpression": "rate(1 minute)", "Description": "first",
+        "FlexibleTimeWindow": {"Mode": "OFF"},
+        "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}
+      }
+    },
+    {
+      "operation": "GetSchedule",
+      "input": {"Name": "absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "ListSchedules",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Schedules": [
+        {"Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
+         "State": "ENABLED", "ScheduleExpression": "rate(1 minute)", "Description": "first",
+         "FlexibleTimeWindow": {"Mode": "OFF"},
+         "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}
+      ]}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "badmode", "ScheduleExpression": "rate(1 minute)", "FlexibleTimeWindow": {"Mode": "NOPE"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "badwindow", "ScheduleExpression": "rate(1 minute)", "FlexibleTimeWindow": {"Mode": "FLEXIBLE", "MaximumWindowInMinutes": 0}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "badstate", "ScheduleExpression": "rate(1 minute)", "State": "PAUSED", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "badaction", "ScheduleExpression": "rate(1 minute)", "ActionAfterCompletion": "STOP", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "badrole", "ScheduleExpression": "rate(1 minute)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "not-an-arn"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "badretry", "ScheduleExpression": "rate(1 minute)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test", "RetryPolicy": {"MaximumRetryAttempts": 999}}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "baddlq", "ScheduleExpression": "rate(1 minute)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test", "DeadLetterConfig": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q.fifo"}}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "baddates", "ScheduleExpression": "rate(1 minute)", "StartDate": "2030-01-02T00:00:00Z", "EndDate": "2030-01-01T00:00:00Z", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "badjson", "ScheduleExpression": "rate(1 minute)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:lambda:us-east-1:000000000000:function:f", "RoleArn": "arn:aws:iam::000000000000:role/test", "Input": "not-json"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "uni", "ScheduleExpression": "at(2030-01-01T00:10:00)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:scheduler:::aws-sdk:lambda:invoke", "RoleArn": "arn:aws:iam::000000000000:role/test", "Input": "not-json"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ScheduleArn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/uni"}
+    },
+    {
+      "operation": "DeleteSchedule",
+      "input": {"Name": "uni"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "CreateSchedule",
+      "input": {"Name": "s2", "GroupName": "batch", "ScheduleExpression": "at(2030-01-01T00:00:00)", "State": "DISABLED", "Description": "second", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ScheduleArn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2"}
+    },
+    {
+      "operation": "GetSchedule",
+      "input": {"Name": "s2", "GroupName": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "Name": "s2", "GroupName": "batch", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2",
+        "State": "DISABLED", "ScheduleExpression": "at(2030-01-01T00:00:00)", "Description": "second",
+        "FlexibleTimeWindow": {"Mode": "OFF"},
+        "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}
+      }
+    },
+    {
+      "operation": "ListSchedules",
+      "input": {"GroupName": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Schedules": [
+        {"Name": "s2", "GroupName": "batch", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2",
+         "State": "DISABLED", "ScheduleExpression": "at(2030-01-01T00:00:00)", "Description": "second",
+         "FlexibleTimeWindow": {"Mode": "OFF"},
+         "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}
+      ]}
+    },
+    {
+      "operation": "ListSchedules",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Schedules": [
+        {"Name": "s2", "GroupName": "batch", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2",
+         "State": "DISABLED", "ScheduleExpression": "at(2030-01-01T00:00:00)", "Description": "second",
+         "FlexibleTimeWindow": {"Mode": "OFF"},
+         "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+        {"Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
+         "State": "ENABLED", "ScheduleExpression": "rate(1 minute)", "Description": "first",
+         "FlexibleTimeWindow": {"Mode": "OFF"},
+         "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}
+      ]}
+    },
+    {
+      "operation": "UpdateSchedule",
+      "input": {"Name": "absent", "ScheduleExpression": "rate(5 minutes)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "UpdateSchedule",
+      "input": {"Name": "s1", "GroupName": "batch", "ScheduleExpression": "rate(5 minutes)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "UpdateSchedule",
+      "input": {"Name": "s1", "ScheduleExpression": "rate(5 minutes)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ScheduleArn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1"}
+    },
+    {
+      "operation": "GetSchedule",
+      "input": {"Name": "s1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
+        "State": "ENABLED", "ScheduleExpression": "rate(5 minutes)",
+        "FlexibleTimeWindow": {"Mode": "OFF"},
+        "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}
+      }
+    },
+    {
+      "operation": "DeleteSchedule",
+      "input": {"Name": "absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "DeleteScheduleGroup",
+      "input": {"Name": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ConflictException", "http_status": 409, "fault": "client"}
+    },
+    {
+      "operation": "DeleteSchedule",
+      "input": {"Name": "s2", "GroupName": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DeleteScheduleGroup",
+      "input": {"Name": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "GetSchedule",
+      "input": {"Name": "s2", "GroupName": "batch"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "ListScheduleGroups",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ScheduleGroups": [
+        {"Name": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule-group/default", "State": "ACTIVE"}
+      ]}
+    },
+    {
+      "operation": "DeleteSchedule",
+      "input": {"Name": "s1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "GetSchedule",
+      "input": {"Name": "s1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "ListSchedules",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Schedules": null}
+    }
+  ]
+}

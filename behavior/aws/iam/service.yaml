@@ -1,0 +1,2040 @@
+schema: bir/1
+service: aws.iam
+
+# Transcribed from the hand-written pack, not established against the real
+# service. IAM-lite: roles, users, groups, policies and profiles are stored
+# records; nothing is validated against anything, no attachment is checked to
+# exist, and renames delete-and-rewrite the record under its new name.
+provenance: authored
+
+# The pack answered an absent required member with NoSuchEntity on the read
+# side: its first() helper folds an absent member to the empty string, the
+# store holds no empty key, and the miss is that fault. The engine's model
+# check now rejects the absence first, so that is also the missing-input
+# answer. On the write side the pack accepted the absence and stored a record
+# under the empty key; that path is dead now (see quirks).
+missing_input_error: NoSuchEntity
+
+# Complete and gated, but not yet serving. Three gaps, none expressible:
+#
+#   - SimulatePrincipalPolicy and SimulateCustomPolicy are a policy decision
+#     engine: glob matching over Action/Resource, the Condition operator
+#     vocabulary (StringLike, Numeric*, Null, IfExists), and -- for the
+#     OrganizationsDecisionDetail member -- a read of the aws.organizations
+#     pack's SCP attachments in another account's scope. CEL has no glob
+#     match and B-IR has no cross-scope read, so both operations are omitted
+#     below rather than approximated.
+#   - GetAccountSummary counts five collections; B-IR can list one resource
+#     per operation and has no count. Omitted rather than answered with a
+#     constant.
+#   - The pack also exports NewAuthorizer, the policy evaluator the runtime
+#     (internal/runtime) uses to authorize every service's requests against
+#     these records. That is engine infrastructure with a Go-only API, not
+#     service behavior; it is why the pack directory stays regardless.
+#
+# The bundle takes over when an iam/evaluate primitive carries the decision
+# engine (with its cross-scope SCP read), a count or size-over-list reaches
+# outputs, and the authorizer's ownership moves into the engine.
+shadow: >
+  SimulatePrincipalPolicy/SimulateCustomPolicy need glob matching, the IAM
+  Condition operators and a cross-scope read of SCP attachments, and
+  GetAccountSummary needs a count over five collections; none of that is
+  expressible in B-IR today, and the pack's NewAuthorizer is Go-only engine
+  infrastructure consumed by internal/runtime. Everything else the pack does
+  is transcribed and gated below.
+
+resources:
+  role:
+    collection: iamrole
+    id:
+      input_members: [RoleName]
+
+  user:
+    collection: iamuser
+    id:
+      input_members: [UserName]
+
+  # The pack keys a customer policy by name, taking PolicyName when the
+  # request carries it and the last ARN path segment otherwise.
+  policy:
+    collection: iampolicy
+    id:
+      derive: >
+        ('PolicyName' in input && string(input.PolicyName) != '')
+        ? string(input.PolicyName)
+        : ('PolicyArn' in input ? lastSegment(string(input.PolicyArn), '/') : '')
+
+  # Versions live under the policy so the listing needs no filter; the pack
+  # kept them in one flat collection under a name:version key, which is the
+  # same containment.
+  polver:
+    collection: "iampolver:{policy.id}"
+    parent: policy
+    id:
+      derive: >
+        (('PolicyName' in input && string(input.PolicyName) != '')
+          ? string(input.PolicyName)
+          : ('PolicyArn' in input ? lastSegment(string(input.PolicyArn), '/') : ''))
+        + ':' + ('VersionId' in input ? string(input.VersionId) : '')
+
+  # Inline policies store the whole request verbatim; reads answer it back.
+  rolepolicy:
+    collection: iamrp
+    id:
+      derive: "string(input.RoleName) + ':' + string(input.PolicyName)"
+
+  userpolicy:
+    collection: iamup
+    id:
+      derive: "string(input.UserName) + ':' + string(input.PolicyName)"
+
+  grouppolicy:
+    collection: iamgp
+    id:
+      derive: "string(input.GroupName) + ':' + string(input.PolicyName)"
+
+  attached:
+    collection: iamatt
+    id:
+      derive: "string(input.RoleName) + ':' + string(input.PolicyArn)"
+
+  uattached:
+    collection: iamuatt
+    id:
+      derive: "string(input.UserName) + ':' + string(input.PolicyArn)"
+
+  gattached:
+    collection: iamgable
+    id:
+      derive: "string(input.GroupName) + ':' + string(input.PolicyArn)"
+
+  # The pack stored the tag list itself, not a record; the record wrapper is
+  # the bundle's. Untag deletes the whole list, ignoring TagKeys.
+  roletags:
+    collection: iamroletags
+    id:
+      input_members: [RoleName]
+
+  usertags:
+    collection: iamusertags
+    id:
+      input_members: [UserName]
+
+  login:
+    collection: iamlogin
+    id:
+      input_members: [UserName]
+
+  group:
+    collection: iamgroup
+    id:
+      input_members: [GroupName]
+
+  # Group membership, group side. The record is the member's user record as
+  # of the add; see the GetGroup quirk for what the pack did instead.
+  gm:
+    collection: "iamgm:{group.id}"
+    parent: group
+    id:
+      derive: "string(input.UserName)"
+
+  # Group membership, user side; ListGroupsForUser answers these verbatim.
+  ug:
+    collection: "iamug:{user.id}"
+    parent: user
+    id:
+      derive: "string(input.GroupName)"
+
+  ip:
+    collection: iamip
+    id:
+      input_members: [InstanceProfileName]
+
+  # Which instance profiles hold a role, role side; the record carries only
+  # the profile name, as the pack's did.
+  iprole:
+    collection: "iamipr:{role.id}"
+    parent: role
+    id:
+      derive: "string(input.InstanceProfileName)"
+
+  alias:
+    collection: iamalias
+    id:
+      input_members: [AccountAlias]
+
+  pwpolicy:
+    collection: iampw
+    singleton: pwpolicy
+
+  # Providers are keyed by their ARN, computed from the URL at creation and
+  # supplied directly afterwards.
+  oidc:
+    collection: iamoidc
+    id:
+      derive: >
+        ('OpenIDConnectProviderArn' in input && string(input.OpenIDConnectProviderArn) != '')
+        ? string(input.OpenIDConnectProviderArn)
+        : ('Url' in input
+          ? 'arn:aws:iam::' + identity.account + ':oidc-provider/'
+            + (string(input.Url).startsWith('https://')
+              ? substr(string(input.Url), 8, blen(string(input.Url)))
+              : (string(input.Url).startsWith('http://')
+                ? substr(string(input.Url), 7, blen(string(input.Url)))
+                : string(input.Url)))
+          : '')
+
+  # SAML providers are keyed by name, taken from the last ARN path segment
+  # when the request names the provider by ARN.
+  saml:
+    collection: iamsaml
+    id:
+      derive: >
+        ('SAMLProviderArn' in input && string(input.SAMLProviderArn) != '')
+        ? lastSegment(string(input.SAMLProviderArn), '/')
+        : ('Name' in input ? lastSegment(string(input.Name), '/') : '')
+
+  # Access keys are addressed by user and id together; creation generates the
+  # id and writes under an explicit key.
+  ak:
+    collection: iamak
+    id:
+      derive: >
+        ('UserName' in input ? string(input.UserName) : '')
+        + ':' + ('AccessKeyId' in input ? string(input.AccessKeyId) : '')
+
+  # The pack's leftover surface (extra.go): every remaining operation stores
+  # the request under kind:id, where id is the first of these members the
+  # request carries, or a generated hex id when it carries none. One
+  # collection per kind; the per-operation chain lives in each operation's
+  # `eid` let binding.
+  ldele:
+    collection: ldele
+  lmfa:
+    collection: lmfa
+  lssh:
+    collection: lssh
+  lscert:
+    collection: lscert
+  lsign:
+    collection: lsign
+  lssc:
+    collection: lssc
+  lslr:
+    collection: lslr
+  loidc:
+    collection: loidc
+  lsaml:
+    collection: lsaml
+  lip:
+    collection: lip
+  lorg:
+    collection: lorg
+  lrep:
+    collection: lrep
+  lbound:
+    collection: lbound
+  lmisc:
+    collection: lmisc
+
+errors:
+  NoSuchEntity:
+    code: NoSuchEntity
+    http: 404
+    fault: client
+  DeleteConflict:
+    code: DeleteConflict
+    http: 409
+    fault: client
+    message: cannot delete default version
+
+operations:
+  # --- roles ---------------------------------------------------------------
+
+  # CreateRole and UpdateRole are one code path in the pack: both replace the
+  # record wholesale. UpdateRole's declared output has no members, so the
+  # Role the pack answered is recorded as superseded.
+  CreateRole:
+    effects:
+      - create:
+          resource: role
+          record:
+            RoleName: id
+            Arn: "'arn:aws:iam::' + identity.account + ':role/' + id"
+            AssumeRolePolicyDocument: "'AssumeRolePolicyDocument' in input ? input.AssumeRolePolicyDocument : null"
+    output:
+      Role: rec
+
+  UpdateRole:
+    effects:
+      - create:
+          resource: role
+          record:
+            RoleName: id
+            Arn: "'arn:aws:iam::' + identity.account + ':role/' + id"
+            AssumeRolePolicyDocument: "'AssumeRolePolicyDocument' in input ? input.AssumeRolePolicyDocument : null"
+    output: {}
+
+  GetRole:
+    reads:
+      r: { resource: role }
+    require:
+      - { cond: r_found, error: NoSuchEntity }
+    output:
+      Role: r
+
+  DeleteRole:
+    effects:
+      - delete: { resource: role, missing: ignore }
+    output: {}
+
+  ListRoles:
+    list: { resource: role, member: Roles, paginate: model }
+
+  UpdateAssumeRolePolicy:
+    reads:
+      r: { resource: role }
+    require:
+      - { cond: r_found, error: NoSuchEntity }
+    effects:
+      - patch:
+          resource: role
+          record:
+            AssumeRolePolicyDocument: "'PolicyDocument' in input ? input.PolicyDocument : input.AssumeRolePolicyDocument"
+    output: {}
+
+  # --- inline role policies --------------------------------------------------
+
+  PutRolePolicy:
+    effects:
+      - create: { resource: rolepolicy, spread: input }
+    output: {}
+
+  GetRolePolicy:
+    reads:
+      p: { resource: rolepolicy }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    output:
+      RoleName: "'RoleName' in p ? p.RoleName : null"
+      PolicyName: "'PolicyName' in p ? p.PolicyName : null"
+      PolicyDocument: "'PolicyDocument' in p ? p.PolicyDocument : null"
+
+  DeleteRolePolicy:
+    effects:
+      - delete: { resource: rolepolicy, missing: ignore }
+    output: {}
+
+  ListRolePolicies:
+    list:
+      resource: rolepolicy
+      member: PolicyNames
+      paginate: model
+      filter: "string(item.RoleName) == string(input.RoleName)"
+    output:
+      PolicyNames: "items.map(p, p.PolicyName)"
+
+  # --- attached role policies --------------------------------------------------
+
+  AttachRolePolicy:
+    effects:
+      - create:
+          resource: attached
+          record:
+            PolicyArn: "string(input.PolicyArn)"
+            RoleName: "string(input.RoleName)"
+    output: {}
+
+  DetachRolePolicy:
+    effects:
+      - delete: { resource: attached, missing: ignore }
+    output: {}
+
+  ListAttachedRolePolicies:
+    list:
+      resource: attached
+      member: AttachedPolicies
+      paginate: model
+      filter: "string(item.RoleName) == string(input.RoleName)"
+
+  # --- managed policies --------------------------------------------------------
+
+  # The version row is written first so `rec` is the policy, which is the
+  # record the output answers.
+  CreatePolicy:
+    reads:
+      # Resolves the policy's key so the version row's parent-scoped
+      # collection can be named; the read itself is not used.
+      p: { resource: policy }
+    effects:
+      - create:
+          resource: polver
+          key: "string(input.PolicyName) + ':v1'"
+          record:
+            VersionId: "'v1'"
+            Document: input.PolicyDocument
+            IsDefaultVersion: true
+      - create:
+          resource: policy
+          record:
+            PolicyName: id
+            Arn: "'arn:aws:iam::' + identity.account + ':policy/' + id"
+            PolicyDocument: input.PolicyDocument
+            DefaultVersionId: "'v1'"
+    output:
+      Policy: rec
+
+  GetPolicy:
+    reads:
+      p: { resource: policy }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    output:
+      Policy: p
+
+  # Deleting a policy orphans its versions; the pack never touched them.
+  DeletePolicy:
+    effects:
+      - delete: { resource: policy, missing: ignore }
+    output: {}
+
+  ListPolicies:
+    list: { resource: policy, member: Policies, paginate: model }
+
+  CreatePolicyVersion:
+    reads:
+      p: { resource: policy }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    effects:
+      - counter: { name: "iam/polvseq/{policy.id}" }
+      - patch:
+          resource: policy
+          when: "'SetAsDefault' in input && (input.SetAsDefault == true || input.SetAsDefault == 'true' || input.SetAsDefault == 'True')"
+          record:
+            DefaultVersionId: "'v' + string(fx.counter + 1)"
+      - create:
+          resource: polver
+          key: "string(p.PolicyName) + ':v' + string(fx.counter + 1)"
+          record:
+            VersionId: "'v' + string(fx.counter + 1)"
+            Document: input.PolicyDocument
+            IsDefaultVersion: "'SetAsDefault' in input && (input.SetAsDefault == true || input.SetAsDefault == 'true' || input.SetAsDefault == 'True')"
+    output:
+      PolicyVersion: rec
+
+  GetPolicyVersion:
+    reads:
+      p: { resource: policy }
+      v: { resource: polver }
+    require:
+      - { cond: v_found, error: NoSuchEntity }
+    output:
+      PolicyVersion: v
+
+  DeletePolicyVersion:
+    reads:
+      p: { resource: policy }
+    require:
+      - cond: "!(p_found && 'DefaultVersionId' in p && string(p.DefaultVersionId) == string(input.VersionId))"
+        error: DeleteConflict
+    effects:
+      - delete: { resource: polver, missing: ignore }
+    output: {}
+
+  ListPolicyVersions:
+    reads:
+      p: { resource: policy }
+    list: { resource: polver, member: Versions, paginate: model }
+
+  SetDefaultPolicyVersion:
+    reads:
+      p: { resource: policy }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    select: { binding: vers, resource: polver }
+    effects:
+      - patch:
+          resource: policy
+          record:
+            DefaultVersionId: "string(input.VersionId)"
+      - patch:
+          resource: polver
+          for_each: vers
+          key: "string(p.PolicyName) + ':' + string(item.VersionId)"
+          record:
+            IsDefaultVersion: "string(item.VersionId) == string(input.VersionId)"
+    output: {}
+
+  # --- users -------------------------------------------------------------------
+
+  CreateUser:
+    effects:
+      - create:
+          resource: user
+          record:
+            UserName: id
+            Arn: "'arn:aws:iam::' + identity.account + ':user/' + id"
+    output:
+      User: rec
+
+  GetUser:
+    reads:
+      u: { resource: user }
+    require:
+      - { cond: u_found, error: NoSuchEntity }
+    output:
+      User: u
+
+  # A rename deletes the old record and writes the same record under the new
+  # name. UpdateUser's output is the unit shape; the User the pack answered
+  # is recorded as superseded.
+  UpdateUser:
+    reads:
+      u: { resource: user }
+    require:
+      - { cond: u_found, error: NoSuchEntity }
+    effects:
+      - delete:
+          resource: user
+          key: "string(input.UserName)"
+          when: "'NewUserName' in input && string(input.NewUserName) != ''"
+      - put:
+          resource: user
+          key: "'NewUserName' in input && string(input.NewUserName) != '' ? string(input.NewUserName) : string(input.UserName)"
+          record:
+            UserName: "'NewUserName' in input && string(input.NewUserName) != '' ? string(input.NewUserName) : string(input.UserName)"
+            Arn: "'arn:aws:iam::' + identity.account + ':user/' + ('NewUserName' in input && string(input.NewUserName) != '' ? string(input.NewUserName) : string(input.UserName))"
+    output: {}
+
+  DeleteUser:
+    effects:
+      - delete: { resource: user, missing: ignore }
+    output: {}
+
+  ListUsers:
+    list: { resource: user, member: Users, paginate: model }
+
+  # --- inline user policies ------------------------------------------------------
+
+  PutUserPolicy:
+    effects:
+      - create: { resource: userpolicy, spread: input }
+    output: {}
+
+  GetUserPolicy:
+    reads:
+      p: { resource: userpolicy }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    output:
+      UserName: "'UserName' in p ? p.UserName : null"
+      PolicyName: "'PolicyName' in p ? p.PolicyName : null"
+      PolicyDocument: "'PolicyDocument' in p ? p.PolicyDocument : null"
+
+  DeleteUserPolicy:
+    effects:
+      - delete: { resource: userpolicy, missing: ignore }
+    output: {}
+
+  ListUserPolicies:
+    list:
+      resource: userpolicy
+      member: PolicyNames
+      paginate: model
+      filter: "string(item.UserName) == string(input.UserName)"
+    output:
+      PolicyNames: "items.map(p, p.PolicyName)"
+
+  AttachUserPolicy:
+    effects:
+      - create:
+          resource: uattached
+          record:
+            PolicyArn: "string(input.PolicyArn)"
+            UserName: "string(input.UserName)"
+    output: {}
+
+  DetachUserPolicy:
+    effects:
+      - delete: { resource: uattached, missing: ignore }
+    output: {}
+
+  ListAttachedUserPolicies:
+    list:
+      resource: uattached
+      member: AttachedPolicies
+      paginate: model
+      filter: "string(item.UserName) == string(input.UserName)"
+
+  # --- access keys -----------------------------------------------------------------
+
+  CreateAccessKey:
+    effects:
+      - generate: { bind: akid, kind: hex, bytes: 20 }
+      - generate: { bind: aksecret, kind: hex, bytes: 40 }
+      - create:
+          resource: ak
+          key: "string(input.UserName) + ':' + string(fx.akid)"
+          record:
+            AccessKeyId: "string(fx.akid)"
+            SecretAccessKey: "string(fx.aksecret)"
+            UserName: "string(input.UserName)"
+            Status: "'Active'"
+    output:
+      AccessKey: rec
+
+  # The pack strips the secret at read time; the projection names what stays.
+  ListAccessKeys:
+    list:
+      resource: ak
+      member: AccessKeyMetadata
+      paginate: model
+      filter: "string(item.UserName) == ('UserName' in input ? string(input.UserName) : '')"
+    output:
+      AccessKeyMetadata: "items.map(k, {'AccessKeyId': k.AccessKeyId, 'Status': k.Status, 'UserName': k.UserName})"
+
+  UpdateAccessKey:
+    reads:
+      a: { resource: ak }
+    require:
+      - { cond: a_found, error: NoSuchEntity }
+    effects:
+      - patch:
+          resource: ak
+          when: "string(input.Status) != ''"
+          record:
+            Status: "string(input.Status)"
+    output: {}
+
+  DeleteAccessKey:
+    effects:
+      - delete: { resource: ak, missing: ignore }
+    output: {}
+
+  # --- login profiles ---------------------------------------------------------------
+
+  CreateLoginProfile:
+    effects:
+      - create:
+          resource: login
+          record:
+            UserName: id
+            PasswordResetRequired: "'PasswordResetRequired' in input ? input.PasswordResetRequired : null"
+    output:
+      LoginProfile: rec
+
+  GetLoginProfile:
+    reads:
+      l: { resource: login }
+    require:
+      - { cond: l_found, error: NoSuchEntity }
+    output:
+      LoginProfile: l
+
+  # Updating a profile that was never created conjures one holding only the
+  # user name; the pack did the same.
+  UpdateLoginProfile:
+    reads:
+      l: { resource: login }
+    effects:
+      - put:
+          resource: login
+          record:
+            UserName: "string(input.UserName)"
+            PasswordResetRequired: "'PasswordResetRequired' in input ? input.PasswordResetRequired : (l_found && 'PasswordResetRequired' in l ? l.PasswordResetRequired : null)"
+    output: {}
+
+  DeleteLoginProfile:
+    effects:
+      - delete: { resource: login, missing: ignore }
+    output: {}
+
+  # --- groups -------------------------------------------------------------------------
+
+  CreateGroup:
+    effects:
+      - create:
+          resource: group
+          record:
+            GroupName: id
+            Arn: "'arn:aws:iam::' + identity.account + ':group/' + id"
+            Path: "'Path' in input && string(input.Path) != '' ? string(input.Path) : '/'"
+    output:
+      Group: rec
+
+  GetGroup:
+    reads:
+      g: { resource: group }
+    require:
+      - { cond: g_found, error: NoSuchEntity }
+    list: { resource: gm, member: Users, paginate: model }
+    output:
+      Group: g
+
+  UpdateGroup:
+    reads:
+      g: { resource: group }
+    require:
+      - { cond: g_found, error: NoSuchEntity }
+    effects:
+      - delete:
+          resource: group
+          key: "string(input.GroupName)"
+          when: "'NewGroupName' in input && string(input.NewGroupName) != ''"
+      - put:
+          resource: group
+          key: "'NewGroupName' in input && string(input.NewGroupName) != '' ? string(input.NewGroupName) : string(input.GroupName)"
+          record:
+            GroupName: "'NewGroupName' in input && string(input.NewGroupName) != '' ? string(input.NewGroupName) : string(input.GroupName)"
+            Arn: "'arn:aws:iam::' + identity.account + ':group/' + ('NewGroupName' in input && string(input.NewGroupName) != '' ? string(input.NewGroupName) : string(input.GroupName))"
+            Path: "'Path' in g ? g.Path : '/'"
+    output: {}
+
+  DeleteGroup:
+    effects:
+      - delete: { resource: group, missing: ignore }
+    output: {}
+
+  ListGroups:
+    list: { resource: group, member: Groups, paginate: model }
+
+  AddUserToGroup:
+    reads:
+      g: { resource: group }
+      u: { resource: user }
+    effects:
+      - create:
+          resource: gm
+          record:
+            UserName: "string(input.UserName)"
+            Arn: "u_found && 'Arn' in u ? u.Arn : null"
+      - create:
+          resource: ug
+          record:
+            GroupName: "string(input.GroupName)"
+            UserName: "string(input.UserName)"
+    output: {}
+
+  RemoveUserFromGroup:
+    reads:
+      g: { resource: group }
+      u: { resource: user }
+    effects:
+      - delete: { resource: gm, missing: ignore }
+      - delete: { resource: ug, missing: ignore }
+    output: {}
+
+  ListGroupsForUser:
+    reads:
+      u: { resource: user }
+    list: { resource: ug, member: Groups, paginate: model }
+
+  # --- inline group policies --------------------------------------------------------------
+
+  PutGroupPolicy:
+    effects:
+      - create: { resource: grouppolicy, spread: input }
+    output: {}
+
+  GetGroupPolicy:
+    reads:
+      p: { resource: grouppolicy }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    output:
+      GroupName: "'GroupName' in p ? p.GroupName : null"
+      PolicyName: "'PolicyName' in p ? p.PolicyName : null"
+      PolicyDocument: "'PolicyDocument' in p ? p.PolicyDocument : null"
+
+  DeleteGroupPolicy:
+    effects:
+      - delete: { resource: grouppolicy, missing: ignore }
+    output: {}
+
+  ListGroupPolicies:
+    list:
+      resource: grouppolicy
+      member: PolicyNames
+      paginate: model
+      filter: "string(item.GroupName) == string(input.GroupName)"
+    output:
+      PolicyNames: "items.map(p, p.PolicyName)"
+
+  AttachGroupPolicy:
+    effects:
+      - create:
+          resource: gattached
+          record:
+            PolicyArn: "string(input.PolicyArn)"
+            GroupName: "string(input.GroupName)"
+    output: {}
+
+  DetachGroupPolicy:
+    effects:
+      - delete: { resource: gattached, missing: ignore }
+    output: {}
+
+  ListAttachedGroupPolicies:
+    list:
+      resource: gattached
+      member: AttachedPolicies
+      paginate: model
+      filter: "string(item.GroupName) == string(input.GroupName)"
+
+  # --- instance profiles ----------------------------------------------------------------------
+
+  CreateInstanceProfile:
+    effects:
+      - create:
+          resource: ip
+          record:
+            InstanceProfileName: id
+            Arn: "'arn:aws:iam::' + identity.account + ':instance-profile/' + id"
+            Roles: "[]"
+    output:
+      InstanceProfile: rec
+
+  GetInstanceProfile:
+    reads:
+      p: { resource: ip }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    output:
+      InstanceProfile: p
+
+  DeleteInstanceProfile:
+    effects:
+      - delete: { resource: ip, missing: ignore }
+    output: {}
+
+  ListInstanceProfiles:
+    list: { resource: ip, member: InstanceProfiles, paginate: model }
+
+  # A role that was never created joins the profile as a bare name and the
+  # ARN it would have had; the pack fabricated the same record.
+  AddRoleToInstanceProfile:
+    reads:
+      p: { resource: ip }
+      r: { resource: role }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    effects:
+      - patch:
+          resource: ip
+          record:
+            Roles: "('Roles' in p ? p.Roles : []) + [r_found ? r : dyn({'RoleName': string(input.RoleName), 'Arn': 'arn:aws:iam::' + identity.account + ':role/' + string(input.RoleName)})]"
+      - create:
+          resource: iprole
+          record:
+            InstanceProfileName: "string(input.InstanceProfileName)"
+    output: {}
+
+  RemoveRoleFromInstanceProfile:
+    reads:
+      p: { resource: ip }
+      r: { resource: role }
+    effects:
+      - patch:
+          resource: ip
+          missing: ignore
+          record:
+            Roles: "('Roles' in p ? p.Roles : []).filter(x, string(x.RoleName) != string(input.RoleName))"
+      - delete: { resource: iprole, missing: ignore }
+    output: {}
+
+  ListInstanceProfilesForRole:
+    reads:
+      r: { resource: role }
+    list: { resource: iprole, member: InstanceProfiles, paginate: model }
+
+  # --- tags ---------------------------------------------------------------------------------------
+
+  TagRole:
+    effects:
+      - put:
+          resource: roletags
+          record:
+            Tags: input.Tags
+    output: {}
+
+  UntagRole:
+    effects:
+      - delete: { resource: roletags, missing: ignore }
+    output: {}
+
+  ListRoleTags:
+    reads:
+      t: { resource: roletags }
+    output:
+      Tags: "t_found && 'Tags' in t ? t.Tags : dyn([])"
+
+  TagUser:
+    effects:
+      - put:
+          resource: usertags
+          record:
+            Tags: input.Tags
+    output: {}
+
+  UntagUser:
+    effects:
+      - delete: { resource: usertags, missing: ignore }
+    output: {}
+
+  ListUserTags:
+    reads:
+      t: { resource: usertags }
+    output:
+      Tags: "t_found && 'Tags' in t ? t.Tags : dyn([])"
+
+  # --- account alias, password policy ---------------------------------------------------------------
+
+  CreateAccountAlias:
+    effects:
+      - create:
+          resource: alias
+          record:
+            AccountAlias: id
+    output: {}
+
+  ListAccountAliases:
+    list: { resource: alias, member: AccountAliases, paginate: model }
+
+  DeleteAccountAlias:
+    effects:
+      - delete: { resource: alias, missing: ignore }
+    output: {}
+
+  UpdateAccountPasswordPolicy:
+    effects:
+      - put: { resource: pwpolicy, spread: input }
+    output: {}
+
+  GetAccountPasswordPolicy:
+    reads:
+      p: { resource: pwpolicy }
+    require:
+      - { cond: p_found, error: NoSuchEntity }
+    output:
+      PasswordPolicy: p
+
+  DeleteAccountPasswordPolicy:
+    effects:
+      - delete: { resource: pwpolicy, missing: ignore }
+    output: {}
+
+  # --- OIDC providers ---------------------------------------------------------------------------------
+
+  CreateOpenIDConnectProvider:
+    effects:
+      - create:
+          resource: oidc
+          record:
+            Url: "string(input.Url)"
+            Arn: id
+            ClientIDList: "'ClientIDList' in input ? input.ClientIDList : null"
+            ThumbprintList: "'ThumbprintList' in input ? input.ThumbprintList : null"
+    output:
+      OpenIDConnectProviderArn: id
+
+  GetOpenIDConnectProvider:
+    reads:
+      o: { resource: oidc }
+    require:
+      - { cond: o_found, error: NoSuchEntity }
+    output:
+      Url: o.Url
+      ClientIDList: "'ClientIDList' in o ? o.ClientIDList : null"
+      ThumbprintList: "'ThumbprintList' in o ? o.ThumbprintList : null"
+
+  DeleteOpenIDConnectProvider:
+    effects:
+      - delete: { resource: oidc, missing: ignore }
+    output: {}
+
+  ListOpenIDConnectProviders:
+    list:
+      resource: oidc
+      member: OpenIDConnectProviderList
+      paginate: model
+    output:
+      OpenIDConnectProviderList: "items.map(o, {'Arn': o.Arn})"
+
+  UpdateOpenIDConnectProviderThumbprint:
+    reads:
+      o: { resource: oidc }
+    require:
+      - { cond: o_found, error: NoSuchEntity }
+    effects:
+      - patch:
+          resource: oidc
+          record:
+            ThumbprintList: input.ThumbprintList
+    output: {}
+
+  # --- SAML providers ------------------------------------------------------------------------------------
+
+  CreateSAMLProvider:
+    effects:
+      - create:
+          resource: saml
+          record:
+            Name: id
+            Arn: "'arn:aws:iam::' + identity.account + ':saml-provider/' + id"
+            SAMLMetadataDocument: "string(input.SAMLMetadataDocument)"
+    output:
+      SAMLProviderArn: rec.Arn
+
+  GetSAMLProvider:
+    reads:
+      s: { resource: saml }
+    require:
+      - { cond: s_found, error: NoSuchEntity }
+    output:
+      SAMLMetadataDocument: s.SAMLMetadataDocument
+
+  DeleteSAMLProvider:
+    effects:
+      - delete: { resource: saml, missing: ignore }
+    output: {}
+
+  ListSAMLProviders:
+    list: { resource: saml, member: SAMLProviderList, paginate: model }
+
+  UpdateSAMLProvider:
+    reads:
+      s: { resource: saml }
+    require:
+      - { cond: s_found, error: NoSuchEntity }
+    effects:
+      - patch:
+          resource: saml
+          when: "'SAMLMetadataDocument' in input && string(input.SAMLMetadataDocument) != ''"
+          record:
+            SAMLMetadataDocument: "string(input.SAMLMetadataDocument)"
+    output:
+      SAMLProviderArn: s.Arn
+
+  # --- leftover control-plane KV (the pack's extra.go) -------------------------
+
+  # Every operation below stores the request verbatim under <kind>:<id>, where
+
+  # id is the first of the chain members the request carries, or a generated
+
+  # hex id when it carries none. Writes replace, deletes ignore the absent,
+
+  # lists dump the whole kind, and a get of an absent id answers empty.
+
+  AcceptDelegationRequest:
+    let:
+      eid: "coalesce('DelegationRequestId' in input ? string(input.DelegationRequestId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: ldele
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            DelegationRequestId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  AcquireRole:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmisc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  AddClientIDToOpenIDConnectProvider:
+    let:
+      eid: "coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: loidc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            OpenIDConnectProviderArn: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  AssociateDelegationRequest:
+    let:
+      eid: "coalesce('DelegationRequestId' in input ? string(input.DelegationRequestId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: ldele
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            DelegationRequestId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  ChangePassword:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmisc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  CreateDelegationRequest:
+    let:
+      eid: "coalesce('DelegationRequestId' in input ? string(input.DelegationRequestId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: ldele
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            DelegationRequestId: "eid != '' ? eid : string(fx.gen)"
+    output:
+      DelegationRequestId: "eid != '' ? eid : string(fx.gen)"
+
+  CreateServiceLinkedRole:
+    let:
+      eid: "coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lslr
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            RoleName: "eid != '' ? eid : string(fx.gen)"
+    output:
+      Role: "rec"
+
+  CreateServiceSpecificCredential:
+    let:
+      eid: "coalesce('ServiceSpecificCredentialId' in input ? string(input.ServiceSpecificCredentialId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lssc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            ServiceSpecificCredentialId: "eid != '' ? eid : string(fx.gen)"
+    output:
+      ServiceSpecificCredential: "rec"
+
+  CreateVirtualMFADevice:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmfa
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            SerialNumber: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  DeactivateMFADevice:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lmfa, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DeleteRolePermissionsBoundary:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lbound, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DeleteSSHPublicKey:
+    let:
+      eid: "coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lssh, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DeleteServerCertificate:
+    let:
+      eid: "coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lscert, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DeleteServiceLinkedRole:
+    let:
+      eid: "coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lslr, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DeleteServiceSpecificCredential:
+    let:
+      eid: "coalesce('ServiceSpecificCredentialId' in input ? string(input.ServiceSpecificCredentialId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - delete: { resource: lssc, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DeleteSigningCertificate:
+    let:
+      eid: "coalesce('CertificateId' in input ? string(input.CertificateId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lsign, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DeleteUserPermissionsBoundary:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lbound, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DeleteVirtualMFADevice:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lmfa, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DisableOrganizationsRootCredentialsManagement:
+    let:
+      eid: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - delete: { resource: lorg, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DisableOrganizationsRootSessions:
+    let:
+      eid: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - delete: { resource: lorg, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  DisableOutboundWebIdentityFederation:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lmisc, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  EnableMFADevice:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmfa
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            SerialNumber: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  EnableOrganizationsRootCredentialsManagement:
+    let:
+      eid: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lorg
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            JobId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  EnableOrganizationsRootSessions:
+    let:
+      eid: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lorg
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            JobId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  EnableOutboundWebIdentityFederation:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmisc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  GenerateCredentialReport:
+    let:
+      eid: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lrep
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            JobId: "eid != '' ? eid : string(fx.gen)"
+            State: "'COMPLETE'"
+    output:
+      State: "'COMPLETE'"
+
+  GenerateOrganizationsAccessReport:
+    let:
+      eid: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lorg
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            JobId: "eid != '' ? eid : string(fx.gen)"
+            State: "'COMPLETE'"
+    output:
+      JobId: "eid != '' ? eid : string(fx.gen)"
+
+  GenerateServiceLastAccessedDetails:
+    let:
+      eid: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lrep
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            JobId: "eid != '' ? eid : string(fx.gen)"
+            State: "'COMPLETE'"
+    output:
+      JobId: "eid != '' ? eid : string(fx.gen)"
+
+  GetAccessKeyLastUsed:
+    output:
+      UserName: "'UserName' in input ? string(input.UserName) : ''"
+      AccessKeyLastUsed: "{'ServiceName': 'N/A'}"
+
+  GetAccountAuthorizationDetails:
+    reads:
+      x: { resource: lmisc, key: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  GetAccountProperties:
+    reads:
+      x: { resource: lmisc, key: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  GetContextKeysForCustomPolicy:
+    reads:
+      x: { resource: lmisc, key: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  GetContextKeysForPrincipalPolicy:
+    reads:
+      x: { resource: lmisc, key: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  GetCredentialReport:
+    output:
+      Content: "''"
+
+  GetDelegationRequest:
+    reads:
+      x: { resource: ldele, key: "coalesce('DelegationRequestId' in input ? string(input.DelegationRequestId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))" }
+    output:
+      DelegationRequest: "x_found ? dyn(x) : null"
+
+  GetHumanReadableSummary:
+    reads:
+      x: { resource: lmisc, key: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  GetMFADevice:
+    reads:
+      x: { resource: lmfa, key: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  GetOrganizationsAccessReport:
+    reads:
+      x: { resource: lorg, key: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))" }
+    output: {}
+
+  GetOutboundWebIdentityFederationInfo:
+    reads:
+      x: { resource: lmisc, key: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  GetRoleTemplateVersion:
+    reads:
+      x: { resource: lmisc, key: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  GetSSHPublicKey:
+    reads:
+      x: { resource: lssh, key: "coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output:
+      SSHPublicKey: "x_found ? dyn(x) : null"
+
+  GetServerCertificate:
+    reads:
+      x: { resource: lscert, key: "coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output:
+      ServerCertificate: "x_found ? dyn(x) : null"
+
+  GetServiceLastAccessedDetails:
+    reads:
+      x: { resource: lrep, key: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))" }
+    output: {}
+
+  GetServiceLastAccessedDetailsWithEntities:
+    reads:
+      x: { resource: lrep, key: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))" }
+    output: {}
+
+  GetServiceLinkedRoleDeletionStatus:
+    reads:
+      x: { resource: lslr, key: "coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))" }
+    output: {}
+
+  ListDelegationRequests:
+    let:
+      eid: "coalesce('DelegationRequestId' in input ? string(input.DelegationRequestId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    list:
+      resource: ldele
+      member: DelegationRequests
+      paginate: model
+      key: "eid"
+
+  ListEntitiesForPolicy:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lmisc
+      member: PolicyUsers
+      paginate: model
+      key: "eid"
+
+  ListInstanceProfileTags:
+    let:
+      eid: "coalesce('InstanceProfileName' in input ? string(input.InstanceProfileName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    list:
+      resource: lip
+      member: Tags
+      paginate: model
+      key: "eid"
+
+  ListMFADeviceTags:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lmfa
+      member: Tags
+      paginate: model
+      key: "eid"
+
+  ListMFADevices:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lmfa
+      member: MFADevices
+      paginate: model
+      key: "eid"
+
+  ListOpenIDConnectProviderTags:
+    let:
+      eid: "coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: loidc
+      member: Tags
+      paginate: model
+      key: "eid"
+
+  ListOrganizationsFeatures:
+    let:
+      eid: "coalesce('JobId' in input ? string(input.JobId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    list:
+      resource: lorg
+      member: EnabledFeatures
+      paginate: model
+      key: "eid"
+
+  ListPoliciesGrantingServiceAccess:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lmisc
+      member: PoliciesGrantingServiceAccess
+      paginate: model
+      key: "eid"
+
+  ListPolicyTags:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lmisc
+      member: Tags
+      paginate: model
+      key: "eid"
+
+  ListSAMLProviderTags:
+    let:
+      eid: "coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lsaml
+      member: Tags
+      paginate: model
+      key: "eid"
+
+  ListSSHPublicKeys:
+    let:
+      eid: "coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lssh
+      member: SSHPublicKeys
+      paginate: model
+      key: "eid"
+
+  ListServerCertificateTags:
+    let:
+      eid: "coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lscert
+      member: Tags
+      paginate: model
+      key: "eid"
+
+  ListServerCertificates:
+    let:
+      eid: "coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lscert
+      member: ServerCertificateMetadataList
+      paginate: model
+      key: "eid"
+
+  ListServiceSpecificCredentials:
+    let:
+      eid: "coalesce('ServiceSpecificCredentialId' in input ? string(input.ServiceSpecificCredentialId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    list:
+      resource: lssc
+      member: ServiceSpecificCredentials
+      paginate: model
+      key: "eid"
+
+  ListSigningCertificates:
+    let:
+      eid: "coalesce('CertificateId' in input ? string(input.CertificateId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', '')))))))))"
+    list:
+      resource: lsign
+      member: Certificates
+      paginate: model
+      key: "eid"
+
+  ListVirtualMFADevices:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    list:
+      resource: lmfa
+      member: VirtualMFADevices
+      paginate: model
+      key: "eid"
+
+  PutAccountProperties:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmisc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  PutRolePermissionsBoundary:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lbound
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  PutUserPermissionsBoundary:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lbound
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  RejectDelegationRequest:
+    let:
+      eid: "coalesce('DelegationRequestId' in input ? string(input.DelegationRequestId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - delete: { resource: ldele, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  RemoveClientIDFromOpenIDConnectProvider:
+    let:
+      eid: "coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: loidc, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  ResetServiceSpecificCredential:
+    let:
+      eid: "coalesce('ServiceSpecificCredentialId' in input ? string(input.ServiceSpecificCredentialId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lssc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            ServiceSpecificCredentialId: "eid != '' ? eid : string(fx.gen)"
+    output:
+      ServiceSpecificCredential: "rec"
+
+  ResyncMFADevice:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmfa
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            SerialNumber: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  SendDelegationToken:
+    let:
+      eid: "coalesce('DelegationRequestId' in input ? string(input.DelegationRequestId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: ldele
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            DelegationRequestId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  SetSecurityTokenServicePreferences:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmisc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  TagInstanceProfile:
+    let:
+      eid: "coalesce('InstanceProfileName' in input ? string(input.InstanceProfileName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lip
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            InstanceProfileName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  TagMFADevice:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmfa
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            SerialNumber: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  TagOpenIDConnectProvider:
+    let:
+      eid: "coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: loidc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            OpenIDConnectProviderArn: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  TagPolicy:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmisc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  TagSAMLProvider:
+    let:
+      eid: "coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lsaml
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            SAMLProviderArn: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  TagServerCertificate:
+    let:
+      eid: "coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lscert
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            ServerCertificateName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  UntagInstanceProfile:
+    let:
+      eid: "coalesce('InstanceProfileName' in input ? string(input.InstanceProfileName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - delete: { resource: lip, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  UntagMFADevice:
+    let:
+      eid: "coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lmfa, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  UntagOpenIDConnectProvider:
+    let:
+      eid: "coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: loidc, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  UntagPolicy:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lmisc, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  UntagSAMLProvider:
+    let:
+      eid: "coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lsaml, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  UntagServerCertificate:
+    let:
+      eid: "coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - delete: { resource: lscert, key: "eid", when: "eid != ''", missing: ignore }
+    output: {}
+
+  UpdateDelegationRequest:
+    let:
+      eid: "coalesce('DelegationRequestId' in input ? string(input.DelegationRequestId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: ldele
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            DelegationRequestId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  UpdateRoleDescription:
+    let:
+      eid: "coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lmisc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            UserName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  UpdateSSHPublicKey:
+    let:
+      eid: "coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lssh
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            SSHPublicKeyId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  UpdateServerCertificate:
+    let:
+      eid: "coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lscert
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            ServerCertificateName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  UpdateServiceSpecificCredential:
+    let:
+      eid: "coalesce('ServiceSpecificCredentialId' in input ? string(input.ServiceSpecificCredentialId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', ''))))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lssc
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            ServiceSpecificCredentialId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  UpdateSigningCertificate:
+    let:
+      eid: "coalesce('CertificateId' in input ? string(input.CertificateId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lsign
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            CertificateId: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  UploadSSHPublicKey:
+    let:
+      eid: "coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lssh
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            SSHPublicKeyId: "eid != '' ? eid : string(fx.gen)"
+    output:
+      SSHPublicKey: "rec"
+
+  UploadServerCertificate:
+    let:
+      eid: "coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', coalesce('CertificateId' in input ? string(input.CertificateId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lscert
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            ServerCertificateName: "eid != '' ? eid : string(fx.gen)"
+    output: {}
+
+  UploadSigningCertificate:
+    let:
+      eid: "coalesce('CertificateId' in input ? string(input.CertificateId) : '', coalesce('UserName' in input ? string(input.UserName) : '', coalesce('RoleName' in input ? string(input.RoleName) : '', coalesce('SerialNumber' in input ? string(input.SerialNumber) : '', coalesce('ServerCertificateName' in input ? string(input.ServerCertificateName) : '', coalesce('OpenIDConnectProviderArn' in input ? string(input.OpenIDConnectProviderArn) : '', coalesce('SAMLProviderArn' in input ? string(input.SAMLProviderArn) : '', coalesce('PolicyArn' in input ? string(input.PolicyArn) : '', coalesce('SSHPublicKeyId' in input ? string(input.SSHPublicKeyId) : '', '')))))))))"
+    effects:
+      - generate: { bind: gen, kind: hex, bytes: 8, when: "eid == ''" }
+      - create:
+          resource: lsign
+          key: "eid != '' ? eid : string(fx.gen)"
+          spread: input
+          record:
+            CertificateId: "eid != '' ? eid : string(fx.gen)"
+    output:
+      Certificate: "rec"
+
+quirks:
+  - operation: CreateRole
+    note: >
+      CreateRole and UpdateRole are one code path in the pack: both replace the
+      record wholesale, so an UpdateRole drops the AssumeRolePolicyDocument the
+      create stored (it reads a member UpdateRole does not declare and stores
+      null), and a Create over an existing name overwrites it where the real
+      service answers EntityAlreadyExists. UpdateRole's output shape declares
+      no members; the pack answered the Role record anyway, so that step is
+      recorded as superseded. UpdateUser and UpdateGroup have the same shape:
+      the pack answered the renamed record though both operations return the
+      unit shape.
+  - operation: UpdateUser
+    note: >
+      A rename deletes the old record and writes it under the new name, but
+      nothing else follows: access keys, login profiles, inline policies,
+      attachments and group memberships keep pointing at the old name, so a
+      renamed user's access keys stop listing under the new name and the old
+      name's GetGroup entry reads as the bare fallback. UpdateGroup renames
+      the same way. UpdateRoleDescription is not this operation: the pack's
+      leftover surface handles it as a flat lmisc write that stores the request
+      under the role's name, and the role record itself is unchanged.
+  - operation: CreatePolicy
+    note: >
+      The v1 version row is written alongside the policy, and DeletePolicy
+      removes only the policy record -- the versions are orphaned and
+      GetPolicyVersion still answers them. The pack keys policies by name,
+      preferring an undeclared PolicyName member over the declared PolicyArn
+      when both are present; the bundle's derive does the same.
+  - operation: CreatePolicyVersion
+    note: >
+      With SetAsDefault the pack updates the policy's DefaultVersionId and the
+      new version's stored IsDefaultVersion but never clears the old default's,
+      so ListPolicyVersions reports two defaults until SetDefaultPolicyVersion
+      runs; the transcription keeps that, and the recorded list steps show it.
+      The version id comes from a per-policy sequence the create seeds at v1.
+  - operation: DeletePolicyVersion
+    note: >
+      Deleting the policy's current default version is the pack's only
+      DeleteConflict; deleting a version that never existed succeeds, and
+      deleting one whose policy is already gone succeeds too.
+  - operation: CreateAccessKey
+    note: >
+      The key id is derived from the count of the user's existing keys, so
+      deleting the only key and creating again reissues the same id and the
+      same secret; the bundle draws fresh ones and the recorded reissue step
+      is superseded. ListAccessKeys strips the secret -- CreateAccessKey is
+      the only operation that ever answers it.
+  - operation: UpdateLoginProfile
+    note: >
+      Updating a profile that was never created conjures one holding only the
+      user name, where GetLoginProfile on a missing user faults. A
+      PasswordResetRequired the update omits is kept from the stored profile.
+  - operation: GetGroup
+    note: >
+      The pack joined member user records live at read time, falling back to a
+      bare {UserName} for a deleted user; the bundle stores the member's user
+      record at AddUserToGroup time, so a user whose record changes after the
+      add lists as of the add, and after a rename -- which deletes the old
+      record -- the pack answers the bare fallback while the bundle still
+      carries the snapshot's stale Arn. That path is not recorded.
+  - operation: AddRoleToInstanceProfile
+    note: >
+      A role that was never created joins the profile as a bare name and the
+      ARN it would have had. RemoveRoleFromInstanceProfile never faults: an
+      unknown profile answers success and the role-side marker is still
+      deleted. DeleteInstanceProfile orphans those markers, so
+      ListInstanceProfilesForRole lists profiles that no longer exist.
+  - operation: TagRole
+    note: >
+      Tag replaces the whole tag list stored under the name; Untag deletes all
+      of it, ignoring the TagKeys it was given. ListRoleTags and ListUserTags
+      answer an empty list for a name that was never tagged rather than
+      faulting. TagUser is the same.
+  - operation: CreateOpenIDConnectProvider
+    note: >
+      The provider ARN is the URL with its scheme stripped. The pack also
+      honored an undeclared URL member when Url was empty; the bundle does
+      not. GetOpenIDConnectProvider answers the stored Arn member, which the
+      response shape does not declare, so those steps are recorded as
+      superseded; GetSAMLProvider is the same with Name and Arn.
+  - operation: CreateSAMLProvider
+    note: >
+      Providers are keyed by the last path segment of whatever names them, so
+      a Name containing a slash is truncated to its last segment. The pack's
+      Name fallback on Get, Update and Delete is dead: the model requires
+      SAMLProviderArn and the engine rejects its absence before the rule runs.
+  - operation: GetAccountSummary
+    note: >
+      Not transcribed: the pack counts five collections and B-IR has no count,
+      so the bundle omits the operation and the shadow note carries it.
+  - operation: SimulatePrincipalPolicy
+    note: >
+      Not transcribed, with SimulateCustomPolicy: the pack runs the policy
+      decision engine (glob matching, the Condition operator vocabulary) and
+      reads SCP attachments from another account's scope for the
+      OrganizationsDecisionDetail member. Neither is expressible; both stay
+      with the pack, and the authorizer they share code with is what
+      internal/runtime consumes.
+  - operation: PutRolePolicy
+    note: >
+      Inline policies store the whole request verbatim and Get answers it
+      back; Put over an existing name replaces it. PutUserPolicy and
+      PutGroupPolicy are the same, and none of them check that the named role,
+      user or group exists. Deletes of inline policies and attachments are
+      idempotent, as is every delete in this service.
+  - operation: ListMFADevices
+    note: >
+      On the leftover surface a list that names an id falls through to a full
+      listing of the kind when that exact record is absent -- ListMFADevices
+      with a UserName lists every MFA device, not the user's -- and the one
+      recorded step naming an absent id is superseded; the bundle's keyed list
+      answers empty. The engine's model check also rejects requests missing
+      required members before any rule runs, where the pack folded the absence
+      to an empty-string key; those write-side paths are dead, and the
+      missing-input answer is NoSuchEntity, the pack's read-side one.
+  - operation: UploadServerCertificate
+    note: >
+      The leftover Update operations are writes: UpdateServerCertificate
+      replaces the certificate record with the update request, so the body and
+      private key are gone afterwards, and the recorded GetServerCertificate
+      after it shows exactly that. UploadSSHPublicKey, UploadSigningCertificate
+      and CreateServiceSpecificCredential are keyed by the user name when the
+      request carries no id member, so a second credential for one user
+      overwrites the first. Every leftover write answers the stored request
+      plus its id member whether or not the output shape declares them; those
+      steps are recorded as superseded, and the wire drops the undeclared
+      members either way. Untag*, Remove*, Deactivate*, Disable* and Reject*
+      all delete the named record itself -- UntagMFADevice deletes the device.
+      ListVirtualMFADevices answers under MFADevices, which the response does
+      not declare (it declares VirtualMFADevices), and the tag listings answer
+      under their kind's list member rather than Tags; the bundle answers the
+      declared member and those steps are superseded. GetCredentialReport
+      always answers an empty Content (its State COMPLETE is undeclared), and
+      GetAccessKeyLastUsed a constant N/A.

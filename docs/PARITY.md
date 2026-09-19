@@ -1414,7 +1414,7 @@ The counting contract, frozen by `TestVercelCensusDenominators`: the vendored do
 |---|---:|
 | Vercel REST document operations (vendored) | 417 |
 | Vercel REST document paths (vendored) | 297 |
-| Narrowed `vercel.api` model operations | 92 |
+| Narrowed `vercel.api` model operations | 104 |
 | `vercel.kv` authored-document operations | 1 (`Command`) |
 
 The pack's own characterization golden went with it; two equivalence recordings replace it -- 100 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer. 41 of the 100 are recorded from the pack; the 59 covering the operations the pack never served are authored against the bundle, which the recording itself says in its note.
@@ -1469,7 +1469,7 @@ Routing is the model's now, which widens the surface rather than narrowing it. T
 | `GET /v2/deployments/{id}/aliases` (`ListDeploymentAliases`) | Authored recording steps replay the one-entry listing after a create (CreateDeployment writes the alias row, as the oracle does) and an unknown deployment 404. The projection answers `uid` and `alias` -- the members the document's item shape declares of the four the oracle sends -- recorded as a quirk |
 | `GET /v3/deployments/{idOrUrl}/events` (`GetDeploymentEvents`) | Authored recording steps replay created/building/ready after a create, newest first (the oracle's default direction), the canceled event a cancel appends, and an unknown deployment 404; the response is the document's bare array |
 | `GET /v6/deployments/{id}/files` (`ListDeploymentFiles`) | Authored recording steps replay the root-wrapped tree with the uploaded file's descriptor and an unknown deployment 404. Bare array where the oracle wraps in `{files: [...]}`; the tree is flat -- recorded as quirks |
-| `PATCH /v12/deployments/{id}/cancel` (`CancelDeployment`) | Authored recording steps replay the cancel answering `readyState: CANCELED`, a second cancel 400/`bad_request`, an unknown deployment 404, and a later GetDeployment reading CANCELED back. The oracle's QUEUED/BUILDING-only guard is loosened to the reachable half -- recorded as a quirk |
+| `PATCH /v12/deployments/{id}/cancel` (`CancelDeployment`) | Authored recording steps replay the refusal: the oracle and mirror both birth deployments READY, so the QUEUED/BUILDING guard refuses every cancel with 400/`bad_request`, and an unknown deployment 404s. The loosened version of this guard answered 200 until the differential corpus caught it against the vendor's emulator -- recorded as a quirk |
 | `POST /v2/files` (`UploadFile`) | Authored recording steps replay the digest registration answering the document's empty object (the oracle answers a bare array; the model can serialize only the one oneOf arm) and a missing digest 400/`bad_request` |
 | `GET /v1/projects/{projectId}/promote/aliases` (`ListPromoteAliases`) | Authored recording steps replay the document's `{aliases, pagination}` arm (the oracle's `{status, alias}` shape is one the model cannot serialize) and an unknown project 404 |
 | `PATCH /v1/projects/{idOrName}/protection-bypass` (`UpdateProjectProtectionBypass`) | Authored recording steps replay generate with a caller-chosen secret, an update's note edit, a revoke-with-regenerate under a fresh secret, a plain revoke answering the empty map, and an unknown project 404. The map lives on the project record, which GetProjects now projects around -- recorded as a quirk |
@@ -1487,22 +1487,22 @@ The monorepo emulates fourteen providers; only `packages/@emulators/vercel` is t
 |---|---:|
 | emulate Vercel routes (vendor-authored oracle) | 52 |
 | emulate Vercel test functions | 26 |
-| emulate Vercel routes served by mirror | 31 / 52 |
+| emulate Vercel routes served by mirror | 52 / 52 |
 
 Serve state per emulate route group (method+path from `src/routes/*.ts`):
 
 | emulate route file | Routes | mirror serves | Missing |
 |---|---:|---:|---|
 | `projects.ts` | 7 | 7 | — |
-| `deployments.ts` | 10 | 9 | `GET /v6/deployments` — the vendored document does not declare it at any version, so there is nothing to narrow into the model (mirror answers `/v7`, the version the document declares) |
+| `deployments.ts` | 10 | 10 | `GET /v6/deployments` is served from the authored supplement (the oracle runs one handler for both versions) |
 | `domains.ts` (project domains) | 6 | 6 | — |
-| `env.ts` | 5 | 4 | `GET /v10/projects/{idOrName}/env/{id}` (get-one; mirror lists and edits) |
-| `user.ts` | 9 | 5 | `PATCH /v2/user`, `GET /registration`, `POST /v2/teams` and `GET /v2/teams/{teamId}/members` — the last two have no vendored-document counterpart, so there is no model operation to serve them with |
-| `api-keys.ts` | 3 | 0 | the whole token lifecycle |
-| `oauth.ts` | 4 | 0 | authorize/callback/token/userinfo |
-| `blob.ts` | 8 | 0 | Vercel Blob is a separate product mirror does not serve at all (KV is Upstash Redis, not Blob) |
+| `env.ts` | 5 | 5 | get-one included via the authored supplement |
+| `user.ts` | 9 | 9 | teams create + members, user patch and the registration probe all ride the authored supplement |
+| `api-keys.ts` | 3 | 3 | create/list/delete with the oracle's 401/404 envelope |
+| `oauth.ts` | 4 | 4 | the local flow end to end: authorize page (mirror's own minimal form markup, recorded as a quirk), callback issues one-shot codes, token exchange with PKCE S256, userinfo |
+| `blob.ts` | 8 | 8 | `vercel.blob` serves the whole data plane: upload (overwrite/ETag/suffix rules), list (folded/cursor/prefix), head, delete, content serving with 304 and `?download=1`; mpu answers the oracle's own 400 refusal |
 
-The 21-route gap is the expansion backlog, in order: the get-one env, teams create and members list and user patch (awaiting vendored-document coverage), api-keys, oauth, then Blob as a new `vercel.blob` service. Every addition lands as B-IR data on `behavior/vercel/` — no Go — and the parity claims here stay traceable to the oracle's route list.
+The gap is closed: every route the oracle registers is served, the supplement routes via an authored document (`specs/vercel/api-extra.json`, fused into `vercel.api` by `x-mirror-service`), Blob via `vercel.blob`. Everything lands as B-IR data on `behavior/vercel/` — the only Go is three generic codec capabilities the routes needed (header-member decode, form bodies, and the OAuth page/redirect wire shapes) — and the parity claims here stay traceable to the oracle's route list.
 
 ## SNS baseline
 

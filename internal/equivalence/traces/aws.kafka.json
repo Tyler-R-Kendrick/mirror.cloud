@@ -1,0 +1,200 @@
+{
+  "schema": "trace/1",
+  "service": "aws.kafka",
+  "source": "pack:internal/services/aws/kafka@77fba2e7",
+  "note": "Recorded from the hand-written pack in the commit that shadowed it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterInfoList": null
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/ghost/0000000000000000"
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "ClusterName": "c1",
+        "BrokerNodeGroupInfo": {"InstanceType": "kafka.t3.small"},
+        "KafkaVersion": "2.8.1",
+        "NumberOfBrokerNodes": 2
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c1/7c589129",
+        "ClusterName": "c1",
+        "State": "ACTIVE"
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "ClusterArn": {"$fromStep": 3, "$fromPath": "ClusterArn"}
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterInfo": {
+          "BrokerNodeGroupInfo": {"InstanceType": "kafka.t3.small"},
+          "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c1/7c589129",
+          "ClusterName": "c1",
+          "State": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "GetBootstrapBrokers",
+      "input": {
+        "ClusterArn": {"$fromStep": 3, "$fromPath": "ClusterArn"}
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "BootstrapBrokerString": "localhost:9092",
+        "BootstrapBrokerStringTls": "localhost:9094"
+      }
+    },
+    {
+      "operation": "ListNodes",
+      "input": {
+        "ClusterArn": {"$fromStep": 3, "$fromPath": "ClusterArn"}
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "NodeInfoList": [
+          {"BrokerNodeInfo": {"BrokerId": "1", "Endpoints": ["localhost:9092"]}}
+        ]
+      }
+    },
+    {
+      "operation": "UpdateBrokerCount",
+      "input": {
+        "ClusterArn": {"$fromStep": 3, "$fromPath": "ClusterArn"},
+        "CurrentVersion": "1",
+        "TargetNumberOfBrokerNodes": 3
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c1/7c589129",
+        "ClusterOperationArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c1/7c589129/op"
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "ClusterName": "c2",
+        "BrokerNodeGroupInfo": {"InstanceType": "kafka.m5.large"},
+        "KafkaVersion": "3.4.0",
+        "NumberOfBrokerNodes": 3
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c2/5f59f223",
+        "ClusterName": "c2",
+        "State": "ACTIVE"
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterInfoList": [
+          {
+            "BrokerNodeGroupInfo": {"InstanceType": "kafka.t3.small"},
+            "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c1/7c589129",
+            "ClusterName": "c1",
+            "State": "ACTIVE"
+          },
+          {
+            "BrokerNodeGroupInfo": {"InstanceType": "kafka.m5.large"},
+            "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c2/5f59f223",
+            "ClusterName": "c2",
+            "State": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterArn": {"$fromStep": 3, "$fromPath": "ClusterArn"}
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c1/7c589129",
+        "State": "DELETING"
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterArn": {"$fromStep": 3, "$fromPath": "ClusterArn"}
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c1/7c589129",
+        "State": "DELETING"
+      }
+    },
+    {
+      "operation": "DescribeCluster",
+      "input": {
+        "ClusterArn": {"$fromStep": 3, "$fromPath": "ClusterArn"}
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterInfoList": [
+          {
+            "BrokerNodeGroupInfo": {"InstanceType": "kafka.m5.large"},
+            "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/c2/5f59f223",
+            "ClusterName": "c2",
+            "State": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/ghost/0000000000000000"
+      },
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {
+        "ClusterArn": "arn:aws:kafka:us-east-1:000000000000:cluster/ghost/0000000000000000",
+        "State": "DELETING"
+      }
+    }
+  ]
+}

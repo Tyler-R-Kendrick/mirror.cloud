@@ -541,7 +541,7 @@
         "name": "example.com",
         "projectId": "prj_7c5891299f64",
         "updatedAt": 0,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -629,7 +629,7 @@
             "name": "example.com",
             "projectId": "prj_7c5891299f64",
             "updatedAt": 0,
-            "verified": true
+            "verified": false
           }
         ]
       },
@@ -1279,7 +1279,7 @@
         "name": "web2.example.com",
         "projectId": "prj_77df676fe2a7",
         "updatedAt": 0,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -1304,7 +1304,7 @@
         "redirect": null,
         "redirectStatusCode": null,
         "updatedAt": 0,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -1350,7 +1350,7 @@
         "redirect": "example.com",
         "redirectStatusCode": 307,
         "updatedAt": 0,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -1991,15 +1991,10 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "canceledAt": 0,
-        "createdAt": 0,
-        "id": "dpl_842605a09b0619a8",
-        "name": "orb",
-        "projectId": "prj_39bb7163b1cb",
-        "readyState": "CANCELED",
-        "type": "LAMBDAS",
-        "url": "orb-a0e8b5.vercel.app"
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
       }
     },
     {
@@ -2061,14 +2056,6 @@
           {
             "date": 0,
             "payload": {
-              "text": "Deployment canceled"
-            },
-            "serial": "0",
-            "type": "canceled"
-          },
-          {
-            "date": 0,
-            "payload": {
               "text": "Deployment ready"
             },
             "serial": "3",
@@ -2113,7 +2100,7 @@
         "id": "dpl_842605a09b0619a8",
         "name": "orb",
         "projectId": "prj_39bb7163b1cb",
-        "readyState": "CANCELED",
+        "readyState": "READY",
         "type": "LAMBDAS",
         "url": "orb-a0e8b5.vercel.app"
       }
@@ -2364,6 +2351,616 @@
       "fault": {
         "code": "not_found",
         "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetTeams",
+      "input": {
+        "authorization": "Bearer test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pagination": {
+          "count": 0,
+          "next": null,
+          "prev": null
+        },
+        "teams": null
+      }
+    },
+    {
+      "operation": "CreateTeam",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_authenticated",
+        "http_status": 401,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateTeam",
+      "input": {
+        "authorization": "Bearer test",
+        "slug": "  "
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "bad_request",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateTeam",
+      "input": {
+        "authorization": "Bearer test",
+        "slug": "acme"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "createdAt": 0,
+        "creatorId": "usr_000000000000",
+        "id": "team_ba094efe",
+        "membership": {
+          "confirmed": true,
+          "role": "OWNER"
+        },
+        "name": "acme",
+        "slug": "acme",
+        "updatedAt": 0
+      }
+    },
+    {
+      "operation": "CreateTeam",
+      "input": {
+        "authorization": "Bearer test",
+        "slug": "acme"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "team_slug_already_exists",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetTeams",
+      "input": {
+        "authorization": "Bearer test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "pagination": {
+          "count": 1,
+          "next": null,
+          "prev": null
+        },
+        "teams": [
+          {
+            "createdAt": 0,
+            "creatorId": "usr_000000000000",
+            "id": "team_ba094efe",
+            "membership": {
+              "confirmed": true,
+              "role": "OWNER"
+            },
+            "name": "acme",
+            "slug": "acme",
+            "updatedAt": 0
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListTeamMembers",
+      "input": {
+        "authorization": "Bearer test",
+        "teamId": "team_ba094efe"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "members": [
+          {
+            "email": "test@mirror.cloud",
+            "role": "OWNER",
+            "uid": "usr_000000000000",
+            "username": "test"
+          }
+        ],
+        "pagination": {
+          "count": 1,
+          "next": null,
+          "prev": null
+        }
+      }
+    },
+    {
+      "operation": "ListTeamMembers",
+      "input": {
+        "authorization": "Bearer test",
+        "teamId": "team_ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PatchTeam",
+      "input": {
+        "authorization": "Bearer test",
+        "teamId": "team_ba094efe",
+        "name": "Acme Inc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "createdAt": 0,
+        "creatorId": "usr_000000000000",
+        "id": "team_ba094efe",
+        "membership": {
+          "confirmed": true,
+          "role": "OWNER"
+        },
+        "name": "Acme Inc",
+        "slug": "acme",
+        "updatedAt": 0,
+        "billing": {
+          "addons": null,
+          "cancelation": null,
+          "period": null,
+          "plan": "hobby",
+          "trial": null
+        },
+        "resourceConfig": {
+          "concurrentBuilds": 1,
+          "nodeType": "standard"
+        },
+        "stagingPrefix": ""
+      }
+    },
+    {
+      "operation": "UpdateAuthUser",
+      "input": {
+        "authorization": "Bearer test",
+        "name": "Pat"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "user": {
+          "email": "test@mirror.cloud",
+          "id": "usr_000000000000",
+          "name": "Pat",
+          "username": "test"
+        }
+      }
+    },
+    {
+      "operation": "GetAuthUser",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "user": {
+          "email": "test@mirror.cloud",
+          "id": "usr_000000000000",
+          "name": "Pat",
+          "username": "test"
+        }
+      }
+    },
+    {
+      "operation": "GetRegistration",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "registration": false
+      }
+    },
+    {
+      "operation": "GetDeploymentsV6",
+      "input": {
+        "authorization": "Bearer test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deployments": [
+          {
+            "created": 0,
+            "createdAt": 0,
+            "name": "ghost",
+            "projectId": "prj_3ed10eca83a2",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_4da7b6a4902c3235",
+            "url": "ghost-e7175e.vercel.app"
+          },
+          {
+            "created": 0,
+            "createdAt": 0,
+            "name": "web2",
+            "projectId": "prj_77df676fe2a7",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_71a868c4bfb93e84",
+            "url": "web2-34ee92.vercel.app"
+          },
+          {
+            "created": 0,
+            "createdAt": 0,
+            "name": "orb",
+            "projectId": "prj_39bb7163b1cb",
+            "readyState": "READY",
+            "state": "READY",
+            "type": "LAMBDAS",
+            "uid": "dpl_842605a09b0619a8",
+            "url": "orb-a0e8b5.vercel.app"
+          }
+        ],
+        "pagination": {
+          "count": 3
+        }
+      }
+    },
+    {
+      "operation": "GetProjectEnv",
+      "input": {
+        "idOrName": "web",
+        "id": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListApiKeys",
+      "input": {
+        "authorization": "Bearer test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keys": null
+      }
+    },
+    {
+      "operation": "ListApiKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_authenticated",
+        "http_status": 401,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateApiKey",
+      "input": {
+        "authorization": "Bearer test",
+        "name": "ci"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "apiKey": {
+          "createdAt": 0,
+          "id": "ak_479ffc9f",
+          "name": "ci",
+          "teamId": null
+        },
+        "apiKeyString": "vercel_api_a3e03f5e760a05c4f9d4f3b6"
+      }
+    },
+    {
+      "operation": "ListApiKeys",
+      "input": {
+        "authorization": "Bearer test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keys": [
+          {
+            "createdAt": 0,
+            "id": "ak_479ffc9f",
+            "name": "ci",
+            "teamId": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApiKey",
+      "input": {
+        "authorization": "Bearer test",
+        "keyId": "ak_ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "not_found",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteApiKey",
+      "input": {
+        "authorization": "Bearer test",
+        "keyId": "ak_479ffc9f"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {}
+    },
+    {
+      "operation": "ListApiKeys",
+      "input": {
+        "authorization": "Bearer test"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "keys": null
+      }
+    },
+    {
+      "operation": "OauthAuthorize",
+      "input": {
+        "client_id": "client_x",
+        "redirect_uri": "http://localhost:3000/cb",
+        "state": "s9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "page": "<!doctype html><html><head><title>Sign in to Vercel</title></head><body><h1>Sign in to Vercel</h1><form method=\"post\" action=\"/oauth/authorize/callback\"><input type=\"hidden\" name=\"client_id\" value=\"client_x\"><input type=\"hidden\" name=\"redirect_uri\" value=\"http://localhost:3000/cb\"><input type=\"hidden\" name=\"scope\" value=\"\"><input type=\"hidden\" name=\"state\" value=\"s9\"><input type=\"hidden\" name=\"code_challenge\" value=\"\"><input type=\"hidden\" name=\"code_challenge_method\" value=\"\"><button type=\"submit\" name=\"username\" value=\"test\">Continue as test</button></form></body></html>"
+      }
+    },
+    {
+      "operation": "OauthAuthorizeCallback",
+      "input": {
+        "username": "test",
+        "redirect_uri": "http://localhost:3000/cb",
+        "state": "s9",
+        "client_id": "client_x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "code": "7130d138d77772d809f2",
+        "location": "http://localhost:3000/cb?code=7130d138d77772d809f2&state=s9"
+      }
+    },
+    {
+      "operation": "OauthToken",
+      "input": {
+        "code": "7130d138d77772d809f2",
+        "redirect_uri": "http://localhost:3000/cb",
+        "client_id": "client_x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "access_token": "vercel_a488f7edf3660dd14dfc",
+        "scope": "",
+        "token_type": "Bearer"
+      }
+    },
+    {
+      "operation": "OauthToken",
+      "input": {
+        "code": "7130d138d77772d809f2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "invalid_grant",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "OauthToken",
+      "input": {
+        "code": "deadbeef"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "invalid_grant",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "OauthUserinfo",
+      "input": {
+        "authorization": "Bearer vercel_a488f7edf3660dd14dfc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "email": "test@mirror.cloud",
+        "email_verified": true,
+        "name": "Pat",
+        "picture": "",
+        "preferred_username": "test",
+        "sub": "usr_000000000000"
+      }
+    },
+    {
+      "operation": "OauthUserinfo",
+      "input": {
+        "authorization": "Bearer never_issued"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "unauthorized",
+        "http_status": 401,
         "fault": "client"
       }
     }

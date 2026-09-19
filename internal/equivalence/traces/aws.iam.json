@@ -1,0 +1,5365 @@
+{
+  "schema": "trace/1",
+  "service": "aws.iam",
+  "source": "pack:internal/services/aws/iam@77fba2e7",
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The bundle is shadowed: SimulatePrincipalPolicy, SimulateCustomPolicy and GetAccountSummary are not transcribed (see the bundle's shadow note) and are deliberately not recorded. Superseded steps are ones where the pack answers members the operation's output shape does not declare -- the wire drops them, so the bundle answers the declared subset.",
+  "steps": [
+    {
+      "operation": "ListRoles",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Roles": []
+      }
+    },
+    {
+      "operation": "CreateRole",
+      "input": {
+        "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Role": {
+          "Arn": "arn:aws:iam::000000000000:role/r",
+          "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+          "RoleName": "r"
+        }
+      }
+    },
+    {
+      "operation": "GetRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Role": {
+          "Arn": "arn:aws:iam::000000000000:role/r",
+          "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+          "RoleName": "r"
+        }
+      }
+    },
+    {
+      "operation": "GetRole",
+      "input": {
+        "RoleName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateRole",
+      "input": {
+        "Description": "d",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Role": {
+          "Arn": "arn:aws:iam::000000000000:role/r",
+          "AssumeRolePolicyDocument": null,
+          "RoleName": "r"
+        }
+      },
+      "superseded": "UpdateRoleResponse declares no members; the pack answered the Role record anyway"
+    },
+    {
+      "operation": "GetRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Role": {
+          "Arn": "arn:aws:iam::000000000000:role/r",
+          "AssumeRolePolicyDocument": null,
+          "RoleName": "r"
+        }
+      }
+    },
+    {
+      "operation": "ListRoles",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Roles": [
+          {
+            "Arn": "arn:aws:iam::000000000000:role/r",
+            "AssumeRolePolicyDocument": null,
+            "RoleName": "r"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateAssumeRolePolicy",
+      "input": {
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Role": {
+          "Arn": "arn:aws:iam::000000000000:role/r",
+          "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+          "RoleName": "r"
+        }
+      }
+    },
+    {
+      "operation": "UpdateAssumeRolePolicy",
+      "input": {
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+        "RoleName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutRolePolicy",
+      "input": {
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+        "PolicyName": "inline",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetRolePolicy",
+      "input": {
+        "PolicyName": "inline",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+        "PolicyName": "inline",
+        "RoleName": "r"
+      }
+    },
+    {
+      "operation": "GetRolePolicy",
+      "input": {
+        "PolicyName": "absent",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutRolePolicy",
+      "input": {
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+        "PolicyName": "second",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRolePolicies",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyNames": [
+          "inline",
+          "second"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteRolePolicy",
+      "input": {
+        "PolicyName": "second",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteRolePolicy",
+      "input": {
+        "PolicyName": "second",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRolePolicies",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyNames": [
+          "inline"
+        ]
+      }
+    },
+    {
+      "operation": "CreatePolicy",
+      "input": {
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+        "PolicyName": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": {
+          "Arn": "arn:aws:iam::000000000000:policy/p",
+          "DefaultVersionId": "v1",
+          "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+          "PolicyName": "p"
+        }
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": {
+          "Arn": "arn:aws:iam::000000000000:policy/p",
+          "DefaultVersionId": "v1",
+          "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+          "PolicyName": "p"
+        }
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "PolicyArn": "arn:aws:iam::000000000000:policy/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListPolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policies": [
+          {
+            "Arn": "arn:aws:iam::000000000000:policy/p",
+            "DefaultVersionId": "v1",
+            "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+            "PolicyName": "p"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AttachRolePolicy",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAttachedRolePolicies",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AttachedPolicies": [
+          {
+            "PolicyArn": "arn:aws:iam::000000000000:policy/p",
+            "RoleName": "r"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetachRolePolicy",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAttachedRolePolicies",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AttachedPolicies": null
+      }
+    },
+    {
+      "operation": "CreatePolicyVersion",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+        "SetAsDefault": false
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyVersion": {
+          "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+          "IsDefaultVersion": false,
+          "VersionId": "v2"
+        }
+      }
+    },
+    {
+      "operation": "GetPolicyVersion",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "VersionId": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyVersion": {
+          "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+          "IsDefaultVersion": false,
+          "VersionId": "v2"
+        }
+      }
+    },
+    {
+      "operation": "GetPolicyVersion",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "VersionId": "v9"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListPolicyVersions",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Versions": [
+          {
+            "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+            "IsDefaultVersion": true,
+            "VersionId": "v1"
+          },
+          {
+            "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+            "IsDefaultVersion": false,
+            "VersionId": "v2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreatePolicyVersion",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Action\":\"s3:DeleteBucket\",\"Resource\":\"*\"}]}",
+        "SetAsDefault": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyVersion": {
+          "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Action\":\"s3:DeleteBucket\",\"Resource\":\"*\"}]}",
+          "IsDefaultVersion": true,
+          "VersionId": "v3"
+        }
+      }
+    },
+    {
+      "operation": "ListPolicyVersions",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Versions": [
+          {
+            "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+            "IsDefaultVersion": true,
+            "VersionId": "v1"
+          },
+          {
+            "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+            "IsDefaultVersion": false,
+            "VersionId": "v2"
+          },
+          {
+            "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Action\":\"s3:DeleteBucket\",\"Resource\":\"*\"}]}",
+            "IsDefaultVersion": true,
+            "VersionId": "v3"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SetDefaultPolicyVersion",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "VersionId": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPolicyVersions",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Versions": [
+          {
+            "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+            "IsDefaultVersion": false,
+            "VersionId": "v1"
+          },
+          {
+            "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+            "IsDefaultVersion": true,
+            "VersionId": "v2"
+          },
+          {
+            "Document": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Action\":\"s3:DeleteBucket\",\"Resource\":\"*\"}]}",
+            "IsDefaultVersion": false,
+            "VersionId": "v3"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": {
+          "Arn": "arn:aws:iam::000000000000:policy/p",
+          "DefaultVersionId": "v2",
+          "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+          "PolicyName": "p"
+        }
+      }
+    },
+    {
+      "operation": "DeletePolicyVersion",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "VersionId": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DeleteConflict",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SetDefaultPolicyVersion",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "VersionId": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeletePolicyVersion",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        },
+        "VersionId": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreatePolicyVersion",
+      "input": {
+        "PolicyArn": "arn:aws:iam::000000000000:policy/absent",
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeletePolicy",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeletePolicy",
+      "input": {
+        "PolicyArn": {
+          "$fromPath": "Policy.Arn",
+          "$fromStep": 18
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": []
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "UserName": "u"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Arn": "arn:aws:iam::000000000000:user/u",
+          "UserName": "u"
+        }
+      }
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "UserName": "u"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Arn": "arn:aws:iam::000000000000:user/u",
+          "UserName": "u"
+        }
+      }
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "UserName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateUser",
+      "input": {
+        "NewUserName": "u2",
+        "UserName": "u"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Arn": "arn:aws:iam::000000000000:user/u2",
+          "UserName": "u2"
+        }
+      },
+      "superseded": "UpdateUser returns the unit shape; the pack answered the renamed User record anyway"
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Arn": "arn:aws:iam::000000000000:user/u2",
+          "UserName": "u2"
+        }
+      }
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "UserName": "u"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateUser",
+      "input": {
+        "UserName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutUserPolicy",
+      "input": {
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+        "PolicyName": "up",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetUserPolicy",
+      "input": {
+        "PolicyName": "up",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+        "PolicyName": "up",
+        "UserName": "u2"
+      }
+    },
+    {
+      "operation": "ListUserPolicies",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyNames": [
+          "up"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUserPolicy",
+      "input": {
+        "PolicyName": "up",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetUserPolicy",
+      "input": {
+        "PolicyName": "up",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AttachUserPolicy",
+      "input": {
+        "PolicyArn": "arn:aws:iam::aws:policy/x",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAttachedUserPolicies",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AttachedPolicies": [
+          {
+            "PolicyArn": "arn:aws:iam::aws:policy/x",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetachUserPolicy",
+      "input": {
+        "PolicyArn": "arn:aws:iam::aws:policy/x",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAttachedUserPolicies",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AttachedPolicies": []
+      }
+    },
+    {
+      "operation": "CreateAccessKey",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessKey": {
+          "AccessKeyId": "6c39d31ca85619a31b9d",
+          "SecretAccessKey": "ab314831ec56501700804ff1beac9835959c6de0",
+          "Status": "Active",
+          "UserName": "u2"
+        }
+      }
+    },
+    {
+      "operation": "ListAccessKeys",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessKeyMetadata": [
+          {
+            "AccessKeyId": "6c39d31ca85619a31b9d",
+            "Status": "Active",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateAccessKey",
+      "input": {
+        "AccessKeyId": {
+          "$fromPath": "AccessKey.AccessKeyId",
+          "$fromStep": 59
+        },
+        "Status": "Inactive",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccessKeys",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessKeyMetadata": [
+          {
+            "AccessKeyId": "6c39d31ca85619a31b9d",
+            "Status": "Inactive",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAccessKey",
+      "input": {
+        "AccessKeyId": {
+          "$fromPath": "AccessKey.AccessKeyId",
+          "$fromStep": 59
+        },
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAccessKey",
+      "input": {
+        "AccessKeyId": {
+          "$fromPath": "AccessKey.AccessKeyId",
+          "$fromStep": 59
+        },
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccessKeys",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessKeyMetadata": null
+      }
+    },
+    {
+      "operation": "CreateAccessKey",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessKey": {
+          "AccessKeyId": "6c39d31ca85619a31b9d",
+          "SecretAccessKey": "ab314831ec56501700804ff1beac9835959c6de0",
+          "Status": "Active",
+          "UserName": "u2"
+        }
+      },
+      "superseded": "the pack derives the key id from the count of the user's existing keys, so deleting the only key and creating again reissues the same id and secret; the bundle draws fresh ones, and the next delete addresses each side's own key by reference"
+    },
+    {
+      "operation": "DeleteAccessKey",
+      "input": {
+        "AccessKeyId": {
+          "$fromStep": 66,
+          "$fromPath": "AccessKey.AccessKeyId"
+        },
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccessKeys",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessKeyMetadata": null
+      }
+    },
+    {
+      "operation": "UpdateAccessKey",
+      "input": {
+        "AccessKeyId": "ffffffffffffffffffff",
+        "Status": "Active",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetLoginProfile",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateLoginProfile",
+      "input": {
+        "Password": "pw",
+        "PasswordResetRequired": true,
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoginProfile": {
+          "PasswordResetRequired": true,
+          "UserName": "u2"
+        }
+      }
+    },
+    {
+      "operation": "GetLoginProfile",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoginProfile": {
+          "PasswordResetRequired": true,
+          "UserName": "u2"
+        }
+      }
+    },
+    {
+      "operation": "UpdateLoginProfile",
+      "input": {
+        "PasswordResetRequired": false,
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetLoginProfile",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoginProfile": {
+          "PasswordResetRequired": false,
+          "UserName": "u2"
+        }
+      }
+    },
+    {
+      "operation": "UpdateLoginProfile",
+      "input": {
+        "PasswordResetRequired": true,
+        "UserName": "ghost2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetLoginProfile",
+      "input": {
+        "UserName": "ghost2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoginProfile": {
+          "PasswordResetRequired": true,
+          "UserName": "ghost2"
+        }
+      }
+    },
+    {
+      "operation": "DeleteLoginProfile",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetLoginProfile",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteLoginProfile",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Groups": []
+      }
+    },
+    {
+      "operation": "CreateGroup",
+      "input": {
+        "GroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Arn": "arn:aws:iam::000000000000:group/g",
+          "GroupName": "g",
+          "Path": "/"
+        }
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Arn": "arn:aws:iam::000000000000:group/g",
+          "GroupName": "g",
+          "Path": "/"
+        },
+        "Users": null
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateGroup",
+      "input": {
+        "GroupName": "g",
+        "NewGroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Arn": "arn:aws:iam::000000000000:group/g2",
+          "GroupName": "g2",
+          "Path": "/"
+        }
+      },
+      "superseded": "UpdateGroup returns the unit shape; the pack answered the renamed Group record anyway"
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Arn": "arn:aws:iam::000000000000:group/g2",
+          "GroupName": "g2",
+          "Path": "/"
+        },
+        "Users": null
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "g"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateGroup",
+      "input": {
+        "GroupName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddUserToGroup",
+      "input": {
+        "GroupName": "g2",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Arn": "arn:aws:iam::000000000000:group/g2",
+          "GroupName": "g2",
+          "Path": "/"
+        },
+        "Users": [
+          {
+            "Arn": "arn:aws:iam::000000000000:user/u2",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListGroupsForUser",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Groups": [
+          {
+            "GroupName": "g2",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutGroupPolicy",
+      "input": {
+        "GroupName": "g2",
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+        "PolicyName": "gp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetGroupPolicy",
+      "input": {
+        "GroupName": "g2",
+        "PolicyName": "gp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GroupName": "g2",
+        "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"*\"}]}",
+        "PolicyName": "gp"
+      }
+    },
+    {
+      "operation": "ListGroupPolicies",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyNames": [
+          "gp"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteGroupPolicy",
+      "input": {
+        "GroupName": "g2",
+        "PolicyName": "gp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetGroupPolicy",
+      "input": {
+        "GroupName": "g2",
+        "PolicyName": "gp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AttachGroupPolicy",
+      "input": {
+        "GroupName": "g2",
+        "PolicyArn": "arn:aws:iam::aws:policy/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAttachedGroupPolicies",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AttachedPolicies": [
+          {
+            "GroupName": "g2",
+            "PolicyArn": "arn:aws:iam::aws:policy/x"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetachGroupPolicy",
+      "input": {
+        "GroupName": "g2",
+        "PolicyArn": "arn:aws:iam::aws:policy/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAttachedGroupPolicies",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AttachedPolicies": []
+      }
+    },
+    {
+      "operation": "RemoveUserFromGroup",
+      "input": {
+        "GroupName": "g2",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Arn": "arn:aws:iam::000000000000:group/g2",
+          "GroupName": "g2",
+          "Path": "/"
+        },
+        "Users": null
+      }
+    },
+    {
+      "operation": "ListGroupsForUser",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Groups": []
+      }
+    },
+    {
+      "operation": "RemoveUserFromGroup",
+      "input": {
+        "GroupName": "g2",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteGroup",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteGroup",
+      "input": {
+        "GroupName": "g2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfile": {
+          "Arn": "arn:aws:iam::000000000000:instance-profile/ip",
+          "InstanceProfileName": "ip",
+          "Roles": []
+        }
+      }
+    },
+    {
+      "operation": "GetInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfile": {
+          "Arn": "arn:aws:iam::000000000000:instance-profile/ip",
+          "InstanceProfileName": "ip",
+          "Roles": []
+        }
+      }
+    },
+    {
+      "operation": "GetInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddRoleToInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfile": {
+          "Arn": "arn:aws:iam::000000000000:instance-profile/ip",
+          "InstanceProfileName": "ip",
+          "Roles": [
+            {
+              "Arn": "arn:aws:iam::000000000000:role/r",
+              "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+              "RoleName": "r"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "ListInstanceProfilesForRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfiles": [
+          {
+            "InstanceProfileName": "ip"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AddRoleToInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip",
+        "RoleName": "ghostrole"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfile": {
+          "Arn": "arn:aws:iam::000000000000:instance-profile/ip",
+          "InstanceProfileName": "ip",
+          "Roles": [
+            {
+              "Arn": "arn:aws:iam::000000000000:role/r",
+              "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+              "RoleName": "r"
+            },
+            {
+              "Arn": "arn:aws:iam::000000000000:role/ghostrole",
+              "RoleName": "ghostrole"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "RemoveRoleFromInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip",
+        "RoleName": "ghostrole"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfile": {
+          "Arn": "arn:aws:iam::000000000000:instance-profile/ip",
+          "InstanceProfileName": "ip",
+          "Roles": [
+            {
+              "Arn": "arn:aws:iam::000000000000:role/r",
+              "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+              "RoleName": "r"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "AddRoleToInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ghost",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "RemoveRoleFromInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ghost",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListInstanceProfiles",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfiles": [
+          {
+            "Arn": "arn:aws:iam::000000000000:instance-profile/ip",
+            "InstanceProfileName": "ip",
+            "Roles": [
+              {
+                "Arn": "arn:aws:iam::000000000000:role/r",
+                "AssumeRolePolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[]}",
+                "RoleName": "r"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ip"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListInstanceProfilesForRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfiles": [
+          {
+            "InstanceProfileName": "ip"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "TagRole",
+      "input": {
+        "RoleName": "r",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRoleTags",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "TagRole",
+      "input": {
+        "RoleName": "r",
+        "Tags": [
+          {
+            "Key": "a",
+            "Value": "b"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRoleTags",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "a",
+            "Value": "b"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagRole",
+      "input": {
+        "RoleName": "r",
+        "TagKeys": [
+          "a"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRoleTags",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "ListRoleTags",
+      "input": {
+        "RoleName": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "TagUser",
+      "input": {
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ],
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListUserTags",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagUser",
+      "input": {
+        "TagKeys": [
+          "k"
+        ],
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListUserTags",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "CreateAccountAlias",
+      "input": {
+        "AccountAlias": "alias1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccountAliases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAliases": [
+          {
+            "AccountAlias": "alias1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateAccountAlias",
+      "input": {
+        "AccountAlias": "alias2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccountAliases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAliases": [
+          {
+            "AccountAlias": "alias1"
+          },
+          {
+            "AccountAlias": "alias2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAccountAlias",
+      "input": {
+        "AccountAlias": "alias1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAccountAlias",
+      "input": {
+        "AccountAlias": "alias1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAccountAliases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountAliases": [
+          {
+            "AccountAlias": "alias2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetAccountPasswordPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateAccountPasswordPolicy",
+      "input": {
+        "MinimumPasswordLength": 12
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAccountPasswordPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PasswordPolicy": {
+          "MinimumPasswordLength": 12
+        }
+      }
+    },
+    {
+      "operation": "DeleteAccountPasswordPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAccountPasswordPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteAccountPasswordPolicy",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateOpenIDConnectProvider",
+      "input": {
+        "ClientIDList": [
+          "c1"
+        ],
+        "ThumbprintList": [
+          "t1"
+        ],
+        "Url": "https://oidc.example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/oidc.example.com"
+      }
+    },
+    {
+      "operation": "GetOpenIDConnectProvider",
+      "input": {
+        "OpenIDConnectProviderArn": {
+          "$fromPath": "OpenIDConnectProviderArn",
+          "$fromStep": 148
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iam::000000000000:oidc-provider/oidc.example.com",
+        "ClientIDList": [
+          "c1"
+        ],
+        "ThumbprintList": [
+          "t1"
+        ],
+        "Url": "https://oidc.example.com"
+      },
+      "superseded": "the pack answers the stored Arn member, which GetOpenIDConnectProviderResponse does not declare"
+    },
+    {
+      "operation": "ListOpenIDConnectProviders",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OpenIDConnectProviderList": [
+          {
+            "Arn": "arn:aws:iam::000000000000:oidc-provider/oidc.example.com"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateOpenIDConnectProviderThumbprint",
+      "input": {
+        "OpenIDConnectProviderArn": {
+          "$fromPath": "OpenIDConnectProviderArn",
+          "$fromStep": 148
+        },
+        "ThumbprintList": [
+          "t2"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetOpenIDConnectProvider",
+      "input": {
+        "OpenIDConnectProviderArn": {
+          "$fromPath": "OpenIDConnectProviderArn",
+          "$fromStep": 148
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iam::000000000000:oidc-provider/oidc.example.com",
+        "ClientIDList": [
+          "c1"
+        ],
+        "ThumbprintList": [
+          "t2"
+        ],
+        "Url": "https://oidc.example.com"
+      },
+      "superseded": "the pack answers the stored Arn member, which GetOpenIDConnectProviderResponse does not declare"
+    },
+    {
+      "operation": "GetOpenIDConnectProvider",
+      "input": {
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteOpenIDConnectProvider",
+      "input": {
+        "OpenIDConnectProviderArn": {
+          "$fromPath": "OpenIDConnectProviderArn",
+          "$fromStep": 148
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteOpenIDConnectProvider",
+      "input": {
+        "OpenIDConnectProviderArn": {
+          "$fromPath": "OpenIDConnectProviderArn",
+          "$fromStep": 148
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetOpenIDConnectProvider",
+      "input": {
+        "OpenIDConnectProviderArn": {
+          "$fromPath": "OpenIDConnectProviderArn",
+          "$fromStep": 148
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateSAMLProvider",
+      "input": {
+        "Name": "saml1",
+        "SAMLMetadataDocument": "<xml/>"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SAMLProviderArn": "arn:aws:iam::000000000000:saml-provider/saml1"
+      }
+    },
+    {
+      "operation": "GetSAMLProvider",
+      "input": {
+        "SAMLProviderArn": {
+          "$fromPath": "SAMLProviderArn",
+          "$fromStep": 157
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iam::000000000000:saml-provider/saml1",
+        "Name": "saml1",
+        "SAMLMetadataDocument": "<xml/>"
+      },
+      "superseded": "the pack answers the stored Name and Arn members, which GetSAMLProviderResponse does not declare"
+    },
+    {
+      "operation": "UpdateSAMLProvider",
+      "input": {
+        "SAMLMetadataDocument": "<xml2/>",
+        "SAMLProviderArn": {
+          "$fromPath": "SAMLProviderArn",
+          "$fromStep": 157
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SAMLProviderArn": "arn:aws:iam::000000000000:saml-provider/saml1"
+      }
+    },
+    {
+      "operation": "GetSAMLProvider",
+      "input": {
+        "SAMLProviderArn": {
+          "$fromPath": "SAMLProviderArn",
+          "$fromStep": 157
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iam::000000000000:saml-provider/saml1",
+        "Name": "saml1",
+        "SAMLMetadataDocument": "<xml2/>"
+      },
+      "superseded": "the pack answers the stored Name and Arn members, which GetSAMLProviderResponse does not declare"
+    },
+    {
+      "operation": "ListSAMLProviders",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SAMLProviderList": [
+          {
+            "Arn": "arn:aws:iam::000000000000:saml-provider/saml1",
+            "Name": "saml1",
+            "SAMLMetadataDocument": "<xml2/>"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateSAMLProvider",
+      "input": {
+        "SAMLMetadataDocument": "<xml3/>",
+        "SAMLProviderArn": "arn:aws:iam::000000000000:saml-provider/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteSAMLProvider",
+      "input": {
+        "SAMLProviderArn": {
+          "$fromPath": "SAMLProviderArn",
+          "$fromStep": 157
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetSAMLProvider",
+      "input": {
+        "SAMLProviderArn": {
+          "$fromPath": "SAMLProviderArn",
+          "$fromStep": 157
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteSAMLProvider",
+      "input": {
+        "SAMLProviderArn": {
+          "$fromPath": "SAMLProviderArn",
+          "$fromStep": 157
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateDelegationRequest",
+      "input": {
+        "Description": "d",
+        "NotificationChannel": "ch",
+        "Permissions": {
+          "Service": "s"
+        },
+        "RequestorWorkflowId": "w",
+        "SessionDuration": 3600
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequest": {
+          "DelegationRequestId": "7c589129",
+          "Description": "d",
+          "NotificationChannel": "ch",
+          "Permissions": {
+            "Service": "s"
+          },
+          "RequestorWorkflowId": "w",
+          "SessionDuration": 3600
+        },
+        "DelegationRequestId": "7c589129"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "GetDelegationRequest",
+      "input": {
+        "DelegationRequestId": {
+          "$fromStep": 166,
+          "$fromPath": "DelegationRequestId"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequest": {
+          "DelegationRequestId": "7c589129",
+          "Description": "d",
+          "NotificationChannel": "ch",
+          "Permissions": {
+            "Service": "s"
+          },
+          "RequestorWorkflowId": "w",
+          "SessionDuration": 3600
+        }
+      }
+    },
+    {
+      "operation": "AcceptDelegationRequest",
+      "input": {
+        "DelegationRequestId": "zzzd1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequest": {
+          "DelegationRequestId": "zzzd1"
+        },
+        "DelegationRequestId": "zzzd1"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "AssociateDelegationRequest",
+      "input": {
+        "DelegationRequestId": "zzzd1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequest": {
+          "DelegationRequestId": "zzzd1"
+        },
+        "DelegationRequestId": "zzzd1"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "UpdateDelegationRequest",
+      "input": {
+        "DelegationRequestId": "zzzd1",
+        "Notes": "n"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequest": {
+          "DelegationRequestId": "zzzd1",
+          "Notes": "n"
+        },
+        "DelegationRequestId": "zzzd1"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "SendDelegationToken",
+      "input": {
+        "DelegationRequestId": "zzzd1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequest": {
+          "DelegationRequestId": "zzzd1"
+        },
+        "DelegationRequestId": "zzzd1"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListDelegationRequests",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequests": [
+          {
+            "DelegationRequestId": "7c589129",
+            "Description": "d",
+            "NotificationChannel": "ch",
+            "Permissions": {
+              "Service": "s"
+            },
+            "RequestorWorkflowId": "w",
+            "SessionDuration": 3600
+          },
+          {
+            "DelegationRequestId": "zzzd1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RejectDelegationRequest",
+      "input": {
+        "DelegationRequestId": "zzzd1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDelegationRequests",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequests": [
+          {
+            "DelegationRequestId": "7c589129",
+            "Description": "d",
+            "NotificationChannel": "ch",
+            "Permissions": {
+              "Service": "s"
+            },
+            "RequestorWorkflowId": "w",
+            "SessionDuration": 3600
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetDelegationRequest",
+      "input": {
+        "DelegationRequestId": "zzzd1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DelegationRequest": {}
+      }
+    },
+    {
+      "operation": "ChangePassword",
+      "input": {
+        "NewPassword": "b",
+        "OldPassword": "a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NewPassword": "b",
+        "OldPassword": "a",
+        "UserName": "5f59f223"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "AcquireRole",
+      "input": {
+        "TemplateArn": "arn:aws:iam::000000000000:role-template/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TemplateArn": "arn:aws:iam::000000000000:role-template/x",
+        "UserName": "9c8e2cb0"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "GetRoleTemplateVersion",
+      "input": {
+        "TemplateArn": "arn:aws:iam::000000000000:role-template/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAccountAuthorizationDetails",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAccountProperties",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutAccountProperties",
+      "input": {
+        "Properties": {
+          "k": "v"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Properties": {
+          "k": "v"
+        },
+        "UserName": "33f6fc5d"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "SetSecurityTokenServicePreferences",
+      "input": {
+        "GlobalEndpointTokenVersion": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GlobalEndpointTokenVersion": "v2",
+        "UserName": "83d4958a"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "GetContextKeysForCustomPolicy",
+      "input": {
+        "PolicyInputList": [
+          "{}"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetContextKeysForPrincipalPolicy",
+      "input": {
+        "PolicySourceArn": {
+          "$fromPath": "Role.Arn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetHumanReadableSummary",
+      "input": {
+        "EntityArn": {
+          "$fromPath": "Role.Arn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetOutboundWebIdentityFederationInfo",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "EnableOutboundWebIdentityFederation",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserName": "100aa4e6"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "DisableOutboundWebIdentityFederation",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAccessKeyLastUsed",
+      "input": {
+        "AccessKeyId": "ZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessKeyLastUsed": {
+          "ServiceName": "N/A"
+        },
+        "UserName": ""
+      }
+    },
+    {
+      "operation": "GetAccessKeyLastUsed",
+      "input": {
+        "AccessKeyId": "ZZZZZZZZZZZZZZZZZZZZ",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccessKeyLastUsed": {
+          "ServiceName": "N/A"
+        },
+        "UserName": "u2"
+      }
+    },
+    {
+      "operation": "PutRolePermissionsBoundary",
+      "input": {
+        "PermissionsBoundary": "arn:aws:iam::000000000000:policy/pb",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PermissionsBoundary": "arn:aws:iam::000000000000:policy/pb",
+        "RoleName": "r",
+        "UserName": "r"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "DeleteRolePermissionsBoundary",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutUserPermissionsBoundary",
+      "input": {
+        "PermissionsBoundary": "arn:aws:iam::000000000000:policy/pb",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PermissionsBoundary": "arn:aws:iam::000000000000:policy/pb",
+        "UserName": "u2"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "DeleteUserPermissionsBoundary",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateVirtualMFADevice",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/m1",
+        "VirtualMFADeviceName": "m1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevice": {
+          "SerialNumber": "arn:aws:iam::000000000000:mfa/m1",
+          "VirtualMFADeviceName": "m1"
+        },
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/m1"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "CreateVirtualMFADevice",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/m2",
+        "VirtualMFADeviceName": "m2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevice": {
+          "SerialNumber": "arn:aws:iam::000000000000:mfa/m2",
+          "VirtualMFADeviceName": "m2"
+        },
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/m2"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "EnableMFADevice",
+      "input": {
+        "AuthenticationCode1": "1",
+        "AuthenticationCode2": "2",
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevice": {
+          "AuthenticationCode1": "1",
+          "AuthenticationCode2": "2",
+          "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+          "UserName": "u2"
+        },
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ResyncMFADevice",
+      "input": {
+        "AuthenticationCode1": "3",
+        "AuthenticationCode2": "4",
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevice": {
+          "AuthenticationCode1": "3",
+          "AuthenticationCode2": "4",
+          "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+          "UserName": "u2"
+        },
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListMFADevices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevices": [
+          {
+            "AuthenticationCode1": "3",
+            "AuthenticationCode2": "4",
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+            "UserName": "u2"
+          },
+          {
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/m1",
+            "VirtualMFADeviceName": "m1"
+          },
+          {
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/m2",
+            "VirtualMFADeviceName": "m2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListMFADevices",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevices": [
+          {
+            "AuthenticationCode1": "3",
+            "AuthenticationCode2": "4",
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+            "UserName": "u2"
+          },
+          {
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/m1",
+            "VirtualMFADeviceName": "m1"
+          },
+          {
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/m2",
+            "VirtualMFADeviceName": "m2"
+          }
+        ]
+      },
+      "superseded": "the pack falls through to a full listing of the kind when the named record is absent; the bundle's keyed list answers empty"
+    },
+    {
+      "operation": "GetMFADevice",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevice": {
+          "AuthenticationCode1": "3",
+          "AuthenticationCode2": "4",
+          "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+          "UserName": "u2"
+        }
+      },
+      "superseded": "the pack wraps the record as MFADevice, which GetMFADeviceResponse does not declare"
+    },
+    {
+      "operation": "GetMFADevice",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevice": {}
+      }
+    },
+    {
+      "operation": "TagMFADevice",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevice": {
+          "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+          "Tags": [
+            {
+              "Key": "k",
+              "Value": "v"
+            }
+          ]
+        },
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListMFADeviceTags",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevices": [
+          {
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "the pack answers under MFADevices, which the response does not declare (it declares Tags)"
+    },
+    {
+      "operation": "UntagMFADevice",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/e1",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeactivateMFADevice",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/m2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListVirtualMFADevices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevices": [
+          {
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/m1",
+            "VirtualMFADeviceName": "m1"
+          }
+        ]
+      },
+      "superseded": "the pack answers under MFADevices, which the response does not declare (it declares VirtualMFADevices)"
+    },
+    {
+      "operation": "DeleteVirtualMFADevice",
+      "input": {
+        "SerialNumber": "arn:aws:iam::000000000000:mfa/m2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListMFADevices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MFADevices": [
+          {
+            "SerialNumber": "arn:aws:iam::000000000000:mfa/m1",
+            "VirtualMFADeviceName": "m1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UploadSSHPublicKey",
+      "input": {
+        "SSHPublicKeyBody": "ssh-rsa AAAA",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SSHPublicKey": {
+          "SSHPublicKeyBody": "ssh-rsa AAAA",
+          "SSHPublicKeyId": "u2",
+          "UserName": "u2"
+        },
+        "SSHPublicKeyId": "u2"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "GetSSHPublicKey",
+      "input": {
+        "Encoding": "PEM",
+        "SSHPublicKeyId": "u2",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SSHPublicKey": {
+          "SSHPublicKeyBody": "ssh-rsa AAAA",
+          "SSHPublicKeyId": "u2",
+          "UserName": "u2"
+        }
+      }
+    },
+    {
+      "operation": "GetSSHPublicKey",
+      "input": {
+        "Encoding": "PEM",
+        "SSHPublicKeyId": "absent0",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SSHPublicKey": {}
+      }
+    },
+    {
+      "operation": "ListSSHPublicKeys",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SSHPublicKeys": [
+          {
+            "SSHPublicKeyBody": "ssh-rsa AAAA",
+            "SSHPublicKeyId": "u2",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListSSHPublicKeys",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SSHPublicKeys": [
+          {
+            "SSHPublicKeyBody": "ssh-rsa AAAA",
+            "SSHPublicKeyId": "u2",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateSSHPublicKey",
+      "input": {
+        "SSHPublicKeyId": "u2",
+        "Status": "Inactive",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SSHPublicKey": {
+          "SSHPublicKeyId": "u2",
+          "Status": "Inactive",
+          "UserName": "u2"
+        },
+        "SSHPublicKeyId": "u2"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "DeleteSSHPublicKey",
+      "input": {
+        "SSHPublicKeyId": "u2",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListSSHPublicKeys",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SSHPublicKeys": []
+      }
+    },
+    {
+      "operation": "UploadServerCertificate",
+      "input": {
+        "CertificateBody": "c",
+        "PrivateKey": "p",
+        "ServerCertificateName": "cert"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerCertificate": {
+          "CertificateBody": "c",
+          "PrivateKey": "p",
+          "ServerCertificateName": "cert"
+        },
+        "ServerCertificateName": "cert"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "GetServerCertificate",
+      "input": {
+        "ServerCertificateName": "cert"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerCertificate": {
+          "CertificateBody": "c",
+          "PrivateKey": "p",
+          "ServerCertificateName": "cert"
+        }
+      }
+    },
+    {
+      "operation": "UpdateServerCertificate",
+      "input": {
+        "ServerCertificateName": "cert"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerCertificate": {
+          "ServerCertificateName": "cert"
+        },
+        "ServerCertificateName": "cert"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "GetServerCertificate",
+      "input": {
+        "ServerCertificateName": "cert"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerCertificate": {
+          "ServerCertificateName": "cert"
+        }
+      }
+    },
+    {
+      "operation": "TagServerCertificate",
+      "input": {
+        "ServerCertificateName": "cert2",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerCertificate": {
+          "ServerCertificateName": "cert2",
+          "Tags": [
+            {
+              "Key": "k",
+              "Value": "v"
+            }
+          ]
+        },
+        "ServerCertificateName": "cert2"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListServerCertificateTags",
+      "input": {
+        "ServerCertificateName": "cert2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerCertificateMetadataList": [
+          {
+            "ServerCertificateName": "cert2",
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "the pack answers under ServerCertificateMetadataList, which the response does not declare (it declares Tags)"
+    },
+    {
+      "operation": "ListServerCertificates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerCertificateMetadataList": [
+          {
+            "ServerCertificateName": "cert"
+          },
+          {
+            "ServerCertificateName": "cert2",
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagServerCertificate",
+      "input": {
+        "ServerCertificateName": "cert2",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteServerCertificate",
+      "input": {
+        "ServerCertificateName": "cert"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListServerCertificates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerCertificateMetadataList": []
+      }
+    },
+    {
+      "operation": "UploadSigningCertificate",
+      "input": {
+        "CertificateBody": "c",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateBody": "c",
+          "CertificateId": "u2",
+          "UserName": "u2"
+        },
+        "CertificateId": "u2"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "ListSigningCertificates",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificates": [
+          {
+            "CertificateBody": "c",
+            "CertificateId": "u2",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateSigningCertificate",
+      "input": {
+        "CertificateId": "u2",
+        "Status": "Inactive",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificate": {
+          "CertificateId": "u2",
+          "Status": "Inactive",
+          "UserName": "u2"
+        },
+        "CertificateId": "u2"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "DeleteSigningCertificate",
+      "input": {
+        "CertificateId": "u2",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListSigningCertificates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificates": []
+      }
+    },
+    {
+      "operation": "CreateServiceSpecificCredential",
+      "input": {
+        "ServiceName": "codecommit",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSpecificCredential": {
+          "ServiceName": "codecommit",
+          "ServiceSpecificCredentialId": "u2",
+          "UserName": "u2"
+        },
+        "ServiceSpecificCredentialId": "u2"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "ListServiceSpecificCredentials",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSpecificCredentials": [
+          {
+            "ServiceName": "codecommit",
+            "ServiceSpecificCredentialId": "u2",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ResetServiceSpecificCredential",
+      "input": {
+        "ServiceSpecificCredentialId": "u2",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSpecificCredential": {
+          "ServiceSpecificCredentialId": "u2",
+          "UserName": "u2"
+        },
+        "ServiceSpecificCredentialId": "u2"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "UpdateServiceSpecificCredential",
+      "input": {
+        "ServiceSpecificCredentialId": "u2",
+        "Status": "Inactive",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSpecificCredential": {
+          "ServiceSpecificCredentialId": "u2",
+          "Status": "Inactive",
+          "UserName": "u2"
+        },
+        "ServiceSpecificCredentialId": "u2"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListServiceSpecificCredentials",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSpecificCredentials": [
+          {
+            "ServiceSpecificCredentialId": "u2",
+            "Status": "Inactive",
+            "UserName": "u2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteServiceSpecificCredential",
+      "input": {
+        "ServiceSpecificCredentialId": "u2",
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListServiceSpecificCredentials",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSpecificCredentials": []
+      }
+    },
+    {
+      "operation": "CreateServiceLinkedRole",
+      "input": {
+        "AWSServiceName": "autoscaling.amazonaws.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Role": {
+          "AWSServiceName": "autoscaling.amazonaws.com",
+          "RoleName": "3ed10eca"
+        },
+        "RoleName": "3ed10eca"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "DeleteServiceLinkedRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetServiceLinkedRoleDeletionStatus",
+      "input": {
+        "DeletionTaskId": "ffffffff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Role": {}
+      }
+    },
+    {
+      "operation": "GenerateCredentialReport",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "4da7b6a4",
+        "State": "COMPLETE"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "GetCredentialReport",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Content": "",
+        "State": "COMPLETE"
+      },
+      "superseded": "the pack answers State COMPLETE, which GetCredentialReportResponse does not declare"
+    },
+    {
+      "operation": "GenerateServiceLastAccessedDetails",
+      "input": {
+        "Arn": "arn:aws:iam::000000000000:policy/zzz"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iam::000000000000:policy/zzz",
+        "JobId": "e7175ec1",
+        "State": "COMPLETE"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "GetServiceLastAccessedDetails",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 245
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:iam::000000000000:policy/zzz",
+        "JobId": "e7175ec1",
+        "State": "COMPLETE"
+      },
+      "superseded": "the pack answers the stored record flat; the response shape declares none of its members, so the bundle answers empty"
+    },
+    {
+      "operation": "GetServiceLastAccessedDetails",
+      "input": {
+        "JobId": "ffffffff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetServiceLastAccessedDetailsWithEntities",
+      "input": {
+        "JobId": "ffffffff",
+        "ServiceNamespace": "s3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GenerateOrganizationsAccessReport",
+      "input": {
+        "EntityPath": "o/a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EntityPath": "o/a",
+        "JobId": "77df676f",
+        "State": "COMPLETE"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "GetOrganizationsAccessReport",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 249
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EntityPath": "o/a",
+        "JobId": "77df676f",
+        "State": "COMPLETE"
+      },
+      "superseded": "the pack answers the stored record flat; the response shape declares none of its members, so the bundle answers empty"
+    },
+    {
+      "operation": "GetOrganizationsAccessReport",
+      "input": {
+        "JobId": "ffffffff"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "EnableOrganizationsRootCredentialsManagement",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "9045051b"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "EnableOrganizationsRootSessions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "ac1d53d8"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "ListOrganizationsFeatures",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Jobs": [
+          {
+            "EntityPath": "o/a",
+            "JobId": "77df676f",
+            "State": "COMPLETE"
+          },
+          {
+            "JobId": "9045051b"
+          },
+          {
+            "JobId": "ac1d53d8"
+          }
+        ]
+      },
+      "superseded": "the pack answers under Jobs, which the response does not declare (it declares EnabledFeatures and OrganizationId)"
+    },
+    {
+      "operation": "DisableOrganizationsRootCredentialsManagement",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DisableOrganizationsRootSessions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AddClientIDToOpenIDConnectProvider",
+      "input": {
+        "ClientID": "c9",
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/extra"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ClientID": "c9",
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/extra"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "TagOpenIDConnectProvider",
+      "input": {
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/extra",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/extra",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListOpenIDConnectProviderTags",
+      "input": {
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/extra"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OpenIDConnectProviderList": [
+          {
+            "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/extra",
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "the pack answers under OpenIDConnectProviderList, which the response does not declare (it declares Tags)"
+    },
+    {
+      "operation": "RemoveClientIDFromOpenIDConnectProvider",
+      "input": {
+        "ClientID": "c9",
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/extra"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UntagOpenIDConnectProvider",
+      "input": {
+        "OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/extra",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TagSAMLProvider",
+      "input": {
+        "SAMLProviderArn": "arn:aws:iam::000000000000:saml-provider/sx",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SAMLProviderArn": "arn:aws:iam::000000000000:saml-provider/sx",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListSAMLProviderTags",
+      "input": {
+        "SAMLProviderArn": "arn:aws:iam::000000000000:saml-provider/sx"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SAMLProviderList": [
+          {
+            "SAMLProviderArn": "arn:aws:iam::000000000000:saml-provider/sx",
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "the pack answers under SAMLProviderList, which the response does not declare (it declares Tags)"
+    },
+    {
+      "operation": "UntagSAMLProvider",
+      "input": {
+        "SAMLProviderArn": "arn:aws:iam::000000000000:saml-provider/sx",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TagInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ipx",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfile": {
+          "InstanceProfileName": "ipx",
+          "Tags": [
+            {
+              "Key": "k",
+              "Value": "v"
+            }
+          ]
+        },
+        "InstanceProfileName": "ipx"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListInstanceProfileTags",
+      "input": {
+        "InstanceProfileName": "ipx"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceProfiles": [
+          {
+            "InstanceProfileName": "ipx",
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ]
+          }
+        ]
+      },
+      "superseded": "the pack answers under InstanceProfiles, which the response does not declare (it declares Tags)"
+    },
+    {
+      "operation": "UntagInstanceProfile",
+      "input": {
+        "InstanceProfileName": "ipx",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TagPolicy",
+      "input": {
+        "PolicyArn": "arn:aws:iam::000000000000:policy/tp",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyArn": "arn:aws:iam::000000000000:policy/tp",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ],
+        "UserName": "arn:aws:iam::000000000000:policy/tp"
+      },
+      "superseded": "the pack answers the stored record on success though the operation declares no output shape; the wire drops it and the bundle answers nothing"
+    },
+    {
+      "operation": "ListPolicyTags",
+      "input": {
+        "PolicyArn": "arn:aws:iam::000000000000:policy/tp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "PolicyArn": "arn:aws:iam::000000000000:policy/tp",
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ],
+            "UserName": "arn:aws:iam::000000000000:policy/tp"
+          }
+        ]
+      },
+      "superseded": "the pack answers under Users, which the response does not declare (it declares Tags)"
+    },
+    {
+      "operation": "ListEntitiesForPolicy",
+      "input": {
+        "PolicyArn": "arn:aws:iam::000000000000:policy/tp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "PolicyArn": "arn:aws:iam::000000000000:policy/tp",
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ],
+            "UserName": "arn:aws:iam::000000000000:policy/tp"
+          }
+        ]
+      },
+      "superseded": "the pack answers under Users, which the response does not declare (it declares PolicyGroups, PolicyRoles and PolicyUsers)"
+    },
+    {
+      "operation": "UntagPolicy",
+      "input": {
+        "PolicyArn": "arn:aws:iam::000000000000:policy/tp",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListEntitiesForPolicy",
+      "input": {
+        "PolicyArn": "arn:aws:iam::000000000000:policy/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "UserName": "100aa4e6"
+          },
+          {
+            "Properties": {
+              "k": "v"
+            },
+            "UserName": "33f6fc5d"
+          },
+          {
+            "NewPassword": "b",
+            "OldPassword": "a",
+            "UserName": "5f59f223"
+          },
+          {
+            "GlobalEndpointTokenVersion": "v2",
+            "UserName": "83d4958a"
+          },
+          {
+            "TemplateArn": "arn:aws:iam::000000000000:role-template/x",
+            "UserName": "9c8e2cb0"
+          }
+        ]
+      },
+      "superseded": "the pack falls through to a full listing of the kind when the named record is absent; the bundle's keyed list answers empty"
+    },
+    {
+      "operation": "ListPoliciesGrantingServiceAccess",
+      "input": {
+        "Arn": "arn:aws:iam::000000000000:user/u2",
+        "ServiceNamespaces": [
+          "s3"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "UserName": "100aa4e6"
+          },
+          {
+            "Properties": {
+              "k": "v"
+            },
+            "UserName": "33f6fc5d"
+          },
+          {
+            "NewPassword": "b",
+            "OldPassword": "a",
+            "UserName": "5f59f223"
+          },
+          {
+            "GlobalEndpointTokenVersion": "v2",
+            "UserName": "83d4958a"
+          },
+          {
+            "TemplateArn": "arn:aws:iam::000000000000:role-template/x",
+            "UserName": "9c8e2cb0"
+          }
+        ]
+      },
+      "superseded": "the pack answers under Users, which the response does not declare (it declares PoliciesGrantingServiceAccess)"
+    },
+    {
+      "operation": "UpdateRoleDescription",
+      "input": {
+        "Description": "d2",
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": "d2",
+        "RoleName": "r",
+        "UserName": "r"
+      },
+      "superseded": "the pack answers the stored request (and its id member) on success, none of which the operation's output shape declares; the wire drops them and the bundle answers the declared subset"
+    },
+    {
+      "operation": "DeleteRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteRole",
+      "input": {
+        "RoleName": "r"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetUser",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchEntity",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "UserName": "u2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

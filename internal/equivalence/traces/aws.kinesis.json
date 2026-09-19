@@ -1,0 +1,388 @@
+{
+  "schema": "trace/1",
+  "service": "aws.kinesis",
+  "source": "pack:internal/services/aws/kinesis@77fba2e7",
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The recording covers the pack's expressible control plane only: PutRecord, PutRecords, GetShardIterator and GetRecords are the bundle's shadow reason (bus publish plus base64 shard-iterator machinery) and are deliberately not recorded. SplitShard, MergeShards and the three stream-option updates answer bodies their output shapes do not declare, so those steps are superseded -- they still run, and the state behind the remaining steps is real.",
+  "steps": [
+    {
+      "operation": "ListStreams",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamNames": null, "HasMoreStreams": false}
+    },
+    {
+      "operation": "DescribeStream",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateStream",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ValidationException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "CreateStream",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "CreateStream",
+      "input": {"StreamName": "t", "ShardCount": 2},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "ListStreams",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamNames": ["s", "t"], "HasMoreStreams": false}
+    },
+    {
+      "operation": "DescribeStream",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamDescription": {
+        "StreamName": "s",
+        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+        "StreamStatus": "ACTIVE",
+        "Shards": [{"ShardId": "shardId-000000000000",
+                    "HashKeyRange": {"StartingHashKey": "0", "EndingHashKey": "340282366920938463463374607431768211455"},
+                    "SequenceNumberRange": {"StartingSequenceNumber": "0"}}]
+      }}
+    },
+    {
+      "operation": "DescribeStreamSummary",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamDescriptionSummary": {
+        "StreamName": "s",
+        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+        "StreamStatus": "ACTIVE",
+        "OpenShardCount": 1
+      }}
+    },
+    {
+      "operation": "DescribeStreamSummary",
+      "input": {"StreamName": "absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "ListShards",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Shards": [{"ShardId": "shardId-000000000000"}]}
+    },
+    {
+      "operation": "AddTagsToStream",
+      "input": {"StreamName": "s", "Tags": {"k": "v"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForStream",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Tags": {"k": "v"}}
+    },
+    {
+      "operation": "TagResource",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s", "Tags": {"a": "b"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Tags": {"a": "b"}}
+    },
+    {
+      "operation": "ListTagsForStream",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Tags": {"k": "v"}}
+    },
+    {
+      "operation": "UntagResource",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s", "TagKeys": ["a"]},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Tags": {}}
+    },
+    {
+      "operation": "RemoveTagsFromStream",
+      "input": {"StreamName": "s", "TagKeys": ["k"]},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "ListTagsForStream",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Tags": {}}
+    },
+    {
+      "operation": "IncreaseStreamRetentionPeriod",
+      "input": {"StreamName": "s", "RetentionPeriodHours": 48},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DecreaseStreamRetentionPeriod",
+      "input": {"StreamName": "s", "RetentionPeriodHours": 24},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "PutResourcePolicy",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s", "Policy": "{\"Version\":\"2012-10-17\"}"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "GetResourcePolicy",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Policy": "{\"Version\":\"2012-10-17\"}"}
+    },
+    {
+      "operation": "GetResourcePolicy",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Policy": ""}
+    },
+    {
+      "operation": "DeleteResourcePolicy",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DeleteResourcePolicy",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "GetResourcePolicy",
+      "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Policy": ""}
+    },
+    {
+      "operation": "RegisterStreamConsumer",
+      "input": {"StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s", "ConsumerName": "c"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Consumer": {
+        "ConsumerName": "c",
+        "ConsumerARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s/consumer/c",
+        "ConsumerStatus": "ACTIVE",
+        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+      }}
+    },
+    {
+      "operation": "DescribeStreamConsumer",
+      "input": {"ConsumerARN": {"$fromStep": 27, "$fromPath": "Consumer.ConsumerARN"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ConsumerDescription": {
+        "ConsumerName": "c",
+        "ConsumerARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s/consumer/c",
+        "ConsumerStatus": "ACTIVE",
+        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+      }}
+    },
+    {
+      "operation": "DescribeStreamConsumer",
+      "input": {"ConsumerARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s/consumer/absent"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
+    },
+    {
+      "operation": "ListStreamConsumers",
+      "input": {"StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Consumers": [{
+        "ConsumerName": "c",
+        "ConsumerARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s/consumer/c",
+        "ConsumerStatus": "ACTIVE",
+        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+      }]}
+    },
+    {
+      "operation": "ListStreamConsumers",
+      "input": {"StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/t"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"Consumers": [{
+        "ConsumerName": "c",
+        "ConsumerARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s/consumer/c",
+        "ConsumerStatus": "ACTIVE",
+        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+      }]}
+    },
+    {
+      "operation": "SubscribeToShard",
+      "input": {"ConsumerARN": {"$fromStep": 27, "$fromPath": "Consumer.ConsumerARN"}, "ShardId": "shardId-000000000000", "StartingPosition": {"Type": "TRIM_HORIZON"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"EventStream": []}
+    },
+    {
+      "operation": "EnableEnhancedMonitoring",
+      "input": {"StreamName": "s", "ShardLevelMetrics": ["IncomingBytes"]},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamName": "s", "CurrentShardLevelMetrics": ["IncomingBytes"]}
+    },
+    {
+      "operation": "DisableEnhancedMonitoring",
+      "input": {"StreamName": "s", "ShardLevelMetrics": ["IncomingBytes"]},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamName": "s", "CurrentShardLevelMetrics": ["IncomingBytes"]}
+    },
+    {
+      "operation": "UpdateShardCount",
+      "input": {"StreamName": "s", "TargetShardCount": 2, "ScalingType": "UNIFORM_SCALING"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamName": "s", "CurrentShardCount": 2, "TargetShardCount": 2}
+    },
+    {
+      "operation": "SplitShard",
+      "input": {"StreamName": "s", "ShardToSplit": "shardId-000000000000", "NewStartingHashKey": "1"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "superseded": "The pack answers {StreamName, CurrentShardCount, TargetShardCount}; the output shape is Unit and declares no members, so the bundle answers nothing. Both sides succeed and the shard count still moves.",
+      "output": {"StreamName": "s", "CurrentShardCount": 3, "TargetShardCount": 3}
+    },
+    {
+      "operation": "MergeShards",
+      "input": {"StreamName": "s", "ShardToMerge": "shardId-000000000000", "AdjacentShardToMerge": "shardId-000000000001"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "superseded": "The pack answers {StreamName, CurrentShardCount, TargetShardCount}; the output shape is Unit and declares no members, so the bundle answers nothing. Both sides succeed and the shard count still moves.",
+      "output": {"StreamName": "s", "CurrentShardCount": 2, "TargetShardCount": 2}
+    },
+    {
+      "operation": "StartStreamEncryption",
+      "input": {"StreamName": "s", "EncryptionType": "KMS", "KeyId": "alias/aws/kinesis"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "StopStreamEncryption",
+      "input": {"StreamName": "s", "EncryptionType": "KMS", "KeyId": "alias/aws/kinesis"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DescribeLimits",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"ShardLimit": 500, "OpenShardCount": 1, "OnDemandStreamCount": 0, "OnDemandStreamCountLimit": 50}
+    },
+    {
+      "operation": "DescribeAccountSettings",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"MinimumThroughputBillingCommitment": {"Status": "DISABLED"}}
+    },
+    {
+      "operation": "UpdateAccountSettings",
+      "input": {"MinimumThroughputBillingCommitment": {"Status": "ENABLED"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"MinimumThroughputBillingCommitment": {"Status": "ENABLED"}}
+    },
+    {
+      "operation": "DescribeAccountSettings",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"MinimumThroughputBillingCommitment": {"Status": "ENABLED"}}
+    },
+    {
+      "operation": "UpdateMaxRecordSize",
+      "input": {"StreamName": "s", "MaxRecordSizeInKiB": 1024},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "superseded": "The pack answers the whole stored stream record; the output shape is Unit and declares no members, so the bundle answers nothing. Both sides succeed and the record still changes.",
+      "output": {"StreamName": "s", "Status": "ACTIVE", "Seq": 0, "RetentionPeriodHours": 24, "EnhancedMonitoring": false, "OpenShardCount": 2, "EncryptionType": "NONE", "MaxRecordSizeInKiB": 1024}
+    },
+    {
+      "operation": "UpdateStreamMode",
+      "input": {"StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s", "StreamModeDetails": {"StreamMode": "ON_DEMAND"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "superseded": "The pack answers the whole stored stream record; the output shape is Unit and declares no members, so the bundle answers nothing. Both sides succeed and the record still changes.",
+      "output": {"StreamName": "s", "Status": "ACTIVE", "Seq": 0, "RetentionPeriodHours": 24, "EnhancedMonitoring": false, "OpenShardCount": 2, "EncryptionType": "NONE", "MaxRecordSizeInKiB": 1024, "StreamModeDetails": {"StreamMode": "ON_DEMAND"}}
+    },
+    {
+      "operation": "UpdateStreamWarmThroughput",
+      "input": {"StreamName": "s", "WarmThroughputMiBps": 1},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "superseded": "The pack answers the whole stored stream record where the shape declares only StreamARN, StreamName and WarmThroughput -- and WarmThroughput is always null, because the pack reads WarmThroughputMiBPerSecond, a member the model does not declare. The bundle answers the declared subset.",
+      "output": {"StreamName": "s", "Status": "ACTIVE", "Seq": 0, "RetentionPeriodHours": 24, "EnhancedMonitoring": false, "OpenShardCount": 2, "EncryptionType": "NONE", "MaxRecordSizeInKiB": 1024, "StreamModeDetails": {"StreamMode": "ON_DEMAND"}, "WarmThroughput": null}
+    },
+    {
+      "operation": "IncreaseStreamRetentionPeriod",
+      "input": {"StreamName": "ghost", "RetentionPeriodHours": 48},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DescribeStream",
+      "input": {"StreamName": "ghost"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamDescription": {
+        "StreamName": "ghost",
+        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/ghost",
+        "StreamStatus": "ACTIVE",
+        "Shards": [{"ShardId": "shardId-000000000000",
+                    "HashKeyRange": {"StartingHashKey": "0", "EndingHashKey": "340282366920938463463374607431768211455"},
+                    "SequenceNumberRange": {"StartingSequenceNumber": "0"}}]
+      }}
+    },
+    {
+      "operation": "DeleteStream",
+      "input": {"StreamName": "ghost"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DeregisterStreamConsumer",
+      "input": {"ConsumerARN": {"$fromStep": 27, "$fromPath": "Consumer.ConsumerARN"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DeregisterStreamConsumer",
+      "input": {"ConsumerARN": {"$fromStep": 27, "$fromPath": "Consumer.ConsumerARN"}},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DeleteStream",
+      "input": {"StreamName": "t"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DeleteStream",
+      "input": {"StreamName": "t"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "DeleteStream",
+      "input": {"StreamName": "s"},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {}
+    },
+    {
+      "operation": "ListStreams",
+      "input": {},
+      "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "output": {"StreamNames": null, "HasMoreStreams": false}
+    }
+  ]
+}

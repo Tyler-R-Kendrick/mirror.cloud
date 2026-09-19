@@ -7612,6 +7612,48 @@ func TestVercelConcurrentKVSetGet(t *testing.T) {
 	}
 }
 
+func TestVercelConcurrentBlobUploads(t *testing.T) {
+	// The overwrite refusal is the blob store's uniqueness rule: sixteen
+	// concurrent uploads of one pathname, exactly one wins and the rest get
+	// the oracle's 400. No draw-order assumption is made; the winner's etag
+	// is whatever body won.
+	p, err := bundled.New("vercel.blob", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	auth := "Bearer vercel_blob_rw_st1_abc"
+	errCh := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UploadBlob", Input: map[string]any{
+				"authorization": auth, "pathname": "race.txt", "body": "x",
+			}})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	winners := 0
+	for err := range errCh {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.HTTPStatus != 400 {
+			t.Fatalf("concurrent upload: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful uploads = %d, want 1", winners)
+	}
+}
+
 func TestCloudflareConcurrentDuplicateNamespaceTitles(t *testing.T) {
 	// The pack these exercised is gone; the property is not. Exactly one
 	// concurrent create may win, and the engine has to hold that the same way

@@ -1,0 +1,405 @@
+{
+  "comment": "Canonical request corpus for the vercel-labs/emulate differential. scripts/capture-vercel-oracle.py replays it against the pinned oracle and records answers.json; oracle_differential_test.go replays it against mirror and compares. Fields: service routes to the bundle and host; refs substitute a value from a previous answer ({\"$ref\": \"step.path\"} \u2014 dot path into the decoded JSON body); compare is exact (normalized), fields (named members only), or status. KV is outside the oracle's surface (emulate has no KV service \u2014 Vercel KV is Upstash, not implemented in the vercel package), so no kv steps exist to compare against. env-create is excluded: the oracle's team-scope resolution answers 400 for its own seeded personal account, a seed artifact rather than API shape.",
+  "steps": [
+    {
+      "name": "user",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v2/user",
+      "compare": "fields",
+      "fields": [
+        "?user.username"
+      ]
+    },
+    {
+      "name": "create-project",
+      "service": "vercel.api",
+      "method": "POST",
+      "path": "/v11/projects",
+      "body": {
+        "name": "corpus-app",
+        "framework": "nextjs"
+      },
+      "compare": "fields",
+      "fields": [
+        "name",
+        "framework"
+      ]
+    },
+    {
+      "name": "dup-project",
+      "service": "vercel.api",
+      "method": "POST",
+      "path": "/v11/projects",
+      "body": {
+        "name": "corpus-app"
+      },
+      "compare": "status"
+    },
+    {
+      "name": "list-projects",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v10/projects",
+      "compare": "fields",
+      "fields": [
+        "projects.0.name"
+      ]
+    },
+    {
+      "name": "get-project",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v9/projects/corpus-app",
+      "compare": "fields",
+      "fields": [
+        "name"
+      ]
+    },
+    {
+      "name": "patch-project",
+      "service": "vercel.api",
+      "method": "PATCH",
+      "path": "/v9/projects/corpus-app",
+      "body": {
+        "framework": "vite"
+      },
+      "compare": "fields",
+      "fields": [
+        "framework"
+      ]
+    },
+    {
+      "name": "env-list",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v10/projects/corpus-app/env",
+      "compare": "fields",
+      "fields": [
+        "envs.0.key"
+      ]
+    },
+    {
+      "name": "env-get",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v10/projects/corpus-app/env/ghost",
+      "compare": "status"
+    },
+    {
+      "name": "domains-add",
+      "service": "vercel.api",
+      "method": "POST",
+      "path": "/v10/projects/corpus-app/domains",
+      "body": {
+        "name": "corpus.example.com"
+      },
+      "compare": "status"
+    },
+    {
+      "name": "domains-list",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v9/projects/corpus-app/domains",
+      "compare": "fields",
+      "fields": [
+        "domains.0.name"
+      ]
+    },
+    {
+      "name": "domains-get",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v9/projects/corpus-app/domains/corpus.example.com",
+      "compare": "fields",
+      "fields": [
+        "name",
+        "verified"
+      ]
+    },
+    {
+      "name": "domains-verify",
+      "service": "vercel.api",
+      "method": "POST",
+      "path": "/v9/projects/corpus-app/domains/corpus.example.com/verify",
+      "compare": "fields",
+      "fields": [
+        "verified"
+      ]
+    },
+    {
+      "name": "deploy",
+      "service": "vercel.api",
+      "method": "POST",
+      "path": "/v13/deployments",
+      "body": {
+        "name": "corpus-app",
+        "project": "corpus-app"
+      },
+      "compare": "fields",
+      "fields": [
+        "readyState"
+      ]
+    },
+    {
+      "name": "deployments-v6",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v6/deployments",
+      "compare": "fields",
+      "fields": [
+        "deployments.0.name"
+      ]
+    },
+    {
+      "name": "deployments-v7",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v7/deployments",
+      "compare": "fields",
+      "fields": [
+        "deployments.0.name"
+      ]
+    },
+    {
+      "name": "deployment-get",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v13/deployments/$ref:deploy.id",
+      "compare": "fields",
+      "fields": [
+        "readyState"
+      ]
+    },
+    {
+      "name": "deployment-events",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v3/deployments/$ref:deploy.id/events",
+      "compare": "status"
+    },
+    {
+      "name": "deployment-files",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v6/deployments/$ref:deploy.id/files",
+      "compare": "status"
+    },
+    {
+      "name": "deployment-aliases",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v2/deployments/$ref:deploy.id/aliases",
+      "compare": "status"
+    },
+    {
+      "name": "deployment-cancel",
+      "service": "vercel.api",
+      "method": "PATCH",
+      "path": "/v12/deployments/$ref:deploy.id/cancel",
+      "compare": "fields",
+      "fields": [
+        "readyState"
+      ]
+    },
+    {
+      "name": "team-create",
+      "service": "vercel.api",
+      "method": "POST",
+      "path": "/v2/teams",
+      "body": {
+        "slug": "corpus-team"
+      },
+      "compare": "status",
+      "fields": [
+        "slug",
+        "name"
+      ],
+      "note": "the vendored document answers the team flat; the oracle nests it under \"team\". The document is declared evidence and wins over the oracle here; status is compared, the envelope is not."
+    },
+    {
+      "name": "team-dup",
+      "service": "vercel.api",
+      "method": "POST",
+      "path": "/v2/teams",
+      "body": {
+        "slug": "corpus-team"
+      },
+      "compare": "status"
+    },
+    {
+      "name": "teams-list",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v2/teams",
+      "compare": "fields",
+      "fields": [
+        "teams.0.slug"
+      ]
+    },
+    {
+      "name": "team-get",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v2/teams/corpus-team",
+      "compare": "status",
+      "fields": [
+        "team.slug"
+      ],
+      "note": "the vendored document answers the team flat; the oracle nests it under \"team\". The document is declared evidence and wins over the oracle here; status is compared, the envelope is not."
+    },
+    {
+      "name": "team-members",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v2/teams/corpus-team/members",
+      "compare": "status"
+    },
+    {
+      "name": "user-patch",
+      "service": "vercel.api",
+      "method": "PATCH",
+      "path": "/v2/user",
+      "body": {
+        "name": "Corpus"
+      },
+      "compare": "fields",
+      "fields": [
+        "user.name"
+      ]
+    },
+    {
+      "name": "registration",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/registration",
+      "compare": "fields",
+      "fields": [
+        "registration"
+      ]
+    },
+    {
+      "name": "apikey-create",
+      "service": "vercel.api",
+      "method": "POST",
+      "path": "/v1/api-keys",
+      "body": {
+        "name": "corpus-key"
+      },
+      "compare": "fields",
+      "fields": [
+        "apiKey.name"
+      ]
+    },
+    {
+      "name": "apikey-list",
+      "service": "vercel.api",
+      "method": "GET",
+      "path": "/v1/api-keys",
+      "compare": "fields",
+      "fields": [
+        "keys.0.name"
+      ]
+    },
+    {
+      "name": "apikey-delete-404",
+      "service": "vercel.api",
+      "method": "DELETE",
+      "path": "/v1/api-keys/ak_ghost",
+      "compare": "status"
+    },
+    {
+      "name": "blob-upload",
+      "service": "vercel.blob",
+      "method": "PUT",
+      "path": "/api/blob/?pathname=corpus.txt",
+      "host": "blob.vercel-storage.com",
+      "token": "blob",
+      "bodyText": "corpus bytes",
+      "compare": "fields",
+      "fields": [
+        "pathname",
+        "contentType",
+        "etag"
+      ]
+    },
+    {
+      "name": "blob-dup",
+      "service": "vercel.blob",
+      "method": "PUT",
+      "path": "/api/blob/?pathname=corpus.txt",
+      "host": "blob.vercel-storage.com",
+      "token": "blob",
+      "bodyText": "again",
+      "compare": "status"
+    },
+    {
+      "name": "blob-list",
+      "service": "vercel.blob",
+      "method": "GET",
+      "path": "/api/blob",
+      "host": "blob.vercel-storage.com",
+      "token": "blob",
+      "compare": "fields",
+      "fields": [
+        "blobs.0.pathname",
+        "hasMore"
+      ]
+    },
+    {
+      "name": "blob-head",
+      "service": "vercel.blob",
+      "method": "GET",
+      "path": "/api/blob?url=corpus.txt",
+      "host": "blob.vercel-storage.com",
+      "token": "blob",
+      "compare": "fields",
+      "fields": [
+        "pathname",
+        "size",
+        "cacheControl"
+      ]
+    },
+    {
+      "name": "blob-serve",
+      "service": "vercel.blob",
+      "method": "GET",
+      "path": "/blob/corpusstore/corpus.txt",
+      "host": "blob.vercel-storage.com",
+      "compare": "exact"
+    },
+    {
+      "name": "blob-mpu",
+      "service": "vercel.blob",
+      "method": "POST",
+      "path": "/api/blob/mpu",
+      "host": "blob.vercel-storage.com",
+      "token": "blob",
+      "body": {},
+      "compare": "status"
+    },
+    {
+      "name": "blob-delete",
+      "service": "vercel.blob",
+      "method": "POST",
+      "path": "/api/blob/delete",
+      "host": "blob.vercel-storage.com",
+      "token": "blob",
+      "body": {
+        "urls": [
+          "corpus.txt"
+        ]
+      },
+      "compare": "exact"
+    },
+    {
+      "name": "blob-head-gone",
+      "service": "vercel.blob",
+      "method": "GET",
+      "path": "/api/blob?url=corpus.txt",
+      "host": "blob.vercel-storage.com",
+      "token": "blob",
+      "compare": "status"
+    }
+  ]
+}

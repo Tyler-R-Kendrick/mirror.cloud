@@ -501,8 +501,10 @@ func TestDigitalOceanRoutesFromItsGeneratedModel(t *testing.T) {
 // one route. That is not four transcription slips in the table; it is the
 // table erasing versioning, which made four of its rows name a version the
 // document does not serve. Each operation now binds to the one version its
-// document declares, so the four move and an undeclared version is a 501
-// rather than a silent success.
+// document declares, so the three still undeclared move and an undeclared
+// version is a 501 rather than a silent success. The fourth, /v6/deployments,
+// is declared now: the authored supplement carries it because the vendor's
+// own emulator serves it from the same handler as /v7.
 //
 // The KV row is gone for a different reason: POST / was Vercel KV, which is a
 // second product on a second host and is its own service now.
@@ -529,6 +531,9 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 		{http.MethodPost, "/v9/projects/app/domains/ex.test/verify", "VerifyProjectDomain"},
 		{http.MethodDelete, "/v9/projects/app/domains/ex.test", "RemoveProjectDomain"},
 		{http.MethodPatch, "/v9/projects/app/env/env_1", "EditProjectEnv"},
+		// Declared by the authored supplement (specs/vercel/api-extra.json),
+		// which the vendor's emulator serves from one handler as v7.
+		{http.MethodGet, "/v6/deployments", "GetDeploymentsV6"},
 	} {
 		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
 		op, err := (Codec{}).Route(vercel, req)
@@ -536,13 +541,14 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 			t.Fatalf("%s %s: op %v err %v, want %s", test.method, test.path, op, err, test.want)
 		}
 	}
-	// The four the pack answered at a version the document does not serve,
-	// and one arbitrary version to show the stripping is really gone.
+	// The three the pack answered at a version the document does not serve,
+	// and one arbitrary version to show the stripping is really gone. The
+	// fourth, /v6/deployments, left this list when the authored supplement
+	// declared it -- the vendor's emulator serves it, so it is served.
 	for _, test := range []struct{ method, path string }{
 		{http.MethodGet, "/v9/projects"},
 		{http.MethodGet, "/v9/projects/app/env"},
 		{http.MethodGet, "/v10/projects/app/domains"},
-		{http.MethodGet, "/v6/deployments"},
 		{http.MethodGet, "/v99/projects"},
 	} {
 		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)

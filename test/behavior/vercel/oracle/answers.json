@@ -1,0 +1,233 @@
+{
+  "comment": "Captured from vercel-labs/emulate at the pin in specs/vercel/emulate-inventory.json by scripts/capture-vercel-oracle.py; normalized per the rules in that script.",
+  "answers": [
+    {
+      "name": "user",
+      "status": 200,
+      "raw": "{\"user\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": 1789756667340, \"defaultTeamId\": null, \"email\": \"admin@localhost\", \"id\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"name\": \"Admin\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"Edge Functions\"}, \"softBlock\": null, \"stagingPrefix\": \"staging\", \"username\": \"admin\", \"version\": null}}",
+      "normalized": "{\"user\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": EPOCHMS, \"defaultTeamId\": null, \"email\": \"admin@localhost\", \"id\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"name\": \"Admin\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"Edge Functions\"}, \"softBlock\": null, \"stagingPrefix\": \"staging\", \"username\": \"admin\", \"version\": null}}"
+    },
+    {
+      "name": "create-project",
+      "status": 200,
+      "raw": "{\"accountId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"autoAssignCustomDomains\": true, \"autoAssignCustomDomainsUpdatedBy\": null, \"buildCommand\": null, \"commandForIgnoringBuildStep\": null, \"connectConfigurationId\": null, \"createdAt\": 1789756690324, \"devCommand\": null, \"directoryListing\": false, \"framework\": \"nextjs\", \"gitComments\": {\"onCommit\": false, \"onPullRequest\": true}, \"gitForkProtection\": true, \"id\": \"prj_CcIVl6iRYU_XKphQ\", \"installCommand\": null, \"latestDeployments\": [], \"link\": null, \"live\": true, \"name\": \"corpus-app\", \"nodeVersion\": \"20.x\", \"oidcTokenConfig\": null, \"outputDirectory\": null, \"passwordProtection\": null, \"protectionBypass\": {}, \"publicSource\": false, \"rootDirectory\": null, \"serverlessFunctionRegion\": null, \"sourceFilesOutsideRootDirectory\": false, \"speedInsights\": null, \"ssoProtection\": null, \"targets\": {}, \"tier\": \"hobby\", \"trustedIps\": null, \"updatedAt\": 1789756690324, \"webAnalytics\": null}",
+      "normalized": "{\"accountId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"autoAssignCustomDomains\": true, \"autoAssignCustomDomainsUpdatedBy\": null, \"buildCommand\": null, \"commandForIgnoringBuildStep\": null, \"connectConfigurationId\": null, \"createdAt\": EPOCHMS, \"devCommand\": null, \"directoryListing\": false, \"framework\": \"nextjs\", \"gitComments\": {\"onCommit\": false, \"onPullRequest\": true}, \"gitForkProtection\": true, \"id\": \"ID_XKphQ\", \"installCommand\": null, \"latestDeployments\": [], \"link\": null, \"live\": true, \"name\": \"corpus-app\", \"nodeVersion\": \"20.x\", \"oidcTokenConfig\": null, \"outputDirectory\": null, \"passwordProtection\": null, \"protectionBypass\": {}, \"publicSource\": false, \"rootDirectory\": null, \"serverlessFunctionRegion\": null, \"sourceFilesOutsideRootDirectory\": false, \"speedInsights\": null, \"ssoProtection\": null, \"targets\": {}, \"tier\": \"hobby\", \"trustedIps\": null, \"updatedAt\": EPOCHMS, \"webAnalytics\": null}"
+    },
+    {
+      "name": "dup-project",
+      "status": 409,
+      "raw": "{\"error\": {\"code\": \"project_already_exists\", \"message\": \"A project with this name already exists\"}}",
+      "normalized": "{\"error\": {\"code\": \"project_already_exists\", \"message\": \"A project with this name already exists\"}}"
+    },
+    {
+      "name": "list-projects",
+      "status": 200,
+      "raw": "{\"pagination\": {\"count\": 1, \"next\": null, \"prev\": 1789756690324}, \"projects\": [{\"accountId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"autoAssignCustomDomains\": true, \"autoAssignCustomDomainsUpdatedBy\": null, \"buildCommand\": null, \"commandForIgnoringBuildStep\": null, \"connectConfigurationId\": null, \"createdAt\": 1789756690324, \"devCommand\": null, \"directoryListing\": false, \"framework\": \"nextjs\", \"gitComments\": {\"onCommit\": false, \"onPullRequest\": true}, \"gitForkProtection\": true, \"id\": \"prj_CcIVl6iRYU_XKphQ\", \"installCommand\": null, \"latestDeployments\": [], \"link\": null, \"live\": true, \"name\": \"corpus-app\", \"nodeVersion\": \"20.x\", \"oidcTokenConfig\": null, \"outputDirectory\": null, \"passwordProtection\": null, \"protectionBypass\": {}, \"publicSource\": false, \"rootDirectory\": null, \"serverlessFunctionRegion\": null, \"sourceFilesOutsideRootDirectory\": false, \"speedInsights\": null, \"ssoProtection\": null, \"targets\": {}, \"tier\": \"hobby\", \"trustedIps\": null, \"updatedAt\": 1789756690324, \"webAnalytics\": null}]}",
+      "normalized": "{\"pagination\": {\"count\": 1, \"next\": null, \"prev\": EPOCHMS}, \"projects\": [{\"accountId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"autoAssignCustomDomains\": true, \"autoAssignCustomDomainsUpdatedBy\": null, \"buildCommand\": null, \"commandForIgnoringBuildStep\": null, \"connectConfigurationId\": null, \"createdAt\": EPOCHMS, \"devCommand\": null, \"directoryListing\": false, \"framework\": \"nextjs\", \"gitComments\": {\"onCommit\": false, \"onPullRequest\": true}, \"gitForkProtection\": true, \"id\": \"ID_XKphQ\", \"installCommand\": null, \"latestDeployments\": [], \"link\": null, \"live\": true, \"name\": \"corpus-app\", \"nodeVersion\": \"20.x\", \"oidcTokenConfig\": null, \"outputDirectory\": null, \"passwordProtection\": null, \"protectionBypass\": {}, \"publicSource\": false, \"rootDirectory\": null, \"serverlessFunctionRegion\": null, \"sourceFilesOutsideRootDirectory\": false, \"speedInsights\": null, \"ssoProtection\": null, \"targets\": {}, \"tier\": \"hobby\", \"trustedIps\": null, \"updatedAt\": EPOCHMS, \"webAnalytics\": null}]}"
+    },
+    {
+      "name": "get-project",
+      "status": 200,
+      "raw": "{\"accountId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"autoAssignCustomDomains\": true, \"autoAssignCustomDomainsUpdatedBy\": null, \"buildCommand\": null, \"commandForIgnoringBuildStep\": null, \"connectConfigurationId\": null, \"createdAt\": 1789756690324, \"devCommand\": null, \"directoryListing\": false, \"env\": [], \"framework\": \"nextjs\", \"gitComments\": {\"onCommit\": false, \"onPullRequest\": true}, \"gitForkProtection\": true, \"id\": \"prj_CcIVl6iRYU_XKphQ\", \"installCommand\": null, \"latestDeployments\": [], \"link\": null, \"live\": true, \"name\": \"corpus-app\", \"nodeVersion\": \"20.x\", \"oidcTokenConfig\": null, \"outputDirectory\": null, \"passwordProtection\": null, \"protectionBypass\": {}, \"publicSource\": false, \"rootDirectory\": null, \"serverlessFunctionRegion\": null, \"sourceFilesOutsideRootDirectory\": false, \"speedInsights\": null, \"ssoProtection\": null, \"targets\": {}, \"tier\": \"hobby\", \"trustedIps\": null, \"updatedAt\": 1789756690324, \"webAnalytics\": null}",
+      "normalized": "{\"accountId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"autoAssignCustomDomains\": true, \"autoAssignCustomDomainsUpdatedBy\": null, \"buildCommand\": null, \"commandForIgnoringBuildStep\": null, \"connectConfigurationId\": null, \"createdAt\": EPOCHMS, \"devCommand\": null, \"directoryListing\": false, \"env\": [], \"framework\": \"nextjs\", \"gitComments\": {\"onCommit\": false, \"onPullRequest\": true}, \"gitForkProtection\": true, \"id\": \"ID_XKphQ\", \"installCommand\": null, \"latestDeployments\": [], \"link\": null, \"live\": true, \"name\": \"corpus-app\", \"nodeVersion\": \"20.x\", \"oidcTokenConfig\": null, \"outputDirectory\": null, \"passwordProtection\": null, \"protectionBypass\": {}, \"publicSource\": false, \"rootDirectory\": null, \"serverlessFunctionRegion\": null, \"sourceFilesOutsideRootDirectory\": false, \"speedInsights\": null, \"ssoProtection\": null, \"targets\": {}, \"tier\": \"hobby\", \"trustedIps\": null, \"updatedAt\": EPOCHMS, \"webAnalytics\": null}"
+    },
+    {
+      "name": "patch-project",
+      "status": 200,
+      "raw": "{\"accountId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"autoAssignCustomDomains\": true, \"autoAssignCustomDomainsUpdatedBy\": null, \"buildCommand\": null, \"commandForIgnoringBuildStep\": null, \"connectConfigurationId\": null, \"createdAt\": 1789756690324, \"devCommand\": null, \"directoryListing\": false, \"framework\": \"vite\", \"gitComments\": {\"onCommit\": false, \"onPullRequest\": true}, \"gitForkProtection\": true, \"id\": \"prj_CcIVl6iRYU_XKphQ\", \"installCommand\": null, \"latestDeployments\": [], \"link\": null, \"live\": true, \"name\": \"corpus-app\", \"nodeVersion\": \"20.x\", \"oidcTokenConfig\": null, \"outputDirectory\": null, \"passwordProtection\": null, \"protectionBypass\": {}, \"publicSource\": false, \"rootDirectory\": null, \"serverlessFunctionRegion\": null, \"sourceFilesOutsideRootDirectory\": false, \"speedInsights\": null, \"ssoProtection\": null, \"targets\": {}, \"tier\": \"hobby\", \"trustedIps\": null, \"updatedAt\": 1789756690332, \"webAnalytics\": null}",
+      "normalized": "{\"accountId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"autoAssignCustomDomains\": true, \"autoAssignCustomDomainsUpdatedBy\": null, \"buildCommand\": null, \"commandForIgnoringBuildStep\": null, \"connectConfigurationId\": null, \"createdAt\": EPOCHMS, \"devCommand\": null, \"directoryListing\": false, \"framework\": \"vite\", \"gitComments\": {\"onCommit\": false, \"onPullRequest\": true}, \"gitForkProtection\": true, \"id\": \"ID_XKphQ\", \"installCommand\": null, \"latestDeployments\": [], \"link\": null, \"live\": true, \"name\": \"corpus-app\", \"nodeVersion\": \"20.x\", \"oidcTokenConfig\": null, \"outputDirectory\": null, \"passwordProtection\": null, \"protectionBypass\": {}, \"publicSource\": false, \"rootDirectory\": null, \"serverlessFunctionRegion\": null, \"sourceFilesOutsideRootDirectory\": false, \"speedInsights\": null, \"ssoProtection\": null, \"targets\": {}, \"tier\": \"hobby\", \"trustedIps\": null, \"updatedAt\": EPOCHMS, \"webAnalytics\": null}"
+    },
+    {
+      "name": "env-list",
+      "status": 200,
+      "raw": "{\"envs\": [], \"pagination\": {\"count\": 0, \"next\": null, \"prev\": null}}",
+      "normalized": "{\"envs\": [], \"pagination\": {\"count\": 0, \"next\": null, \"prev\": null}}"
+    },
+    {
+      "name": "env-get",
+      "status": 404,
+      "raw": "{\"error\": {\"code\": \"not_found\", \"message\": \"Environment variable not found\"}}",
+      "normalized": "{\"error\": {\"code\": \"not_found\", \"message\": \"Environment variable not found\"}}"
+    },
+    {
+      "name": "domains-add",
+      "status": 200,
+      "raw": "{\"apexName\": \"example.com\", \"createdAt\": 1789756690339, \"customEnvironmentId\": null, \"gitBranch\": null, \"name\": \"corpus.example.com\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"redirect\": null, \"redirectStatusCode\": null, \"updatedAt\": 1789756690339, \"verification\": [{\"domain\": \"_vercel.example.com\", \"reason\": \"Add the TXT record above to verify domain ownership\", \"type\": \"TXT\", \"value\": \"vc-domain-verify=corpus.example.com,vr72UaNZTtwOhpgc\"}], \"verified\": false}",
+      "normalized": "{\"apexName\": \"example.com\", \"createdAt\": EPOCHMS, \"customEnvironmentId\": null, \"gitBranch\": null, \"name\": \"corpus.example.com\", \"projectId\": \"ID_XKphQ\", \"redirect\": null, \"redirectStatusCode\": null, \"updatedAt\": EPOCHMS, \"verification\": [{\"domain\": \"_vercel.example.com\", \"reason\": \"Add the TXT record above to verify domain ownership\", \"type\": \"TXT\", \"value\": \"vc-domain-verify=corpus.example.com,vr72UaNZTtwOhpgc\"}], \"verified\": false}"
+    },
+    {
+      "name": "domains-list",
+      "status": 200,
+      "raw": "{\"domains\": [{\"apexName\": \"example.com\", \"createdAt\": 1789756690339, \"customEnvironmentId\": null, \"gitBranch\": null, \"name\": \"corpus.example.com\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"redirect\": null, \"redirectStatusCode\": null, \"updatedAt\": 1789756690339, \"verification\": [{\"domain\": \"_vercel.example.com\", \"reason\": \"Add the TXT record above to verify domain ownership\", \"type\": \"TXT\", \"value\": \"vc-domain-verify=corpus.example.com,vr72UaNZTtwOhpgc\"}], \"verified\": false}], \"pagination\": {\"count\": 1, \"next\": null, \"prev\": 1789756690339}}",
+      "normalized": "{\"domains\": [{\"apexName\": \"example.com\", \"createdAt\": EPOCHMS, \"customEnvironmentId\": null, \"gitBranch\": null, \"name\": \"corpus.example.com\", \"projectId\": \"ID_XKphQ\", \"redirect\": null, \"redirectStatusCode\": null, \"updatedAt\": EPOCHMS, \"verification\": [{\"domain\": \"_vercel.example.com\", \"reason\": \"Add the TXT record above to verify domain ownership\", \"type\": \"TXT\", \"value\": \"vc-domain-verify=corpus.example.com,vr72UaNZTtwOhpgc\"}], \"verified\": false}], \"pagination\": {\"count\": 1, \"next\": null, \"prev\": EPOCHMS}}"
+    },
+    {
+      "name": "domains-get",
+      "status": 200,
+      "raw": "{\"apexName\": \"example.com\", \"createdAt\": 1789756690339, \"customEnvironmentId\": null, \"gitBranch\": null, \"name\": \"corpus.example.com\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"redirect\": null, \"redirectStatusCode\": null, \"updatedAt\": 1789756690339, \"verification\": [{\"domain\": \"_vercel.example.com\", \"reason\": \"Add the TXT record above to verify domain ownership\", \"type\": \"TXT\", \"value\": \"vc-domain-verify=corpus.example.com,vr72UaNZTtwOhpgc\"}], \"verified\": false}",
+      "normalized": "{\"apexName\": \"example.com\", \"createdAt\": EPOCHMS, \"customEnvironmentId\": null, \"gitBranch\": null, \"name\": \"corpus.example.com\", \"projectId\": \"ID_XKphQ\", \"redirect\": null, \"redirectStatusCode\": null, \"updatedAt\": EPOCHMS, \"verification\": [{\"domain\": \"_vercel.example.com\", \"reason\": \"Add the TXT record above to verify domain ownership\", \"type\": \"TXT\", \"value\": \"vc-domain-verify=corpus.example.com,vr72UaNZTtwOhpgc\"}], \"verified\": false}"
+    },
+    {
+      "name": "domains-verify",
+      "status": 200,
+      "raw": "{\"apexName\": \"example.com\", \"createdAt\": 1789756690339, \"customEnvironmentId\": null, \"gitBranch\": null, \"name\": \"corpus.example.com\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"redirect\": null, \"redirectStatusCode\": null, \"updatedAt\": 1789756690345, \"verification\": [], \"verified\": true}",
+      "normalized": "{\"apexName\": \"example.com\", \"createdAt\": EPOCHMS, \"customEnvironmentId\": null, \"gitBranch\": null, \"name\": \"corpus.example.com\", \"projectId\": \"ID_XKphQ\", \"redirect\": null, \"redirectStatusCode\": null, \"updatedAt\": EPOCHMS, \"verification\": [], \"verified\": true}"
+    },
+    {
+      "name": "deploy",
+      "status": 200,
+      "raw": "{\"alias\": [\"corpus-app-THe06xHR.vercel.app\"], \"aliasAssigned\": true, \"aliasError\": null, \"bootedAt\": 1789756690347, \"buildingAt\": 1789756690347, \"canceledAt\": null, \"created\": 1789756690347, \"createdAt\": 1789756690347, \"creator\": {\"email\": \"admin@localhost\", \"uid\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"username\": \"admin\"}, \"errorCode\": null, \"errorMessage\": null, \"functions\": null, \"gitSource\": null, \"id\": \"dpl_THe06xHRysoNqaTC\", \"inspectorUrl\": \"http://localhost:4400/deployments/dpl_THe06xHRysoNqaTC\", \"meta\": {}, \"name\": \"corpus-app\", \"plan\": \"hobby\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"readyAt\": 1789756690347, \"readyState\": \"READY\", \"readySubstate\": null, \"regions\": [\"iad1\"], \"routes\": null, \"source\": \"cli\", \"state\": \"READY\", \"target\": \"preview\", \"type\": \"LAMBDAS\", \"uid\": \"dpl_THe06xHRysoNqaTC\", \"url\": \"corpus-app-THe06xHR.vercel.app\"}",
+      "normalized": "{\"alias\": [\"corpus-app-THe06xHR.vercel.app\"], \"aliasAssigned\": true, \"aliasError\": null, \"bootedAt\": EPOCHMS, \"buildingAt\": EPOCHMS, \"canceledAt\": null, \"created\": EPOCHMS, \"createdAt\": EPOCHMS, \"creator\": {\"email\": \"admin@localhost\", \"uid\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"username\": \"admin\"}, \"errorCode\": null, \"errorMessage\": null, \"functions\": null, \"gitSource\": null, \"id\": \"ID\", \"inspectorUrl\": \"http://HOST/deployments/ID\", \"meta\": {}, \"name\": \"corpus-app\", \"plan\": \"hobby\", \"projectId\": \"ID_XKphQ\", \"readyAt\": EPOCHMS, \"readyState\": \"READY\", \"readySubstate\": null, \"regions\": [\"iad1\"], \"routes\": null, \"source\": \"cli\", \"state\": \"READY\", \"target\": \"preview\", \"type\": \"LAMBDAS\", \"uid\": \"ID\", \"url\": \"corpus-app-THe06xHR.vercel.app\"}"
+    },
+    {
+      "name": "deployments-v6",
+      "status": 200,
+      "raw": "{\"deployments\": [{\"aliasAssigned\": true, \"created\": 1789756690347, \"creator\": {\"email\": \"admin@localhost\", \"uid\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"username\": \"admin\"}, \"meta\": {}, \"name\": \"corpus-app\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"readyState\": \"READY\", \"state\": \"READY\", \"target\": \"preview\", \"type\": \"LAMBDAS\", \"uid\": \"dpl_THe06xHRysoNqaTC\", \"url\": \"corpus-app-THe06xHR.vercel.app\"}], \"pagination\": {\"count\": 1, \"next\": null, \"prev\": 1789756690347}}",
+      "normalized": "{\"deployments\": [{\"aliasAssigned\": true, \"created\": EPOCHMS, \"creator\": {\"email\": \"admin@localhost\", \"uid\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"username\": \"admin\"}, \"meta\": {}, \"name\": \"corpus-app\", \"projectId\": \"ID_XKphQ\", \"readyState\": \"READY\", \"state\": \"READY\", \"target\": \"preview\", \"type\": \"LAMBDAS\", \"uid\": \"ID\", \"url\": \"corpus-app-THe06xHR.vercel.app\"}], \"pagination\": {\"count\": 1, \"next\": null, \"prev\": EPOCHMS}}"
+    },
+    {
+      "name": "deployments-v7",
+      "status": 200,
+      "raw": "{\"deployments\": [{\"aliasAssigned\": true, \"created\": 1789756690347, \"creator\": {\"email\": \"admin@localhost\", \"uid\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"username\": \"admin\"}, \"meta\": {}, \"name\": \"corpus-app\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"readyState\": \"READY\", \"state\": \"READY\", \"target\": \"preview\", \"type\": \"LAMBDAS\", \"uid\": \"dpl_THe06xHRysoNqaTC\", \"url\": \"corpus-app-THe06xHR.vercel.app\"}], \"pagination\": {\"count\": 1, \"next\": null, \"prev\": 1789756690347}}",
+      "normalized": "{\"deployments\": [{\"aliasAssigned\": true, \"created\": EPOCHMS, \"creator\": {\"email\": \"admin@localhost\", \"uid\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"username\": \"admin\"}, \"meta\": {}, \"name\": \"corpus-app\", \"projectId\": \"ID_XKphQ\", \"readyState\": \"READY\", \"state\": \"READY\", \"target\": \"preview\", \"type\": \"LAMBDAS\", \"uid\": \"ID\", \"url\": \"corpus-app-THe06xHR.vercel.app\"}], \"pagination\": {\"count\": 1, \"next\": null, \"prev\": EPOCHMS}}"
+    },
+    {
+      "name": "deployment-get",
+      "status": 200,
+      "raw": "{\"alias\": [\"corpus-app-THe06xHR.vercel.app\"], \"aliasAssigned\": true, \"aliasError\": null, \"bootedAt\": 1789756690347, \"buildingAt\": 1789756690347, \"canceledAt\": null, \"created\": 1789756690347, \"createdAt\": 1789756690347, \"creator\": {\"email\": \"admin@localhost\", \"uid\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"username\": \"admin\"}, \"errorCode\": null, \"errorMessage\": null, \"functions\": null, \"gitSource\": null, \"id\": \"dpl_THe06xHRysoNqaTC\", \"inspectorUrl\": \"http://localhost:4400/deployments/dpl_THe06xHRysoNqaTC\", \"meta\": {}, \"name\": \"corpus-app\", \"plan\": \"hobby\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"readyAt\": 1789756690347, \"readyState\": \"READY\", \"readySubstate\": null, \"regions\": [\"iad1\"], \"routes\": null, \"source\": \"cli\", \"state\": \"READY\", \"target\": \"preview\", \"type\": \"LAMBDAS\", \"uid\": \"dpl_THe06xHRysoNqaTC\", \"url\": \"corpus-app-THe06xHR.vercel.app\"}",
+      "normalized": "{\"alias\": [\"corpus-app-THe06xHR.vercel.app\"], \"aliasAssigned\": true, \"aliasError\": null, \"bootedAt\": EPOCHMS, \"buildingAt\": EPOCHMS, \"canceledAt\": null, \"created\": EPOCHMS, \"createdAt\": EPOCHMS, \"creator\": {\"email\": \"admin@localhost\", \"uid\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"username\": \"admin\"}, \"errorCode\": null, \"errorMessage\": null, \"functions\": null, \"gitSource\": null, \"id\": \"ID\", \"inspectorUrl\": \"http://HOST/deployments/ID\", \"meta\": {}, \"name\": \"corpus-app\", \"plan\": \"hobby\", \"projectId\": \"ID_XKphQ\", \"readyAt\": EPOCHMS, \"readyState\": \"READY\", \"readySubstate\": null, \"regions\": [\"iad1\"], \"routes\": null, \"source\": \"cli\", \"state\": \"READY\", \"target\": \"preview\", \"type\": \"LAMBDAS\", \"uid\": \"ID\", \"url\": \"corpus-app-THe06xHR.vercel.app\"}"
+    },
+    {
+      "name": "deployment-events",
+      "status": 200,
+      "raw": "[{\"date\": 1789756690347, \"payload\": {\"text\": \"Deployment ready\"}, \"serial\": \"3\", \"type\": \"ready\"}, {\"date\": 1789756690347, \"payload\": {\"text\": \"Building\"}, \"serial\": \"2\", \"type\": \"building\"}, {\"date\": 1789756690347, \"payload\": {\"text\": \"Deployment created\"}, \"serial\": \"1\", \"type\": \"created\"}]",
+      "normalized": "[{\"date\": EPOCHMS, \"payload\": {\"text\": \"Deployment ready\"}, \"serial\": \"3\", \"type\": \"ready\"}, {\"date\": EPOCHMS, \"payload\": {\"text\": \"Building\"}, \"serial\": \"2\", \"type\": \"building\"}, {\"date\": EPOCHMS, \"payload\": {\"text\": \"Deployment created\"}, \"serial\": \"1\", \"type\": \"created\"}]"
+    },
+    {
+      "name": "deployment-files",
+      "status": 200,
+      "raw": "{\"files\": [{\"children\": [], \"contentType\": null, \"mode\": 16877, \"name\": \"/\", \"size\": 0, \"type\": \"directory\", \"uid\": \"file_M0lM-ID2YmvjuBuH\"}]}",
+      "normalized": "{\"files\": [{\"children\": [], \"contentType\": null, \"mode\": 16877, \"name\": \"/\", \"size\": 0, \"type\": \"directory\", \"uid\": \"file_M0lM-ID2YmvjuBuH\"}]}"
+    },
+    {
+      "name": "deployment-aliases",
+      "status": 200,
+      "raw": "{\"aliases\": [{\"alias\": \"corpus-app-THe06xHR.vercel.app\", \"deploymentId\": \"dpl_THe06xHRysoNqaTC\", \"projectId\": \"prj_CcIVl6iRYU_XKphQ\", \"uid\": \"als_D5XM1tOxDZEDSjJT\"}]}",
+      "normalized": "{\"aliases\": [{\"alias\": \"corpus-app-THe06xHR.vercel.app\", \"deploymentId\": \"ID\", \"projectId\": \"ID_XKphQ\", \"uid\": \"als_D5XM1tOxDZEDSjJT\"}]}"
+    },
+    {
+      "name": "deployment-cancel",
+      "status": 400,
+      "raw": "{\"error\": {\"code\": \"bad_request\", \"message\": \"Deployment cannot be canceled in its current state\"}}",
+      "normalized": "{\"error\": {\"code\": \"bad_request\", \"message\": \"Deployment cannot be canceled in its current state\"}}"
+    },
+    {
+      "name": "team-create",
+      "status": 200,
+      "raw": "{\"team\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": 1789756690362, \"creatorId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"description\": null, \"id\": \"team_xhbzDrh3TsuTsnfL\", \"membership\": {\"confirmed\": true, \"role\": \"OWNER\"}, \"name\": \"corpus-team\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"standard\"}, \"slug\": \"corpus-team\", \"stagingPrefix\": \"\", \"updatedAt\": 1789756690362}}",
+      "normalized": "{\"team\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": EPOCHMS, \"creatorId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"description\": null, \"id\": \"ID\", \"membership\": {\"confirmed\": true, \"role\": \"OWNER\"}, \"name\": \"corpus-team\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"standard\"}, \"slug\": \"corpus-team\", \"stagingPrefix\": \"\", \"updatedAt\": EPOCHMS}}"
+    },
+    {
+      "name": "team-dup",
+      "status": 409,
+      "raw": "{\"error\": {\"code\": \"team_slug_already_exists\", \"message\": \"A team with this slug already exists\"}}",
+      "normalized": "{\"error\": {\"code\": \"team_slug_already_exists\", \"message\": \"A team with this slug already exists\"}}"
+    },
+    {
+      "name": "teams-list",
+      "status": 200,
+      "raw": "{\"pagination\": {\"count\": 1, \"next\": null, \"prev\": 1789756690362}, \"teams\": [{\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": 1789756690362, \"creatorId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"description\": null, \"id\": \"team_xhbzDrh3TsuTsnfL\", \"membership\": {\"confirmed\": true, \"role\": \"OWNER\"}, \"name\": \"corpus-team\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"standard\"}, \"slug\": \"corpus-team\", \"stagingPrefix\": \"\", \"updatedAt\": 1789756690362}]}",
+      "normalized": "{\"pagination\": {\"count\": 1, \"next\": null, \"prev\": EPOCHMS}, \"teams\": [{\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": EPOCHMS, \"creatorId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"description\": null, \"id\": \"ID\", \"membership\": {\"confirmed\": true, \"role\": \"OWNER\"}, \"name\": \"corpus-team\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"standard\"}, \"slug\": \"corpus-team\", \"stagingPrefix\": \"\", \"updatedAt\": EPOCHMS}]}"
+    },
+    {
+      "name": "team-get",
+      "status": 200,
+      "raw": "{\"team\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": 1789756690362, \"creatorId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"description\": null, \"id\": \"team_xhbzDrh3TsuTsnfL\", \"membership\": {\"confirmed\": true, \"role\": \"OWNER\"}, \"name\": \"corpus-team\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"standard\"}, \"slug\": \"corpus-team\", \"stagingPrefix\": \"\", \"updatedAt\": 1789756690362}}",
+      "normalized": "{\"team\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": EPOCHMS, \"creatorId\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"description\": null, \"id\": \"ID\", \"membership\": {\"confirmed\": true, \"role\": \"OWNER\"}, \"name\": \"corpus-team\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"standard\"}, \"slug\": \"corpus-team\", \"stagingPrefix\": \"\", \"updatedAt\": EPOCHMS}}"
+    },
+    {
+      "name": "team-members",
+      "status": 200,
+      "raw": "{\"members\": [{\"confirmed\": true, \"id\": \"1\", \"joinedFrom\": \"cli\", \"role\": \"OWNER\", \"user\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": 1789756667340, \"defaultTeamId\": null, \"email\": \"admin@localhost\", \"id\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"name\": \"Admin\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"Edge Functions\"}, \"softBlock\": null, \"stagingPrefix\": \"staging\", \"username\": \"admin\", \"version\": null}}], \"pagination\": {\"count\": 1, \"next\": null, \"prev\": 1789756690362}}",
+      "normalized": "{\"members\": [{\"confirmed\": true, \"id\": \"1\", \"joinedFrom\": \"cli\", \"role\": \"OWNER\", \"user\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": EPOCHMS, \"defaultTeamId\": null, \"email\": \"admin@localhost\", \"id\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"name\": \"Admin\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"Edge Functions\"}, \"softBlock\": null, \"stagingPrefix\": \"staging\", \"username\": \"admin\", \"version\": null}}], \"pagination\": {\"count\": 1, \"next\": null, \"prev\": EPOCHMS}}"
+    },
+    {
+      "name": "user-patch",
+      "status": 200,
+      "raw": "{\"user\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": 1789756667340, \"defaultTeamId\": null, \"email\": \"admin@localhost\", \"id\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"name\": \"Corpus\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"Edge Functions\"}, \"softBlock\": null, \"stagingPrefix\": \"staging\", \"username\": \"admin\", \"version\": null}}",
+      "normalized": "{\"user\": {\"avatar\": null, \"billing\": {\"addons\": null, \"cancelation\": null, \"period\": null, \"plan\": \"hobby\", \"trial\": null}, \"createdAt\": EPOCHMS, \"defaultTeamId\": null, \"email\": \"admin@localhost\", \"id\": \"user_TJmvJD7TRlPUUzlqmAJr\", \"name\": \"Corpus\", \"resourceConfig\": {\"concurrentBuilds\": 1, \"nodeType\": \"Edge Functions\"}, \"softBlock\": null, \"stagingPrefix\": \"staging\", \"username\": \"admin\", \"version\": null}}"
+    },
+    {
+      "name": "registration",
+      "status": 200,
+      "raw": "{\"registration\": false}",
+      "normalized": "{\"registration\": false}"
+    },
+    {
+      "name": "apikey-create",
+      "status": 200,
+      "raw": "{\"apiKey\": {\"createdAt\": 1789756690372, \"id\": \"ak_4nV8LlAHMt9h6cGl\", \"name\": \"corpus-key\", \"teamId\": null}, \"apiKeyString\": \"vercel_api_iI4QfFuxwLJJu32jdILg5aLVEGW2V96i\"}",
+      "normalized": "{\"apiKey\": {\"createdAt\": EPOCHMS, \"id\": \"ID\", \"name\": \"corpus-key\", \"teamId\": null}, \"apiKeyString\": \"TOKEN\"}"
+    },
+    {
+      "name": "apikey-list",
+      "status": 200,
+      "raw": "{\"keys\": [{\"createdAt\": \"2026-09-18T18:38:10.372Z\", \"id\": \"ak_4nV8LlAHMt9h6cGl\", \"name\": \"corpus-key\", \"teamId\": null}]}",
+      "normalized": "{\"keys\": [{\"createdAt\": \"TS\", \"id\": \"ID\", \"name\": \"corpus-key\", \"teamId\": null}]}"
+    },
+    {
+      "name": "apikey-delete-404",
+      "status": 404,
+      "raw": "{\"error\": {\"code\": \"not_found\", \"message\": \"API key not found\"}}",
+      "normalized": "{\"error\": {\"code\": \"not_found\", \"message\": \"API key not found\"}}"
+    },
+    {
+      "name": "blob-upload",
+      "status": 200,
+      "raw": "{\"contentDisposition\": \"attachment; filename=\\\"corpus.txt\\\"\", \"contentType\": \"text/plain\", \"downloadUrl\": \"http://localhost:4400/blob/corpusstore/corpus.txt?download=1\", \"etag\": \"\\\"67d41db008bd3effe1bde505ec502602c6f77e36bf84056406e24dc0f8451e9b\\\"\", \"pathname\": \"corpus.txt\", \"url\": \"http://localhost:4400/blob/corpusstore/corpus.txt\"}",
+      "normalized": "{\"contentDisposition\": \"attachment; filename=\\\"corpus.txt\\\"\", \"contentType\": \"text/plain\", \"downloadUrl\": \"http://HOST/blob/corpusstore/corpus.txt?download=1\", \"etag\": \"\\\"HEX\\\"\", \"pathname\": \"corpus.txt\", \"url\": \"http://HOST/blob/corpusstore/corpus.txt\"}"
+    },
+    {
+      "name": "blob-dup",
+      "status": 400,
+      "raw": "{\"error\": {\"code\": \"bad_request\", \"message\": \"This blob already exists, use allowOverwrite: true to overwrite it\"}}",
+      "normalized": "{\"error\": {\"code\": \"bad_request\", \"message\": \"This blob already exists, use allowOverwrite: true to overwrite it\"}}"
+    },
+    {
+      "name": "blob-list",
+      "status": 200,
+      "raw": "{\"blobs\": [{\"downloadUrl\": \"http://localhost:4400/blob/corpusstore/corpus.txt?download=1\", \"etag\": \"\\\"67d41db008bd3effe1bde505ec502602c6f77e36bf84056406e24dc0f8451e9b\\\"\", \"pathname\": \"corpus.txt\", \"size\": 12, \"uploadedAt\": \"2026-09-18T18:38:10.376Z\", \"url\": \"http://localhost:4400/blob/corpusstore/corpus.txt\"}], \"hasMore\": false}",
+      "normalized": "{\"blobs\": [{\"downloadUrl\": \"http://HOST/blob/corpusstore/corpus.txt?download=1\", \"etag\": \"\\\"HEX\\\"\", \"pathname\": \"corpus.txt\", \"size\": 12, \"uploadedAt\": \"TS\", \"url\": \"http://HOST/blob/corpusstore/corpus.txt\"}], \"hasMore\": false}"
+    },
+    {
+      "name": "blob-head",
+      "status": 200,
+      "raw": "{\"cacheControl\": \"public, max-age=2592000\", \"contentDisposition\": \"attachment; filename=\\\"corpus.txt\\\"\", \"contentType\": \"text/plain\", \"downloadUrl\": \"http://localhost:4400/blob/corpusstore/corpus.txt?download=1\", \"etag\": \"\\\"67d41db008bd3effe1bde505ec502602c6f77e36bf84056406e24dc0f8451e9b\\\"\", \"pathname\": \"corpus.txt\", \"size\": 12, \"uploadedAt\": \"2026-09-18T18:38:10.376Z\", \"url\": \"http://localhost:4400/blob/corpusstore/corpus.txt\"}",
+      "normalized": "{\"cacheControl\": \"public, max-age=2592000\", \"contentDisposition\": \"attachment; filename=\\\"corpus.txt\\\"\", \"contentType\": \"text/plain\", \"downloadUrl\": \"http://HOST/blob/corpusstore/corpus.txt?download=1\", \"etag\": \"\\\"HEX\\\"\", \"pathname\": \"corpus.txt\", \"size\": 12, \"uploadedAt\": \"TS\", \"url\": \"http://HOST/blob/corpusstore/corpus.txt\"}"
+    },
+    {
+      "name": "blob-serve",
+      "status": 200,
+      "raw": "\"corpus bytes\"",
+      "normalized": "\"corpus bytes\""
+    },
+    {
+      "name": "blob-mpu",
+      "status": 400,
+      "raw": "{\"error\": {\"code\": \"bad_request\", \"message\": \"Multipart uploads are not supported by the emulator yet\"}}",
+      "normalized": "{\"error\": {\"code\": \"bad_request\", \"message\": \"Multipart uploads are not supported by the emulator yet\"}}"
+    },
+    {
+      "name": "blob-delete",
+      "status": 200,
+      "raw": "null",
+      "normalized": "null"
+    },
+    {
+      "name": "blob-head-gone",
+      "status": 404,
+      "raw": "{\"error\": {\"code\": \"not_found\", \"message\": \"The requested blob does not exist\"}}",
+      "normalized": "{\"error\": {\"code\": \"not_found\", \"message\": \"The requested blob does not exist\"}}"
+    }
+  ]
+}

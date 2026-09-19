@@ -31,12 +31,16 @@
       "ref": "2026-09-11T10:32:02Z"
     },
     "vercel.api": {
-      "source": "https://openapi.vercel.sh/",
-      "ref": "2026-09-11T16:02:48Z"
+      "source": "authored",
+      "ref": "2026-09-18T18:20:01Z"
     },
     "vercel.kv": {
       "source": "authored",
       "ref": "2026-09-11T22:29:30Z"
+    },
+    "vercel.blob": {
+      "source": "authored",
+      "ref": "2026-09-18T17:14:10Z"
     },
     "azure.blobs": {
       "source": "authored",
@@ -1322,11 +1326,35 @@
     },
     {
       "serviceId": "vercel.api",
+      "source": "authored",
+      "ref": "2026-09-18T18:20:01Z",
+      "path": "vercel/api-extra.json",
+      "sha256": "3543f5f7785fc1bf7b5b44e840783eea5a5eec9942097f6874d076f8637cb0b9",
+      "ingested": "2026-09-18T18:20:01Z"
+    },
+    {
+      "serviceId": "vercel.api",
+      "source": "authored",
+      "ref": "2026-09-18T18:20:01Z",
+      "path": "vercel/api-extra.json",
+      "sha256": "3543f5f7785fc1bf7b5b44e840783eea5a5eec9942097f6874d076f8637cb0b9",
+      "ingested": "2026-09-18T18:20:01Z"
+    },
+    {
+      "serviceId": "vercel.api",
       "source": "https://openapi.vercel.sh/",
       "ref": "2026-09-11T16:02:48Z",
       "path": "vercel/api.json",
       "sha256": "0c88ca09d296363d1769fff0054ea129e944e91e9a32ef2779dcf8e3fccf4aa4",
       "ingested": "2026-09-11T16:02:49Z"
+    },
+    {
+      "serviceId": "vercel.blob",
+      "source": "authored",
+      "ref": "2026-09-18T17:14:10Z",
+      "path": "vercel/blob.json",
+      "sha256": "de63587a8b81e87a3a7182cae610b7c68c9419d2acffa36cf8b3e05e140881d7",
+      "ingested": "2026-09-18T17:14:11Z"
     },
     {
       "serviceId": "vercel.kv",

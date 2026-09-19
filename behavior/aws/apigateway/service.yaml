@@ -1,0 +1,1199 @@
+schema: bir/1
+service: aws.apigateway
+
+# Transcribed from the hand-written pack, not established against the real
+# service. The control plane is flat records: a REST API is an id, a name and
+# a root resource, and every child collection is keyed under the api id.
+# Nothing is ever served at an API's endpoint from this bundle.
+provenance: authored
+
+# The pack answered a missing id member with NotFoundException: its lookups
+# folded an absent member to the empty string, the store holds no empty key,
+# and the miss is that fault. The engine's model check rejects the absence
+# first, so that is also the missing-input answer. On creates the pack
+# accepted a missing required member and stored empty strings; the engine now
+# rejects those requests, which is a divergence the quirks name.
+missing_input_error: NotFound
+
+# Complete and gated, but not yet serving: ExecuteApi is a Lambda AWS_PROXY
+# invocation, not a CRUD write. It resolves the resource for a request path,
+# reads the integration, calls aws.lambda Invoke synchronously with a
+# synthesized proxy event, and answers with the flattened response as a stream
+# with the function's status code and headers. The effect vocabulary has no
+# synchronous cross-service call and no stream answer, and the engine's prim
+# dispatch reports no primitives registered, so a serving bundle would fault
+# every invocation NotImplemented where the pack runs the function. Pipes'
+# execute-api enrichment and the `_user_request_` edge route both depend on
+# it. The bundle takes over when an engine primitive can invoke a sibling
+# service and answer with a stream.
+shadow: >
+  ExecuteApi invokes aws.lambda synchronously and streams the flattened
+  AWS_PROXY response; the bundle vocabulary cannot call a sibling service or
+  answer with a stream, so the pack still serves. Everything else the pack
+  does -- all 123 remaining operations, including the leftover control-plane
+  KV family -- is transcribed and gated below.
+
+resources:
+  api:
+    collection: apigw
+    id:
+      input_members: [restApiId]
+    record:
+      id: id
+      rootResourceId: "'root'"
+
+  # Everything below the api is scoped to it: the pack used one collection
+  # per kind with keys prefixed by the api id, which is the same containment
+  # as a collection named for the api. Every operation on one reads its api
+  # first -- not to check it exists, which this service never does on writes,
+  # but because the collection is named for it.
+  res:
+    collection: "apigwres:{api.id}"
+    parent: api
+    id:
+      input_members: [resourceId]
+
+  method:
+    collection: "apigwm:{api.id}"
+    parent: api
+    id:
+      derive: "string(input.resourceId) + '/' + upper(string(input.httpMethod))"
+
+  integration:
+    collection: "apigwi:{api.id}"
+    parent: api
+    id:
+      derive: "string(input.resourceId) + '/' + upper(string(input.httpMethod))"
+
+  method_response:
+    collection: "apigwmr:{api.id}"
+    parent: api
+    id:
+      derive: "string(input.resourceId) + '/' + upper(string(input.httpMethod)) + '/' + string(input.statusCode)"
+
+  integration_response:
+    collection: "apigwir:{api.id}"
+    parent: api
+    id:
+      derive: "string(input.resourceId) + '/' + upper(string(input.httpMethod)) + '/' + string(input.statusCode)"
+
+  deployment:
+    collection: "apigwdep:{api.id}"
+    parent: api
+    id:
+      input_members: [deploymentId]
+
+  # The pack stored a stage as the bare deployment id string, not a record;
+  # GetStage answers the stageName from the request, never from the store.
+  stage:
+    collection: "apigwst:{api.id}"
+    parent: api
+    id:
+      input_members: [stageName]
+    record:
+      stageName: "string(input.stageName)"
+
+  authorizer:
+    collection: "apigwau:{api.id}"
+    parent: api
+    id:
+      input_members: [authorizerId]
+
+  api_key:
+    collection: apigwkey
+    id:
+      input_members: [apiKey]
+
+  usage_plan:
+    collection: apigwup
+    id:
+      input_members: [usagePlanId]
+
+  # The leftover family: the pack served every remaining operation as
+  # control-plane KV over one collection with keys kind + ':' + id, where id
+  # is the first present, non-empty of the kind's own member, then id, name,
+  # Name, domainName, restApiId -- and a fresh hex id when none are present.
+  # One resource per kind is the same layout; the fallback chain is the
+  # input_members order, transcribed rather than repaired.
+  domain_name:
+    collection: agwldn
+    id:
+      input_members: [domainName, id, name, Name, restApiId]
+
+  vpc_link:
+    collection: agwlvpc
+    id:
+      input_members: [id, name, Name, domainName, restApiId]
+
+  lmodel:
+    collection: agwlmod
+    id:
+      input_members: [name, id, Name, domainName, restApiId]
+
+  doc:
+    collection: agwldoc
+    id:
+      input_members: [id, name, Name, domainName, restApiId]
+
+  request_validator:
+    collection: agwlrv
+    id:
+      input_members: [id, name, Name, domainName, restApiId]
+
+  usage_plan_key:
+    collection: agwlupk
+    id:
+      input_members: [id, name, Name, domainName, restApiId]
+
+  gateway_response:
+    collection: agwlgr
+    id:
+      input_members: [responseType, id, name, Name, domainName, restApiId]
+
+  client_certificate:
+    collection: agwlcc
+    id:
+      input_members: [clientCertificateId, id, name, Name, domainName, restApiId]
+
+  base_path_mapping:
+    collection: agwlbp
+    id:
+      input_members: [basePath, id, name, Name, domainName, restApiId]
+
+  misc:
+    collection: agwlmisc
+    id:
+      input_members: [id, name, Name, domainName, restApiId]
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateRestApi:
+    let:
+      apiName: "'name' in input && string(input.name) != '' ? string(input.name) : ('Name' in input ? string(input.Name) : '')"
+    effects:
+      - generate: { bind: aid, kind: hex, bytes: 8 }
+      - create:
+          resource: api
+          key: "fx.aid"
+          record:
+            name: apiName
+      # Every api is born with its root resource, path '/'.
+      - create:
+          resource: res
+          key: "'root'"
+          record:
+            id: "'root'"
+            path: "'/'"
+            pathPart: "''"
+            parentId: "''"
+    output:
+      id: "fx.aid"
+      name: apiName
+      rootResourceId: "'root'"
+
+  GetRestApi:
+    reads:
+      a: { resource: api }
+    require:
+      - { cond: a_found, error: NotFound }
+    output:
+      id: "string(a.id)"
+      name: "string(a.name)"
+      rootResourceId: "string(a.rootResourceId)"
+
+  GetRestApis:
+    list: { resource: api, member: items, paginate: model }
+
+  DeleteRestApi:
+    effects:
+      - delete: { resource: api, missing: ignore }
+
+  # The declared update mechanism is patchOperations; the pack instead read a
+  # top-level name (or Name) the request shape does not declare, and renamed
+  # when it was non-empty. Transcribed, not repaired.
+  UpdateRestApi:
+    reads:
+      a: { resource: api }
+    require:
+      - { cond: a_found, error: NotFound }
+    let:
+      newName: "('name' in input && string(input.name) != '') ? string(input.name) : (('Name' in input && string(input.Name) != '') ? string(input.Name) : '')"
+    effects:
+      - patch:
+          resource: api
+          when: "newName != ''"
+          record:
+            name: newName
+    output:
+      id: "string(input.restApiId)"
+      name: "newName != '' ? newName : string(a.name)"
+      rootResourceId: "string(a.rootResourceId)"
+
+  CreateResource:
+    reads:
+      api: { resource: api }
+      parent: { resource: res, key: "string(input.parentId)" }
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8 }
+      - create:
+          resource: res
+          key: "fx.rid"
+          record:
+            id: "fx.rid"
+            parentId: "string(input.parentId)"
+            pathPart: "string(input.pathPart)"
+            path: "(parent_found ? string(parent.path) : '/') == '/' ? '/' + string(input.pathPart) : string(parent.path) + '/' + string(input.pathPart)"
+    output:
+      id: "fx.rid"
+      parentId: "string(input.parentId)"
+      pathPart: "string(input.pathPart)"
+      path: "rec.path"
+
+  GetResources:
+    reads:
+      api: { resource: api }
+    list: { resource: res, member: items, paginate: model }
+
+  GetResource:
+    reads:
+      api: { resource: api }
+      r: { resource: res }
+    require:
+      - { cond: r_found, error: NotFound }
+    output:
+      id: "string(r.id)"
+      parentId: "string(r.parentId)"
+      pathPart: "string(r.pathPart)"
+      path: "string(r.path)"
+
+  DeleteResource:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: res, missing: ignore }
+
+  PutMethod:
+    reads:
+      api: { resource: api }
+    let:
+      auth: "('authorizationType' in input && string(input.authorizationType) != '') ? string(input.authorizationType) : ('AuthorizationType' in input ? string(input.AuthorizationType) : 'NONE')"
+    effects:
+      - create:
+          resource: method
+          record:
+            httpMethod: "upper(string(input.httpMethod))"
+            authorizationType: auth
+    output:
+      httpMethod: "rec.httpMethod"
+      authorizationType: "rec.authorizationType"
+
+  GetMethod:
+    reads:
+      api: { resource: api }
+      m: { resource: method }
+    require:
+      - { cond: m_found, error: NotFound }
+    output:
+      httpMethod: "string(m.httpMethod)"
+      authorizationType: "string(m.authorizationType)"
+
+  DeleteMethod:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: method, missing: ignore }
+
+  PutIntegration:
+    reads:
+      api: { resource: api }
+    let:
+      integUri: "('uri' in input && string(input.uri) != '') ? string(input.uri) : ('Uri' in input ? string(input.Uri) : '')"
+      integMethod: "('integrationHttpMethod' in input && string(input.integrationHttpMethod) != '') ? string(input.integrationHttpMethod) : string(input.httpMethod)"
+      integType: "('type' in input && string(input.type) != '') ? string(input.type) : ('Type' in input ? string(input.Type) : '')"
+    effects:
+      - create:
+          resource: integration
+          record:
+            type: integType
+            uri: integUri
+            # The method the caller named on the request, not the folded key.
+            httpMethod: integMethod
+    output:
+      type: "rec.type"
+      uri: "rec.uri"
+      httpMethod: "rec.httpMethod"
+
+  GetIntegration:
+    reads:
+      api: { resource: api }
+      i: { resource: integration }
+    require:
+      - { cond: i_found, error: NotFound }
+    output:
+      type: "string(i.type)"
+      uri: "string(i.uri)"
+      httpMethod: "string(i.httpMethod)"
+
+  DeleteIntegration:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: integration, missing: ignore }
+
+  PutMethodResponse:
+    reads:
+      api: { resource: api }
+    effects:
+      - create:
+          resource: method_response
+          record:
+            statusCode: "string(input.statusCode)"
+    output:
+      statusCode: "rec.statusCode"
+
+  GetMethodResponse:
+    reads:
+      api: { resource: api }
+      mr: { resource: method_response }
+    require:
+      - { cond: mr_found, error: NotFound }
+    output:
+      statusCode: "string(mr.statusCode)"
+
+  DeleteMethodResponse:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: method_response, missing: ignore }
+
+  PutIntegrationResponse:
+    reads:
+      api: { resource: api }
+    effects:
+      - create:
+          resource: integration_response
+          record:
+            statusCode: "string(input.statusCode)"
+            selectionPattern: "'selectionPattern' in input ? string(input.selectionPattern) : ''"
+    output:
+      statusCode: "rec.statusCode"
+      selectionPattern: "rec.selectionPattern"
+
+  GetIntegrationResponse:
+    reads:
+      api: { resource: api }
+      ir: { resource: integration_response }
+    require:
+      - { cond: ir_found, error: NotFound }
+    output:
+      statusCode: "string(ir.statusCode)"
+      selectionPattern: "string(ir.selectionPattern)"
+
+  DeleteIntegrationResponse:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: integration_response, missing: ignore }
+
+  # A deployment that names a stage points that stage at itself, overwriting
+  # whatever deployment the stage held.
+  CreateDeployment:
+    reads:
+      api: { resource: api }
+    effects:
+      - generate: { bind: dep, kind: hex, bytes: 8 }
+      - create:
+          resource: deployment
+          key: "fx.dep"
+          record:
+            id: "fx.dep"
+            stageName: "'stageName' in input ? string(input.stageName) : ''"
+      - create:
+          resource: stage
+          key: "string(input.stageName)"
+          when: "'stageName' in input && string(input.stageName) != ''"
+          record:
+            deploymentId: "fx.dep"
+    output:
+      id: "fx.dep"
+
+  GetDeployments:
+    reads:
+      api: { resource: api }
+    list: { resource: deployment, member: items, paginate: model }
+
+  GetDeployment:
+    reads:
+      api: { resource: api }
+      d: { resource: deployment }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      id: "string(d.id)"
+
+  DeleteDeployment:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: deployment, missing: ignore }
+
+  CreateStage:
+    reads:
+      api: { resource: api }
+    effects:
+      - create:
+          resource: stage
+          record:
+            deploymentId: "string(input.deploymentId)"
+    output:
+      stageName: "string(input.stageName)"
+      deploymentId: "string(input.deploymentId)"
+
+  GetStage:
+    reads:
+      api: { resource: api }
+      s: { resource: stage }
+    require:
+      - { cond: s_found, error: NotFound }
+    output:
+      # The stageName is the one the request named; the store only holds the
+      # deployment id.
+      stageName: "string(input.stageName)"
+      deploymentId: "string(s.deploymentId)"
+
+  # Like UpdateRestApi, the pack read a member the request shape does not
+  # declare (deploymentId rather than patchOperations), and a missing stage
+  # is not a fault: it answers the empty deployment id and, when the request
+  # carries one, creates the stage.
+  UpdateStage:
+    reads:
+      api: { resource: api }
+      s: { resource: stage }
+    effects:
+      - patch:
+          resource: stage
+          when: "'deploymentId' in input && string(input.deploymentId) != ''"
+          record:
+            deploymentId: "string(input.deploymentId)"
+    output:
+      stageName: "string(input.stageName)"
+      deploymentId: "'deploymentId' in input && string(input.deploymentId) != '' ? string(input.deploymentId) : (s_found ? string(s.deploymentId) : '')"
+
+  DeleteStage:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: stage, missing: ignore }
+
+  CreateAuthorizer:
+    reads:
+      api: { resource: api }
+    effects:
+      - generate: { bind: azid, kind: hex, bytes: 8 }
+      - create:
+          resource: authorizer
+          key: "fx.azid"
+          record:
+            id: "fx.azid"
+            name: "('name' in input && string(input.name) != '') ? string(input.name) : ('Name' in input ? string(input.Name) : '')"
+            type: "('type' in input && string(input.type) != '') ? string(input.type) : ('Type' in input ? string(input.Type) : '')"
+    output:
+      id: "fx.azid"
+      name: "rec.name"
+      type: "rec.type"
+
+  GetAuthorizer:
+    reads:
+      api: { resource: api }
+      a: { resource: authorizer }
+    require:
+      - { cond: a_found, error: NotFound }
+    output:
+      id: "string(a.id)"
+      name: "string(a.name)"
+      type: "string(a.type)"
+
+  GetAuthorizers:
+    reads:
+      api: { resource: api }
+    list: { resource: authorizer, member: items, paginate: model }
+
+  DeleteAuthorizer:
+    reads:
+      api: { resource: api }
+    effects:
+      - delete: { resource: authorizer, missing: ignore }
+
+  CreateApiKey:
+    effects:
+      - generate: { bind: kid, kind: hex, bytes: 8 }
+      - generate: { bind: kval, kind: hex, bytes: 20 }
+      - create:
+          resource: api_key
+          key: "fx.kid"
+          record:
+            id: "fx.kid"
+            name: "('name' in input && string(input.name) != '') ? string(input.name) : ('Name' in input ? string(input.Name) : '')"
+            value: "fx.kval"
+            enabled: "true"
+    output:
+      id: "fx.kid"
+      name: "rec.name"
+      value: "fx.kval"
+      enabled: "true"
+
+  GetApiKey:
+    reads:
+      k: { resource: api_key }
+    require:
+      - { cond: k_found, error: NotFound }
+    output:
+      id: "string(k.id)"
+      name: "string(k.name)"
+      value: "string(k.value)"
+      enabled: "k.enabled"
+
+  GetApiKeys:
+    list: { resource: api_key, member: items, paginate: model }
+
+  DeleteApiKey:
+    effects:
+      - delete: { resource: api_key, missing: ignore }
+
+  CreateUsagePlan:
+    effects:
+      - generate: { bind: upid, kind: hex, bytes: 8 }
+      - create:
+          resource: usage_plan
+          key: "fx.upid"
+          record:
+            id: "fx.upid"
+            name: "('name' in input && string(input.name) != '') ? string(input.name) : ('Name' in input ? string(input.Name) : '')"
+    output:
+      id: "fx.upid"
+      name: "rec.name"
+
+  GetUsagePlan:
+    reads:
+      u: { resource: usage_plan }
+    require:
+      - { cond: u_found, error: NotFound }
+    output:
+      id: "string(u.id)"
+      name: "string(u.name)"
+
+  GetUsagePlans:
+    list: { resource: usage_plan, member: items, paginate: model }
+
+  DeleteUsagePlan:
+    effects:
+      - delete: { resource: usage_plan, missing: ignore }
+
+  # --- leftover control-plane KV --------------------------------------------
+  # Every operation below stores the whole request (spread), forces the kind's
+  # own id member to the resolved key, and answers the record flat. Single
+  # gets never fault: a miss is an empty answer (200), plus a canned member
+  # for GetAccount, GetExport and GetSdk. Deletes and flushes are idempotent.
+
+  CreateDomainName:
+    effects:
+      - create: { resource: domain_name, spread: input, record: { domainName: id } }
+    output:
+      domainName: "string(rec.domainName)"
+
+  GetDomainName:
+    reads:
+      d: { resource: domain_name }
+    output:
+      domainName: "'domainName' in d ? d.domainName : null"
+
+  GetDomainNames:
+    list: { resource: domain_name, member: items, paginate: model }
+
+  DeleteDomainName:
+    effects:
+      - delete: { resource: domain_name, missing: ignore }
+
+  UpdateDomainName:
+    effects:
+      - create: { resource: domain_name, spread: input, record: { domainName: id } }
+    output:
+      domainName: "string(rec.domainName)"
+
+  # The request names the association by domainNameArn, which is not in the
+  # fallback chain, so the id is generated -- and then stored as the record's
+  # domainName, in the same collection as real domains, where GetDomainNames
+  # lists it.
+  CreateDomainNameAccessAssociation:
+    effects:
+      - generate: { bind: aid, kind: hex, bytes: 8 }
+      - create: { resource: domain_name, key: "fx.aid", spread: input, record: { domainName: id } }
+
+  GetDomainNameAccessAssociations:
+    list: { resource: domain_name, member: items, paginate: model }
+
+  DeleteDomainNameAccessAssociation:
+    addressing:
+      domain_name: "the pack's id fallback finds none of its members on this request, so the id is empty and nothing is deleted"
+    effects:
+      - delete: { resource: domain_name, missing: ignore }
+
+  RejectDomainNameAccessAssociation:
+    addressing:
+      domain_name: "the pack's id fallback finds none of its members on this request, so the id is empty and nothing is deleted"
+    effects:
+      - delete: { resource: domain_name, missing: ignore }
+
+  CreateVpcLink:
+    effects:
+      - create: { resource: vpc_link, spread: input, record: { id: id } }
+    output:
+      id: "rec.id"
+      name: "rec.name"
+      targetArns: "rec.targetArns"
+
+  # Reads resolve by the fallback chain, and GetVpcLink's request carries only
+  # vpcLinkId -- not one of them -- so the key is empty and a created link
+  # never reads back.
+  GetVpcLink:
+    addressing:
+      vpc_link: "the pack resolved this read to the empty key: vpcLinkId is not in its fallback chain, so no stored link is ever found"
+    reads:
+      v: { resource: vpc_link }
+    output:
+      id: "'id' in v ? v.id : null"
+      name: "'name' in v ? v.name : null"
+      status: "'status' in v ? v.status : null"
+
+  GetVpcLinks:
+    list: { resource: vpc_link, member: items, paginate: model }
+
+  DeleteVpcLink:
+    addressing:
+      vpc_link: "same empty-key resolution as GetVpcLink: deleting a link by vpcLinkId deletes nothing"
+    effects:
+      - delete: { resource: vpc_link, missing: ignore }
+
+  UpdateVpcLink:
+    effects:
+      - generate: { bind: vid, kind: hex, bytes: 8 }
+      - create: { resource: vpc_link, key: "fx.vid", spread: input, record: { id: id } }
+
+  # Models are created under their name but read and deleted under the
+  # restApiId (name and id are ahead of it in the chain and absent), so a
+  # created model never describes.
+  CreateModel:
+    effects:
+      - create: { resource: lmodel, spread: input, record: { name: id } }
+
+  GetModel:
+    reads:
+      m: { resource: lmodel }
+    output:
+      id: "'id' in m ? m.id : null"
+      name: "'name' in m ? m.name : null"
+      contentType: "'contentType' in m ? m.contentType : null"
+
+  GetModelTemplate:
+    reads:
+      m: { resource: lmodel }
+    output:
+      value: "'value' in m ? m.value : null"
+
+  GetModels:
+    list: { resource: lmodel, member: items, paginate: model }
+
+  DeleteModel:
+    effects:
+      - delete: { resource: lmodel, missing: ignore }
+
+  UpdateModel:
+    effects:
+      - create: { resource: lmodel, spread: input, record: { name: id } }
+
+  # Documentation parts and versions share one collection keyed by the
+  # restApiId (neither request carries id or name), so an api holds at most
+  # one of each and creating overwrites.
+  CreateDocumentationPart:
+    effects:
+      - create: { resource: doc, spread: input, record: { id: id } }
+
+  CreateDocumentationVersion:
+    effects:
+      - create: { resource: doc, spread: input, record: { id: id } }
+
+  GetDocumentationPart:
+    reads:
+      d: { resource: doc }
+    output:
+      id: "'id' in d ? d.id : null"
+      location: "'location' in d ? d.location : null"
+      properties: "'properties' in d ? d.properties : null"
+
+  GetDocumentationParts:
+    list: { resource: doc, member: items, paginate: model }
+
+  GetDocumentationVersion:
+    reads:
+      d: { resource: doc }
+    output:
+      version: "'version' in d ? d.version : null"
+
+  GetDocumentationVersions:
+    list: { resource: doc, member: items, paginate: model }
+
+  DeleteDocumentationPart:
+    effects:
+      - delete: { resource: doc, missing: ignore }
+
+  DeleteDocumentationVersion:
+    effects:
+      - delete: { resource: doc, missing: ignore }
+
+  ImportDocumentationParts:
+    effects:
+      - create: { resource: doc, spread: input, record: { id: id } }
+
+  UpdateDocumentationPart:
+    effects:
+      - create: { resource: doc, spread: input, record: { id: id } }
+
+  UpdateDocumentationVersion:
+    effects:
+      - create: { resource: doc, spread: input, record: { id: id } }
+
+  CreateRequestValidator:
+    effects:
+      - create: { resource: request_validator, spread: input, record: { id: id } }
+
+  GetRequestValidator:
+    reads:
+      v: { resource: request_validator }
+    output:
+      id: "'id' in v ? v.id : null"
+      name: "'name' in v ? v.name : null"
+
+  GetRequestValidators:
+    list: { resource: request_validator, member: items, paginate: model }
+
+  DeleteRequestValidator:
+    effects:
+      - delete: { resource: request_validator, missing: ignore }
+
+  UpdateRequestValidator:
+    effects:
+      - create: { resource: request_validator, spread: input, record: { id: id } }
+
+  # A usage plan key's request carries keyId and usagePlanId, neither in the
+  # fallback chain, so the record is keyed by a generated id nothing reads.
+  CreateUsagePlanKey:
+    effects:
+      - generate: { bind: kid, kind: hex, bytes: 8 }
+      - create: { resource: usage_plan_key, key: "fx.kid", spread: input, record: { id: id } }
+
+  GetUsagePlanKey:
+    addressing:
+      usage_plan_key: "the pack resolved this read to the empty key: keyId and usagePlanId are not in its fallback chain, so no stored key is ever found"
+    reads:
+      k: { resource: usage_plan_key }
+    output:
+      id: "'id' in k ? k.id : null"
+      name: "'name' in k ? k.name : null"
+      value: "'value' in k ? k.value : null"
+
+  GetUsagePlanKeys:
+    list: { resource: usage_plan_key, member: items, paginate: model }
+
+  DeleteUsagePlanKey:
+    addressing:
+      usage_plan_key: "same empty-key resolution as GetUsagePlanKey: deleting by keyId deletes nothing"
+    effects:
+      - delete: { resource: usage_plan_key, missing: ignore }
+
+  # Gateway responses are keyed by responseType; the restApiId on the request
+  # is never part of the key, so one DEFAULT_4XX is shared by every api.
+  PutGatewayResponse:
+    effects:
+      - create: { resource: gateway_response, spread: input, record: { responseType: id } }
+
+  GetGatewayResponse:
+    reads:
+      g: { resource: gateway_response }
+    output:
+      responseType: "'responseType' in g ? g.responseType : null"
+      statusCode: "'statusCode' in g ? g.statusCode : null"
+      defaultResponse: "'defaultResponse' in g ? g.defaultResponse : null"
+
+  GetGatewayResponses:
+    list: { resource: gateway_response, member: items, paginate: model }
+
+  DeleteGatewayResponse:
+    effects:
+      - delete: { resource: gateway_response, missing: ignore }
+
+  UpdateGatewayResponse:
+    effects:
+      - create: { resource: gateway_response, spread: input, record: { responseType: id } }
+
+  GenerateClientCertificate:
+    effects:
+      - generate: { bind: cid, kind: hex, bytes: 8 }
+      - create:
+          resource: client_certificate
+          key: "fx.cid"
+          spread: input
+          record:
+            clientCertificateId: id
+            pemEncodedCertificate: '"-----BEGIN CERTIFICATE-----\nM\n-----END CERTIFICATE-----"'
+    output:
+      clientCertificateId: "rec.clientCertificateId"
+      pemEncodedCertificate: "rec.pemEncodedCertificate"
+
+  GetClientCertificate:
+    reads:
+      c: { resource: client_certificate }
+    output:
+      clientCertificateId: "'clientCertificateId' in c ? c.clientCertificateId : null"
+      pemEncodedCertificate: "'pemEncodedCertificate' in c ? c.pemEncodedCertificate : null"
+
+  GetClientCertificates:
+    list: { resource: client_certificate, member: items, paginate: model }
+
+  DeleteClientCertificate:
+    effects:
+      - delete: { resource: client_certificate, missing: ignore }
+
+  # The update replaces the record with the request, dropping the PEM body.
+  UpdateClientCertificate:
+    effects:
+      - create: { resource: client_certificate, spread: input, record: { clientCertificateId: id } }
+    output:
+      clientCertificateId: "rec.clientCertificateId"
+
+  CreateBasePathMapping:
+    effects:
+      - create: { resource: base_path_mapping, spread: input, record: { basePath: id } }
+
+  GetBasePathMapping:
+    reads:
+      b: { resource: base_path_mapping }
+    output:
+      basePath: "'basePath' in b ? b.basePath : null"
+      restApiId: "'restApiId' in b ? b.restApiId : null"
+      stage: "'stage' in b ? b.stage : null"
+
+  GetBasePathMappings:
+    list: { resource: base_path_mapping, member: items, paginate: model }
+
+  DeleteBasePathMapping:
+    effects:
+      - delete: { resource: base_path_mapping, missing: ignore }
+
+  UpdateBasePathMapping:
+    effects:
+      - create: { resource: base_path_mapping, spread: input, record: { basePath: id } }
+
+  # --- the misc kind ----------------------------------------------------------
+  # Flush, Tag/Untag, Import, TestInvoke, GetAccount/Export/Sdk/Tags/Usage and
+  # every Update* of a core type land here. The Update* ops of the core
+  # collections write misc records keyed by restApiId and never touch the
+  # record they name: UpdateDeployment does not update a deployment,
+  # UpdateResource does not update a resource, and so on.
+
+  FlushStageAuthorizersCache:
+    effects:
+      - delete: { resource: misc, missing: ignore }
+
+  FlushStageCache:
+    effects:
+      - delete: { resource: misc, missing: ignore }
+
+  GetAccount:
+    reads:
+      a: { resource: misc }
+    output:
+      cloudwatchRoleArn: "'cloudwatchRoleArn' in a ? a.cloudwatchRoleArn : ''"
+
+  GetExport:
+    reads:
+      x: { resource: misc }
+    output:
+      body: "'body' in x ? x.body : ''"
+
+  GetSdk:
+    reads:
+      x: { resource: misc }
+    output:
+      body: "'body' in x ? x.body : ''"
+
+  GetSdkType:
+    reads:
+      x: { resource: misc }
+    output:
+      id: "'id' in x ? x.id : null"
+
+  # GetStages and GetSdkTypes list the misc leftover collection, not stages or
+  # SDK types: real stages live in their own per-api collection and never
+  # list, and no SDK type is ever stored.
+  GetSdkTypes:
+    list: { resource: misc, member: items, paginate: model }
+
+  GetStages:
+    list: { resource: misc, member: item }
+
+  GetTags:
+    addressing:
+      misc: "the pack's id fallback finds none of its members on this request (resourceArn), so it reads the empty key and answers empty"
+    reads:
+      t: { resource: misc }
+    output:
+      tags: "'tags' in t ? t.tags : null"
+
+  GetUsage:
+    addressing:
+      misc: "same empty-key resolution as GetTags: usage reads answer empty"
+    reads:
+      u: { resource: misc }
+    output:
+      usagePlanId: "'usagePlanId' in u ? u.usagePlanId : null"
+
+  ImportApiKeys:
+    effects:
+      - generate: { bind: iid, kind: hex, bytes: 8 }
+      - create: { resource: misc, key: "fx.iid", spread: input, record: { id: id } }
+
+  ImportRestApi:
+    effects:
+      - generate: { bind: iid, kind: hex, bytes: 8 }
+      - create: { resource: misc, key: "fx.iid", spread: input, record: { id: id } }
+    output:
+      id: "rec.id"
+
+  PutRestApi:
+    effects:
+      - create: { resource: misc, spread: input, record: { id: id } }
+    output:
+      id: "rec.id"
+
+  TagResource:
+    effects:
+      - generate: { bind: tid, kind: hex, bytes: 8 }
+      - create: { resource: misc, key: "fx.tid", spread: input, record: { id: id } }
+
+  UntagResource:
+    addressing:
+      misc: "the pack's id fallback finds none of its members on this request, so nothing is deleted"
+    effects:
+      - delete: { resource: misc, missing: ignore }
+
+  # Test-invocations store the request plus a canned 200/{} answer and answer
+  # the whole record; nothing is invoked.
+  TestInvokeAuthorizer:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            id: id
+            status: "200"
+            body: "'{}'"
+
+  TestInvokeMethod:
+    effects:
+      - create:
+          resource: misc
+          spread: input
+          record:
+            id: id
+            status: "200"
+            body: "'{}'"
+
+  UpdateAccount:
+    effects:
+      - generate: { bind: uid, kind: hex, bytes: 8 }
+      - create: { resource: misc, key: "fx.uid", spread: input, record: { id: id } }
+
+  UpdateApiKey:
+    effects:
+      - generate: { bind: uid, kind: hex, bytes: 8 }
+      - create: { resource: misc, key: "fx.uid", spread: input, record: { id: id } }
+    output:
+      id: "rec.id"
+
+  UpdateAuthorizer:
+    effects:
+      - create: { resource: misc, spread: input, record: { id: id } }
+    output:
+      id: "rec.id"
+
+  UpdateDeployment:
+    effects:
+      - create: { resource: misc, spread: input, record: { id: id } }
+    output:
+      id: "rec.id"
+
+  UpdateIntegration:
+    effects:
+      - create: { resource: misc, spread: input, record: { id: id } }
+
+  UpdateIntegrationResponse:
+    effects:
+      - create: { resource: misc, spread: input, record: { id: id } }
+
+  UpdateMethod:
+    effects:
+      - create: { resource: misc, spread: input, record: { id: id } }
+
+  UpdateMethodResponse:
+    effects:
+      - create: { resource: misc, spread: input, record: { id: id } }
+
+  UpdateResource:
+    effects:
+      - create: { resource: misc, spread: input, record: { id: id } }
+    output:
+      id: "rec.id"
+
+  UpdateUsage:
+    effects:
+      - generate: { bind: uid, kind: hex, bytes: 8 }
+      - create: { resource: misc, key: "fx.uid", spread: input, record: { id: id } }
+
+  UpdateUsagePlan:
+    effects:
+      - generate: { bind: uid, kind: hex, bytes: 8 }
+      - create: { resource: misc, key: "fx.uid", spread: input, record: { id: id } }
+    output:
+      id: "rec.id"
+
+quirks:
+  - operation: CreateRestApi
+    note: >
+      The model requires name and the engine rejects its absence, which the
+      pack accepted (storing an empty name and still creating the api and its
+      root resource). description, endpointConfiguration, tags and every other
+      declared member are dropped: an api is an id, a name and rootResourceId,
+      which is always the literal "root" -- the root resource is a record with
+      that id at path '/', not a generated id as the real service issues.
+      Creating twice with the same name makes two apis.
+  - operation: UpdateRestApi
+    note: >
+      The declared update mechanism (patchOperations) is ignored; the pack
+      instead read a top-level name or Name member the request shape does not
+      declare, renaming only when it was non-empty, and answered the whole
+      record either way. The engine passes the undeclared member through
+      unvalidated, so the transcription behaves identically. Deleting an api
+      leaves its resources, methods, integrations, deployments, stages and
+      authorizers behind in their per-api collections, all still reachable by
+      naming the deleted api's id again.
+  - operation: PutMethod
+    note: >
+      authorizationType is required by the model; the pack's NONE default for
+      an absent or empty one is unreachable for absence (the engine rejects
+      it) and is transcribed for the empty case. The method record is only
+      httpMethod (case-folded up) and authorizationType; apiKeyRequired,
+      requestParameters, requestModels and the rest are accepted and dropped.
+      PutMethod over an existing method replaces it.
+  - operation: PutIntegration
+    note: >
+      The record's httpMethod is integrationHttpMethod when present, not the
+      request's httpMethod, and is not case-folded -- while the storage key is
+      the folded request method. An integration addressed by one casing and
+      read by another is found, and reports the method it was given. type is
+      required by the model and stored unvalidated: AWS_PROXY, MOCK and
+      anything else are the same record here, and uri is never resolved
+      (ExecuteApi, which would resolve it, is the shadow reason).
+  - operation: CreateDeployment
+    note: >
+      A deployment that names a stage overwrites that stage's deployment id,
+      and a deployment's record carries the stageName it was created with --
+      which the Deployment output shape does not declare, so the create and
+      describe answers cannot carry it and the recorded steps are superseded.
+      description, variables and the canary and cache settings are dropped.
+  - operation: CreateStage
+    note: >
+      A stage is only its deployment id: the pack stored the bare id string,
+      and GetStage answers the stageName from the request rather than the
+      store. The model requires deploymentId, so the pack's absent-deployment
+      path (storing an empty string) is rejected by the engine now. Creating
+      over an existing stage replaces its deployment; the cache settings,
+      variables, tags and description are dropped.
+  - operation: UpdateStage
+    note: >
+      A missing stage is not a fault: the answer is the request's stageName
+      with an empty deploymentId, and a request carrying the undeclared
+      deploymentId member creates the stage. patchOperations, the declared
+      mechanism, is ignored.
+  - operation: CreateApiKey
+    note: >
+      The key's value is a second generated token (20 bytes of hex to the
+      id's 8), always answered, and enabled is always true: a request asking
+      for a disabled key gets an enabled one. GetApiKey's includeValue is
+      ignored; the value is always in the answer.
+  - operation: GetStages
+    note: >
+      GetStages lists the misc leftover collection, not stages -- real stages
+      are never listed by anything -- and GetSdkTypes does the same for SDK
+      types. Both answer every misc record in the account and region.
+  - operation: GetVpcLink
+    note: >
+      The leftover family's storage id is the first present, non-empty of the
+      kind's own member, then id, name, Name, domainName, restApiId.
+      GetVpcLink and DeleteVpcLink carry only vpcLinkId -- none of them -- so
+      they read and delete the empty key: a created VPC link (stored under its
+      name) can never be fetched or deleted, and UpdateVpcLink writes a new
+      record under a generated id rather than touching it. GetUsagePlanKey and
+      DeleteUsagePlanKey are the same shape with keyId/usagePlanId.
+  - operation: GetModel
+    note: >
+      Models are created under their name but read, updated and deleted under
+      the restApiId, so GetModel of a created model answers empty and
+      DeleteModel removes nothing; UpdateModel writes a second record keyed by
+      the api, whose name member is the restApiId. Documentation parts and
+      versions are keyed by restApiId too, so an api holds at most one of each
+      and GetDocumentationPart of it answers whichever part was written last.
+  - operation: GetGatewayResponse
+    note: >
+      Gateway responses are keyed by responseType alone; the restApiId is
+      ignored, so one DEFAULT_4XX is shared by every api in the account and
+      region.
+  - operation: TagResource
+    note: >
+      Tagging stores the request under a generated id and answers it with a
+      201; the tags are never attached to anything, GetTags always answers
+      empty, and UntagResource resolves to the empty key and deletes nothing.
+      ImportApiKeys and ImportRestApi likewise store the request under a
+      generated id and answer it -- no api is imported into the apigw
+      collection, so an imported api cannot be fetched.
+  - operation: TestInvokeMethod
+    note: >
+      Nothing is invoked: the request is stored under the restApiId with a
+      canned status 200 and body "{}" and answered flat, whatever method or
+      authorizer it names. TestInvokeAuthorizer is identical.
+  - operation: UpdateDeployment
+    note: >
+      Every Update* of a core type -- UpdateDeployment, UpdateIntegration,
+      UpdateIntegrationResponse, UpdateMethod, UpdateMethodResponse,
+      UpdateResource, UpdateAuthorizer, UpdateApiKey, UpdateUsagePlan -- writes
+      a misc leftover record and leaves the record it names untouched:
+      UpdateResource answers a Resource-shaped echo but the resource itself
+      never changes. Several of those (UpdateApiKey, UpdateUsagePlan,
+      UpdateUsage, UpdateAccount) find no fallback member at all and store
+      under a generated id nothing reads back.
+  - operation: CreateDomainNameAccessAssociation
+    note: >
+      The association is keyed by a generated id and stored as a record whose
+      domainName member is that id, in the domain names' collection -- so
+      GetDomainNames lists associations alongside domains, and neither
+      DeleteDomainNameAccessAssociation nor RejectDomainNameAccessAssociation
+      can find one to remove (both resolve to the empty key and delete
+      nothing).
+  - operation: DeleteRestApi
+    note: >
+      Deletes never fault, here and across the pack: deleting any record that
+      was never created succeeds, and every delete is idempotent.

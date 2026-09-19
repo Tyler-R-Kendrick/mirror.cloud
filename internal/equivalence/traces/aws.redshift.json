@@ -1,0 +1,4511 @@
+{
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Steps marked superseded are ones where the pack answers members the operation's output shape does not declare -- the top-level id echo and the record wrapper on every generic write, the Clusters/LoggingStatus/Partners-style members on the misc describes -- which the wire drops and the bundle cannot name. The COPY data plane (CreateTable/Copy/TableRows) has no HTTP operation and is the bundle's shadow reason; it is not recorded.",
+  "schema": "trace/1",
+  "service": "aws.redshift",
+  "source": "pack:internal/services/aws/redshift@77fba2e7",
+  "steps": [
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeAccountAttributes",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterDbRevisions",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterTracks",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterVersions",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ParameterGroupFamily": "redshift-1.0"
+      },
+      "operation": "DescribeDefaultClusterParameters",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEventCategories",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEvents",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ActionType": "restore-cluster"
+      },
+      "operation": "DescribeNodeConfigurationOptions",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeOrderableClusterOptions",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs-absent"
+      },
+      "operation": "DescribeResize",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeStorage",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeTableRestoreStatus",
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ActionType": "resize-cluster"
+      },
+      "operation": "GetReservedNodeExchangeConfigurationOptions",
+      "output": {
+        "ReservedNode": {}
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ReservedNodeId": "rn-absent"
+      },
+      "operation": "GetReservedNodeExchangeOfferings",
+      "output": {
+        "ReservedNode": {}
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "ListRecommendations",
+      "output": {
+        "Recommendations": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs-absent"
+      },
+      "operation": "DescribeLoggingStatus",
+      "output": {
+        "LoggingStatus": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeInboundIntegrations",
+      "output": {
+        "Integrations": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEndpointAuthorization",
+      "output": {
+        "EndpointAccessList": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AccountId": "000000000000",
+        "ClusterIdentifier": "rs-absent"
+      },
+      "operation": "DescribePartners",
+      "output": {
+        "Partners": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeReservedNodeOfferings",
+      "output": {
+        "ReservedNodes": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeReservedNodeExchangeStatus",
+      "output": {
+        "ReservedNodes": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeQev2IdcApplications",
+      "output": {
+        "IdcApplications": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeRedshiftIdcApplications",
+      "output": {
+        "IdcApplications": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusters",
+      "output": {
+        "Clusters": null
+      }
+    },
+    {
+      "fault": {
+        "code": "ClusterNotFound",
+        "fault": "client",
+        "http_status": 404
+      },
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "absent"
+      },
+      "operation": "DescribeClusters"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1",
+        "MasterUsername": "awsuser",
+        "NodeType": "dc2.large"
+      },
+      "operation": "CreateCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "available",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.large"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs3",
+        "DBName": "analytics",
+        "MasterUserPassword": "secret-password",
+        "MasterUsername": "awsuser",
+        "NodeType": "dc2.large"
+      },
+      "operation": "CreateCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs3",
+          "ClusterStatus": "available",
+          "DBName": "analytics",
+          "Endpoint": {
+            "Address": "rs3.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.large"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "DescribeClusters",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "rs1",
+            "ClusterStatus": "available",
+            "DBName": "dev",
+            "Endpoint": {
+              "Address": "rs1.us-east-1.redshift.amazonaws.com",
+              "Port": 5439
+            },
+            "MasterUsername": "awsuser",
+            "NodeType": "dc2.large"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusters",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "rs1",
+            "ClusterStatus": "available",
+            "DBName": "dev",
+            "Endpoint": {
+              "Address": "rs1.us-east-1.redshift.amazonaws.com",
+              "Port": 5439
+            },
+            "MasterUsername": "awsuser",
+            "NodeType": "dc2.large"
+          },
+          {
+            "ClusterIdentifier": "rs3",
+            "ClusterStatus": "available",
+            "DBName": "analytics",
+            "Endpoint": {
+              "Address": "rs3.us-east-1.redshift.amazonaws.com",
+              "Port": 5439
+            },
+            "MasterUsername": "awsuser",
+            "NodeType": "dc2.large"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1",
+        "NodeType": "dc2.8xlarge"
+      },
+      "operation": "ModifyCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "available",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.large"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "RebootCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "available",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.large"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "PauseCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "paused",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.large"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "ResumeCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "available",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.large"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1",
+        "NodeType": "dc2.8xlarge"
+      },
+      "operation": "ResizeCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "resizing",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.8xlarge"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs-unknown"
+      },
+      "operation": "ResizeCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs-unknown",
+          "ClusterStatus": "resizing"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs-unknown"
+      },
+      "operation": "DescribeClusters",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "rs-unknown",
+            "ClusterStatus": "resizing"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs-unknown"
+      },
+      "operation": "DeleteCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs-unknown",
+          "ClusterStatus": "deleting"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1",
+        "DbUser": "awsuser"
+      },
+      "operation": "GetClusterCredentials",
+      "output": {
+        "DbPassword": "63ce8d49359cd4a5",
+        "DbUser": "IAM:awsuser",
+        "Expiration": "2099-01-01T00:00:00Z"
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1",
+        "DestinationRegion": "us-west-2"
+      },
+      "operation": "EnableSnapshotCopy",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterSnapshotCopyStatus": {
+            "DestinationRegion": "us-west-2"
+          },
+          "ClusterStatus": "resizing",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.8xlarge"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "DescribeClusters",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "rs1",
+            "ClusterSnapshotCopyStatus": {
+              "DestinationRegion": "us-west-2"
+            },
+            "ClusterStatus": "resizing",
+            "DBName": "dev",
+            "Endpoint": {
+              "Address": "rs1.us-east-1.redshift.amazonaws.com",
+              "Port": 5439
+            },
+            "MasterUsername": "awsuser",
+            "NodeType": "dc2.8xlarge"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "DisableSnapshotCopy",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "resizing",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.8xlarge"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "DescribeClusters",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "rs1",
+            "ClusterStatus": "resizing",
+            "DBName": "dev",
+            "Endpoint": {
+              "Address": "rs1.us-east-1.redshift.amazonaws.com",
+              "Port": 5439
+            },
+            "MasterUsername": "awsuser",
+            "NodeType": "dc2.8xlarge"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "ModifyClusterIamRoles",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "resizing",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "IamRoles": null,
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.8xlarge"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AddIamRoles": [
+          "arn:aws:iam::000000000000:role/r"
+        ],
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "ModifyClusterIamRoles",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "resizing",
+          "DBName": "dev",
+          "Endpoint": {
+            "Address": "rs1.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          },
+          "IamRoles": [
+            "arn:aws:iam::000000000000:role/r"
+          ],
+          "MasterUsername": "awsuser",
+          "NodeType": "dc2.8xlarge"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1",
+        "SnapshotIdentifier": "snap1"
+      },
+      "operation": "CreateClusterSnapshot",
+      "output": {
+        "Snapshot": {
+          "ClusterIdentifier": "rs1",
+          "SnapshotIdentifier": "snap1",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterSnapshots",
+      "output": {
+        "Snapshots": [
+          {
+            "ClusterIdentifier": "rs1",
+            "SnapshotIdentifier": "snap1",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "fault": {
+        "code": "ClusterNotFound",
+        "fault": "client",
+        "http_status": 404
+      },
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnapshotIdentifier": "absent"
+      },
+      "operation": "DescribeClusterSnapshots"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SourceSnapshotIdentifier": "snap1",
+        "TargetSnapshotIdentifier": "snap2"
+      },
+      "operation": "CopyClusterSnapshot",
+      "output": {
+        "Snapshot": {
+          "ClusterIdentifier": "rs1",
+          "SnapshotIdentifier": "snap2",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SourceSnapshotIdentifier": "absent",
+        "TargetSnapshotIdentifier": "snap3"
+      },
+      "operation": "CopyClusterSnapshot",
+      "output": {
+        "Snapshot": {
+          "SnapshotIdentifier": "snap3",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterSnapshots",
+      "output": {
+        "Snapshots": [
+          {
+            "ClusterIdentifier": "rs1",
+            "SnapshotIdentifier": "snap1",
+            "Status": "available"
+          },
+          {
+            "ClusterIdentifier": "rs1",
+            "SnapshotIdentifier": "snap2",
+            "Status": "available"
+          },
+          {
+            "SnapshotIdentifier": "snap3",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2",
+        "SnapshotIdentifier": "snap1"
+      },
+      "operation": "RestoreFromClusterSnapshot",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2",
+          "ClusterStatus": "available",
+          "Endpoint": {
+            "Address": "rs2.us-east-1.redshift.amazonaws.com",
+            "Port": 5439
+          }
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "DescribeClusters",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "rs2",
+            "ClusterStatus": "available",
+            "Endpoint": {
+              "Address": "rs2.us-east-1.redshift.amazonaws.com",
+              "Port": 5439
+            }
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnapshotIdentifier": "snap1"
+      },
+      "operation": "DeleteClusterSnapshot"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnapshotIdentifier": "snap1"
+      },
+      "operation": "DeleteClusterSnapshot"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterSnapshots",
+      "output": {
+        "Snapshots": [
+          {
+            "ClusterIdentifier": "rs1",
+            "SnapshotIdentifier": "snap2",
+            "Status": "available"
+          },
+          {
+            "SnapshotIdentifier": "snap3",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSubnetGroupName": "sg1",
+        "Description": "d",
+        "SubnetIds": [
+          "subnet-1"
+        ]
+      },
+      "operation": "CreateClusterSubnetGroup",
+      "output": {
+        "ClusterSubnetGroup": {
+          "ClusterSubnetGroupName": "sg1"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterSubnetGroups",
+      "output": {
+        "ClusterSubnetGroups": [
+          {
+            "ClusterSubnetGroupName": "sg1"
+          }
+        ]
+      }
+    },
+    {
+      "fault": {
+        "code": "ClusterNotFound",
+        "fault": "client",
+        "http_status": 404
+      },
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSubnetGroupName": "absent"
+      },
+      "operation": "DescribeClusterSubnetGroups"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSubnetGroupName": "sg1",
+        "SubnetIds": [
+          "subnet-2"
+        ]
+      },
+      "operation": "ModifyClusterSubnetGroup",
+      "output": {
+        "ClusterSubnetGroup": {
+          "ClusterSubnetGroupName": "sg1"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSubnetGroupName": "sg1"
+      },
+      "operation": "DeleteClusterSubnetGroup"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSubnetGroupName": "sg1"
+      },
+      "operation": "DeleteClusterSubnetGroup"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterSubnetGroups",
+      "output": {
+        "ClusterSubnetGroups": null
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "Description": "d",
+        "ParameterGroupFamily": "redshift-1.0",
+        "ParameterGroupName": "pg1"
+      },
+      "operation": "CreateClusterParameterGroup",
+      "output": {
+        "ClusterParameterGroup": {
+          "ParameterGroupFamily": "redshift-1.0",
+          "ParameterGroupName": "pg1"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterParameterGroups",
+      "output": {
+        "ParameterGroups": [
+          {
+            "ParameterGroupFamily": "redshift-1.0",
+            "ParameterGroupName": "pg1"
+          }
+        ]
+      }
+    },
+    {
+      "fault": {
+        "code": "ClusterNotFound",
+        "fault": "client",
+        "http_status": 404
+      },
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ParameterGroupName": "absent"
+      },
+      "operation": "DescribeClusterParameterGroups"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ParameterGroupName": "pg1",
+        "Parameters": [
+          {
+            "ParameterName": "n1",
+            "ParameterValue": "v1"
+          }
+        ]
+      },
+      "operation": "ModifyClusterParameterGroup"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ParameterGroupName": "pg1"
+      },
+      "operation": "DescribeClusterParameters",
+      "output": {
+        "Parameters": [
+          {
+            "ParameterGroupName": "pg1",
+            "Parameters": [
+              {
+                "ParameterName": "n1",
+                "ParameterValue": "v1"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ParameterGroupName": "pg1"
+      },
+      "operation": "ResetClusterParameterGroup"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ParameterGroupName": "pg1"
+      },
+      "operation": "DescribeClusterParameters",
+      "output": {
+        "Parameters": [
+          {
+            "ParameterGroupName": "pg1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ParameterGroupName": "pg1"
+      },
+      "operation": "DeleteClusterParameterGroup"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ParameterGroupName": "pg1"
+      },
+      "operation": "DescribeClusterParameters",
+      "output": {
+        "Parameters": [
+          {
+            "ParameterGroupName": "pg1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterParameterGroups",
+      "output": {
+        "ParameterGroups": null
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnapshotCopyGrantName": "g1"
+      },
+      "operation": "CreateSnapshotCopyGrant",
+      "output": {
+        "SnapshotCopyGrant": {
+          "KmsKeyId": "",
+          "SnapshotCopyGrantName": "g1"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "KmsKeyId": "arn:aws:kms:us-east-1:000000000000:key/k1",
+        "SnapshotCopyGrantName": "g2"
+      },
+      "operation": "CreateSnapshotCopyGrant",
+      "output": {
+        "SnapshotCopyGrant": {
+          "KmsKeyId": "arn:aws:kms:us-east-1:000000000000:key/k1",
+          "SnapshotCopyGrantName": "g2"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeSnapshotCopyGrants",
+      "output": {
+        "SnapshotCopyGrants": [
+          {
+            "KmsKeyId": "",
+            "SnapshotCopyGrantName": "g1"
+          },
+          {
+            "KmsKeyId": "arn:aws:kms:us-east-1:000000000000:key/k1",
+            "SnapshotCopyGrantName": "g2"
+          }
+        ]
+      }
+    },
+    {
+      "fault": {
+        "code": "ClusterNotFound",
+        "fault": "client",
+        "http_status": 404
+      },
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnapshotCopyGrantName": "absent"
+      },
+      "operation": "DescribeSnapshotCopyGrants"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnapshotCopyGrantName": "g1"
+      },
+      "operation": "DeleteSnapshotCopyGrant"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeSnapshotCopyGrants",
+      "output": {
+        "SnapshotCopyGrants": [
+          {
+            "KmsKeyId": "arn:aws:kms:us-east-1:000000000000:key/k1",
+            "SnapshotCopyGrantName": "g2"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnsTopicArn": "arn:aws:sns:us-east-1:000000000000:t",
+        "SubscriptionName": "ev1"
+      },
+      "operation": "CreateEventSubscription",
+      "output": {
+        "EventSubscription": {
+          "CustSubscriptionId": "ev1",
+          "SnsTopicArn": "arn:aws:sns:us-east-1:000000000000:t",
+          "Status": "active"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEventSubscriptions",
+      "output": {
+        "EventSubscriptionsList": [
+          {
+            "CustSubscriptionId": "ev1",
+            "SnsTopicArn": "arn:aws:sns:us-east-1:000000000000:t",
+            "Status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SubscriptionName": "ev1"
+      },
+      "operation": "ModifyEventSubscription",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "7c589129",
+          "SubscriptionName": "ev1"
+        },
+        "ClusterIdentifier": "7c589129"
+      },
+      "superseded": "the pack answers Cluster, ClusterIdentifier, which ModifyEventSubscriptionResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "fault": {
+        "code": "ClusterNotFound",
+        "fault": "client",
+        "http_status": 404
+      },
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SubscriptionName": "absent"
+      },
+      "operation": "DescribeEventSubscriptions"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SubscriptionName": "ev1"
+      },
+      "operation": "DeleteEventSubscription"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEventSubscriptions",
+      "output": {
+        "EventSubscriptionsList": null
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ResourceName": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          }
+        ]
+      },
+      "operation": "CreateTags"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ResourceName": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1"
+      },
+      "operation": "DescribeTags",
+      "output": {
+        "TaggedResources": [
+          {
+            "Tags": [
+              {
+                "Key": "k",
+                "Value": "v"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ResourceName": "arn:aws:redshift:us-east-1:000000000000:cluster:absent"
+      },
+      "operation": "DescribeTags",
+      "output": {
+        "TaggedResources": [
+          {
+            "Tags": []
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ResourceName": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "operation": "DeleteTags"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ResourceName": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1"
+      },
+      "operation": "DescribeTags",
+      "output": {
+        "TaggedResources": [
+          {
+            "Tags": []
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "DeleteCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "deleting"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "DeleteCluster",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs1",
+          "ClusterStatus": "deleting"
+        }
+      }
+    },
+    {
+      "fault": {
+        "code": "ClusterNotFound",
+        "fault": "client",
+        "http_status": 404
+      },
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs1"
+      },
+      "operation": "DescribeClusters"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusters",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "rs2",
+            "ClusterStatus": "available",
+            "Endpoint": {
+              "Address": "rs2.us-east-1.redshift.amazonaws.com",
+              "Port": 5439
+            }
+          },
+          {
+            "ClusterIdentifier": "rs3",
+            "ClusterStatus": "available",
+            "DBName": "analytics",
+            "Endpoint": {
+              "Address": "rs3.us-east-1.redshift.amazonaws.com",
+              "Port": 5439
+            },
+            "MasterUsername": "awsuser",
+            "NodeType": "dc2.large"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AuthenticationProfileContent": "{}",
+        "AuthenticationProfileName": "ap1"
+      },
+      "operation": "CreateAuthenticationProfile",
+      "output": {
+        "AuthenticationProfile": {
+          "AuthenticationProfileContent": "{}",
+          "AuthenticationProfileName": "ap1"
+        },
+        "AuthenticationProfileName": "ap1"
+      },
+      "superseded": "the pack answers AuthenticationProfile, which CreateAuthenticationProfileResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeAuthenticationProfiles",
+      "output": {
+        "AuthenticationProfiles": [
+          {
+            "AuthenticationProfileContent": "{}",
+            "AuthenticationProfileName": "ap1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AuthenticationProfileName": "ap1"
+      },
+      "operation": "DescribeAuthenticationProfiles",
+      "output": {
+        "AuthenticationProfiles": [
+          {
+            "AuthenticationProfileContent": "{}",
+            "AuthenticationProfileName": "ap1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AuthenticationProfileName": "absent"
+      },
+      "operation": "DescribeAuthenticationProfiles",
+      "output": {
+        "AuthenticationProfiles": [
+          {
+            "AuthenticationProfileContent": "{}",
+            "AuthenticationProfileName": "ap1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AuthenticationProfileContent": "{\"edited\":true}",
+        "AuthenticationProfileName": "ap1"
+      },
+      "operation": "ModifyAuthenticationProfile",
+      "output": {
+        "AuthenticationProfile": {
+          "AuthenticationProfileContent": "{\"edited\":true}",
+          "AuthenticationProfileName": "ap1"
+        },
+        "AuthenticationProfileName": "ap1"
+      },
+      "superseded": "the pack answers AuthenticationProfile, which ModifyAuthenticationProfileResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeAuthenticationProfiles",
+      "output": {
+        "AuthenticationProfiles": [
+          {
+            "AuthenticationProfileContent": "{\"edited\":true}",
+            "AuthenticationProfileName": "ap1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AuthenticationProfileName": "ap1"
+      },
+      "operation": "DeleteAuthenticationProfile"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AuthenticationProfileName": "ap1"
+      },
+      "operation": "DeleteAuthenticationProfile"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeAuthenticationProfiles",
+      "output": {
+        "AuthenticationProfiles": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2",
+        "CustomDomainCertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/abc",
+        "CustomDomainName": "cd1.example.com"
+      },
+      "operation": "CreateCustomDomainAssociation",
+      "output": {
+        "CustomDomainAssociation": {
+          "ClusterIdentifier": "rs2",
+          "CustomDomainCertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/abc",
+          "CustomDomainName": "cd1.example.com"
+        },
+        "CustomDomainName": "cd1.example.com"
+      },
+      "superseded": "the pack answers CustomDomainAssociation, which CreateCustomDomainAssociationResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeCustomDomainAssociations",
+      "output": {
+        "Associations": [
+          {
+            "ClusterIdentifier": "rs2",
+            "CustomDomainCertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/abc",
+            "CustomDomainName": "cd1.example.com"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "CustomDomainName": "cd1.example.com"
+      },
+      "operation": "DescribeCustomDomainAssociations",
+      "output": {
+        "Associations": [
+          {
+            "ClusterIdentifier": "rs2",
+            "CustomDomainCertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/abc",
+            "CustomDomainName": "cd1.example.com"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2",
+        "CustomDomainCertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/def",
+        "CustomDomainName": "cd1.example.com"
+      },
+      "operation": "ModifyCustomDomainAssociation",
+      "output": {
+        "CustomDomainAssociation": {
+          "ClusterIdentifier": "rs2",
+          "CustomDomainCertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/def",
+          "CustomDomainName": "cd1.example.com"
+        },
+        "CustomDomainName": "cd1.example.com"
+      },
+      "superseded": "the pack answers CustomDomainAssociation, which ModifyCustomDomainAssociationResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2",
+        "CustomDomainName": "cd1.example.com"
+      },
+      "operation": "DeleteCustomDomainAssociation"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeCustomDomainAssociations",
+      "output": {
+        "Associations": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ConsumerIdentifier": "000000000000",
+        "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+      },
+      "operation": "AuthorizeDataShare",
+      "output": {
+        "DataShare": {
+          "ConsumerIdentifier": "000000000000",
+          "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+        },
+        "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+      },
+      "superseded": "the pack answers DataShare, which DataShare does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeDataShares",
+      "output": {
+        "DataShares": [
+          {
+            "ConsumerIdentifier": "000000000000",
+            "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeDataSharesForConsumer",
+      "output": {
+        "DataShares": [
+          {
+            "ConsumerIdentifier": "000000000000",
+            "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeDataSharesForProducer",
+      "output": {
+        "DataShares": [
+          {
+            "ConsumerIdentifier": "000000000000",
+            "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ConsumerIdentifier": "000000000000",
+        "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+      },
+      "operation": "AssociateDataShareConsumer",
+      "output": {
+        "DataShare": {
+          "ConsumerIdentifier": "000000000000",
+          "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+        },
+        "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+      },
+      "superseded": "the pack answers DataShare, which DataShare does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ConsumerIdentifier": "000000000000",
+        "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+      },
+      "operation": "DeauthorizeDataShare"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeDataShares",
+      "output": {
+        "DataShares": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+      },
+      "operation": "DisassociateDataShareConsumer"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "DataShareArn": "arn:aws:redshift:us-east-1:000000000000:datashare:ds1"
+      },
+      "operation": "RejectDataShare"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "EndpointName": "ep1",
+        "SubnetGroupName": "sg1"
+      },
+      "operation": "CreateEndpointAccess",
+      "output": {
+        "EndpointAccess": {
+          "EndpointName": "ep1",
+          "SubnetGroupName": "sg1"
+        },
+        "EndpointName": "ep1"
+      },
+      "superseded": "the pack answers EndpointAccess, which EndpointAccess does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEndpointAccess",
+      "output": {
+        "EndpointAccessList": [
+          {
+            "EndpointName": "ep1",
+            "SubnetGroupName": "sg1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "EndpointName": "ep1"
+      },
+      "operation": "DescribeEndpointAccess",
+      "output": {
+        "EndpointAccessList": [
+          {
+            "EndpointName": "ep1",
+            "SubnetGroupName": "sg1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "EndpointName": "absent"
+      },
+      "operation": "DescribeEndpointAccess",
+      "output": {
+        "EndpointAccessList": [
+          {
+            "EndpointName": "ep1",
+            "SubnetGroupName": "sg1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "Account": "000000000000",
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "AuthorizeEndpointAccess",
+      "output": {
+        "EndpointAccess": {
+          "Account": "000000000000",
+          "ClusterIdentifier": "rs2",
+          "EndpointName": "rs2"
+        },
+        "EndpointName": "rs2"
+      },
+      "superseded": "the pack answers EndpointAccess, EndpointName, which EndpointAuthorization does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEndpointAuthorization",
+      "output": {
+        "EndpointAccessList": [
+          {
+            "EndpointName": "ep1",
+            "SubnetGroupName": "sg1"
+          },
+          {
+            "Account": "000000000000",
+            "ClusterIdentifier": "rs2",
+            "EndpointName": "rs2"
+          }
+        ]
+      },
+      "superseded": "the pack answers EndpointAccessList, which EndpointAuthorizationList does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "EndpointName": "ep1"
+      },
+      "operation": "ModifyEndpointAccess",
+      "output": {
+        "EndpointAccess": {
+          "EndpointName": "ep1"
+        },
+        "EndpointName": "ep1"
+      },
+      "superseded": "the pack answers EndpointAccess, which EndpointAccess does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "RevokeEndpointAccess"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEndpointAccess",
+      "output": {
+        "EndpointAccessList": [
+          {
+            "EndpointName": "ep1"
+          },
+          {
+            "Account": "000000000000",
+            "ClusterIdentifier": "rs2",
+            "EndpointName": "rs2"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "EndpointName": "ep1"
+      },
+      "operation": "DeleteEndpointAccess"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEndpointAccess",
+      "output": {
+        "EndpointAccessList": [
+          {
+            "Account": "000000000000",
+            "ClusterIdentifier": "rs2",
+            "EndpointName": "rs2"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "Description": "d",
+        "HsmConfigurationIdentifier": "h1",
+        "HsmIpAddress": "10.0.0.1",
+        "HsmPartitionName": "p1",
+        "HsmPartitionPassword": "pw",
+        "HsmServerPublicCertificate": "cert"
+      },
+      "operation": "CreateHsmConfiguration",
+      "output": {
+        "HsmConfiguration": {
+          "Description": "d",
+          "HsmConfigurationIdentifier": "h1",
+          "HsmIpAddress": "10.0.0.1",
+          "HsmPartitionName": "p1",
+          "HsmPartitionPassword": "pw",
+          "HsmServerPublicCertificate": "cert"
+        },
+        "HsmConfigurationIdentifier": "h1"
+      },
+      "superseded": "the pack answers HsmConfigurationIdentifier, which CreateHsmConfigurationResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeHsmConfigurations",
+      "output": {
+        "HsmConfigurations": [
+          {
+            "Description": "d",
+            "HsmConfigurationIdentifier": "h1",
+            "HsmIpAddress": "10.0.0.1",
+            "HsmPartitionName": "p1",
+            "HsmPartitionPassword": "pw",
+            "HsmServerPublicCertificate": "cert"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "HsmConfigurationIdentifier": "h1"
+      },
+      "operation": "DescribeHsmConfigurations",
+      "output": {
+        "HsmConfigurations": [
+          {
+            "Description": "d",
+            "HsmConfigurationIdentifier": "h1",
+            "HsmIpAddress": "10.0.0.1",
+            "HsmPartitionName": "p1",
+            "HsmPartitionPassword": "pw",
+            "HsmServerPublicCertificate": "cert"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "HsmConfigurationIdentifier": "absent"
+      },
+      "operation": "DescribeHsmConfigurations",
+      "output": {
+        "HsmConfigurations": [
+          {
+            "Description": "d",
+            "HsmConfigurationIdentifier": "h1",
+            "HsmIpAddress": "10.0.0.1",
+            "HsmPartitionName": "p1",
+            "HsmPartitionPassword": "pw",
+            "HsmServerPublicCertificate": "cert"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "HsmConfigurationIdentifier": "h1"
+      },
+      "operation": "DeleteHsmConfiguration"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeHsmConfigurations",
+      "output": {
+        "HsmConfigurations": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "HsmClientCertificateIdentifier": "hc1"
+      },
+      "operation": "CreateHsmClientCertificate",
+      "output": {
+        "HsmClientCertificate": {
+          "HsmClientCertificateIdentifier": "hc1"
+        },
+        "HsmClientCertificateIdentifier": "hc1"
+      },
+      "superseded": "the pack answers HsmClientCertificateIdentifier, which CreateHsmClientCertificateResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeHsmClientCertificates",
+      "output": {
+        "HsmClientCertificates": [
+          {
+            "HsmClientCertificateIdentifier": "hc1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "HsmClientCertificateIdentifier": "hc1"
+      },
+      "operation": "DescribeHsmClientCertificates",
+      "output": {
+        "HsmClientCertificates": [
+          {
+            "HsmClientCertificateIdentifier": "hc1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "HsmClientCertificateIdentifier": "hc1"
+      },
+      "operation": "DeleteHsmClientCertificate"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeHsmClientCertificates",
+      "output": {
+        "HsmClientCertificates": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "IamRoleArn": "arn:aws:iam::000000000000:role/r",
+        "IdcDisplayName": "d",
+        "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+        "RedshiftIdcApplicationName": "ria1"
+      },
+      "operation": "CreateRedshiftIdcApplication",
+      "output": {
+        "IdcApplication": {
+          "IamRoleArn": "arn:aws:iam::000000000000:role/r",
+          "IdcApplicationArn": "5f59f223",
+          "IdcDisplayName": "d",
+          "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+          "RedshiftIdcApplicationName": "ria1"
+        },
+        "IdcApplicationArn": "5f59f223"
+      },
+      "superseded": "the pack answers IdcApplication, IdcApplicationArn, which CreateRedshiftIdcApplicationResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeRedshiftIdcApplications",
+      "output": {
+        "IdcApplications": [
+          {
+            "IamRoleArn": "arn:aws:iam::000000000000:role/r",
+            "IdcApplicationArn": "5f59f223",
+            "IdcDisplayName": "d",
+            "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+            "RedshiftIdcApplicationName": "ria1"
+          }
+        ]
+      },
+      "superseded": "the pack answers IdcApplications, which DescribeRedshiftIdcApplicationsResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "RedshiftIdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:ria1"
+      },
+      "operation": "ModifyRedshiftIdcApplication",
+      "output": {
+        "IdcApplication": {
+          "IdcApplicationArn": "9c8e2cb0",
+          "RedshiftIdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:ria1"
+        },
+        "IdcApplicationArn": "9c8e2cb0"
+      },
+      "superseded": "the pack answers IdcApplication, IdcApplicationArn, which ModifyRedshiftIdcApplicationResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "RedshiftIdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:ria1"
+      },
+      "operation": "DeleteRedshiftIdcApplication"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeRedshiftIdcApplications",
+      "output": {
+        "IdcApplications": [
+          {
+            "IamRoleArn": "arn:aws:iam::000000000000:role/r",
+            "IdcApplicationArn": "5f59f223",
+            "IdcDisplayName": "d",
+            "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+            "RedshiftIdcApplicationName": "ria1"
+          },
+          {
+            "IdcApplicationArn": "9c8e2cb0",
+            "RedshiftIdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:ria1"
+          }
+        ]
+      },
+      "superseded": "the pack answers IdcApplications, which DescribeRedshiftIdcApplicationsResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "IdcDisplayName": "q",
+        "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+        "Qev2IdcApplicationName": "q1"
+      },
+      "operation": "CreateQev2IdcApplication",
+      "output": {
+        "IdcApplication": {
+          "IdcApplicationArn": "33f6fc5d",
+          "IdcDisplayName": "q",
+          "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+          "Qev2IdcApplicationName": "q1"
+        },
+        "IdcApplicationArn": "33f6fc5d"
+      },
+      "superseded": "the pack answers IdcApplication, IdcApplicationArn, which CreateQev2IdcApplicationResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeQev2IdcApplications",
+      "output": {
+        "IdcApplications": [
+          {
+            "IdcApplicationArn": "33f6fc5d",
+            "IdcDisplayName": "q",
+            "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+            "Qev2IdcApplicationName": "q1"
+          },
+          {
+            "IamRoleArn": "arn:aws:iam::000000000000:role/r",
+            "IdcApplicationArn": "5f59f223",
+            "IdcDisplayName": "d",
+            "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+            "RedshiftIdcApplicationName": "ria1"
+          },
+          {
+            "IdcApplicationArn": "9c8e2cb0",
+            "RedshiftIdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:ria1"
+          }
+        ]
+      },
+      "superseded": "the pack answers IdcApplications, which DescribeQev2IdcApplicationsResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "Qev2IdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:q1"
+      },
+      "operation": "ModifyQev2IdcApplication",
+      "output": {
+        "IdcApplication": {
+          "IdcApplicationArn": "83d4958a",
+          "Qev2IdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:q1"
+        },
+        "IdcApplicationArn": "83d4958a"
+      },
+      "superseded": "the pack answers IdcApplication, IdcApplicationArn, which ModifyQev2IdcApplicationResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "Qev2IdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:q1"
+      },
+      "operation": "DeleteQev2IdcApplication"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeQev2IdcApplications",
+      "output": {
+        "IdcApplications": [
+          {
+            "IdcApplicationArn": "33f6fc5d",
+            "IdcDisplayName": "q",
+            "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+            "Qev2IdcApplicationName": "q1"
+          },
+          {
+            "IamRoleArn": "arn:aws:iam::000000000000:role/r",
+            "IdcApplicationArn": "5f59f223",
+            "IdcDisplayName": "d",
+            "IdcInstanceArn": "arn:aws:sso:::instance/ssoins-1",
+            "RedshiftIdcApplicationName": "ria1"
+          },
+          {
+            "IdcApplicationArn": "83d4958a",
+            "Qev2IdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:q1"
+          },
+          {
+            "IdcApplicationArn": "9c8e2cb0",
+            "RedshiftIdcApplicationArn": "arn:aws:redshift:us-east-1:000000000000:idcapplication:ria1"
+          }
+        ]
+      },
+      "superseded": "the pack answers IdcApplications, which DescribeQev2IdcApplicationsResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "IntegrationName": "i1",
+        "SourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2",
+        "TargetArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2"
+      },
+      "operation": "CreateIntegration",
+      "output": {
+        "Integration": {
+          "IntegrationArn": "100aa4e6",
+          "IntegrationName": "i1",
+          "SourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2",
+          "TargetArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2"
+        },
+        "IntegrationArn": "100aa4e6"
+      },
+      "superseded": "the pack answers Integration, which Integration does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeIntegrations",
+      "output": {
+        "Integrations": [
+          {
+            "IntegrationArn": "100aa4e6",
+            "IntegrationName": "i1",
+            "SourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2",
+            "TargetArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "IntegrationArn": {
+          "$fromPath": "IntegrationArn",
+          "$fromStep": 149
+        }
+      },
+      "operation": "DescribeIntegrations",
+      "output": {
+        "Integrations": [
+          {
+            "IntegrationArn": "100aa4e6",
+            "IntegrationName": "i1",
+            "SourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2",
+            "TargetArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeInboundIntegrations",
+      "output": {
+        "Integrations": [
+          {
+            "IntegrationArn": "100aa4e6",
+            "IntegrationName": "i1",
+            "SourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2",
+            "TargetArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs2"
+          }
+        ]
+      },
+      "superseded": "the pack answers Integrations, which InboundIntegrationsMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "IntegrationArn": {
+          "$fromPath": "IntegrationArn",
+          "$fromStep": 149
+        }
+      },
+      "operation": "ModifyIntegration",
+      "output": {
+        "Integration": {
+          "IntegrationArn": "100aa4e6"
+        },
+        "IntegrationArn": "100aa4e6"
+      },
+      "superseded": "the pack answers Integration, which Integration does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeIntegrations",
+      "output": {
+        "Integrations": [
+          {
+            "IntegrationArn": "100aa4e6"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "IntegrationArn": {
+          "$fromPath": "IntegrationArn",
+          "$fromStep": 149
+        }
+      },
+      "operation": "DeleteIntegration"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeIntegrations",
+      "output": {
+        "Integrations": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "BucketName": "logs",
+        "ClusterIdentifier": "rs2",
+        "S3KeyPrefix": "rs/"
+      },
+      "operation": "EnableLogging",
+      "output": {
+        "BucketName": "logs",
+        "ClusterIdentifier": "rs2",
+        "S3KeyPrefix": "rs/"
+      },
+      "superseded": "the pack answers ClusterIdentifier, which LoggingStatus does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "DescribeLoggingStatus",
+      "output": {
+        "LoggingStatus": [
+          {
+            "BucketName": "logs",
+            "ClusterIdentifier": "rs2",
+            "S3KeyPrefix": "rs/"
+          }
+        ]
+      },
+      "superseded": "the pack answers LoggingStatus, which LoggingStatus does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "DisableLogging"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "DescribeLoggingStatus",
+      "output": {
+        "LoggingStatus": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ConsumerIdentifiers": [
+          "000000000000"
+        ],
+        "NamespaceIdentifier": "ns1"
+      },
+      "operation": "RegisterNamespace",
+      "output": {
+        "ConsumerIdentifiers": [
+          "000000000000"
+        ],
+        "NamespaceArn": "3ed10eca",
+        "NamespaceIdentifier": "ns1"
+      },
+      "superseded": "the pack answers ConsumerIdentifiers, NamespaceArn, NamespaceIdentifier, which RegisterNamespaceOutputMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ConsumerIdentifiers": [
+          "000000000000"
+        ],
+        "NamespaceIdentifier": "ns1"
+      },
+      "operation": "DeregisterNamespace"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "RotateEncryptionKey",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2"
+        },
+        "ClusterIdentifier": "rs2"
+      },
+      "superseded": "the pack answers ClusterIdentifier, which RotateEncryptionKeyResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "FailoverPrimaryCompute",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2"
+        },
+        "ClusterIdentifier": "rs2"
+      },
+      "superseded": "the pack answers ClusterIdentifier, which FailoverPrimaryComputeResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2",
+        "RevisionTarget": "2"
+      },
+      "operation": "ModifyClusterDbRevision",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2",
+          "RevisionTarget": "2"
+        },
+        "ClusterIdentifier": "rs2"
+      },
+      "superseded": "the pack answers ClusterIdentifier, which ModifyClusterDbRevisionResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "ModifyClusterMaintenance",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2"
+        },
+        "ClusterIdentifier": "rs2"
+      },
+      "superseded": "the pack answers ClusterIdentifier, which ModifyClusterMaintenanceResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2",
+        "RetentionPeriod": 7
+      },
+      "operation": "ModifySnapshotCopyRetentionPeriod",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2",
+          "RetentionPeriod": 7
+        },
+        "ClusterIdentifier": "rs2"
+      },
+      "superseded": "the pack answers ClusterIdentifier, which ModifySnapshotCopyRetentionPeriodResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "ModifyAquaConfiguration",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2"
+        },
+        "ClusterIdentifier": "rs2"
+      },
+      "superseded": "the pack answers Cluster, ClusterIdentifier, which ModifyAquaOutputMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "ModifyLakehouseConfiguration",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2"
+        },
+        "ClusterIdentifier": "rs2"
+      },
+      "superseded": "the pack answers Cluster, which LakehouseConfiguration does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnapshotIdentifier": "snap2"
+      },
+      "operation": "ModifyClusterSnapshot",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "snap2",
+          "SnapshotIdentifier": "snap2"
+        },
+        "ClusterIdentifier": "snap2"
+      },
+      "superseded": "the pack answers Cluster, ClusterIdentifier, which ModifyClusterSnapshotResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2",
+        "NewTableName": "t2",
+        "SnapshotIdentifier": "snap2",
+        "SourceDatabaseName": "dev",
+        "SourceTableName": "t1"
+      },
+      "operation": "RestoreTableFromClusterSnapshot",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2",
+          "NewTableName": "t2",
+          "SnapshotIdentifier": "snap2",
+          "SourceDatabaseName": "dev",
+          "SourceTableName": "t1"
+        },
+        "ClusterIdentifier": "rs2"
+      },
+      "superseded": "the pack answers Cluster, ClusterIdentifier, which RestoreTableFromClusterSnapshotResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AccountWithRestoreAccess": "000000000000",
+        "SnapshotIdentifier": "snap2"
+      },
+      "operation": "AuthorizeSnapshotAccess",
+      "output": {
+        "Cluster": {
+          "AccountWithRestoreAccess": "000000000000",
+          "ClusterIdentifier": "snap2",
+          "SnapshotIdentifier": "snap2"
+        },
+        "ClusterIdentifier": "snap2"
+      },
+      "superseded": "the pack answers Cluster, ClusterIdentifier, which AuthorizeSnapshotAccessResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "SnapshotIdentifierList": [
+          "snap2"
+        ]
+      },
+      "operation": "BatchModifyClusterSnapshots",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "4da7b6a4",
+          "SnapshotIdentifierList": [
+            "snap2"
+          ]
+        },
+        "ClusterIdentifier": "4da7b6a4"
+      },
+      "superseded": "the pack answers Cluster, ClusterIdentifier, which BatchModifyClusterSnapshotsOutputMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2",
+        "DbUser": "awsuser"
+      },
+      "operation": "GetClusterCredentialsWithIAM",
+      "output": {
+        "Cluster": {
+          "ClusterIdentifier": "rs2",
+          "NewTableName": "t2",
+          "SnapshotIdentifier": "snap2",
+          "SourceDatabaseName": "dev",
+          "SourceTableName": "t1"
+        }
+      },
+      "superseded": "the pack answers Cluster, which ClusterExtendedCredentials does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeEvents",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "4da7b6a4",
+            "SnapshotIdentifierList": [
+              "snap2"
+            ]
+          },
+          {
+            "ClusterIdentifier": "7c589129",
+            "SubscriptionName": "ev1"
+          },
+          {
+            "ClusterIdentifier": "rs2",
+            "NewTableName": "t2",
+            "SnapshotIdentifier": "snap2",
+            "SourceDatabaseName": "dev",
+            "SourceTableName": "t1"
+          },
+          {
+            "AccountWithRestoreAccess": "000000000000",
+            "ClusterIdentifier": "snap2",
+            "SnapshotIdentifier": "snap2"
+          }
+        ]
+      },
+      "superseded": "the pack answers Clusters, which EventsMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "DescribeResize",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "rs2",
+            "NewTableName": "t2",
+            "SnapshotIdentifier": "snap2",
+            "SourceDatabaseName": "dev",
+            "SourceTableName": "t1"
+          }
+        ]
+      },
+      "superseded": "the pack answers Clusters, which ResizeProgressMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "CancelResize"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "DescribeResize",
+      "output": {
+        "Clusters": [
+          {
+            "ClusterIdentifier": "4da7b6a4",
+            "SnapshotIdentifierList": [
+              "snap2"
+            ]
+          },
+          {
+            "ClusterIdentifier": "7c589129",
+            "SubscriptionName": "ev1"
+          },
+          {
+            "AccountWithRestoreAccess": "000000000000",
+            "ClusterIdentifier": "snap2",
+            "SnapshotIdentifier": "snap2"
+          }
+        ]
+      },
+      "superseded": "the pack answers Clusters, which ResizeProgressMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AccountWithRestoreAccess": "000000000000"
+      },
+      "operation": "RevokeSnapshotAccess"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "Identifiers": [
+          {
+            "SnapshotIdentifier": "snap2"
+          }
+        ]
+      },
+      "operation": "BatchDeleteClusterSnapshots"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs-absent",
+        "DbUser": "awsuser"
+      },
+      "operation": "GetClusterCredentialsWithIAM",
+      "output": {
+        "Cluster": {},
+        "DbPassword": "10b54511cb883946",
+        "DbUser": "IAM:awsuser"
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIds": [
+          "rs2"
+        ]
+      },
+      "operation": "GetIdentityCenterAuthToken",
+      "output": {
+        "AuthToken": "88f870aa93d6b226",
+        "Cluster": {}
+      },
+      "superseded": "the pack answers AuthToken, which GetIdentityCenterAuthTokenResponse does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AccountId": "000000000000",
+        "ClusterIdentifier": "rs2",
+        "DatabaseName": "dev",
+        "PartnerName": "p1"
+      },
+      "operation": "AddPartner",
+      "output": {
+        "PartnerIntegrationInfo": {
+          "AccountId": "000000000000",
+          "ClusterIdentifier": "rs2",
+          "DatabaseName": "dev",
+          "PartnerName": "p1"
+        },
+        "PartnerName": "p1"
+      },
+      "superseded": "the pack answers PartnerIntegrationInfo, which PartnerIntegrationOutputMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AccountId": "000000000000",
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "DescribePartners",
+      "output": {
+        "Partners": [
+          {
+            "AccountId": "000000000000",
+            "ClusterIdentifier": "rs2",
+            "DatabaseName": "dev",
+            "PartnerName": "p1"
+          }
+        ]
+      },
+      "superseded": "the pack answers Partners, which DescribePartnersOutputMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AccountId": "000000000000",
+        "ClusterIdentifier": "rs2",
+        "DatabaseName": "dev",
+        "PartnerName": "p1",
+        "Status": "Active"
+      },
+      "operation": "UpdatePartnerStatus",
+      "output": {
+        "PartnerIntegrationInfo": {
+          "AccountId": "000000000000",
+          "ClusterIdentifier": "rs2",
+          "DatabaseName": "dev",
+          "PartnerName": "p1",
+          "Status": "Active"
+        },
+        "PartnerName": "p1"
+      },
+      "superseded": "the pack answers PartnerIntegrationInfo, which PartnerIntegrationOutputMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AccountId": "000000000000",
+        "ClusterIdentifier": "rs2",
+        "DatabaseName": "dev",
+        "PartnerName": "p1"
+      },
+      "operation": "DeletePartner"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "AccountId": "000000000000",
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "DescribePartners",
+      "output": {
+        "Partners": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ReservedNodeOfferingId": "off1"
+      },
+      "operation": "PurchaseReservedNodeOffering",
+      "output": {
+        "ReservedNode": {
+          "ReservedNodeId": "e7175ec1",
+          "ReservedNodeOfferingId": "off1"
+        },
+        "ReservedNodeId": "e7175ec1"
+      },
+      "superseded": "the pack answers ReservedNodeId, which PurchaseReservedNodeOfferingResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeReservedNodes",
+      "output": {
+        "ReservedNodes": [
+          {
+            "ReservedNodeId": "e7175ec1",
+            "ReservedNodeOfferingId": "off1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ReservedNodeId": "rn1",
+        "TargetReservedNodeOfferingId": "off1"
+      },
+      "operation": "AcceptReservedNodeExchange",
+      "output": {
+        "ReservedNode": {
+          "ReservedNodeId": "rn1",
+          "TargetReservedNodeOfferingId": "off1"
+        },
+        "ReservedNodeId": "rn1"
+      },
+      "superseded": "the pack answers ReservedNode, ReservedNodeId, which AcceptReservedNodeExchangeOutputMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeReservedNodes",
+      "output": {
+        "ReservedNodes": [
+          {
+            "ReservedNodeId": "e7175ec1",
+            "ReservedNodeOfferingId": "off1"
+          },
+          {
+            "ReservedNodeId": "rn1",
+            "TargetReservedNodeOfferingId": "off1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeReservedNodeOfferings",
+      "output": {
+        "ReservedNodes": [
+          {
+            "ReservedNodeId": "e7175ec1",
+            "ReservedNodeOfferingId": "off1"
+          },
+          {
+            "ReservedNodeId": "rn1",
+            "TargetReservedNodeOfferingId": "off1"
+          }
+        ]
+      },
+      "superseded": "the pack answers ReservedNodes, which ReservedNodeOfferingsMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeReservedNodeExchangeStatus",
+      "output": {
+        "ReservedNodes": [
+          {
+            "ReservedNodeId": "e7175ec1",
+            "ReservedNodeOfferingId": "off1"
+          },
+          {
+            "ReservedNodeId": "rn1",
+            "TargetReservedNodeOfferingId": "off1"
+          }
+        ]
+      },
+      "superseded": "the pack answers ReservedNodes, which DescribeReservedNodeExchangeStatusOutputMessage does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "Policy": "{\"v\":1}",
+        "ResourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1"
+      },
+      "operation": "PutResourcePolicy",
+      "output": {
+        "ResourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1",
+        "ResourcePolicy": {
+          "Policy": "{\"v\":1}",
+          "ResourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1"
+        }
+      },
+      "superseded": "the pack answers ResourceArn, which PutResourcePolicyResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ResourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1"
+      },
+      "operation": "GetResourcePolicy",
+      "output": {
+        "ResourcePolicy": {
+          "Policy": "{\"v\":1}",
+          "ResourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1"
+        }
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ResourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1"
+      },
+      "operation": "DeleteResourcePolicy"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ResourceArn": "arn:aws:redshift:us-east-1:000000000000:cluster:rs1"
+      },
+      "operation": "GetResourcePolicy",
+      "output": {
+        "ResourcePolicy": {}
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "IamRole": "arn:aws:iam::000000000000:role/r",
+        "Schedule": "rate(1 day)",
+        "ScheduledActionName": "sa1",
+        "TargetAction": {
+          "Type": "resize-cluster"
+        }
+      },
+      "operation": "CreateScheduledAction",
+      "output": {
+        "ScheduledAction": {
+          "IamRole": "arn:aws:iam::000000000000:role/r",
+          "Schedule": "rate(1 day)",
+          "ScheduledActionName": "sa1",
+          "TargetAction": {
+            "Type": "resize-cluster"
+          }
+        },
+        "ScheduledActionName": "sa1"
+      },
+      "superseded": "the pack answers ScheduledAction, which ScheduledAction does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeScheduledActions",
+      "output": {
+        "ScheduledActions": [
+          {
+            "IamRole": "arn:aws:iam::000000000000:role/r",
+            "Schedule": "rate(1 day)",
+            "ScheduledActionName": "sa1",
+            "TargetAction": {
+              "Type": "resize-cluster"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ScheduledActionName": "sa1"
+      },
+      "operation": "DescribeScheduledActions",
+      "output": {
+        "ScheduledActions": [
+          {
+            "IamRole": "arn:aws:iam::000000000000:role/r",
+            "Schedule": "rate(1 day)",
+            "ScheduledActionName": "sa1",
+            "TargetAction": {
+              "Type": "resize-cluster"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ScheduledActionName": "sa1"
+      },
+      "operation": "ModifyScheduledAction",
+      "output": {
+        "ScheduledAction": {
+          "ScheduledActionName": "sa1"
+        },
+        "ScheduledActionName": "sa1"
+      },
+      "superseded": "the pack answers ScheduledAction, which ScheduledAction does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ScheduledActionName": "sa1"
+      },
+      "operation": "DeleteScheduledAction"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeScheduledActions",
+      "output": {
+        "ScheduledActions": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSecurityGroupName": "csg1",
+        "Description": "d"
+      },
+      "operation": "CreateClusterSecurityGroup",
+      "output": {
+        "ClusterSecurityGroup": {
+          "ClusterSecurityGroupName": "csg1",
+          "Description": "d"
+        },
+        "ClusterSecurityGroupName": "csg1"
+      },
+      "superseded": "the pack answers ClusterSecurityGroupName, which CreateClusterSecurityGroupResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterSecurityGroups",
+      "output": {
+        "ClusterSecurityGroups": [
+          {
+            "ClusterSecurityGroupName": "csg1",
+            "Description": "d"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSecurityGroupName": "csg1"
+      },
+      "operation": "AuthorizeClusterSecurityGroupIngress",
+      "output": {
+        "ClusterSecurityGroup": {
+          "ClusterSecurityGroupName": "csg1"
+        },
+        "ClusterSecurityGroupName": "csg1"
+      },
+      "superseded": "the pack answers ClusterSecurityGroupName, which AuthorizeClusterSecurityGroupIngressResult does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterSecurityGroups",
+      "output": {
+        "ClusterSecurityGroups": [
+          {
+            "ClusterSecurityGroupName": "csg1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSecurityGroupName": "csg1"
+      },
+      "operation": "RevokeClusterSecurityGroupIngress"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeClusterSecurityGroups",
+      "output": {
+        "ClusterSecurityGroups": []
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterSecurityGroupName": "csg1"
+      },
+      "operation": "DeleteClusterSecurityGroup"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ScheduleDefinitions": [
+          "rate(1 day)"
+        ],
+        "ScheduleIdentifier": "ss1"
+      },
+      "operation": "CreateSnapshotSchedule",
+      "output": {
+        "ScheduleIdentifier": "ss1",
+        "SnapshotSchedule": {
+          "ScheduleDefinitions": [
+            "rate(1 day)"
+          ],
+          "ScheduleIdentifier": "ss1"
+        }
+      },
+      "superseded": "the pack answers SnapshotSchedule, which SnapshotSchedule does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "CreateSnapshotSchedule",
+      "output": {
+        "ScheduleIdentifier": "77df676f",
+        "SnapshotSchedule": {
+          "ScheduleIdentifier": "77df676f"
+        }
+      },
+      "superseded": "the pack answers SnapshotSchedule, which SnapshotSchedule does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeSnapshotSchedules",
+      "output": {
+        "SnapshotSchedules": [
+          {
+            "ScheduleIdentifier": "77df676f"
+          },
+          {
+            "ScheduleDefinitions": [
+              "rate(1 day)"
+            ],
+            "ScheduleIdentifier": "ss1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ScheduleDefinitions": [
+          "rate(2 days)"
+        ],
+        "ScheduleIdentifier": "ss1"
+      },
+      "operation": "ModifySnapshotSchedule",
+      "output": {
+        "ScheduleIdentifier": "ss1",
+        "SnapshotSchedule": {
+          "ScheduleDefinitions": [
+            "rate(2 days)"
+          ],
+          "ScheduleIdentifier": "ss1"
+        }
+      },
+      "superseded": "the pack answers SnapshotSchedule, which SnapshotSchedule does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ClusterIdentifier": "rs2"
+      },
+      "operation": "ModifyClusterSnapshotSchedule",
+      "output": {
+        "ScheduleIdentifier": "rs2",
+        "SnapshotSchedule": {
+          "ClusterIdentifier": "rs2",
+          "ScheduleIdentifier": "rs2"
+        }
+      },
+      "superseded": "the pack answers ScheduleIdentifier, SnapshotSchedule, which Unit does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeSnapshotSchedules",
+      "output": {
+        "SnapshotSchedules": [
+          {
+            "ScheduleIdentifier": "77df676f"
+          },
+          {
+            "ClusterIdentifier": "rs2",
+            "ScheduleIdentifier": "rs2"
+          },
+          {
+            "ScheduleDefinitions": [
+              "rate(2 days)"
+            ],
+            "ScheduleIdentifier": "ss1"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "ScheduleIdentifier": "ss1"
+      },
+      "operation": "DeleteSnapshotSchedule"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeSnapshotSchedules",
+      "output": {
+        "SnapshotSchedules": [
+          {
+            "ScheduleIdentifier": "77df676f"
+          },
+          {
+            "ClusterIdentifier": "rs2",
+            "ScheduleIdentifier": "rs2"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "Amount": 100,
+        "ClusterIdentifier": "rs2",
+        "FeatureType": "spectrum",
+        "LimitType": "time"
+      },
+      "operation": "CreateUsageLimit",
+      "output": {
+        "UsageLimit": {
+          "Amount": 100,
+          "ClusterIdentifier": "rs2",
+          "FeatureType": "spectrum",
+          "LimitType": "time",
+          "UsageLimitId": "rs2"
+        },
+        "UsageLimitId": "rs2"
+      },
+      "superseded": "the pack answers UsageLimit, which UsageLimit does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeUsageLimits",
+      "output": {
+        "UsageLimits": [
+          {
+            "Amount": 100,
+            "ClusterIdentifier": "rs2",
+            "FeatureType": "spectrum",
+            "LimitType": "time",
+            "UsageLimitId": "rs2"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "UsageLimitId": "rs2"
+      },
+      "operation": "DescribeUsageLimits",
+      "output": {
+        "UsageLimits": [
+          {
+            "Amount": 100,
+            "ClusterIdentifier": "rs2",
+            "FeatureType": "spectrum",
+            "LimitType": "time",
+            "UsageLimitId": "rs2"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "UsageLimitId": "rs2"
+      },
+      "operation": "ModifyUsageLimit",
+      "output": {
+        "UsageLimit": {
+          "UsageLimitId": "rs2"
+        },
+        "UsageLimitId": "rs2"
+      },
+      "superseded": "the pack answers UsageLimit, which UsageLimit does not declare; the wire drops them and the bundle answers the declared members only"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {
+        "UsageLimitId": "rs2"
+      },
+      "operation": "DeleteUsageLimit"
+    },
+    {
+      "identity": {
+        "ARN": "",
+        "AccessKeyID": "",
+        "Account": "000000000000",
+        "Project": "",
+        "Region": "us-east-1"
+      },
+      "input": {},
+      "operation": "DescribeUsageLimits",
+      "output": {
+        "UsageLimits": []
+      }
+    }
+  ]
+}

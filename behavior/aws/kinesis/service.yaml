@@ -1,0 +1,495 @@
+schema: bir/1
+service: aws.kinesis
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A stream is ACTIVE the moment it is created, there is exactly one
+# shard however the shard-count operations move the counter, and the record
+# plane is the shadow below.
+provenance: authored
+
+# Complete and gated for the control plane, but not serving: the record plane
+# is not expressible. PutRecord and PutRecords publish every record to the
+# deps.Bus "kinesis" topic, which aws.pipes drains and aws.firehose subscribes
+# to, and the effect vocabulary has no bus publish -- the emit effect is
+# validated but the engine's runEffects does not execute it ("effect kind is
+# not yet supported by this engine"), so a serving bundle would silently stop
+# feeding pipes and firehose. GetShardIterator and GetRecords carry an opaque
+# base64 "stream|seq" iterator the client hands back, with an AT_TIMESTAMP
+# arrival-time scan over the per-stream record collection, numeric-key
+# ordering and Limit pagination; the CEL env has no base64, no decode-split,
+# and no scan over a second collection. The bundle takes over when an engine
+# effect publishes to the bus and an iterator primitive carries the
+# encode/decode and the scan, moved verbatim.
+shadow: >
+  The record plane -- PutRecord, PutRecords, GetShardIterator, GetRecords --
+  is unexpressible: PutRecord's bus publish feeds aws.pipes and aws.firehose
+  and has no engine effect, and the shard iterator is base64-encoded opaque
+  state with timestamp scans and numeric ordering that CEL cannot express.
+  DeleteStream's cleanup of the per-stream record collection rides with the
+  shadow. Everything else the pack does is transcribed and gated below.
+
+resources:
+  # Streams are keyed by StreamName alone for the operations the pack's main
+  # switch serves (CreateStream, DeleteStream, DescribeStream,
+  # DescribeStreamSummary): those never look at StreamARN. The operations the
+  # pack's extra() serves fall back to the last segment of StreamARN or
+  # ResourceARN, which those operations spell out as an explicit key.
+  stream:
+    collection: kinesis
+    id:
+      input_members: [StreamName]
+    record:
+      StreamName: id
+      Status: "'ACTIVE'"
+
+  # The pack's tag record IS the tag map, keyed by stream name for the
+  # stream-named operations and by the full ResourceARN for the resource-ARN
+  # ones -- so one stream has two tag sets that never meet. Here the map sits
+  # under a Tags member so `without` can rewrite it wholesale; the answers are
+  # identical.
+  tag:
+    collection: ktags
+
+  # The pack stored the policy document as raw bytes, not JSON; the record
+  # holds it as a string member, which answers the same bytes.
+  policy:
+    collection: kpol
+
+  consumer:
+    collection: kcons
+
+  account_settings:
+    collection: kacct
+    singleton: default
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateStream:
+    effects:
+      - create:
+          resource: stream
+          record:
+            Seq: 0
+    output: {}
+
+  # The pack also deletes every record in the stream's per-stream collection;
+  # that collection is the shadow plane and the cleanup rides with it.
+  DeleteStream:
+    effects:
+      - delete: { resource: stream, missing: ignore }
+    output: {}
+
+  ListStreams:
+    list: { resource: stream, member: StreamNames, paginate: model }
+    output:
+      StreamNames: "items.map(s, s.StreamName)"
+      HasMoreStreams: "false"
+
+  # The pack builds the description from the name alone: one static shard,
+  # status ACTIVE, nothing read from the record.
+  DescribeStream:
+    reads:
+      s: { resource: stream }
+    require:
+      - { cond: s_found, error: NotFound }
+    output:
+      StreamDescription: >
+        {'StreamName': s.StreamName,
+         'StreamARN': 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + string(s.StreamName),
+         'StreamStatus': 'ACTIVE',
+         'Shards': [{'ShardId': 'shardId-000000000000',
+                     'HashKeyRange': {'StartingHashKey': '0', 'EndingHashKey': '340282366920938463463374607431768211455'},
+                     'SequenceNumberRange': {'StartingSequenceNumber': '0'}}]}
+
+  # OpenShardCount is a constant 1 however many splits, merges or
+  # UpdateShardCount calls have run.
+  DescribeStreamSummary:
+    reads:
+      s: { resource: stream }
+    require:
+      - { cond: s_found, error: NotFound }
+    output:
+      StreamDescriptionSummary: >
+        {'StreamName': s.StreamName,
+         'StreamARN': 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + string(s.StreamName),
+         'StreamStatus': 'ACTIVE',
+         'OpenShardCount': 1}
+
+  ListShards:
+    output:
+      Shards: "[{'ShardId': 'shardId-000000000000'}]"
+
+  AddTagsToStream:
+    reads:
+      t: { resource: tag, key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+    effects:
+      - patch:
+          resource: tag
+          key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))"
+          record:
+            Tags: "merge(t_found && 'Tags' in t ? t.Tags : {}, 'Tags' in input ? input.Tags : {})"
+    output: {}
+
+  RemoveTagsFromStream:
+    reads:
+      t: { resource: tag, key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+    effects:
+      - patch:
+          resource: tag
+          key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))"
+          record:
+            Tags: "without(t_found && 'Tags' in t ? t.Tags : {}, 'TagKeys' in input ? input.TagKeys : [])"
+    output: {}
+
+  ListTagsForStream:
+    reads:
+      t: { resource: tag, key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+    output:
+      Tags: "t_found && 'Tags' in t ? t.Tags : dyn({})"
+
+  TagResource:
+    reads:
+      t: { resource: tag, key: "string(input.ResourceARN)" }
+    effects:
+      - patch:
+          resource: tag
+          key: "string(input.ResourceARN)"
+          record:
+            Tags: "merge(t_found && 'Tags' in t ? t.Tags : {}, 'Tags' in input ? input.Tags : {})"
+    output: {}
+
+  UntagResource:
+    reads:
+      t: { resource: tag, key: "string(input.ResourceARN)" }
+    effects:
+      - patch:
+          resource: tag
+          key: "string(input.ResourceARN)"
+          record:
+            Tags: "without(t_found && 'Tags' in t ? t.Tags : {}, 'TagKeys' in input ? input.TagKeys : [])"
+    output: {}
+
+  ListTagsForResource:
+    reads:
+      t: { resource: tag, key: "string(input.ResourceARN)" }
+    output:
+      Tags: "t_found && 'Tags' in t ? t.Tags : dyn({})"
+
+  # The pack defaults an absent or non-positive period to 24, and writes the
+  # stream record even when the stream does not exist -- a retention call on a
+  # name that was never created conjures an ACTIVE stream.
+  IncreaseStreamRetentionPeriod:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))"
+          record:
+            RetentionPeriodHours: "int(input.RetentionPeriodHours) > 0 ? int(input.RetentionPeriodHours) : 24"
+    output: {}
+
+  DecreaseStreamRetentionPeriod:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))"
+          record:
+            RetentionPeriodHours: "int(input.RetentionPeriodHours) > 0 ? int(input.RetentionPeriodHours) : 24"
+    output: {}
+
+  PutResourcePolicy:
+    effects:
+      - create:
+          resource: policy
+          key: "string(input.ResourceARN)"
+          record:
+            Policy: "string(input.Policy)"
+    output: {}
+
+  GetResourcePolicy:
+    reads:
+      p: { resource: policy, key: "string(input.ResourceARN)" }
+    output:
+      Policy: "p_found ? string(p.Policy) : ''"
+
+  DeleteResourcePolicy:
+    effects:
+      - delete: { resource: policy, key: "string(input.ResourceARN)", missing: ignore }
+    output: {}
+
+  # The pack hardcodes the arn:aws partition rather than consulting the
+  # identity, and derives the stream name from StreamName first (a member this
+  # operation's input shape does not declare) before the StreamARN suffix.
+  RegisterStreamConsumer:
+    effects:
+      - create:
+          resource: consumer
+          key: "'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : lastSegment(string(input.StreamARN), '/')) + '/consumer/' + string(input.ConsumerName)"
+          record:
+            ConsumerName: "string(input.ConsumerName)"
+            ConsumerARN: "'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : lastSegment(string(input.StreamARN), '/')) + '/consumer/' + string(input.ConsumerName)"
+            ConsumerStatus: "'ACTIVE'"
+            StreamARN: "string(input.StreamARN)"
+    output:
+      Consumer: rec
+
+  DeregisterStreamConsumer:
+    effects:
+      - delete:
+          resource: consumer
+          key: "'ConsumerARN' in input && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : '')"
+          missing: ignore
+    output: {}
+
+  DescribeStreamConsumer:
+    reads:
+      c: { resource: consumer, key: "'ConsumerARN' in input && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : '')" }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      ConsumerDescription: c
+
+  # The pack ignores the StreamARN it is asked about: every consumer in the
+  # account and region is listed, whichever stream the request names.
+  ListStreamConsumers:
+    list: { resource: consumer, member: Consumers, paginate: model }
+
+  # The pack answers an empty event stream and never sends anything on it.
+  SubscribeToShard:
+    output:
+      EventStream: "[]"
+
+  EnableEnhancedMonitoring:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            EnhancedMonitoring: true
+    output:
+      StreamName: rec.StreamName
+      CurrentShardLevelMetrics: "input.ShardLevelMetrics"
+
+  DisableEnhancedMonitoring:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            EnhancedMonitoring: false
+    output:
+      StreamName: rec.StreamName
+      CurrentShardLevelMetrics: "input.ShardLevelMetrics"
+
+  # The shard count is a counter on the stream record, defaulting to 1; it
+  # changes nothing else. SplitShard and MergeShards answer a body the output
+  # shape (Unit) does not declare, so the bundle answers nothing there.
+  SplitShard:
+    reads:
+      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+    let:
+      cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            OpenShardCount: "cur + 1"
+    output: {}
+
+  MergeShards:
+    reads:
+      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+    let:
+      cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            OpenShardCount: "cur > 1 ? cur - 1 : cur"
+    output: {}
+
+  UpdateShardCount:
+    reads:
+      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+    let:
+      cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            OpenShardCount: "int(input.TargetShardCount) > 0 ? int(input.TargetShardCount) : cur"
+    output:
+      StreamName: rec.StreamName
+      CurrentShardCount: rec.OpenShardCount
+      TargetShardCount: rec.OpenShardCount
+
+  # The pack reads EncryptionType from the operation name, not the request:
+  # Start is always KMS, Stop always NONE.
+  StartStreamEncryption:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            EncryptionType: "'KMS'"
+            KeyId: "string(input.KeyId)"
+    output: {}
+
+  StopStreamEncryption:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            EncryptionType: "'NONE'"
+    output: {}
+
+  DescribeLimits:
+    output:
+      ShardLimit: "500"
+      OpenShardCount: "1"
+      OnDemandStreamCount: "0"
+      OnDemandStreamCountLimit: "50"
+
+  # The pack stores the request verbatim under a fixed key and answers it
+  # back; DescribeAccountSettings answers that store, or a DISABLED default.
+  UpdateAccountSettings:
+    effects:
+      - create: { resource: account_settings, spread: input }
+    output:
+      MinimumThroughputBillingCommitment: "input.MinimumThroughputBillingCommitment"
+
+  DescribeAccountSettings:
+    reads:
+      a: { resource: account_settings }
+    output:
+      MinimumThroughputBillingCommitment: "a_found && 'MinimumThroughputBillingCommitment' in a ? a.MinimumThroughputBillingCommitment : dyn({'Status': 'DISABLED'})"
+
+  # The three stream-option operations answer the whole stored stream record,
+  # which their output shapes do not declare (UpdateMaxRecordSize and
+  # UpdateStreamMode are Unit); the bundle answers the declared subset and the
+  # recorded steps are superseded with that reason.
+  UpdateMaxRecordSize:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            MaxRecordSizeInKiB: "input.MaxRecordSizeInKiB"
+    output: {}
+
+  UpdateStreamMode:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            StreamModeDetails: "input.StreamModeDetails"
+    output: {}
+
+  UpdateStreamWarmThroughput:
+    effects:
+      - patch:
+          resource: stream
+          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          record:
+            WarmThroughput: "'WarmThroughputMiBPerSecond' in input ? input.WarmThroughputMiBPerSecond : null"
+    output:
+      StreamName: rec.StreamName
+      WarmThroughput: rec.WarmThroughput
+
+quirks:
+  - note: >
+      The record plane (PutRecord, PutRecords, GetShardIterator, GetRecords)
+      is not transcribed; see the shadow. DeleteStream still drops the stream
+      record, but the pack's cleanup of the stream's per-stream record
+      collection is part of the shadow plane and goes with it.
+  - operation: CreateStream
+    note: >
+      An absent StreamName faults ValidationException from the engine's model
+      check, the same code the pack answered. ShardCount, StreamModeDetails,
+      Tags, MaxRecordSizeInKiB and WarmThroughputMiBps are accepted and
+      discarded. Creating over an existing name replaces the record wholesale,
+      resetting the record-plane sequence counter to 0.
+  - operation: DescribeStream
+    note: >
+      StreamARN is ignored here and by DeleteStream, ListStreams and
+      DescribeStreamSummary -- the pack's main switch resolves StreamName
+      alone, so a describe addressed by ARN alone faults ResourceNotFound.
+      The description is built from the name: the stored record's status,
+      retention, encryption and shard count never appear, HasMoreShards is
+      never set, and there is always exactly one shard with a full-range hash
+      key. DescribeStreamSummary's OpenShardCount is a constant 1.
+  - operation: AddTagsToStream
+    note: >
+      One stream has two tag sets: the stream-named operations key the tag
+      record by stream name, the ResourceARN operations by the full ARN, and
+      they never meet. An absent Tags map merges nothing and succeeds, which
+      the engine's model check now rejects (Tags is required); TagKeys-less
+      Remove calls die the same way. The pack also honored a ResourceArn
+      member the model does not declare; the key expressions keep that.
+  - operation: IncreaseStreamRetentionPeriod
+    note: >
+      A retention call on a stream that does not exist succeeds and writes a
+      phantom ACTIVE stream record, which then describes and lists as a real
+      stream. An absent or non-positive RetentionPeriodHours stores 24; the
+      model requires the member, so the absence path is now the engine's
+      ValidationException. Enhanced-monitoring, shard-count, encryption and
+      the stream-option updates phantom-create the same way.
+  - operation: GetResourcePolicy
+    note: >
+      An absent policy answers an empty string, never a fault. The pack fell
+      back to the stream name when ResourceARN was absent; the model requires
+      ResourceARN on all three policy operations, so that fallback is dead.
+  - operation: RegisterStreamConsumer
+    note: >
+      The consumer ARN hardcodes the aws partition and derives the stream name
+      from StreamName first -- a member this operation's input shape does not
+      even declare -- before the StreamARN suffix. Registering over an
+      existing consumer replaces the record. No ConsumerCreationTimestamp is
+      ever set, and the record carries StreamARN, which the Consumer shape
+      does not declare but the pack answers with.
+  - operation: ListStreamConsumers
+    note: >
+      The StreamARN the request names is ignored: every consumer in the
+      account and region is listed. MaxResults and NextToken are accepted and
+      ignored by the pack; the engine paginates only when the request asks.
+  - operation: SubscribeToShard
+    note: >
+      Answers an empty event stream immediately; nothing is ever delivered on
+      it, and the consumer named is not checked to exist.
+  - operation: UpdateShardCount
+    note: >
+      The count is a number on the stream record with a floor of 1; Split and
+      Merge answer StreamName, CurrentShardCount and TargetShardCount where
+      their output shapes are Unit, so the bundle answers nothing there and
+      the recorded steps are superseded. ScalingType is required by the model
+      and ignored. No shards actually exist to split or merge.
+  - operation: StartStreamEncryption
+    note: >
+      EncryptionType comes from the operation name, not the request: Start is
+      always KMS and Stop always NONE, whatever the request's required
+      EncryptionType says.
+  - operation: UpdateAccountSettings
+    note: >
+      The whole request is stored under a fixed key and answered back;
+      DescribeAccountSettings answers that store or a DISABLED default. Any
+      extra member the caller sent round-trips too.
+  - operation: UpdateStreamWarmThroughput
+    note: >
+      The pack reads WarmThroughputMiBPerSecond, a member the model does not
+      declare (the declared one is WarmThroughputMiBps), so WarmThroughput is
+      always stored and answered as null. All three stream-option operations
+      answer the whole stored stream record where their shapes declare a
+      subset or nothing, so those recorded steps are superseded.
+  - operation: DescribeLimits
+    note: >
+      Constants: 500 shards, 1 open, 0 on-demand streams of 50 -- whatever the
+      account has done.

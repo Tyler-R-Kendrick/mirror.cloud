@@ -123,7 +123,9 @@ func TestVercelBundleBehaves(t *testing.T) {
 	// Domains: get, update, verify, remove.
 	ok(t, "AddProjectDomain", map[string]any{"idOrName": "app2", "name": "app.example.com"})
 	dom := ok(t, "GetProjectDomain", map[string]any{"idOrName": "app2", "domain": "app.example.com"})
-	if dom["name"] != "app.example.com" || dom["verified"] != true || dom["projectId"] != pid {
+	// Unverified until the verify route moves the flag -- the vendor's
+	// emulator's behavior, not the deleted pack's.
+	if dom["name"] != "app.example.com" || dom["verified"] != false || dom["projectId"] != pid {
 		t.Fatalf("get domain answered %v", dom)
 	}
 	if _, err := call("GetProjectDomain", map[string]any{"idOrName": "app2", "domain": "nope.example.com"}); err == nil {

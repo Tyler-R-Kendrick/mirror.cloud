@@ -70,6 +70,13 @@ func celFuncs() []cel.EnvOption {
 		// Digests and identifiers.
 		unaryDyn("md5hex", str, str),
 		unaryDyn("sha256hex", str, str),
+		// b64urlhex decodes a hex string and base64url-encodes it without
+		// padding. PKCE's S256 is base64url(sha256(verifier)), so the
+		// challenge check is b64urlhex(sha256hex(verifier)) == challenge.
+		unaryDyn("b64urlhex", str, str),
+		// trim is strings.TrimSpace: the oracle trims a team slug before it
+		// stores it, and CEL has no whitespace handling at all.
+		unaryDyn("trim", str, str),
 
 		// Value helpers. coalesce takes the first non-empty argument, which is
 		// how behavior data expresses a documented default without branching.
@@ -122,6 +129,14 @@ func celFuncs() []cel.EnvOption {
 		// join concatenates a list of values with a separator. PutBlockList
 		// folds staged blocks in request order; CEL has no list join.
 		binaryDyn("join", dyn, str, str),
+		// split is strings.Split, CEL has no tokenization at all. A Bearer
+		// header's token, a blob token's underscore-separated fields and a
+		// pathname's extension all need it.
+		binaryDyn("split", str, str, dyn),
+		// iso8601ms renders a timestamp the way JavaScript's toISOString does
+		// -- always with milliseconds. CEL's string(timestamp) drops the
+		// fraction when it is zero, and Vercel Blob's uploadedAt carries it.
+		unaryDyn("iso8601ms", cel.TimestampType, str),
 		// tagmatch evaluates an Azure tag-condition expression (x-ms-if-tags,
 		// FilterBlobs where) against a tag map and container name; tagkeys
 		// lists the keys an expression references.

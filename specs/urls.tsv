@@ -38,7 +38,10 @@ gcp.storage	gcp/storage.json	https://storage.googleapis.com/$discovery/rest?vers
 hetzner.v1	hetzner/v1.json	https://docs.hetzner.cloud/cloud.spec.json
 hostinger.api	hostinger/api.json	https://raw.githubusercontent.com/hostinger/api/main/openapi.json
 vercel.api	vercel/api.json	https://openapi.vercel.sh/
+vercel.api	vercel/api-extra.json	authored
+vercel.api	vercel/api-extra.json	authored
 vercel.kv	vercel/kv.json	authored
+vercel.blob	vercel/blob.json	authored
 azure.blobs	azure/blobs.json	authored
 azure.queue	azure/queue.json	authored
 azure.table	azure/table.json	authored

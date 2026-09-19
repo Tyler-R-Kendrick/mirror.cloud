@@ -779,6 +779,19 @@
       "RemoveCustomEnvironment",
       "RequestPromote",
       "GetTeams",
+      "CreateTeam",
+      "ListTeamMembers",
+      "UpdateAuthUser",
+      "GetRegistration",
+      "GetDeploymentsV6",
+      "GetProjectEnv",
+      "CreateApiKey",
+      "ListApiKeys",
+      "DeleteApiKey",
+      "OauthAuthorize",
+      "OauthAuthorizeCallback",
+      "OauthToken",
+      "OauthUserinfo",
       "GetTeam",
       "PatchTeam",
       "InviteUserToTeam",
@@ -796,6 +809,19 @@
     "Protocol": "restJson1",
     "Ops": [
       "Command"
+    ]
+  },
+  {
+    "ID": "vercel.blob",
+    "Protocol": "restJson1",
+    "Ops": [
+      "UploadBlob",
+      "ListBlobs",
+      "HeadBlob",
+      "DeleteBlobs",
+      "CreateMultipartUpload",
+      "CompleteMultipartUpload",
+      "ServeBlob"
     ]
   },
   {

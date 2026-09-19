@@ -73,6 +73,15 @@ type document struct {
 	// collapsing all three Azure services onto `azure` would change which
 	// services the demux considers for those labels.
 	MirrorEndpointPrefix string `json:"x-mirror-endpoint-prefix"`
+	// MirrorService is `x-mirror-service`: the service id this document
+	// contributes to when it is not the one its path derives. A service's
+	// identity is otherwise its location, which means one file per service --
+	// but a vendored document and an authored supplement are two files of one
+	// service: the vendored Vercel document is pinned bytes, and the routes
+	// the vendor's own emulator serves but the document never declared (the
+	// api-keys lifecycle, the OAuth token exchange) can only be authored.
+	// Fusion merges the two at operation level with provenance intact.
+	MirrorService string `json:"x-mirror-service"`
 	Servers              []struct {
 		URL string `json:"url"`
 	} `json:"servers"`
@@ -227,6 +236,9 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		return nil, fmt.Errorf("openapi: %s: no `openapi` version field", src.Path)
 	}
 	id := serviceID(src.Path)
+	if doc.MirrorService != "" {
+		id = doc.MirrorService
+	}
 	base := basePath(doc)
 	sh := &shaper{shapes: map[string]model.Shape{}, responses: doc.Components.Responses}
 	// The named schemas first, so a `$ref` from an operation or from another

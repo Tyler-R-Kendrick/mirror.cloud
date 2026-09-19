@@ -21655,6 +21655,28 @@ var mutants = []mutant{
 		run:  "TestDeclaredHostsPlaceTheirService",
 	},
 	{
+		// ServeBlob's 304 is the conditionalGET a caching client depends on:
+		// answering 200 with a body to an If-None-Match hit is a wrong answer,
+		// not a smaller one.
+		name: "vercel-blob-serve-ignores-if-none-match",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "	if nm, _ := out[\"not_modified\"].(bool); nm {",
+		new:  "	if nm, _ := out[\"not_modified\"].(bool); nm && false {",
+		pkg:  "./test/behavior/vercel",
+		run:  "TestVercelBlobBehavior",
+	},
+	{
+		// Header-bound input members are how a bearer token, a digest or an
+		// If-Match reaches the engine at all; without the binding, blob
+		// uploads answer 403 to every authenticated request.
+		name: "restjson-decode-drops-header-members",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "			if m.Binding.Location != \"header\" {",
+		new:  "			if m.Binding.Location != \"header\" || true {",
+		pkg:  "./test/behavior/vercel",
+		run:  "TestVercelBlobBehavior",
+	},
+	{
 		// KV's errors are a plain string, which is what its document declares
 		// and what Upstash answers. Without this branch they fall through to
 		// the REST API's {error: {code, message}}, which no Upstash client

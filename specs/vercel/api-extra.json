@@ -1,0 +1,828 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Vercel REST API \u2014 authored supplement",
+    "version": "authored",
+    "description": "Routes the vendored Vercel document never declared but the vendor's own emulator (vercel-labs/emulate, pinned in specs/vercel/emulate-inventory.json) serves: the /v1 API-key lifecycle, team creation and member listing, user patching, the registration probe, the v6 deployment listing, get-one env, and the local OAuth flow. Every cell is `authored` provenance \u2014 a reading of the oracle's packages/@emulators/vercel/src/routes/{api-keys,user,oauth,deployments,env}.ts, not of the real api.vercel.com."
+  },
+  "x-mirror-service": "vercel.api",
+  "servers": [
+    {
+      "url": "https://api.vercel.com"
+    }
+  ],
+  "paths": {
+    "/v1/api-keys": {
+      "post": {
+        "operationId": "CreateApiKey",
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementCreateApiKeyResult"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "ListApiKeys",
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementListApiKeysResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/api-keys/{keyId}": {
+      "delete": {
+        "operationId": "DeleteApiKey",
+        "parameters": [
+          {
+            "name": "keyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/teams": {
+      "post": {
+        "operationId": "CreateTeam",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementTeam"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/teams/{teamId}/members": {
+      "get": {
+        "operationId": "ListTeamMembers",
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementListTeamMembersResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/user": {
+      "patch": {
+        "operationId": "UpdateAuthUser",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementUserResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/registration": {
+      "get": {
+        "operationId": "GetRegistration",
+        "responses": {
+          "200": {
+            "description": "registration probe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementRegistrationResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v6/deployments": {
+      "get": {
+        "operationId": "GetDeploymentsV6",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementDeploymentList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v10/projects/{idOrName}/env/{id}": {
+      "get": {
+        "operationId": "GetProjectEnv",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the variable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementEnvVar"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize": {
+      "get": {
+        "operationId": "OauthAuthorize",
+        "parameters": [
+          {
+            "name": "client_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code_challenge",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code_challenge_method",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the sign-in page (HTML)",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementHtmlPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize/callback": {
+      "post": {
+        "operationId": "OauthAuthorizeCallback",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "redirect_uri": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "client_id": {
+                    "type": "string"
+                  },
+                  "code_challenge": {
+                    "type": "string"
+                  },
+                  "code_challenge_method": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "302": {
+            "description": "redirect back with the code",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementCallbackResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "the issued code and redirect target; the wire answer is the 302 redirect, forced by the codec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementCallbackResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/login/oauth/token": {
+      "post": {
+        "operationId": "OauthToken",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "redirect_uri": {
+                    "type": "string"
+                  },
+                  "client_id": {
+                    "type": "string"
+                  },
+                  "client_secret": {
+                    "type": "string"
+                  },
+                  "code_verifier": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "issued token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementTokenResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/login/oauth/userinfo": {
+      "get": {
+        "operationId": "OauthUserinfo",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the user the token names",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementUserinfoResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SupplementCreateApiKeyResult": {
+        "type": "object",
+        "properties": {
+          "apiKeyString": {
+            "type": "string"
+          },
+          "apiKey": {
+            "$ref": "#/components/schemas/SupplementApiKey"
+          }
+        }
+      },
+      "SupplementApiKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "teamId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "integer"
+          }
+        }
+      },
+      "SupplementListApiKeysResult": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupplementApiKey"
+            }
+          }
+        }
+      },
+      "SupplementTeam": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "membership": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string"
+              }
+            }
+          },
+          "creatorId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        }
+      },
+      "SupplementListTeamMembersResult": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupplementTeamMember"
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer"
+              },
+              "next": {
+                "type": "string",
+                "nullable": true
+              },
+              "prev": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          }
+        }
+      },
+      "SupplementTeamMember": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        }
+      },
+      "SupplementUserResult": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/SupplementAuthUser"
+          }
+        }
+      },
+      "SupplementAuthUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "SupplementRegistrationResult": {
+        "type": "object",
+        "properties": {
+          "registration": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SupplementDeploymentList": {
+        "type": "object",
+        "properties": {
+          "deployments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "aliasAssigned": {},
+                "aliasError": {},
+                "attribution": {},
+                "buildingAt": {},
+                "checks": {},
+                "checksConclusion": {},
+                "checksState": {},
+                "connectBuildsEnabled": {},
+                "connectConfigurationId": {},
+                "created": {},
+                "createdAt": {},
+                "creator": {},
+                "customEnvironment": {},
+                "defaultRoute": {},
+                "deleted": {},
+                "errorCode": {},
+                "errorMessage": {},
+                "expiration": {},
+                "inspectorUrl": {},
+                "isRollbackCandidate": {},
+                "manualProvisioning": {},
+                "meta": {},
+                "name": {},
+                "oomReport": {},
+                "passiveConnectConfigurationId": {},
+                "platform": {},
+                "prebuilt": {},
+                "projectId": {},
+                "projectSettings": {},
+                "proposedExpiration": {},
+                "ready": {},
+                "readyState": {},
+                "readySubstate": {},
+                "seatBlock": {},
+                "softDeletedByRetention": {},
+                "source": {},
+                "state": {},
+                "target": {},
+                "type": {},
+                "uid": {},
+                "undeleted": {},
+                "url": {}
+              },
+              "additionalProperties": true
+            }
+          },
+          "pagination": {
+            "type": "object"
+          }
+        }
+      },
+      "SupplementEnvVar": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "target": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        }
+      },
+      "SupplementHtmlPage": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "string"
+          }
+        }
+      },
+      "SupplementCallbackResult": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        }
+      },
+      "SupplementTokenResult": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "token_type": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        }
+      },
+      "SupplementUserinfoResult": {
+        "type": "object",
+        "properties": {
+          "sub": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "preferred_username": {
+            "type": "string"
+          },
+          "email_verified": {
+            "type": "boolean"
+          },
+          "picture": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

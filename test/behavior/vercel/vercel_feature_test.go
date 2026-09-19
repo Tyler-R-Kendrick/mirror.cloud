@@ -190,7 +190,8 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("still there after remove %d %#v", code, body)
 		}
 	})
-	t.Run("Given a deployment When promoted Then 201 and an unknown one is not_found", func(t *testing.T) {		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-app2","project":"bdd-app2"}`, "")
+	t.Run("Given a deployment When promoted Then 201 and an unknown one is not_found", func(t *testing.T) {
+		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-app2","project":"bdd-app2"}`, "")
 		if code != 200 {
 			t.Fatalf("deploy %d %#v", code, dpl)
 		}
@@ -270,17 +271,17 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		if code != 200 || root["type"] != "directory" || len(root["children"].([]any)) != 1 {
 			t.Fatalf("files %d %#v", code, files)
 		}
+		// The vendor's emulator refuses to cancel a READY deployment, and so
+		// does mirror: the QUEUED/BUILDING guard can never fire when every
+		// deployment is born READY. The loosened guard answered 200 here until
+		// the differential corpus caught it.
 		code, canceled, _ := call(http.MethodPatch, "/v12/deployments/"+id+"/cancel", "", "")
-		if code != 200 || canceled["readyState"] != "CANCELED" {
-			t.Fatalf("cancel %d %#v", code, canceled)
-		}
-		code, again, _ := call(http.MethodPatch, "/v12/deployments/"+id+"/cancel", "", "")
 		if code != 400 {
-			t.Fatalf("second cancel %d %#v", code, again)
+			t.Fatalf("cancel of a READY deployment %d %#v", code, canceled)
 		}
 		code, after, _ := call(http.MethodGet, "/v13/deployments/"+id, "", "")
-		if code != 200 || after["readyState"] != "CANCELED" {
-			t.Fatalf("get after cancel %d %#v", code, after)
+		if code != 200 || after["readyState"] != "READY" {
+			t.Fatalf("get after refused cancel %d %#v", code, after)
 		}
 	})
 	t.Run("Given a file digest When registered Then 200 and a missing digest is bad_request", func(t *testing.T) {

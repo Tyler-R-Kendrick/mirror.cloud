@@ -3,8 +3,10 @@ package restjson
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -432,7 +434,24 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		}
 		body = nil
 	}
-	if len(body) > 0 {
+	// A form body is as much a restJson payload as a JSON one: Vercel's OAuth
+	// callback and token exchange are declared form operations, and
+	// JSON-unmarshalling `code=...&state=...` into a map silently decodes to
+	// nothing. The demux parses forms on the way past (the AWS query protocol
+	// lives on r.Form), which drains the body, so the already parsed answer is
+	// read first and the raw body is the fallback. Outside the body-length
+	// guard, because the drained case is the common one.
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		vals := r.PostForm
+		if len(vals) == 0 && len(body) > 0 {
+			if parsed, err := url.ParseQuery(string(body)); err == nil {
+				vals = parsed
+			}
+		}
+		for k, vs := range vals {
+			in[k] = vs[0]
+		}
+	} else if len(body) > 0 {
 		_ = json.Unmarshal(body, &in)
 	}
 	if svc.ID == "azure.table" {
@@ -542,6 +561,23 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
+	}
+	if svc.ID == "vercel.blob" && op.Name == "ServeBlob" {
+		return encodeVercelBlobContent(w, status, resp)
+	}
+	// Vercel's local OAuth flow has two wire shapes the JSON envelope cannot
+	// carry: the authorize page is HTML a browser renders, and the callback's
+	// answer is the redirect, not a body.
+	if svc.ID == "vercel.api" && op.Name == "OauthAuthorize" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, fmt.Sprint(resp.Output["page"]))
+		return err
+	}
+	if svc.ID == "vercel.api" && op.Name == "OauthAuthorizeCallback" {
+		w.Header().Set("Location", fmt.Sprint(resp.Output["location"]))
+		w.WriteHeader(http.StatusFound)
+		return nil
 	}
 	// `_raw` is the engine's name for an operation whose body is the value
 	// itself -- bir.TopLevelRaw -- and it is answered before any provider
@@ -684,7 +720,16 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"odata.error": map[string]any{"code": f.Code, "message": map[string]any{"lang": "en-US", "value": f.Message}}})
 	}
-	if svc.ID == "vercel.api" {
+	// Vercel's REST API and Blob data plane share the {error:{code,message}}
+	// envelope -- emulate's blobErr is the same shape the REST API answers --
+	// while KV below is the product whose errors differ. The token endpoint's
+	// faults are RFC 6749's instead: {error, error_description} flat, because
+	// that is what every OAuth client parses.
+	if svc.ID == "vercel.api" && op != nil && op.Name == "OauthToken" {
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"error": f.Code, "error_description": f.Message})
+	}
+	if svc.ID == "vercel.api" || svc.ID == "vercel.blob" {
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
 	}
@@ -732,6 +777,38 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	w.Header().Set("x-amzn-errortype", f.Code)
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(map[string]any{"message": f.Message, "__type": f.Code})
+}
+
+// encodeVercelBlobContent unfolds ServeBlob's envelope: the wire answer is the
+// stored bytes with ETag/Cache-Control (and, on a full answer, Content-Type and
+// an optional Content-Disposition) as headers, or a header-only 304 when
+// If-None-Match matched. The bundle projects the record's members; the codec
+// places them, the same division of labour as writeAzureBlobHeaders.
+func encodeVercelBlobContent(w http.ResponseWriter, status int, resp *spi.Response) error {
+	out := resp.Output
+	if nm, _ := out["not_modified"].(bool); nm {
+		status = http.StatusNotModified
+	}
+	if s, _ := out["etag"].(string); s != "" {
+		w.Header().Set("ETag", s)
+	}
+	if s, _ := out["cache_control"].(string); s != "" {
+		w.Header().Set("Cache-Control", s)
+	}
+	if status == http.StatusNotModified {
+		w.WriteHeader(status)
+		return nil
+	}
+	if s, _ := out["content_type"].(string); s != "" {
+		w.Header().Set("Content-Type", s)
+	}
+	if s, _ := out["content_disposition"].(string); s != "" {
+		w.Header().Set("Content-Disposition", s)
+	}
+	w.WriteHeader(status)
+	body, _ := out["body"].(string)
+	_, err := io.WriteString(w, body)
+	return err
 }
 
 // rawBody reports the opaque body an operation projected, if it projected one.

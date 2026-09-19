@@ -92,7 +92,7 @@ func TestSharedEndpointPrefixesAreNamed(t *testing.T) {
 		"es":               {"aws.elasticsearch", "aws.es", "aws.opensearch"},
 		"kinesisanalytics": {"aws.kinesisanalytics", "aws.kinesisanalyticsv2"},
 		"rds":              {"aws.docdb", "aws.neptune", "aws.rds"},
-		"vercel":           {"vercel.api", "vercel.kv"},
+		"vercel":           {"vercel.api", "vercel.blob", "vercel.kv"},
 	}
 	got := map[string][]string{}
 	seen := map[string]bool{}

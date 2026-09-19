@@ -266,6 +266,19 @@ func Bundle() *model.Bundle {
 		op("RemoveCustomEnvironment", "DELETE", "/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}", 200, false),
 		op("RequestPromote", "POST", "/v10/projects/{projectId}/promote/{deploymentId}", 201, false),
 		op("GetTeams", "GET", "/v2/teams", 200, true),
+		op("CreateTeam", "POST", "/v2/teams", 200, false),
+		op("ListTeamMembers", "GET", "/v2/teams/{teamId}/members", 200, true),
+		op("UpdateAuthUser", "PATCH", "/v2/user", 200, false),
+		op("GetRegistration", "GET", "/registration", 200, true),
+		op("GetDeploymentsV6", "GET", "/v6/deployments", 200, true),
+		op("GetProjectEnv", "GET", "/v10/projects/{idOrName}/env/{id}", 200, true),
+		op("CreateApiKey", "POST", "/v1/api-keys", 200, false),
+		op("ListApiKeys", "GET", "/v1/api-keys", 200, true),
+		op("DeleteApiKey", "DELETE", "/v1/api-keys/{keyId}", 200, false),
+		op("OauthAuthorize", "GET", "/oauth/authorize", 200, true),
+		op("OauthAuthorizeCallback", "POST", "/oauth/authorize/callback", 302, false),
+		op("OauthToken", "POST", "/login/oauth/token", 200, false),
+		op("OauthUserinfo", "GET", "/login/oauth/userinfo", 200, true),
 		op("GetTeam", "GET", "/v2/teams/{teamId}", 200, true),
 		op("PatchTeam", "PATCH", "/v2/teams/{teamId}", 200, false),
 		op("InviteUserToTeam", "POST", "/v2/teams/{teamId}/members", 200, false),
@@ -283,6 +296,18 @@ func Bundle() *model.Bundle {
 	// and adoptGenerated cannot invent one.
 	vercelkv := []model.Operation{
 		op("Command", "POST", "/", 200, false),
+	}
+	// Vercel Blob's document is authored (specs/vercel/blob.json) from the
+	// vendor's own emulator: management rides blob.vercel-storage.com and
+	// content serves from a per-store subdomain of it.
+	vercelblob := []model.Operation{
+		op("UploadBlob", "PUT", "/api/blob", 200, false),
+		op("ListBlobs", "GET", "/api/blob", 200, true),
+		op("HeadBlob", "GET", "/api/blob?url", 200, true),
+		op("DeleteBlobs", "POST", "/api/blob/delete", 200, false),
+		op("CreateMultipartUpload", "POST", "/api/blob/mpu", 400, false),
+		op("CompleteMultipartUpload", "PUT", "/api/blob/mpu", 400, false),
+		op("ServeBlob", "GET", "/blob/{storeId}/{pathname}", 200, true),
 	}
 	// Cloudflare is served from behavior/cloudflare/api now, under the id its
 	// document produces -- cloudflare.api -- and the names that document
@@ -1727,6 +1752,7 @@ func Bundle() *model.Bundle {
 			svc("gcp.storage", "storage", model.ProtoGCPRESTSON, "", "", "", mk(gcs)),
 			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", vercel),
 			svc("vercel.kv", "vercel", model.ProtoRESTJSON1, "", "", "", vercelkv),
+			svc("vercel.blob", "vercel", model.ProtoRESTJSON1, "", "", "", vercelblob),
 			svc("cloudflare.api", "cloudflare", model.ProtoRESTJSON1, "", "", "", cloudflare),
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
 			azureSvc,

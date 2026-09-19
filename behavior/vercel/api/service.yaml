@@ -96,10 +96,11 @@ resources:
       # of the project, which is the same value by construction -- a domain
       # lives in its project's collection.
       #
-      # The pack answered a domain verified the moment it was added. A real one
-      # is not, and a client that waits for verification waits forever against
-      # the real API and not at all against this -- recorded as a quirk.
-      verified: "true"
+      # The pack verified on add; the vendor's own emulator does not -- a
+      # domain is unverified until the verify route runs. The differential
+      # corpus (test/behavior/vercel/oracle) records the difference and the
+      # oracle wins it.
+      verified: "false"
       createdAt: "int(now) * 1000"
       updatedAt: "int(now) * 1000"
 
@@ -200,6 +201,40 @@ resources:
     id:
       derive: "''"
 
+
+  # The one caller. The pack answered a fixed identity and patches move it;
+  # the singleton keeps the overrides so GetAuthUser, the patch and userinfo
+  # read the same answer.
+  user:
+    collection: vuser
+    singleton: current
+
+  # An API key's id and its token are both minted at create; the token is the
+  # secret answer, the id is how a delete addresses the row.
+  api_key:
+    collection: vapikey
+    id:
+      derive: "''"
+
+  # The local OAuth flow's two stores: codes the callback issues and the token
+  # exchange consumes exactly once, and the tokens it issues.
+  oauth_code:
+    collection: voauthcode
+    id:
+      derive: "''"
+
+  oauth_token:
+    collection: voauthtok
+    id:
+      derive: "''"
+
+  # Teams are addressed by id or by slug, the way the oracle's
+  # resolveTeamByIdOrSlug accepts both: the index answers which.
+  team_slug:
+    collection: vteamslug
+    id:
+      derive: "''"
+
   # A deployment's alias rows, written by CreateDeployment the way emulate
   # writes them (one per deployment, the deployment's own URL). Keyed off the
   # deployment id; the list filters on the record's deploymentId, so the key
@@ -257,17 +292,39 @@ errors:
     code: member_already_exists
     http: 409
     fault: client
+  NotAuthenticated:
+    code: not_authenticated
+    http: 401
+    fault: client
+  Unauthorized:
+    code: unauthorized
+    http: 401
+    fault: client
+  TeamSlugAlreadyExists:
+    code: team_slug_already_exists
+    http: 409
+    fault: client
+  InvalidGrant:
+    code: invalid_grant
+    http: 400
+    fault: client
+  InvalidClient:
+    code: invalid_client
+    http: 401
+    fault: client
 
 operations:
   GetAuthUser:
-    # No stored state at all: the pack answered a fixed identity derived from
-    # the caller's account, and so does this.
+    # The fixed identity the pack answered, now read through the user
+    # singleton so UpdateAuthUser's patch moves the answer.
+    reads:
+      u: { resource: user }
     output:
       user: >
         {
           'id': 'usr_' + identity.account,
-          'email': 'test@mirror.cloud',
-          'name': 'Mirror',
+          'email': (u_found && 'email' in u) ? u.email : 'test@mirror.cloud',
+          'name': (u_found && 'name' in u) ? u.name : 'Mirror',
           'username': 'test'
         }
 
@@ -901,18 +958,23 @@ operations:
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
       - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    # No effects: the domain is verified from creation, which is the add's
-    # quirk, so there is nothing for verify to move. It answers the domain.
+    effects:
+      # Verification moves the flag: unverified from creation, verified here.
+      - patch:
+          resource: domain
+          record:
+            verified: "true"
+            updatedAt: "int(now) * 1000"
     output:
-      name: dom.name
-      apexName: dom.apexName
+      name: rec.name
+      apexName: rec.apexName
       projectId: proj.id
-      verified: dom.verified
-      createdAt: dom.createdAt
-      updatedAt: dom.updatedAt
-      gitBranch: "('gitBranch' in dom) ? dom.gitBranch : null"
-      redirect: "('redirect' in dom) ? dom.redirect : null"
-      redirectStatusCode: "('redirectStatusCode' in dom) ? dom.redirectStatusCode : null"
+      verified: rec.verified
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      gitBranch: "('gitBranch' in rec) ? rec.gitBranch : null"
+      redirect: "('redirect' in rec) ? rec.redirect : null"
+      redirectStatusCode: "('redirectStatusCode' in rec) ? rec.redirectStatusCode : null"
 
   CreateCustomEnvironment:
     reads:
@@ -1118,7 +1180,10 @@ operations:
 
   GetTeam:
     reads:
-      team: { resource: team }
+      by_slug: { resource: team_slug, key: "string(input.teamId)" }
+      team:
+        resource: team
+        key: "by_slug_found ? string(by_slug.team) : string(input.teamId)"
     require:
       - { cond: team_found, error: NotFound, message: "Team not found" }
     output:
@@ -1139,7 +1204,10 @@ operations:
 
   PatchTeam:
     reads:
-      team: { resource: team }
+      by_slug: { resource: team_slug, key: "string(input.teamId)" }
+      team:
+        resource: team
+        key: "by_slug_found ? string(by_slug.team) : string(input.teamId)"
     require:
       - { cond: team_found, error: NotFound, message: "Team not found" }
     effects:
@@ -1290,10 +1358,11 @@ operations:
     require:
       - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
       # The oracle refuses unless the deployment is QUEUED or BUILDING, and
-      # its deployments are born READY -- so strictly transcribed the guard
-      # would refuse every cancel. This refuses only a second cancel, which is
-      # the reachable half of the guard.
-      - { cond: "dep.readyState != 'CANCELED'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
+      # both emulators' deployments are born READY, so the guard refuses every
+      # cancel either of them serves. The differential corpus caught the
+      # loosened version of this guard answering 200 where the vendor's
+      # emulator answers 400; the vendor wins.
+      - { cond: "dep.readyState == 'QUEUED' || dep.readyState == 'BUILDING'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
     effects:
       # The event write comes first: every write rebinds `rec`, and the output
       # projects the deployment from it. `canceledAt` is answered at cancel
@@ -1450,6 +1519,271 @@ operations:
     output:
       protectionBypass: "('protectionBypass' in rec && rec.protectionBypass != null) ? rec.protectionBypass : {}"
 
+  # --- Auth supplement: the routes the vendored document never declares and
+  # the vendor's own emulator serves. Auth is enforced on these the way the
+  # oracle enforces it (401 without a Bearer), where the older operations
+  # above predate that and stay open -- the asymmetry is recorded in quirks.
+
+  CreateTeam:
+    reads:
+      clash: { resource: team_slug, key: "('slug' in input && input.slug != null) ? trim(string(input.slug)) : ''" }
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+      - { cond: "trim(string(input.slug)) != ''", error: BadRequest, message: "Missing required field: slug" }
+      - { cond: "!clash_found", error: TeamSlugAlreadyExists, message: "A team with this slug already exists" }
+    effects:
+      - generate: { bind: tid, kind: hex, bytes: 8 }
+      # The creator is the first member, so the member listing of a fresh
+      # team is not empty. Written first, because `rec` for the output is the
+      # LAST write's record and the output is the team's.
+      - put:
+          resource: team_member
+          key: "'team_' + fx.tid + ':test'"
+          record:
+            team: "'team_' + fx.tid"
+            uid: "'usr_' + identity.account"
+            username: "'test'"
+            email: "'test@mirror.cloud'"
+            role: "'OWNER'"
+      - put:
+          resource: team_slug
+          key: "trim(string(input.slug))"
+          record:
+            team: "'team_' + fx.tid"
+      - put:
+          resource: team
+          key: "'team_' + fx.tid"
+          record:
+            id: "'team_' + fx.tid"
+            slug: "trim(string(input.slug))"
+            name: "('name' in input && input.name != null && trim(string(input.name)) != '') ? trim(string(input.name)) : trim(string(input.slug))"
+            creatorId: "'usr_' + identity.account"
+            createdAt: "int(now) * 1000"
+            updatedAt: "int(now) * 1000"
+            membership: "{'confirmed': true, 'role': 'OWNER'}"
+    output:
+      id: rec.id
+      slug: rec.slug
+      name: rec.name
+      creatorId: rec.creatorId
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      membership: "{'confirmed': true, 'role': 'OWNER'}"
+
+  ListTeamMembers:
+    reads:
+      by_slug: { resource: team_slug, key: "string(input.teamId)" }
+      team:
+        resource: team
+        key: "by_slug_found ? string(by_slug.team) : string(input.teamId)"
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+      - { cond: team_found, error: NotFound, message: "Team not found" }
+    select:
+      binding: members
+      resource: team_member
+      filter: "string(item.team) == string(team.id)"
+    output:
+      members: "members.map(m, {'uid': string(m.uid), 'username': string(m.username), 'email': string(m.email), 'role': string(m.role)})"
+      pagination: "{'count': size(members), 'next': null, 'prev': null}"
+
+  UpdateAuthUser:
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+    reads:
+      u: { resource: user }
+    effects:
+      # The base patch binds rec to the record as it stands, so the output
+      # reads the post-write answer even when the body named neither member.
+      - patch:
+          resource: user
+          record: {}
+      - patch:
+          resource: user
+          when: "'name' in input"
+          record:
+            name: "input.name == null ? '' : string(input.name)"
+      - patch:
+          resource: user
+          when: "'email' in input"
+          record:
+            email: "input.email == null ? '' : string(input.email)"
+    output:
+      user: >
+        {
+          'id': 'usr_' + identity.account,
+          'email': ('email' in rec) ? rec.email : 'test@mirror.cloud',
+          'name': ('name' in rec) ? rec.name : 'Mirror',
+          'username': 'test'
+        }
+
+  GetRegistration:
+    # The oracle's constant: registration is closed.
+    output:
+      registration: "false"
+
+  GetDeploymentsV6:
+    # The v6 listing is the v7 listing: the oracle serves both versions from
+    # one handler, and the vendored document declares only v7.
+    list: { resource: deployment, member: deployments }
+    output:
+      pagination: "{'count': size(items)}"
+
+  GetProjectEnv:
+    reads:
+      # The project's two-spelling resolution, the same as every other env
+      # operation: the parent scope names project.id, which nothing resolves
+      # unless the project is read.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      v: { resource: env }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: v_found, error: NotFound, message: "Environment Variable not found" }
+    output:
+      id: v.id
+      key: "('key' in v) ? v.key : null"
+      value: "('value' in v) ? v.value : null"
+      type: "('type' in v) ? v.type : null"
+      target: "('target' in v) ? v.target : null"
+      createdAt: "('createdAt' in v) ? v.createdAt : null"
+      updatedAt: "('updatedAt' in v) ? v.updatedAt : null"
+
+  CreateApiKey:
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+    effects:
+      - generate: { bind: kid, kind: hex, bytes: 8 }
+      - generate: { bind: tok, kind: hex, bytes: 24 }
+      - put:
+          resource: api_key
+          key: "'ak_' + fx.kid"
+          record:
+            id: "'ak_' + fx.kid"
+            name: "('name' in input && input.name != null && string(input.name) != '') ? string(input.name) : 'API Key'"
+            teamId: "('teamId' in input && input.teamId != null && string(input.teamId) != '') ? dyn(string(input.teamId)) : dyn(null)"
+            createdAt: "int(now) * 1000"
+    output:
+      apiKeyString: "'vercel_api_' + fx.tok"
+      apiKey: "{'id': rec.id, 'name': rec.name, 'teamId': rec.teamId, 'createdAt': rec.createdAt}"
+
+  ListApiKeys:
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+    list:
+      resource: api_key
+      member: keys
+      filter: "!('teamId' in input) || input.teamId == null || string(input.teamId) == '' || string(item.teamId) == string(input.teamId)"
+    output:
+      keys: "items.map(k, {'id': k.id, 'name': k.name, 'teamId': k.teamId, 'createdAt': k.createdAt})"
+
+  DeleteApiKey:
+    reads:
+      k: { resource: api_key, key: "string(input.keyId)" }
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+      - { cond: k_found, error: NotFound, message: "API key not found" }
+    effects:
+      - delete: { resource: api_key, key: "string(input.keyId)", missing: ignore }
+    output: {}
+
+  OauthAuthorize:
+    # The sign-in page. The oracle renders a card per seeded user; mirror has
+    # one user, so the page is one form posting that user back with every
+    # parameter carried through. The markup is mirror's own -- a browser flow
+    # needs a working form, not the oracle's pixels.
+    output:
+      page: >
+        '<!doctype html><html><head><title>Sign in to Vercel</title></head><body>'
+        + '<h1>Sign in to Vercel</h1>'
+        + '<form method="post" action="/oauth/authorize/callback">'
+        + '<input type="hidden" name="client_id" value="' + ('client_id' in input && input.client_id != null ? string(input.client_id) : '') + '">'
+        + '<input type="hidden" name="redirect_uri" value="' + ('redirect_uri' in input && input.redirect_uri != null ? string(input.redirect_uri) : '') + '">'
+        + '<input type="hidden" name="scope" value="' + ('scope' in input && input.scope != null ? string(input.scope) : '') + '">'
+        + '<input type="hidden" name="state" value="' + ('state' in input && input.state != null ? string(input.state) : '') + '">'
+        + '<input type="hidden" name="code_challenge" value="' + ('code_challenge' in input && input.code_challenge != null ? string(input.code_challenge) : '') + '">'
+        + '<input type="hidden" name="code_challenge_method" value="' + ('code_challenge_method' in input && input.code_challenge_method != null ? string(input.code_challenge_method) : '') + '">'
+        + '<button type="submit" name="username" value="test">Continue as test</button>'
+        + '</form></body></html>'
+
+  OauthAuthorizeCallback:
+    effects:
+      - generate: { bind: code, kind: hex, bytes: 20 }
+      - put:
+          resource: oauth_code
+          key: fx.code
+          record:
+            username: "('username' in input && input.username != null) ? string(input.username) : ''"
+            scope: "('scope' in input && input.scope != null) ? string(input.scope) : ''"
+            redirect_uri: "('redirect_uri' in input && input.redirect_uri != null) ? string(input.redirect_uri) : ''"
+            client_id: "('client_id' in input && input.client_id != null) ? string(input.client_id) : ''"
+            code_challenge: "('code_challenge' in input && input.code_challenge != null) ? string(input.code_challenge) : ''"
+            code_challenge_method: "('code_challenge_method' in input && input.code_challenge_method != null) ? string(input.code_challenge_method) : ''"
+            created_at: "int(now) * 1000"
+    output:
+      code: fx.code
+      location: >
+        (('redirect_uri' in input && input.redirect_uri != null && string(input.redirect_uri) != '') ? string(input.redirect_uri) : '')
+        + (('redirect_uri' in input && input.redirect_uri != null && string(input.redirect_uri).contains('?')) ? '&' : '?')
+        + 'code=' + fx.code
+        + (('state' in input && input.state != null && string(input.state) != '') ? '&state=' + string(input.state) : '')
+
+  OauthToken:
+    reads:
+      pending: { resource: oauth_code, key: "('code' in input && input.code != null) ? string(input.code) : ''" }
+    require:
+      # In the oracle's order: unknown code, expiry, redirect mismatch, PKCE.
+      - { cond: pending_found, error: InvalidGrant, message: "The code passed is incorrect or expired." }
+      - { cond: "int(now) * 1000 - int(pending.created_at) <= 600000", error: InvalidGrant, message: "The code passed is incorrect or expired." }
+      - cond: >
+          !('redirect_uri' in input && input.redirect_uri != null && string(input.redirect_uri) != ''
+            && string(pending.redirect_uri) != '')
+          || string(input.redirect_uri) == string(pending.redirect_uri)
+        error: InvalidGrant
+        message: "The redirect_uri does not match the one used during authorization."
+      - { cond: "string(pending.code_challenge) == '' || ('code_verifier' in input && input.code_verifier != null && string(input.code_verifier) != '')", error: InvalidGrant, message: "PKCE verification failed." }
+      - cond: >
+          string(pending.code_challenge) == ''
+          || (string(pending.code_challenge_method) == 's256'
+            ? b64urlhex(sha256hex(string(input.code_verifier))) == string(pending.code_challenge)
+            : string(input.code_verifier) == string(pending.code_challenge))
+        error: InvalidGrant
+        message: "PKCE verification failed."
+      # mirror has one user; a code issued for another name has none.
+      - { cond: "string(pending.username) == 'test' || string(pending.username) == ''", error: InvalidGrant, message: "The user associated with this code was not found." }
+    effects:
+      - delete: { resource: oauth_code, key: "string(input.code)", missing: ignore }
+      - generate: { bind: tok, kind: hex, bytes: 20 }
+      - put:
+          resource: oauth_token
+          key: "'vercel_' + fx.tok"
+          record:
+            username: string(pending.username)
+            scope: string(pending.scope)
+    output:
+      access_token: "'vercel_' + fx.tok"
+      token_type: "'Bearer'"
+      scope: string(pending.scope)
+
+  OauthUserinfo:
+    reads:
+      tok: { resource: oauth_token, key: "('authorization' in input && input.authorization != null && size(split(string(input.authorization), ' ')) == 2) ? split(string(input.authorization), ' ')[1] : ''" }
+      u: { resource: user }
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: Unauthorized, message: "Authentication required" }
+      - { cond: tok_found, error: Unauthorized, message: "Authentication required" }
+    output:
+      sub: "'usr_' + identity.account"
+      email: "(u_found && 'email' in u) ? u.email : 'test@mirror.cloud'"
+      name: "(u_found && 'name' in u) ? u.name : 'Mirror'"
+      preferred_username: "'test'"
+      email_verified: "true"
+      picture: "''"
+
 quirks:
   - operation: GetProjects
     note: >
@@ -1485,11 +1819,12 @@ quirks:
       Answers 201, where the pack answered 200.
   - operation: AddProjectDomain
     note: >
-      A domain is answered verified: true the moment it is added. A real one is
-      not -- verification is a DNS round trip -- so a client that polls until
-      verified never polls here and waits forever against the real API. The
-      pack did this and the document declares `verified` without saying what it
-      starts as, so it is transcribed rather than corrected, and named here.
+      The pack answered a domain verified the moment it was added, and the
+      vendored document declares `verified` without saying what it starts as.
+      The vendor's own emulator answers false until the verify route runs --
+      better evidence than the dead pack -- so a domain is added unverified and
+      VerifyProjectDomain moves the flag. The differential corpus caught the
+      old answer (test/behavior/vercel/oracle, domains-get).
   - operation: CreateDeployment
     note: >
       Creating a deployment for a project that does not exist creates the

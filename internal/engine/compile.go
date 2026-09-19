@@ -3,6 +3,7 @@ package engine
 import (
 	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -125,6 +126,23 @@ func runtimeFuncs() []cel.EnvOption {
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
 				sum := sha256.Sum256([]byte(fmt.Sprint(v.Value())))
 				return types.String(hex.EncodeToString(sum[:]))
+			}))),
+
+		// b64urlhex decodes hex and base64url-encodes without padding, so a
+		// digest renders the way PKCE's S256 challenge expects it.
+		cel.Function("b64urlhex", cel.Overload("b64urlhex_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				raw, err := hex.DecodeString(fmt.Sprint(v.Value()))
+				if err != nil {
+					return types.String("")
+				}
+				return types.String(base64.RawURLEncoding.EncodeToString(raw))
+			}))),
+
+		// trim is strings.TrimSpace.
+		cel.Function("trim", cel.Overload("trim_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				return types.String(strings.TrimSpace(fmt.Sprint(v.Value())))
 			}))),
 
 		// coalesce returns the first argument that is neither null nor empty,
@@ -310,6 +328,31 @@ func runtimeFuncs() []cel.EnvOption {
 					parts = append(parts, fmt.Sprint(p))
 				}
 				return types.String(strings.Join(parts, fmt.Sprint(sep.Value())))
+			}))),
+
+		// split is strings.Split: CEL's core has no tokenization, and a Bearer
+		// header's token, a blob token's underscore-separated fields and a
+		// pathname's extension are all read by splitting.
+		cel.Function("split", cel.Overload("split_2", []*cel.Type{str, str}, dyn,
+			cel.BinaryBinding(func(s, sep ref.Val) ref.Val {
+				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))
+				out := make([]any, len(parts))
+				for i, p := range parts {
+					out[i] = p
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
+		// iso8601ms renders a timestamp the way JavaScript's toISOString does:
+		// always with milliseconds. CEL's string(timestamp) drops a zero
+		// fraction, and Vercel Blob's uploadedAt carries it either way.
+		cel.Function("iso8601ms", cel.Overload("iso8601ms_1", []*cel.Type{cel.TimestampType}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				t, ok := v.(types.Timestamp)
+				if !ok {
+					return types.String(fmt.Sprint(v.Value()))
+				}
+				return types.String(t.Time.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
 			}))),
 
 		cel.Function("tagmatch", cel.Overload("tagmatch_3", []*cel.Type{str, dyn, str}, cel.BoolType,

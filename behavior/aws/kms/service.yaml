@@ -1,0 +1,828 @@
+schema: bir/1
+service: aws.kms
+
+# Transcribed from the hand-written pack, not established against the real
+# service. The pack is a local AES-GCM emulate: ciphertext is not AWS-compatible
+# and a key's material is a random draw stored on the record.
+provenance: authored
+
+# The pack answered an absent required member with NotFoundException almost
+# everywhere: an absent KeyId resolves to the empty key, the store holds no
+# empty key, and the miss is that fault. The engine's model check now rejects
+# the absence first, so that is also the missing-input answer.
+missing_input_error: NotFound
+
+# Complete for the expressible surface and gated, but not yet serving: the
+# service's core is cryptography, and none of it is expressible. Encrypt,
+# Decrypt, GenerateDataKey(WithoutPlaintext), GenerateDataKeyPair
+# (WithoutPlaintext) and ReEncrypt are AES-GCM seal/open with a fresh
+# crypto/rand nonce under the stored key material; Sign/Verify and
+# GenerateMac/VerifyMac are HMAC-SHA256 over the message under that material;
+# DeriveSharedSecret XORs the material with the caller's public key;
+# GenerateRandom and GetParametersForImport answer fresh random bytes; and
+# ImportKeyMaterial base64-decodes the submitted material. CEL expressions are
+# pure -- no randomness, no I/O -- and the engine's prim dispatch reports no
+# primitives registered, so there is no seal/open/hmac/base64 to call. A
+# serving bundle would have to answer Encrypt with something that is not
+# encryption. The bundle takes over when an aws.kms/crypto primitive family
+# (seal, open, hmac, random bytes, base64) is registered and those fifteen
+# operations move here verbatim.
+shadow: >
+  Encrypt, Decrypt, GenerateDataKey(WithoutPlaintext), GenerateDataKeyPair
+  (WithoutPlaintext), ReEncrypt, Sign, Verify, GenerateMac, VerifyMac,
+  DeriveSharedSecret, GenerateRandom, GetParametersForImport and
+  ImportKeyMaterial need AES-GCM with a crypto/rand nonce, HMAC-SHA256 keyed by
+  stored material, XOR, base64 decode, or fresh random bytes -- none of which
+  CEL or the (empty) primitive registry can express. Everything else the pack
+  does is transcribed and gated below.
+
+resources:
+  # The key record's members live on the operations' write effects, not here:
+  # a template member is recomputed on every write, and a DisableKey that
+  # recomputed Description from a request that does not carry one would reset
+  # it to "" -- the pack's patch merges and loses nothing.
+  key:
+    collection: kms
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:kms:{region}:{account}:key/{id}"
+
+  alias:
+    collection: kmsalias
+    id:
+      input_members: [AliasName]
+    record:
+      AliasName: id
+
+  custom_key_store:
+    collection: kmscks
+    id:
+      input_members: [CustomKeyStoreId]
+    record:
+      CustomKeyStoreId: id
+      ConnectionState: "'CONNECTED'"
+
+  # GrantToken is on the write effect, not here: the template feeds the
+  # list-shape check, and GrantListEntry does not declare it, though the pack
+  # stored it and ListGrants answers it.
+  grant:
+    collection: kmsgrant
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [GrantId]
+    record:
+      GrantId: id
+
+  # The pack stores the policy document as raw bytes under the resolved key
+  # id; a one-member record answers the same on the wire.
+  policy:
+    collection: kmspolicy
+    id:
+      input_members: [KeyId]
+    record:
+      Policy: "string(input.Policy)"
+
+  # The pack stores the Tags list itself as the record body; a one-member
+  # record answers the same on the wire.
+  tags:
+    collection: kmstags
+    id:
+      input_members: [KeyId]
+    record:
+      Tags: input.Tags
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+  Unsupported:
+    code: UnsupportedOperationException
+    http: 400
+    fault: client
+    message: symmetric keys have no public key
+
+operations:
+  # KeyMaterial is drawn (32 bytes, as 64 hex chars) only to keep the
+  # deterministic draw stream aligned with the pack, which drew the real
+  # material there; the value is never answered -- CreateKey and DescribeKey
+  # strip it -- and the crypto operations that would consume it are the shadow
+  # reason above. CurrentKeyMaterialId is a hash of the key id rather than the
+  # pack's derived-stream UUID, which the engine's draw vocabulary cannot
+  # express; it is token-shaped, so the recordings unify it.
+  CreateKey:
+    effects:
+      - create:
+          resource: key
+          record:
+            AWSAccountId: identity.account
+            Arn: "'arn:aws:kms:' + string(identity.region) + ':' + string(identity.account) + ':key/' + id"
+            CreationDate: int(now)
+            CurrentKeyMaterialId: sha256hex('kms:key-material:' + id)
+            CustomerMasterKeySpec: "'SYMMETRIC_DEFAULT'"
+            Description: "'Description' in input ? string(input.Description) : ''"
+            Enabled: true
+            EncryptionAlgorithms: ["'SYMMETRIC_DEFAULT'"]
+            KeyId: id
+            KeyManager: "'KeyManager' in input && string(input.KeyManager) != '' ? string(input.KeyManager) : 'CUSTOMER'"
+            KeyMaterial: { generate: { kind: hex, bytes: 64 } }
+            KeySpec: "'SYMMETRIC_DEFAULT'"
+            KeyState: "'Enabled'"
+            KeyUsage: "'ENCRYPT_DECRYPT'"
+            MultiRegion: false
+            Origin: "'AWS_KMS'"
+    output:
+      KeyMetadata: without(rec, ['KeyMaterial'])
+
+  # A KeyId naming an alias resolves through the alias's TargetKeyId; an alias
+  # that is missing or has an empty target resolves to itself, and any other
+  # id is its own last path segment (an ARN's key id).
+  DescribeKey:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    output:
+      KeyMetadata: without(k, ['KeyMaterial'])
+
+  ListKeys:
+    list:
+      resource: key
+      member: Keys
+      paginate: model
+    output:
+      Keys: "items.map(k, {'KeyId': k.KeyId, 'KeyArn': k.Arn})"
+
+  # The pack replaced the alias record outright.
+  CreateAlias:
+    reads:
+      ta: { resource: alias, key: "lastSegment(string(input.TargetKeyId), ':')" }
+    effects:
+      - create:
+          resource: alias
+          key: string(input.AliasName)
+          record:
+            TargetKeyId: >-
+              (string(input.TargetKeyId).startsWith('alias/') || string(input.TargetKeyId).contains(':alias/'))
+              && ta_found && 'TargetKeyId' in ta && string(ta.TargetKeyId) != ''
+              ? string(ta.TargetKeyId)
+              : (string(input.TargetKeyId).startsWith('alias/') || string(input.TargetKeyId).contains(':alias/')
+                 ? string(input.TargetKeyId)
+                 : lastSegment(string(input.TargetKeyId), '/'))
+    output: {}
+
+  # The pack merged onto the stored alias, creating it when absent.
+  UpdateAlias:
+    reads:
+      ta: { resource: alias, key: "lastSegment(string(input.TargetKeyId), ':')" }
+    effects:
+      - put:
+          resource: alias
+          key: string(input.AliasName)
+          record:
+            TargetKeyId: >-
+              (string(input.TargetKeyId).startsWith('alias/') || string(input.TargetKeyId).contains(':alias/'))
+              && ta_found && 'TargetKeyId' in ta && string(ta.TargetKeyId) != ''
+              ? string(ta.TargetKeyId)
+              : (string(input.TargetKeyId).startsWith('alias/') || string(input.TargetKeyId).contains(':alias/')
+                 ? string(input.TargetKeyId)
+                 : lastSegment(string(input.TargetKeyId), '/'))
+    output: {}
+
+  DeleteAlias:
+    effects:
+      - delete: { resource: alias, missing: ignore }
+    output: {}
+
+  ListAliases:
+    list:
+      resource: alias
+      member: Aliases
+      paginate: model
+
+  # The pack stored the request verbatim with the id and connection state
+  # forced on top, replacing whatever was there; it drew an id only when the
+  # request carried none. CustomKeyStoreId is not a member CreateCustomKeyStore
+  # declares, so a caller can only ever reach the draw through the engine.
+  CreateCustomKeyStore:
+    effects:
+      - generate:
+          bind: cksid
+          kind: hex
+          bytes: 8
+          when: "!('CustomKeyStoreId' in input) || string(input.CustomKeyStoreId) == ''"
+      - create:
+          resource: custom_key_store
+          spread: input
+          key: "'CustomKeyStoreId' in input && string(input.CustomKeyStoreId) != '' ? string(input.CustomKeyStoreId) : fx.cksid"
+    output:
+      CustomKeyStoreId: rec.CustomKeyStoreId
+
+  # Same store-the-request shape as create. The model requires
+  # CustomKeyStoreId here, so the pack's draw-on-absence path is unreachable.
+  # The pack answered the id, which the response shape does not declare, so
+  # the recorded step is superseded.
+  UpdateCustomKeyStore:
+    effects:
+      - create: { resource: custom_key_store, spread: input }
+    output: {}
+
+  DescribeCustomKeyStores:
+    list:
+      resource: custom_key_store
+      member: CustomKeyStores
+      paginate: model
+
+  DeleteCustomKeyStore:
+    effects:
+      - delete: { resource: custom_key_store, missing: ignore }
+    output: {}
+
+  # The pack created the store record when connecting or disconnecting one
+  # that was never created.
+  ConnectCustomKeyStore:
+    effects:
+      - patch: { resource: custom_key_store }
+    output: {}
+
+  DisconnectCustomKeyStore:
+    effects:
+      - patch:
+          resource: custom_key_store
+          record:
+            ConnectionState: "'DISCONNECTED'"
+    output: {}
+
+  # The pack stored the request plus the grant id, the resolved key id and a
+  # grant token; the draw order is id then token, which the generated id and
+  # the record's GrantToken reproduce.
+  CreateGrant:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+    effects:
+      - create:
+          resource: grant
+          spread: input
+          record:
+            KeyId: >-
+              (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+              && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+              ? string(a.TargetKeyId)
+              : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+                 ? string(input.KeyId)
+                 : lastSegment(string(input.KeyId), '/'))
+            GrantToken: { generate: { kind: hex, bytes: 8 } }
+    output:
+      GrantId: rec.GrantId
+      GrantToken: rec.GrantToken
+
+  ListGrants:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+    let:
+      want: >-
+        (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+        && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+        ? string(a.TargetKeyId)
+        : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+           ? string(input.KeyId)
+           : lastSegment(string(input.KeyId), '/'))
+    list:
+      resource: grant
+      member: Grants
+      paginate: model
+      filter: "string(want) == '' || ('KeyId' in item ? string(item.KeyId) : '') == want"
+
+  # The pack read a KeyId here too, but the model declares no member on the
+  # request at all, so the filter never narrows.
+  ListRetirableGrants:
+    list:
+      resource: grant
+      member: Grants
+      paginate: model
+
+  RetireGrant:
+    effects:
+      - delete: { resource: grant, missing: ignore }
+    output: {}
+
+  # The pack deleted by GrantId alone; the KeyId the model requires is ignored.
+  RevokeGrant:
+    effects:
+      - delete: { resource: grant, missing: ignore }
+    output: {}
+
+  PutKeyPolicy:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+    effects:
+      - put:
+          resource: policy
+          key: >-
+            (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+            && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+            ? string(a.TargetKeyId)
+            : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+               ? string(input.KeyId)
+               : lastSegment(string(input.KeyId), '/'))
+    output: {}
+
+  # The pack answered '{}' for a key that never had a policy put.
+  GetKeyPolicy:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      p:
+        resource: policy
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    output:
+      Policy: "p_found && 'Policy' in p ? string(p.Policy) : '{}'"
+
+  ListKeyPolicies:
+    output:
+      PolicyNames: "['default']"
+
+  EnableKey:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            KeyState: "'Enabled'"
+    output: {}
+
+  DisableKey:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            KeyState: "'Disabled'"
+    output: {}
+
+  CancelKeyDeletion:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            KeyState: "'Enabled'"
+    output:
+      KeyId: rec.KeyId
+
+  ScheduleKeyDeletion:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            KeyState: "'PendingDeletion'"
+            DeletionDate: "'2020-01-31T00:00:00Z'"
+    output:
+      KeyId: rec.KeyId
+      KeyState: rec.KeyState
+      DeletionDate: rec.DeletionDate
+
+  EnableKeyRotation:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            KeyRotationEnabled: true
+    output: {}
+
+  DisableKeyRotation:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            KeyRotationEnabled: false
+    output: {}
+
+  RotateKeyOnDemand:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            Rotated: true
+    output:
+      KeyId: rec.KeyId
+
+  UpdateKeyDescription:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            Description: input.Description
+    output: {}
+
+  UpdatePrimaryRegion:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            PrimaryRegion: input.PrimaryRegion
+    output: {}
+
+  DeleteImportedKeyMaterial:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - patch:
+          resource: key
+          record:
+            Imported: false
+    output:
+      KeyId: rec.KeyId
+
+  # The pack answered false for a key that never had rotation toggled, and did
+  # not answer the KeyId the model declares.
+  GetKeyRotationStatus:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    output:
+      KeyRotationEnabled: "'KeyRotationEnabled' in k && k.KeyRotationEnabled == true"
+
+  ListKeyRotations:
+    output:
+      Rotations: "[]"
+
+  # The pack answered a fixed date and never checked the key to exist. It
+  # named the member LastUsedDate, which the response shape does not declare
+  # (the declared member is KeyLastUsage), so the recorded step is superseded.
+  GetKeyLastUsage:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+    output:
+      KeyId: >-
+        (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+        && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+        ? string(a.TargetKeyId)
+        : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+           ? string(input.KeyId)
+           : lastSegment(string(input.KeyId), '/'))
+
+  # The pack answered this fault unconditionally: every key it creates is
+  # symmetric, and symmetric keys have no public key.
+  GetPublicKey:
+    require:
+      - cond: "false"
+        error: Unsupported
+    output: {}
+
+  # The clone keeps every member of the source record -- including members a
+  # patch added later, answered as null when absent -- under a fresh id and an
+  # ARN in the replica region. The pack stored the clone in the same
+  # collection, so the replica describes and lists like any other key.
+  ReplicateKey:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      k:
+        resource: key
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    require:
+      - { cond: k_found, error: NotFound }
+    effects:
+      - create:
+          resource: key
+          record:
+            AWSAccountId: k.AWSAccountId
+            Arn: "'arn:aws:kms:' + string(input.ReplicaRegion) + ':' + identity.account + ':key/' + id"
+            CreationDate: k.CreationDate
+            CurrentKeyMaterialId: k.CurrentKeyMaterialId
+            CustomerMasterKeySpec: k.CustomerMasterKeySpec
+            Description: k.Description
+            Enabled: k.Enabled
+            EncryptionAlgorithms: k.EncryptionAlgorithms
+            KeyId: id
+            KeyManager: k.KeyManager
+            KeyMaterial: k.KeyMaterial
+            KeySpec: k.KeySpec
+            KeyState: k.KeyState
+            KeyUsage: k.KeyUsage
+            MultiRegion: k.MultiRegion
+            Origin: k.Origin
+            Replica: true
+            DeletionDate: "'DeletionDate' in k ? k.DeletionDate : null"
+            Imported: "'Imported' in k ? k.Imported : null"
+            KeyRotationEnabled: "'KeyRotationEnabled' in k ? k.KeyRotationEnabled : null"
+            PrimaryRegion: "'PrimaryRegion' in k ? k.PrimaryRegion : null"
+            Rotated: "'Rotated' in k ? k.Rotated : null"
+    output:
+      ReplicaKeyMetadata: "{'KeyId': rec.KeyId, 'Arn': rec.Arn, 'KeyState': rec.KeyState}"
+
+  TagResource:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+    effects:
+      - create:
+          resource: tags
+          key: >-
+            (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+            && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+            ? string(a.TargetKeyId)
+            : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+               ? string(input.KeyId)
+               : lastSegment(string(input.KeyId), '/'))
+    output: {}
+
+  UntagResource:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+    effects:
+      - delete:
+          resource: tags
+          missing: ignore
+          key: >-
+            (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+            && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+            ? string(a.TargetKeyId)
+            : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+               ? string(input.KeyId)
+               : lastSegment(string(input.KeyId), '/'))
+    output: {}
+
+  ListResourceTags:
+    reads:
+      a: { resource: alias, key: "lastSegment(string(input.KeyId), ':')" }
+      t:
+        resource: tags
+        key: >-
+          (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/'))
+          && a_found && 'TargetKeyId' in a && string(a.TargetKeyId) != ''
+          ? string(a.TargetKeyId)
+          : (string(input.KeyId).startsWith('alias/') || string(input.KeyId).contains(':alias/')
+             ? string(input.KeyId)
+             : lastSegment(string(input.KeyId), '/'))
+    output:
+      Tags: "t_found && 'Tags' in t ? t.Tags : dyn([])"
+
+quirks:
+  - operation: CreateKey
+    note: >
+      The stored KeyMaterial is a 64-character hex draw standing in for the
+      pack's base64 of 32 random bytes; it exists to keep the deterministic
+      draw stream aligned with the pack and is never answered -- both sides
+      strip it from KeyMetadata. CurrentKeyMaterialId is sha256 of the key id
+      rather than a UUID drawn from a derived stream, which the engine's draw
+      vocabulary has no form for. Tags, Policy, KeySpec and every other
+      declared request member are accepted and discarded, and creating a key
+      does not check that a CustomKeyStoreId it names exists.
+  - operation: DescribeKey
+    note: >
+      An alias whose TargetKeyId is empty resolves to the alias name itself,
+      which then misses the key store -- transcribed from the pack's resolve.
+      The metadata answers every stored member, including members a patch
+      added (KeyRotationEnabled, Rotated, DeletionDate, Imported,
+      PrimaryRegion, Replica), and never includes KeyMaterial.
+  - operation: ListKeys
+    note: >
+      Limit and Marker are accepted and ignored by the pack; every key in the
+      account and region lists in one page.
+  - operation: CreateAlias
+    note: >
+      Creating over an existing alias replaces the record; the model requires
+      AliasName and TargetKeyId, and the pack accepted their absence -- storing
+      an alias under the empty name pointing at the empty key -- which the
+      engine now rejects. The target key is not checked to exist.
+  - operation: UpdateAlias
+    note: >
+      Updating an alias that was never created creates it, where the real
+      service faults.
+  - operation: DeleteAlias
+    note: >
+      Deleting is idempotent: an absent alias deletes cleanly.
+  - operation: CreateCustomKeyStore
+    note: >
+      The pack read CustomKeyStoreId from the request although the operation
+      does not declare it, drawing an id only when the member was absent; the
+      bundle keeps that, so an id the caller never could have sent is never
+      honored and the draw is the only path. CustomKeyStoreName is required by
+      the model but never stored by the pack unless the request carried it;
+      the engine now rejects its absence.
+  - operation: UpdateCustomKeyStore
+    note: >
+      Same store-the-request shape as create, replacing the record. The model
+      requires CustomKeyStoreId, so the pack's draw-an-id-on-absence path is
+      unreachable through the engine.
+  - operation: DescribeCustomKeyStores
+    note: >
+      The CustomKeyStoreId and CustomKeyStoreName filters the model declares
+      are ignored: every store in the account and region lists.
+  - operation: ConnectCustomKeyStore
+    note: >
+      Connecting or disconnecting a store that was never created creates a
+      bare record holding only the id and the connection state, which
+      DescribeCustomKeyStores then answers.
+  - operation: CreateGrant
+    note: >
+      The model requires Operations; the pack accepted its absence and stored
+      a grant without it, which the engine now rejects. The grant record --
+      and so ListGrants -- carries GrantToken, which GrantListEntry does not
+      declare.
+  - operation: RetireGrant
+    note: >
+      Retiring names no required member: an absent GrantId deletes the empty
+      key, which never exists, and succeeds. Revoking ignores the KeyId the
+      model requires and deletes by GrantId alone.
+  - operation: GetKeyPolicy
+    note: >
+      A key that never had a policy put answers '{}', whether or not the key
+      exists.
+  - operation: EnableKey
+    note: >
+      The whole patch family -- EnableKey, DisableKey, CancelKeyDeletion,
+      ScheduleKeyDeletion, EnableKeyRotation, DisableKeyRotation,
+      RotateKeyOnDemand, UpdateKeyDescription, UpdatePrimaryRegion,
+      DeleteImportedKeyMaterial -- faults NotFoundException on an unknown key
+      and answers the key's KeyId even where the response shape declares no
+      members; the bundle answers only the declared members and the recorded
+      steps are superseded for the difference. CancelKeyDeletion and EnableKey
+      are the same patch, and RotateKeyOnDemand only sets a Rotated flag no
+      operation reads.
+  - operation: ScheduleKeyDeletion
+    note: >
+      The deletion date is the fixed string 2020-01-31T00:00:00Z whatever the
+      clock says, PendingWindowInDays is accepted and ignored, and nothing
+      ever deletes the key: PendingDeletion is a label, not a deadline.
+  - operation: GetKeyRotationStatus
+    note: >
+      The KeyId the response shape declares is never answered.
+  - operation: GetKeyLastUsage
+    note: >
+      The pack answered LastUsedDate, which the response shape does not
+      declare (the declared member is KeyLastUsage), with the fixed string
+      2020-01-01T00:00:00Z; the bundle answers the declared KeyId only and the
+      recorded step is superseded. The key is not checked to exist.
+  - operation: GetPublicKey
+    note: >
+      Always UnsupportedOperationException: the pack creates only symmetric
+      keys, and symmetric keys have no public key -- including for keys that
+      do not exist, which are never looked up.
+  - operation: ReplicateKey
+    note: >
+      The replica lands in the same account-and-region collection as its
+      source despite naming a ReplicaRegion: only the ARN carries the other
+      region, so the replica lists and describes alongside the original and
+      replicating again from the same source draws another sibling here.
+      ReplicaPolicy and ReplicaTags are declared and never answered.
+  - operation: UntagResource
+    note: >
+      The TagKeys member the model requires is ignored: untagging drops every
+      tag the key carries. Tagging a key that does not exist succeeds, and
+      ListResourceTags on a key that was never tagged answers an empty list.

@@ -449,7 +449,7 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 			}
 		}
 		for k, vs := range vals {
-			in[k] = vs[0]
+			assignForm(in, k, vs)
 		}
 	} else if len(body) > 0 {
 		_ = json.Unmarshal(body, &in)
@@ -506,7 +506,19 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	}
 	for k, vs := range r.URL.Query() {
 		if _, ok := in[k]; !ok {
-			in[k] = vs[0]
+			// A member the model declares as a list collects every repeated
+			// value -- Stripe's expand[]=customer&expand[]=charge is one
+			// member arriving several times, and keeping only the first
+			// would silently drop every expansion but one.
+			if isListMember(svc, op, k) {
+				all := make([]any, 0, len(vs))
+				for _, v := range vs {
+					all = append(all, v)
+				}
+				in[k] = all
+			} else {
+				in[k] = vs[0]
+			}
 		}
 	}
 	// Header-bound members arrive by their wire name: UploadFile's digest is
@@ -578,6 +590,34 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		w.Header().Set("Location", fmt.Sprint(resp.Output["location"]))
 		w.WriteHeader(http.StatusFound)
 		return nil
+	}
+	// Stripe's hosted checkout has the same two wire shapes as Vercel's OAuth
+	// flow, beside them because it is the same pattern: the page is HTML a
+	// browser renders (its status rides in the envelope, since a missing
+	// session is the 404 page), and the complete POST's answer is the redirect
+	// when there is one, the receipt page when there is not.
+	if svc.ID == "stripe.api" && op.Name == "GetCheckoutPage" {
+		switch n := resp.Output["status"].(type) {
+		case int64:
+			status = int(n)
+		case float64:
+			status = int(n)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, fmt.Sprint(resp.Output["page"]))
+		return err
+	}
+	if svc.ID == "stripe.api" && op.Name == "CompleteCheckoutSession" {
+		if loc, _ := resp.Output["location"].(string); loc != "" {
+			w.Header().Set("Location", loc)
+			w.WriteHeader(http.StatusFound)
+			return nil
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, fmt.Sprint(resp.Output["page"]))
+		return err
 	}
 	// `_raw` is the engine's name for an operation whose body is the value
 	// itself -- bir.TopLevelRaw -- and it is answered before any provider
@@ -733,6 +773,26 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
 	}
+	// Stripe's envelope is {error: {type, message, code?, param?}}. The type
+	// is the oracle's constant invalid_request_error -- no route in the
+	// pinned package answers card_error or api_error. The code is omitted
+	// where the bundle declares none (its missing-param errors carry no code
+	// member on the wire), and param rides in the fault's Fields.
+	if svc.ID == "stripe.api" {
+		e := map[string]any{"type": "invalid_request_error", "message": f.Message}
+		code := f.Code
+		if c, ok := f.Fields["code"].(string); ok {
+			code = c
+		}
+		if code != "" {
+			e["code"] = code
+		}
+		if p, ok := f.Fields["param"]; ok && p != nil && fmt.Sprint(p) != "" {
+			e["param"] = p
+		}
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"error": e})
+	}
 	// Vercel KV is a second product on a second host, and its errors are not
 	// shaped like the REST API's. The deleted pack served both through one
 	// registration and therefore through the envelope above, wrapping an
@@ -818,4 +878,81 @@ func rawBody(resp *spi.Response) (string, bool) {
 	}
 	raw, ok := resp.Output[bir.TopLevelRaw].(string)
 	return raw, ok
+}
+
+// isListMember reports whether the operation's input shape declares this
+// member with a list shape.
+func isListMember(svc *model.Service, op *model.Operation, name string) bool {
+	if op.Input == "" {
+		return false
+	}
+	shape, ok := svc.Shapes[op.Input]
+	if !ok {
+		return false
+	}
+	m, ok := shape.Members[name]
+	if !ok {
+		return false
+	}
+	return svc.Shapes[m.Shape].Kind == model.KindList
+}
+
+// assignForm places one form field into the input, nesting Rack-style bracket
+// keys: `line_items[0][price]=x` is line_items -> [0] -> price, `metadata[k]=v`
+// is metadata -> k, and `ids[]=a&ids[]=b` appends. A flat key is the common
+// case and assigns directly. Stripe's SDK form-encodes every nested structure
+// this way, and the parse mirrors the vendor oracle's parseStripeBody -- minus
+// its numeric coercion, which here is the bundle's job (a member's declared
+// shape says whether it is a number; the form itself does not).
+func assignForm(in map[string]any, key string, vs []string) {
+	if !strings.Contains(key, "[") {
+		in[key] = vs[len(vs)-1]
+		return
+	}
+	parts := strings.Split(strings.ReplaceAll(key, "]", ""), "[")
+	in[parts[0]] = formAssign(in[parts[0]], parts[1:], vs)
+}
+
+// formAssign walks parts into the container cur -- nil, a map, or a list --
+// and answers the updated container. A numeric or empty part indexes a list
+// (empty appends), anything else a map member.
+func formAssign(cur any, parts []string, vs []string) any {
+	if len(parts) == 0 {
+		return vs[len(vs)-1]
+	}
+	head := parts[0]
+	if head == "" {
+		list, _ := cur.([]any)
+		for _, v := range vs {
+			list = append(list, v)
+		}
+		return list
+	}
+	if isDigits(head) {
+		list, _ := cur.([]any)
+		n, _ := strconv.Atoi(head)
+		for len(list) <= n {
+			list = append(list, nil)
+		}
+		list[n] = formAssign(list[n], parts[1:], vs)
+		return list
+	}
+	m, ok := cur.(map[string]any)
+	if !ok || m == nil {
+		m = map[string]any{}
+	}
+	m[head] = formAssign(m[head], parts[1:], vs)
+	return m
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }

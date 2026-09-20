@@ -413,13 +413,35 @@ func (ev *eval) checkRequires(op bir.Operation, afterSelect bool) *spi.Fault {
 		if afterSelect && sel != "" && !strings.Contains(req.Cond, sel) {
 			continue
 		}
-		path := fmt.Sprintf("operations.%s.require[%d].cond", ev.req.Operation, i)
-		ok, err := ev.evalBool(path)
+		base := fmt.Sprintf("operations.%s.require[%d]", ev.req.Operation, i)
+		ok, err := ev.evalBool(base + ".cond")
 		if err != nil {
 			return &spi.Fault{Code: "InternalFailure", Message: err.Error(), HTTPStatus: 500, Fault: "server"}
 		}
 		if !ok {
-			return ev.e.fault(req.Error, req.Message)
+			f := ev.e.fault(req.Error, req.Message)
+			// A message the request decides -- Stripe's "No such customer:
+			// 'cus_123'" -- is an expression rather than a fixed string, and
+			// the envelope's per-rule members (Stripe's `param`) ride in the
+			// fault's Fields, which the codec's envelope places.
+			if req.MessageExpr != "" {
+				msg, err := ev.eval(base + ".message_expr")
+				if err != nil {
+					return &spi.Fault{Code: "InternalFailure", Message: err.Error(), HTTPStatus: 500, Fault: "server"}
+				}
+				f.Message = fmt.Sprint(msg)
+			}
+			if len(req.Fields) > 0 {
+				f.Fields = map[string]any{}
+				for _, k := range sortedKeys(req.Fields) {
+					v, err := ev.eval(base + ".fields." + k)
+					if err != nil {
+						return &spi.Fault{Code: "InternalFailure", Message: err.Error(), HTTPStatus: 500, Fault: "server"}
+					}
+					f.Fields[k] = v
+				}
+			}
+			return f
 		}
 	}
 	return nil
@@ -506,8 +528,11 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 			return nil
 		}
 	}
-	if w.ForEach == "" {
+	if w.ForEach == "" && w.Where == "" {
 		return ev.writeOne(ctx, path, w, create)
+	}
+	if w.Where != "" {
+		return ev.writeWhere(ctx, path, w)
 	}
 
 	elems, err := ev.eval(path + ".for_each")
@@ -565,6 +590,104 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		}
 		if rec, ok := ev.binds["rec"].(map[string]any); ok {
 			written = append(written, rec)
+		}
+	}
+	return nil
+}
+
+// writeWhere applies a put or patch to every stored record the `where`
+// predicate accepts, with the candidate bound to `item` -- the same contract
+// a delete's `where` and a list's `filter` have. It is the cascade a request
+// cannot enumerate: the records it owes an update are named by what they
+// store, not by anything the caller sent.
+func (ev *eval) writeWhere(ctx context.Context, path string, w bir.WriteEffect) error {
+	res, ok := ev.e.ir.Resources[w.Resource]
+	if !ok {
+		return fmt.Errorf("engine: %s: unknown resource %s", path, w.Resource)
+	}
+	col, err := ev.collection(res)
+	if err != nil {
+		return err
+	}
+	kvs, _, err := col.List(ctx, "", "", 0)
+	if err != nil {
+		return err
+	}
+	// `item` is bound per candidate and restored afterwards, the same scoping
+	// the for_each loop gives its element.
+	prev, had := ev.binds["item"]
+	defer func() {
+		if had {
+			ev.binds["item"] = prev
+		} else {
+			delete(ev.binds, "item")
+		}
+	}()
+	for _, kv := range kvs {
+		rec := map[string]any{}
+		if err := unmarshal(kv.Value, &rec); err != nil {
+			return err
+		}
+		ev.binds["item"] = rec
+		keep, err := ev.evalBool(path + ".where")
+		if err != nil {
+			return err
+		}
+		if !keep {
+			continue
+		}
+		if w.When != "" {
+			on, err := ev.evalBool(path + ".when")
+			if err != nil {
+				return err
+			}
+			if !on {
+				continue
+			}
+		}
+		ev.id = kv.Key
+		if w.Spread != "" {
+			src, err := ev.spread(w.Spread)
+			if err != nil {
+				return fmt.Errorf("engine: %s: spread: %w", path, err)
+			}
+			for k, v := range src {
+				rec[k] = v
+			}
+		}
+		// Resource-level record members first, then effect-level overrides --
+		// writeOne's merge order, over the stored record rather than an empty
+		// one.
+		for _, k := range sortedKeysAny(res.Record) {
+			v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
+			if err != nil {
+				return err
+			}
+			rec[k] = v
+		}
+		for _, k := range sortedKeysAny(w.Record) {
+			v, err := ev.recordValue(ctx, path+".record."+k, w.Record[k])
+			if err != nil {
+				return err
+			}
+			rec[k] = v
+		}
+		key := kv.Key
+		if res.Key != "" {
+			v, ok := rec[res.Key]
+			if !ok {
+				return fmt.Errorf("engine: %s: resource keys on %q, which the record does not set",
+					path, res.Key)
+			}
+			key = fmt.Sprint(v)
+		}
+		if key != kv.Key {
+			if err := col.Delete(ctx, kv.Key); err != nil {
+				return err
+			}
+		}
+		if err := ev.putRecord(ctx, col, key, rec); err != nil {
+			return err
 		}
 	}
 	return nil

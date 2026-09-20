@@ -209,6 +209,12 @@ type MoveAction struct {
 // is what makes error precedence explicit — the part no specification states
 // and every SDK retry policy depends on.
 type ErrorDef struct {
+	// Code is the wire error code. It may be empty: Stripe's missing-param
+	// errors genuinely carry no `code` member on the wire ({error: {type,
+	// message, param}}), and a bundle transcribing that has nothing to declare.
+	// The codec decides what an empty code means on the wire; for the AWS
+	// protocols it was always an authoring mistake, which is what the check
+	// used to assume of every service.
 	Code       string     `yaml:"code"`
 	HTTP       int        `yaml:"http"`
 	Fault      string     `yaml:"fault"`
@@ -279,6 +285,16 @@ type Require struct {
 	Cond    string `yaml:"cond"`
 	Error   string `yaml:"error"`
 	Message string `yaml:"message,omitempty"`
+	// MessageExpr is a CEL expression for the fault message, for the services
+	// whose error text names what the request asked about: Stripe answers
+	// "No such customer: 'cus_123'", and a static message cannot carry the id.
+	// Message stays the static form; both set, MessageExpr wins.
+	MessageExpr string `yaml:"message_expr,omitempty"`
+	// Fields are CEL expressions evaluated into the fault's extra error-shape
+	// members. Stripe's error envelope carries a `param` member naming the
+	// offending request member, which varies per rule rather than per error
+	// table row, so it cannot live on the ErrorDef.
+	Fields map[string]string `yaml:"fields,omitempty"`
 }
 
 // Select gathers records for operations that read a set, such as a queue
@@ -440,6 +456,16 @@ type WriteEffect struct {
 	// overwrite -- the exact failure shape this project keeps finding in the
 	// packs -- so the loader refuses it rather than the engine producing it.
 	ForEach string `yaml:"for_each,omitempty"`
+	// Where applies the write to every stored record the predicate accepts,
+	// with the candidate bound to `item`, exactly as a delete's `where` and a
+	// list's `filter` bind it. It exists for the cascade an operation owes
+	// records nobody named in the request: Stripe's customer delete nullifies
+	// the customer on every payment intent, charge and checkout session that
+	// references it, and the predicate is the only place that set can be
+	// described. Key must be empty alongside it -- the candidate's own key is
+	// the write's address -- and the loader refuses it on a create, where
+	// there is nothing stored to select.
+	Where string `yaml:"where,omitempty"`
 	// Missing says what an update does when the record is not there. The
 	// default writes it anyway, which is what "update or create" means and
 	// what most of these operations do; "ignore" skips the write entirely.

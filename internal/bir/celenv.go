@@ -126,6 +126,14 @@ func celFuncs() []cel.EnvOption {
 		// element[value]. The map-shaped answer to a list-shaped store (Secrets
 		// Manager's VersionIdsToStages) has no comprehension form.
 		ternaryDyn("rollup", dyn, str, str, dyn),
+		// sum folds a list of numbers to their total. CEL's comprehension
+		// macros map and filter but never accumulate, and a checkout page's
+		// subtotal is a sum over line items.
+		unaryDyn("sum", dyn, dyn),
+		// slice is list[start:end] with clamped bounds. CEL has no list
+		// slicing at all, and cursor pagination -- take the page after this
+		// position, keep the first limit entries -- is slicing.
+		ternaryDyn("slice", dyn, num, num, dyn),
 
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.

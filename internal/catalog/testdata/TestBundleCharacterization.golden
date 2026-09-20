@@ -825,6 +825,39 @@
     ]
   },
   {
+    "ID": "stripe.api",
+    "Protocol": "restJson1",
+    "Ops": [
+      "CreateCustomer",
+      "GetCustomer",
+      "UpdateCustomer",
+      "DeleteCustomer",
+      "ListCustomers",
+      "CreateProduct",
+      "GetProduct",
+      "ListProducts",
+      "CreatePrice",
+      "GetPrice",
+      "ListPrices",
+      "CreatePaymentIntent",
+      "GetPaymentIntent",
+      "UpdatePaymentIntent",
+      "ConfirmPaymentIntent",
+      "CancelPaymentIntent",
+      "ListPaymentIntents",
+      "ListPaymentMethods",
+      "GetCharge",
+      "ListCharges",
+      "CreateCheckoutSession",
+      "GetCheckoutSession",
+      "ExpireCheckoutSession",
+      "ListCheckoutSessions",
+      "GetCheckoutPage",
+      "CompleteCheckoutSession",
+      "CreateCustomerSession"
+    ]
+  },
+  {
     "ID": "cloudflare.api",
     "Protocol": "restJson1",
     "Ops": [

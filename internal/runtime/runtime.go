@@ -393,6 +393,8 @@ var Aliases = map[string]string{
 	"vercel.api":                  "vercel.api",
 	"vercel.kv":                   "vercel.kv",
 	"vercel.blob":                 "vercel.blob",
+	"stripe":                      "stripe.api",
+	"stripe.api":                  "stripe.api",
 	"cloudflare":                  "cloudflare.kv",
 	"cloudflare.kv":               "cloudflare.kv",
 	"hostinger":                   "hostinger.dns",

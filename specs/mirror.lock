@@ -42,6 +42,10 @@
       "source": "authored",
       "ref": "2026-09-18T17:14:10Z"
     },
+    "stripe.api": {
+      "source": "authored",
+      "ref": "2026-09-20T01:42:55Z"
+    },
     "azure.blobs": {
       "source": "authored",
       "ref": "2026-09-12T02:44:35Z"
@@ -1323,6 +1327,14 @@
       "path": "railway/graphql.json",
       "sha256": "3e69291aa94529fa50300af51f74979555fef57412e72c5d2c4fe31d9d6dd735",
       "ingested": "2026-09-13T06:20:57Z"
+    },
+    {
+      "serviceId": "stripe.api",
+      "source": "authored",
+      "ref": "2026-09-20T01:42:55Z",
+      "path": "stripe/api.json",
+      "sha256": "04309cb49104a7ca955a2c6ad690825fe76fbf29441286838d6faef2f3818682",
+      "ingested": "2026-09-20T01:42:55Z"
     },
     {
       "serviceId": "vercel.api",

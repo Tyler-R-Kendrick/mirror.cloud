@@ -1,0 +1,797 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Stripe API (emulate surface)",
+    "version": "authored-1",
+    "description": "The Stripe surface the vendor-authored oracle serves: packages/@emulators/stripe in vercel-labs/emulate (pinned in specs/stripe/emulate-inventory.json) -- customers, products, prices, payment intents, payment methods, charges, checkout sessions and customer sessions, 27 route registrations.\n\nTHIS DOCUMENT IS AUTHORED, NOT VENDORED, like specs/vercel/blob.json and specs/vercel/kv.json. Stripe publishes an OpenAPI document, but the parity claim is against what the vendor's own emulator serves, so this transcribes the oracle's src/routes/*.ts: its exact request members (form or JSON bodies, bracketed nesting included), its response fields, and its status codes. Every create answers 200, never 201; every error is {error: {type, message, code?, param?}} with type invalid_request_error.\n\nThree spellings here are mirror's, not the oracle's. Query members named `expand[]` and `created[gte]`/`created[lte]` are literal wire names carried as parameter names. The hosted checkout page (GET /checkout/{id}) and its completion (POST /checkout/{id}/complete) ride the API host because the oracle serves them on the same server, not because checkout.stripe.com is declared anywhere. And the page/redirect answers are envelopes, not wire shapes: the wire answer is HTML or a 302, and the envelope's members (status/page, location/page) are where a behavior bundle names those -- the codec unfolds them, the way it does Vercel's OAuth page and redirect."
+  },
+  "servers": [
+    {
+      "url": "https://api.stripe.com",
+      "description": "Stripe API host, as the oracle serves it on one server."
+    }
+  ],
+  "paths": {
+    "/v1/customers": {
+      "post": {
+        "operationId": "CreateCustomer",
+        "summary": "Create a customer; every member optional",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The created customer.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } }
+          }
+        }
+      },
+      "get": {
+        "operationId": "ListCustomers",
+        "summary": "List customers, newest first",
+        "parameters": [
+          { "name": "email", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "string" } },
+          { "name": "starting_after", "in": "query", "schema": { "type": "string" } },
+          { "name": "ending_before", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[gte]", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[lte]", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerList" } } }
+          }
+        }
+      }
+    },
+    "/v1/customers/{id}": {
+      "get": {
+        "operationId": "GetCustomer",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The customer.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } }
+          },
+          "404": { "description": "No such customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      },
+      "post": {
+        "operationId": "UpdateCustomer",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated customer; members the request omits keep their values.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } }
+          },
+          "404": { "description": "No such customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      },
+      "delete": {
+        "operationId": "DeleteCustomer",
+        "summary": "Delete a customer and nullify its id on every payment intent, charge and checkout session that references it",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The deletion stub.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Deleted" } } }
+          },
+          "404": { "description": "No such customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/products": {
+      "post": {
+        "operationId": "CreateProduct",
+        "summary": "Create a product; name is required",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "active": { "type": "boolean" },
+                  "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The created product.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } }
+          },
+          "400": { "description": "Missing name.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      },
+      "get": {
+        "operationId": "ListProducts",
+        "parameters": [
+          { "name": "active", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "string" } },
+          { "name": "starting_after", "in": "query", "schema": { "type": "string" } },
+          { "name": "ending_before", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[gte]", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[lte]", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductList" } } }
+          }
+        }
+      }
+    },
+    "/v1/products/{id}": {
+      "get": {
+        "operationId": "GetProduct",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The product.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } }
+          },
+          "404": { "description": "No such product.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/prices": {
+      "post": {
+        "operationId": "CreatePrice",
+        "summary": "Create a price; currency and product are required and the product must exist",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "currency": { "type": "string" },
+                  "product": { "type": "string" },
+                  "unit_amount": { "type": "integer" },
+                  "recurring": { "type": "object" },
+                  "active": { "type": "boolean" },
+                  "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The created price.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Price" } } }
+          },
+          "400": { "description": "Missing currency/product, or no such product.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      },
+      "get": {
+        "operationId": "ListPrices",
+        "parameters": [
+          { "name": "product", "in": "query", "schema": { "type": "string" } },
+          { "name": "active", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "string" } },
+          { "name": "starting_after", "in": "query", "schema": { "type": "string" } },
+          { "name": "ending_before", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[gte]", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[lte]", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PriceList" } } }
+          }
+        }
+      }
+    },
+    "/v1/prices/{id}": {
+      "get": {
+        "operationId": "GetPrice",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "expand[]", "in": "query", "schema": { "type": "array", "items": { "type": "string" } }, "description": "expand[]=product embeds the product." }
+        ],
+        "responses": {
+          "200": {
+            "description": "The price.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Price" } } }
+          },
+          "404": { "description": "No such price.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/payment_intents": {
+      "post": {
+        "operationId": "CreatePaymentIntent",
+        "summary": "Create a payment intent; amount and currency are required, status follows the payment method's presence",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": { "type": "integer" },
+                  "currency": { "type": "string" },
+                  "customer": { "type": "string" },
+                  "payment_method": { "type": "string" },
+                  "description": { "type": "string" },
+                  "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The created intent.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentIntent" } } }
+          },
+          "400": { "description": "Missing amount/currency, or no such customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      },
+      "get": {
+        "operationId": "ListPaymentIntents",
+        "parameters": [
+          { "name": "customer", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "string" } },
+          { "name": "starting_after", "in": "query", "schema": { "type": "string" } },
+          { "name": "ending_before", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[gte]", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[lte]", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentIntentList" } } }
+          }
+        }
+      }
+    },
+    "/v1/payment_intents/{id}": {
+      "get": {
+        "operationId": "GetPaymentIntent",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "expand[]", "in": "query", "schema": { "type": "array", "items": { "type": "string" } }, "description": "expand[]=customer embeds the customer." }
+        ],
+        "responses": {
+          "200": {
+            "description": "The intent.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentIntent" } } }
+          },
+          "404": { "description": "No such payment_intent.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      },
+      "post": {
+        "operationId": "UpdatePaymentIntent",
+        "summary": "Update an intent; attaching a payment method to a requires_payment_method intent moves it to requires_confirmation",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": { "type": "integer" },
+                  "currency": { "type": "string" },
+                  "description": { "type": "string" },
+                  "payment_method": { "type": "string" },
+                  "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated intent.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentIntent" } } }
+          },
+          "404": { "description": "No such payment_intent.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/payment_intents/{id}/confirm": {
+      "post": {
+        "operationId": "ConfirmPaymentIntent",
+        "summary": "Confirm an intent in a confirmable status; success writes the intent to succeeded and mints its charge",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "payment_method": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The succeeded intent.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentIntent" } } }
+          },
+          "400": { "description": "The status does not allow confirmation.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } },
+          "404": { "description": "No such payment_intent.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/payment_intents/{id}/cancel": {
+      "post": {
+        "operationId": "CancelPaymentIntent",
+        "summary": "Cancel an intent that is neither succeeded nor already canceled",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The canceled intent.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentIntent" } } }
+          },
+          "400": { "description": "The status does not allow cancellation.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } },
+          "404": { "description": "No such payment_intent.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/payment_methods": {
+      "get": {
+        "operationId": "ListPaymentMethods",
+        "summary": "The oracle stores no payment methods, so this always answers an empty page; an unknown customer filter is still a 400",
+        "parameters": [
+          { "name": "customer", "in": "query", "schema": { "type": "string" } },
+          { "name": "type", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "string" } },
+          { "name": "starting_after", "in": "query", "schema": { "type": "string" } },
+          { "name": "ending_before", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The empty page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentMethodList" } } }
+          },
+          "400": { "description": "No such customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/charges/{id}": {
+      "get": {
+        "operationId": "GetCharge",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "expand[]", "in": "query", "schema": { "type": "array", "items": { "type": "string" } }, "description": "expand[]=customer and expand[]=payment_intent embed the relations." }
+        ],
+        "responses": {
+          "200": {
+            "description": "The charge.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Charge" } } }
+          },
+          "404": { "description": "No such charge.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/charges": {
+      "get": {
+        "operationId": "ListCharges",
+        "parameters": [
+          { "name": "customer", "in": "query", "schema": { "type": "string" } },
+          { "name": "payment_intent", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "string" } },
+          { "name": "starting_after", "in": "query", "schema": { "type": "string" } },
+          { "name": "ending_before", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[gte]", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[lte]", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChargeList" } } }
+          }
+        }
+      }
+    },
+    "/v1/checkout/sessions": {
+      "post": {
+        "operationId": "CreateCheckoutSession",
+        "summary": "Create a checkout session; mode is required and every line item names an existing price with a positive quantity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": { "type": "string" },
+                  "customer": { "type": "string" },
+                  "success_url": { "type": "string" },
+                  "cancel_url": { "type": "string" },
+                  "line_items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "price": { "type": "string" },
+                        "quantity": { "type": "integer" }
+                      }
+                    }
+                  },
+                  "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The open session, with its hosted url.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CheckoutSession" } } }
+          },
+          "400": { "description": "Missing mode, bad line items, or no such customer/price.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      },
+      "get": {
+        "operationId": "ListCheckoutSessions",
+        "parameters": [
+          { "name": "customer", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "payment_status", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "string" } },
+          { "name": "starting_after", "in": "query", "schema": { "type": "string" } },
+          { "name": "ending_before", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[gte]", "in": "query", "schema": { "type": "string" } },
+          { "name": "created[lte]", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CheckoutSessionList" } } }
+          }
+        }
+      }
+    },
+    "/v1/checkout/sessions/{id}": {
+      "get": {
+        "operationId": "GetCheckoutSession",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CheckoutSession" } } }
+          },
+          "404": { "description": "No such checkout session.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/v1/checkout/sessions/{id}/expire": {
+      "post": {
+        "operationId": "ExpireCheckoutSession",
+        "summary": "Expire an open session; anything else is a 400",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The expired session.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CheckoutSession" } } }
+          },
+          "400": { "description": "The session is not open.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } },
+          "404": { "description": "No such checkout session.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    },
+    "/checkout/{id}": {
+      "get": {
+        "operationId": "GetCheckoutPage",
+        "summary": "The hosted checkout page: the order summary for an open session, a 404 card for an unknown one, an expired card otherwise",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The page. This schema is an envelope for the bundle, not the wire shape: the wire answer is `page` as text/html with `status` as its HTTP status.",
+            "content": { "text/html": { "schema": { "$ref": "#/components/schemas/CheckoutPage" } } }
+          }
+        }
+      }
+    },
+    "/checkout/{id}/complete": {
+      "post": {
+        "operationId": "CompleteCheckoutSession",
+        "summary": "Complete an open session: paid, then the success_url redirect with {CHECKOUT_SESSION_ID} substituted, or the receipt card without one; anything not open redirects back to its page",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": {
+            "description": "The redirect. This schema is an envelope for the bundle: the wire answer is the 302 to `location`, or the receipt card when it is empty.",
+            "content": { "text/html": { "schema": { "$ref": "#/components/schemas/CheckoutComplete" } } }
+          },
+          "200": {
+            "description": "The receipt card, when the session carries no success_url.",
+            "content": { "text/html": { "schema": { "$ref": "#/components/schemas/CheckoutComplete" } } }
+          }
+        }
+      }
+    },
+    "/v1/customer_sessions": {
+      "post": {
+        "operationId": "CreateCustomerSession",
+        "summary": "Create a customer session; the customer is required and must exist",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customer": { "type": "string" },
+                  "components": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session, with a drawn client secret expiring in 30 minutes.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerSession" } } }
+          },
+          "400": { "description": "Missing customer, or no such customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeError" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "StripeError": {
+        "type": "object",
+        "description": "The oracle's stripeError: type is always invalid_request_error on these routes; code is absent on missing-param errors and param rides beside it.",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string" },
+              "message": { "type": "string" },
+              "code": { "type": "string" },
+              "param": { "type": "string" }
+            }
+          }
+        }
+      },
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string" },
+          "email": { "type": "string", "nullable": true },
+          "name": { "type": "string", "nullable": true },
+          "description": { "type": "string", "nullable": true },
+          "metadata": { "type": "object" },
+          "created": { "type": "integer" },
+          "livemode": { "type": "boolean" }
+        }
+      },
+      "CustomerList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string" },
+          "url": { "type": "string" },
+          "has_more": { "type": "boolean" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Customer" } }
+        }
+      },
+      "Deleted": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string" },
+          "deleted": { "type": "boolean" }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "active": { "type": "boolean" },
+          "metadata": { "type": "object" },
+          "created": { "type": "integer" },
+          "livemode": { "type": "boolean" }
+        }
+      },
+      "ProductList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string" },
+          "url": { "type": "string" },
+          "has_more": { "type": "boolean" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Product" } }
+        }
+      },
+      "Price": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string" },
+          "product": { "type": "string" },
+          "currency": { "type": "string" },
+          "unit_amount": { "type": "integer", "nullable": true },
+          "type": { "type": "string" },
+          "active": { "type": "boolean" },
+          "metadata": { "type": "object" },
+          "created": { "type": "integer" },
+          "livemode": { "type": "boolean" }
+        }
+      },
+      "PriceList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string" },
+          "url": { "type": "string" },
+          "has_more": { "type": "boolean" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Price" } }
+        }
+      },
+      "PaymentIntent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string" },
+          "amount": { "type": "integer" },
+          "currency": { "type": "string" },
+          "status": { "type": "string" },
+          "customer": { "type": "string", "nullable": true },
+          "description": { "type": "string", "nullable": true },
+          "payment_method": { "type": "string", "nullable": true },
+          "metadata": { "type": "object" },
+          "created": { "type": "integer" },
+          "livemode": { "type": "boolean" }
+        }
+      },
+      "PaymentIntentList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string" },
+          "url": { "type": "string" },
+          "has_more": { "type": "boolean" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/PaymentIntent" } }
+        }
+      },
+      "PaymentMethodList": {
+        "type": "object",
+        "description": "Always the empty page: the oracle stores no payment methods.",
+        "properties": {
+          "object": { "type": "string" },
+          "url": { "type": "string" },
+          "has_more": { "type": "boolean" },
+          "data": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "Charge": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string" },
+          "amount": { "type": "integer" },
+          "currency": { "type": "string" },
+          "status": { "type": "string" },
+          "customer": { "type": "string", "nullable": true },
+          "payment_intent": { "type": "string", "nullable": true },
+          "description": { "type": "string", "nullable": true },
+          "metadata": { "type": "object" },
+          "created": { "type": "integer" },
+          "livemode": { "type": "boolean" }
+        }
+      },
+      "ChargeList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string" },
+          "url": { "type": "string" },
+          "has_more": { "type": "boolean" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Charge" } }
+        }
+      },
+      "CheckoutSession": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string" },
+          "mode": { "type": "string" },
+          "status": { "type": "string" },
+          "payment_status": { "type": "string" },
+          "customer": { "type": "string", "nullable": true },
+          "success_url": { "type": "string", "nullable": true },
+          "cancel_url": { "type": "string", "nullable": true },
+          "metadata": { "type": "object" },
+          "created": { "type": "integer" },
+          "livemode": { "type": "boolean" },
+          "url": { "type": "string", "nullable": true }
+        }
+      },
+      "CheckoutSessionList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string" },
+          "url": { "type": "string" },
+          "has_more": { "type": "boolean" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/CheckoutSession" } }
+        }
+      },
+      "CheckoutPage": {
+        "type": "object",
+        "description": "Not a wire body: the page route answers text/html, and this envelope is where a bundle names its status and markup.",
+        "properties": {
+          "status": { "type": "integer" },
+          "page": { "type": "string" }
+        }
+      },
+      "CheckoutComplete": {
+        "type": "object",
+        "description": "Not a wire body: the complete route answers a 302 to location, or the receipt card when location is empty.",
+        "properties": {
+          "location": { "type": "string" },
+          "page": { "type": "string" }
+        }
+      },
+      "CustomerSession": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string" },
+          "client_secret": { "type": "string" },
+          "components": { "type": "object" },
+          "created": { "type": "integer" },
+          "customer": { "type": "string" },
+          "expires_at": { "type": "integer" },
+          "livemode": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

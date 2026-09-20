@@ -1,0 +1,145 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OpenSearch data-plane supplement",
+    "version": "authored-1",
+    "description": "The four document operations the 2021-01-01 OpenSearch specification never declares but the mirror serves: index, get, delete and search ride the Elasticsearch-style paths (/.../_doc/..., /.../_search) and dispatch by path, not by target. Fused into aws.es by x-mirror-service; the vendored specification keeps every control-plane operation, its protocol and its shapes."
+  },
+  "x-mirror-service": "aws.es",
+  "paths": {
+    "/_doc": {
+      "put": {
+        "operationId": "IndexDocument",
+        "summary": "Index a document, drawing an id when the request names none",
+        "parameters": [
+          { "name": "DomainName", "in": "query", "schema": { "type": "string" } },
+          { "name": "domainName", "in": "query", "schema": { "type": "string" } },
+          { "name": "Index", "in": "query", "schema": { "type": "string" } },
+          { "name": "index", "in": "query", "schema": { "type": "string" } },
+          { "name": "Id", "in": "query", "schema": { "type": "string" } },
+          { "name": "id", "in": "query", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "Document": { "type": "object" },
+                  "_source": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The index id and result.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IndexResponse" } } }
+          }
+        }
+      },
+      "get": {
+        "operationId": "GetDocument",
+        "parameters": [
+          { "name": "DomainName", "in": "query", "schema": { "type": "string" } },
+          { "name": "domainName", "in": "query", "schema": { "type": "string" } },
+          { "name": "Index", "in": "query", "schema": { "type": "string" } },
+          { "name": "index", "in": "query", "schema": { "type": "string" } },
+          { "name": "Id", "in": "query", "schema": { "type": "string" } },
+          { "name": "id", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Found flag, identity, and the source when found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GetResponse" } } }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "DeleteDocument",
+        "parameters": [
+          { "name": "DomainName", "in": "query", "schema": { "type": "string" } },
+          { "name": "domainName", "in": "query", "schema": { "type": "string" } },
+          { "name": "Index", "in": "query", "schema": { "type": "string" } },
+          { "name": "index", "in": "query", "schema": { "type": "string" } },
+          { "name": "Id", "in": "query", "schema": { "type": "string" } },
+          { "name": "id", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The index id and deletion result.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeleteResponse" } } }
+          }
+        }
+      }
+    },
+    "/_search": {
+      "post": {
+        "operationId": "Search",
+        "summary": "Substring query over an index: match_all, term, match and query_string",
+        "parameters": [
+          { "name": "DomainName", "in": "query", "schema": { "type": "string" } },
+          { "name": "domainName", "in": "query", "schema": { "type": "string" } },
+          { "name": "Index", "in": "query", "schema": { "type": "string" } },
+          { "name": "index", "in": "query", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The hits envelope.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SearchResponse" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "IndexResponse": {
+        "type": "object",
+        "properties": {
+          "_index": { "type": "string" },
+          "_id": { "type": "string" },
+          "result": { "type": "string" },
+          "_shards": { "type": "object" }
+        }
+      },
+      "GetResponse": {
+        "type": "object",
+        "properties": {
+          "found": { "type": "boolean" },
+          "_index": { "type": "string" },
+          "_id": { "type": "string" },
+          "_source": { "type": "object" }
+        }
+      },
+      "DeleteResponse": {
+        "type": "object",
+        "properties": {
+          "_index": { "type": "string" },
+          "_id": { "type": "string" },
+          "result": { "type": "string" }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "hits": { "type": "object" },
+          "timed_out": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

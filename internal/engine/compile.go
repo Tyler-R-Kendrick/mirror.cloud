@@ -16,6 +16,7 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/prim"
 )
 
 // compileAll turns the bundle's expression sources into runnable programs.
@@ -495,12 +496,24 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
-		// prim dispatches to a named pure primitive. None are registered yet,
-		// so a bundle that calls one fails loudly rather than returning a
-		// plausible-looking value.
+		// prim dispatches to a named pure primitive from the registry. An
+		// unregistered name fails loudly rather than returning a
+		// plausible-looking value; a bundle declares the names it calls
+		// under `primitives:`, and the loader refuses unknown names and
+		// versions before any request runs.
 		cel.Function("prim", cel.Overload("prim_2", []*cel.Type{str, dyn}, dyn,
-			cel.BinaryBinding(func(name, _ ref.Val) ref.Val {
-				return types.NewErr("engine: primitive %q is not registered", fmt.Sprint(name.Value()))
+			cel.BinaryBinding(func(name, args ref.Val) ref.Val {
+				n := fmt.Sprint(name.Value())
+				f, ok := prim.Lookup(n)
+				if !ok {
+					return types.NewErr("engine: primitive %q is not registered (registered: %s)", n, strings.Join(prim.Names(), ", "))
+				}
+				list, _ := fromCEL(args).([]any)
+				out, err := f.Call(list)
+				if err != nil {
+					return types.NewErr("engine: primitive %q: %v", n, err)
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"cel.dev/cel-go/cel"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/prim"
 )
 
 // Validate checks a loaded bundle against the generated model and compiles
@@ -180,6 +181,29 @@ func Validate(s *Service, svc *model.Service) error {
 		}
 	}
 
+	// Declared primitives must exist in the registry at the pinned version.
+	// A bundle calling what nothing implements fails at request time rather
+	// than here, which is exactly the silence the version pin exists to
+	// prevent: an engine upgrade moves the registry, and a bundle written
+	// against the old one must fail its load, not its traffic.
+	declared := map[string]bool{}
+	for _, alias := range sortedKeys(s.Primitives) {
+		ref := s.Primitives[alias]
+		declared[ref.Name] = true
+		fn, ok := prim.Lookup(ref.Name)
+		if !ok {
+			problems = append(problems, fmt.Errorf(
+				"%s: primitives.%s: unknown primitive %q (registered: %s)",
+				s.ServiceID, alias, ref.Name, strings.Join(prim.Names(), ", ")))
+			continue
+		}
+		if fn.Version != ref.Version {
+			problems = append(problems, fmt.Errorf(
+				"%s: primitives.%s: wants %s version %d, registry carries %d",
+				s.ServiceID, alias, ref.Name, ref.Version, fn.Version))
+		}
+	}
+
 	// Operations.
 	for _, name := range sortedKeys(s.Operations) {
 		op := s.Operations[name]
@@ -233,6 +257,13 @@ func Validate(s *Service, svc *model.Service) error {
 		fxk := fxKeys(op)
 		inspect = func(pathStr string, ast *cel.Ast) {
 			checkFxRefs(s.ServiceID, pathStr, ast, fxk, &problems)
+			for _, name := range primCalls(ast) {
+				if !declared[name] {
+					problems = append(problems, fmt.Errorf(
+						"%s: %s: calls primitive %q without declaring it under `primitives:`",
+						s.ServiceID, pathStr, name))
+				}
+			}
 		}
 
 		for _, b := range sortedKeys(op.Reads) {
@@ -367,6 +398,15 @@ func Validate(s *Service, svc *model.Service) error {
 		for _, m := range sortedKeys(op.Output) {
 			compile(where+".output."+m, op.Output[m])
 			checkOutputMember(s, svc, modelOp, where+".output", m, &problems)
+		}
+		// An omitted member must be a projected one: naming a member the
+		// output never sets would drop nothing and hide a typo.
+		for _, m := range op.OmitNull {
+			if _, projected := op.Output[m]; !projected {
+				problems = append(problems, fmt.Errorf(
+					"%s: %s: omit_null names %q, which this operation does not project",
+					s.ServiceID, where, m))
+			}
 		}
 
 		if op.Provenance != "" && !op.Provenance.Valid() {

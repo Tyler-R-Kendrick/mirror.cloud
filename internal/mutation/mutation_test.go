@@ -12845,14 +12845,11 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestKPLDeaggregation",
 	},
-	{
-		name: "opensearch-index-missing-domain",
-		file: filepath.Join("internal", "services", "aws", "opensearch", "opensearch.go"),
-		old:  `name != "" && !ok`,
-		new:  `false`,
-		pkg:  "./internal/services/aws/opensearch",
-		run:  "TestIndexDocumentRejectsMissingDomain",
-	},
+	// The opensearch pack is deleted; its missing-domain refusal lives in
+	// the bundle's require, which TestBundlesMatchRecordedPacks replays
+	// against the recording. This needle is retired with the pack it
+	// mutated: deleting the file would leave a needle pointing at nothing,
+	// so the entry goes too.
 	{
 		name: "firehose-skip-opensearch-validation",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
@@ -12896,7 +12893,7 @@ var mutants = []mutant{
 	{
 		name: "firehose-skip-opensearch-indexing",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `opensearch.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "IndexDocument", Input: input})`,
+		old:  `bundled.Handler("aws.es", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "IndexDocument", Input: input})`,
 		new:  `nil, error(nil)`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseOpenSearchDestination",

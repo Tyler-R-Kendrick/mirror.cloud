@@ -33,7 +33,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lookoutmetrics"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/organizations"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/pipes"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/qldb"

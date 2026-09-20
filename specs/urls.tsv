@@ -48,3 +48,4 @@ azure.queue	azure/queue.json	authored
 azure.table	azure/table.json	authored
 railway.graphql	railway/graphql.json	https://backboard.railway.com/graphql/v2	railway/introspect.json
 aws.appsync	appsync-graphql.json	authored
+aws.es	es-dataplane.json	authored

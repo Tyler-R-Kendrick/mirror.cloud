@@ -35,7 +35,6 @@ import (
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -3319,7 +3318,7 @@ func (p *Pack) deliverSearch(ctx context.Context, req *spi.Request, destinationK
 		if useID {
 			input["Id"] = payload.RecordIDs[index]
 		}
-		if _, err := opensearch.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "IndexDocument", Input: input}); err != nil {
+		if _, err := bundled.Handler("aws.es", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "IndexDocument", Input: input}); err != nil {
 			appendSearchPayload(&retryable, payload, index)
 			code, message = "500", err.Error()
 			var fault *spi.Fault

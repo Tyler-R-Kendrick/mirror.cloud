@@ -251,6 +251,13 @@ type Operation struct {
 	Batch   *BatchSpec        `yaml:"batch,omitempty"`
 	Output  map[string]string `yaml:"output,omitempty"`
 
+	// OmitNull names output members the answer drops when they project null.
+	// A record that lacks a member answers without it -- OpenSearch answers
+	// a missed get with no _source member at all -- and answering null
+	// instead would be a member the service never sends. Without this the
+	// only honest transcription would be two operations for the two shapes.
+	OmitNull []string `yaml:"omit_null,omitempty"`
+
 	// Addressing exempts named resources from the check that an operation
 	// which resolves a resource's key from the request declares at least one
 	// of the members that resource is addressed by. The value is the reason,

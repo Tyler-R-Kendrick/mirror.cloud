@@ -1,8 +1,8 @@
 {
   "schema": "trace/1",
-  "service": "aws.opensearch",
+  "service": "aws.es",
   "source": "pack:internal/services/aws/opensearch@1f8076ed",
-  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The IndexDocument, GetDocument, DeleteDocument and Search steps are superseded: the served model carries those operations from the hand-authored catalog with no output shape (the vendored 2021-01-01 specification is the control plane only), so the bundle cannot declare the _index/_id/_source/hits members the pack answered with, and answers them empty. Their fault steps still gate. One DescribeDomains step is superseded because the pack answered in request order and the bundle lists in store order.",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. The IndexDocument, GetDocument, DeleteDocument and Search steps are superseded: the served model carries those operations from the hand-authored catalog with no output shape (the vendored 2021-01-01 specification is the control plane only), so the bundle cannot declare the _index/_id/_source/hits members the pack answered with, and answers them empty. Their fault steps still gate. One DescribeDomains step is superseded because the pack answered in request order and the bundle lists in store order. [moved aws.opensearch -> aws.es with the bundle: the edge resolves to aws.es (short name), so the bundle serves under the resolving id and the recording follows it; no step changed.]",
   "steps": [
     {
       "operation": "ListDomainNames",
@@ -174,7 +174,10 @@
     {
       "operation": "DescribeDomains",
       "input": {
-        "DomainNames": ["d1", "d2"]
+        "DomainNames": [
+          "d1",
+          "d2"
+        ]
       },
       "identity": {
         "Account": "000000000000",
@@ -211,7 +214,10 @@
     {
       "operation": "DescribeDomains",
       "input": {
-        "DomainNames": ["d2", "d1"]
+        "DomainNames": [
+          "d2",
+          "d1"
+        ]
       },
       "identity": {
         "Account": "000000000000",
@@ -249,7 +255,10 @@
     {
       "operation": "DescribeDomains",
       "input": {
-        "DomainNames": ["d1", "ghost"]
+        "DomainNames": [
+          "d1",
+          "ghost"
+        ]
       },
       "identity": {
         "Account": "000000000000",
@@ -429,7 +438,9 @@
       "operation": "RemoveTags",
       "input": {
         "ARN": "arn:aws:es:us-east-1:000000000000:domain/d1",
-        "TagKeys": ["env"]
+        "TagKeys": [
+          "env"
+        ]
       },
       "identity": {
         "Account": "000000000000",

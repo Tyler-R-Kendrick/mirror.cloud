@@ -10,6 +10,10 @@
       "source": "https://storage.googleapis.com/$discovery/rest?version=v1",
       "ref": "2026-08-28T18:51:00Z"
     },
+    "aws.es": {
+      "source": "authored",
+      "ref": "2026-09-20T13:31:20Z"
+    },
     "aws.appsync": {
       "source": "authored",
       "ref": "2026-09-20T13:23:03Z"
@@ -1299,6 +1303,14 @@
       "path": "digitalocean/v2.yaml",
       "sha256": "4ea599dfe03f2fb661de8e6f19e14ae5a6771cb6205572d1d262c5f080c4bcd1",
       "ingested": "2026-09-11T10:32:02Z"
+    },
+    {
+      "serviceId": "aws.es",
+      "source": "authored",
+      "ref": "2026-09-20T13:31:20Z",
+      "path": "es-dataplane.json",
+      "sha256": "6290c6b3b73438a5cd2198e6ed1eeb4d9cdd79978905f68715a778e59454e534",
+      "ingested": "2026-09-20T13:31:21Z"
     },
     {
       "serviceId": "fly.machines",

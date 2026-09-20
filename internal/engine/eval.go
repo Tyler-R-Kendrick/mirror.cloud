@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -1315,6 +1316,11 @@ func (ev *eval) project(op bir.Operation, modelOp model.Operation) (map[string]a
 		v, err := ev.eval("operations." + ev.req.Operation + ".output." + member)
 		if err != nil {
 			return nil, err
+		}
+		// A member the operation drops when null is absent rather than null
+		// on the wire; anything else answers null as usual.
+		if v == nil && slices.Contains(op.OmitNull, member) {
+			continue
 		}
 		out[member] = v
 	}

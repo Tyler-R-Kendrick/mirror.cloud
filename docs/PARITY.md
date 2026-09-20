@@ -1504,6 +1504,33 @@ Serve state per emulate route group (method+path from `src/routes/*.ts`):
 
 The gap is closed: every route the oracle registers is served, the supplement routes via an authored document (`specs/vercel/api-extra.json`, fused into `vercel.api` by `x-mirror-service`), Blob via `vercel.blob`. Everything lands as B-IR data on `behavior/vercel/` — the only Go is three generic codec capabilities the routes needed (header-member decode, form bodies, and the OAuth page/redirect wire shapes) — and the parity claims here stay traceable to the oracle's route list.
 
+## Stripe baseline
+
+Authority: the vendor-authored oracle, [vercel-labs/emulate](https://github.com/vercel-labs/emulate) `packages/@emulators/stripe`, pinned at `afddfabb28f18190758203c98d8739dfd156dccf` (2026-09-16) in `specs/stripe/emulate-inventory.json`; `scripts/count-emulate-stripe.py --check` reproduces the census, and `TestStripeCensusDenominators` dies if the numbers drift. Stripe publishes an OpenAPI document, but the parity claim here is against what the vendor's own emulator serves, the same contract as Vercel's.
+
+| Denominator | Count |
+|---|---:|
+| emulate Stripe routes (vendor-authored oracle) | 27 |
+| emulate Stripe test functions | 23 |
+| emulate Stripe routes served by mirror | 0 / 27 |
+
+The oracle also dispatches signed webhooks for configured endpoints (`Stripe-Signature: t=<unix>,v1=<HMAC-SHA256(secret, t + "." + rawbody)>`). It has no Idempotency-Key middleware -- that replay contract is resend's, not stripe's; the inventory says so.
+
+Serve state per oracle route file (method+path from `src/routes/*.ts`):
+
+| emulate route file | Routes | mirror serves | Missing |
+|---|---:|---:|---|
+| `customers.ts` | 5 | 0 | the customer CRUD |
+| `products.ts` | 3 | 0 | the product CRUD |
+| `prices.ts` | 3 | 0 | the price CRUD |
+| `payment-intents.ts` | 6 | 0 | create/list/get/update/confirm/cancel |
+| `payment-methods.ts` | 1 | 0 | list for a customer |
+| `charges.ts` | 2 | 0 | list/get |
+| `checkout-sessions.ts` | 6 | 0 | create/list/get/expire/complete + the hosted page |
+| `customer-sessions.ts` | 1 | 0 | create |
+
+Stripe is a new provider for mirror: the authored spec lands on `specs/stripe/api.json`, the service as `stripe.api` B-IR data, and webhook delivery rides the same cross-service-delivery unlock the shadowed AWS bundles are waiting on -- recorded as a takeover condition, not shipped silently.
+
 ## SNS baseline
 
 Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-08.

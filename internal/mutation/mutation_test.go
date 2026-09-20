@@ -4400,8 +4400,8 @@ var mutants = []mutant{
 				return types.String(parts[len(parts)-1])`,
 		new: `				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))
 				return types.String(parts[0])`,
-		pkg:  "./internal/equivalence",
-		run:  "TestBundlesMatchRecordedPacks/aws.secretsmanager",
+		pkg: "./internal/equivalence",
+		run: "TestBundlesMatchRecordedPacks/aws.secretsmanager",
 	},
 	{
 		// The pack skipped records marked Deleted unless the request opted in;
@@ -4412,8 +4412,8 @@ var mutants = []mutant{
 			ev.binds["item"] = rec`,
 		new: `		if false && op.List.Filter != "" {
 			ev.binds["item"] = rec`,
-		pkg:  "./internal/equivalence",
-		run:  "TestBundlesMatchRecordedPacks/aws.secretsmanager",
+		pkg: "./internal/equivalence",
+		run: "TestBundlesMatchRecordedPacks/aws.secretsmanager",
 	},
 	{
 		// UntagResource's put keeps every member it did not name; that is the
@@ -4444,8 +4444,8 @@ var mutants = []mutant{
 				return err
 			}
 		}`,
-		pkg:  "./internal/equivalence",
-		run:  "TestBundlesMatchRecordedPacks/aws.secretsmanager",
+		pkg: "./internal/equivalence",
+		run: "TestBundlesMatchRecordedPacks/aws.secretsmanager",
 	},
 	{
 		name: "dynamodb-ignore-tag-update",
@@ -5479,8 +5479,8 @@ var mutants = []mutant{
 	if w.Spread != "" {`,
 		new: `	// later Get would answer those nulls.
 	if w.Spread != "" && false {`,
-		pkg:  "./internal/engine",
-		run:  "TestSpreadStoresWhatTheRequestCarried",
+		pkg: "./internal/engine",
+		run: "TestSpreadStoresWhatTheRequestCarried",
 	},
 	{
 		// Spreading after the declared members lets a request overwrite the

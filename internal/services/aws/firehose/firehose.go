@@ -29,12 +29,12 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/itchyny/gojq"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"

@@ -82,7 +82,7 @@ type document struct {
 	// api-keys lifecycle, the OAuth token exchange) can only be authored.
 	// Fusion merges the two at operation level with provenance intact.
 	MirrorService string `json:"x-mirror-service"`
-	Servers              []struct {
+	Servers       []struct {
 		URL string `json:"url"`
 	} `json:"servers"`
 	Paths      map[string]json.RawMessage `json:"paths"`

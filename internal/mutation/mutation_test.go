@@ -12347,7 +12347,7 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
 		old:  "\t// endpoint -- which a POST to the root would otherwise always match.\n\tif target := r.Header.Get(\"X-Amz-Target\"); target != \"\" {",
 		new:  "\t// endpoint -- which a POST to the root would otherwise always match.\n\tif target := r.Header.Get(\"X-Amz-Target\"); false {",
-		pkg:  "./internal/services/aws/appsync",
+		pkg:  "./test/behavior/aws",
 		run:  "TestBootedServerAppSyncApiAndQuery",
 	},
 	{

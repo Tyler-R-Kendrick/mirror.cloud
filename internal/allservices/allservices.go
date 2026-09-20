@@ -18,7 +18,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/appsync"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/athena"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudcontrol"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudformation"

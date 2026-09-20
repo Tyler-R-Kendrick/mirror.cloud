@@ -120,6 +120,10 @@ mkdir -p specs/aws specs/gcp
 # The set decides what is fetched. AWS comes from a git repository; everything
 # in specs/urls.tsv comes from its URL. A service in neither is a service the
 # set asks for and nothing can supply, which resolve_specs.py makes fatal.
+# An aws.* id still scans urls.tsv on the way past: an authored supplement to
+# a vendored AWS model (a data-plane operation the smithy document never
+# declared) names its file there, and the authored branch below locks it like
+# any authored document.
 want_aws=0
 declare -a want_urls=()
 if [[ -f "$SET" ]]; then
@@ -127,7 +131,6 @@ if [[ -f "$SET" ]]; then
     [[ -z "$id" || "$id" == \#* ]] && continue
     if [[ "$id" == aws.* ]]; then
       want_aws=1
-      continue
     fi
     while IFS=$'\t' read -r uid upath uurl ubody; do
       [[ -z "$uid" || "$uid" == \#* ]] && continue

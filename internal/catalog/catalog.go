@@ -290,6 +290,41 @@ func Bundle() *model.Bundle {
 		op("ListPromoteAliases", "GET", "/v1/projects/{projectId}/promote/aliases", 200, true),
 		op("UpdateProjectProtectionBypass", "PATCH", "/v1/projects/{idOrName}/protection-bypass", 200, false),
 	}
+	// Stripe is served from behavior/stripe/api, transcribed from the
+	// vendor-authored oracle (specs/stripe/emulate-inventory.json) against an
+	// authored document (specs/stripe/api.json), the way vercel.blob is.
+	// adoptGenerated replaces this list with the generated model's 27; what
+	// it cannot do is invent the entry, so the ID has to be the one the
+	// bundle registers under. Every create answers 200, as the oracle does.
+	stripe := []model.Operation{
+		op("CreateCustomer", "POST", "/v1/customers", 200, false),
+		op("GetCustomer", "GET", "/v1/customers/{id}", 200, true),
+		op("UpdateCustomer", "POST", "/v1/customers/{id}", 200, false),
+		op("DeleteCustomer", "DELETE", "/v1/customers/{id}", 200, false),
+		op("ListCustomers", "GET", "/v1/customers", 200, true),
+		op("CreateProduct", "POST", "/v1/products", 200, false),
+		op("GetProduct", "GET", "/v1/products/{id}", 200, true),
+		op("ListProducts", "GET", "/v1/products", 200, true),
+		op("CreatePrice", "POST", "/v1/prices", 200, false),
+		op("GetPrice", "GET", "/v1/prices/{id}", 200, true),
+		op("ListPrices", "GET", "/v1/prices", 200, true),
+		op("CreatePaymentIntent", "POST", "/v1/payment_intents", 200, false),
+		op("GetPaymentIntent", "GET", "/v1/payment_intents/{id}", 200, true),
+		op("UpdatePaymentIntent", "POST", "/v1/payment_intents/{id}", 200, false),
+		op("ConfirmPaymentIntent", "POST", "/v1/payment_intents/{id}/confirm", 200, false),
+		op("CancelPaymentIntent", "POST", "/v1/payment_intents/{id}/cancel", 200, false),
+		op("ListPaymentIntents", "GET", "/v1/payment_intents", 200, true),
+		op("ListPaymentMethods", "GET", "/v1/payment_methods", 200, true),
+		op("GetCharge", "GET", "/v1/charges/{id}", 200, true),
+		op("ListCharges", "GET", "/v1/charges", 200, true),
+		op("CreateCheckoutSession", "POST", "/v1/checkout/sessions", 200, false),
+		op("GetCheckoutSession", "GET", "/v1/checkout/sessions/{id}", 200, true),
+		op("ExpireCheckoutSession", "POST", "/v1/checkout/sessions/{id}/expire", 200, false),
+		op("ListCheckoutSessions", "GET", "/v1/checkout/sessions", 200, true),
+		op("GetCheckoutPage", "GET", "/checkout/{id}", 200, true),
+		op("CompleteCheckoutSession", "POST", "/checkout/{id}/complete", 200, false),
+		op("CreateCustomerSession", "POST", "/v1/customer_sessions", 200, false),
+	}
 	// Vercel KV is the data plane -- Upstash Redis behind a Vercel host -- and
 	// its whole surface is one operation: POST / with the command as a JSON
 	// array. It needs its own catalog entry because it is its own service id,
@@ -1753,6 +1788,7 @@ func Bundle() *model.Bundle {
 			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", vercel),
 			svc("vercel.kv", "vercel", model.ProtoRESTJSON1, "", "", "", vercelkv),
 			svc("vercel.blob", "vercel", model.ProtoRESTJSON1, "", "", "", vercelblob),
+			svc("stripe.api", "stripe", model.ProtoRESTJSON1, "", "", "", stripe),
 			svc("cloudflare.api", "cloudflare", model.ProtoRESTJSON1, "", "", "", cloudflare),
 			svc("hostinger.api", "hostinger", model.ProtoRESTJSON1, "", "", "", hostinger),
 			azureSvc,

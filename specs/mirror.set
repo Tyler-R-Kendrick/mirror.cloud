@@ -176,6 +176,7 @@ digitalocean.v2 emulate paths=/v2/droplets,/v2/domains
 vercel.api emulate paths=/v2/user,/v9/projects,/v10/projects,/v11/projects,/v7/deployments,/v13/deployments,/v1/projects,/v2/teams,/v2/files,/v2/deployments,/v3/deployments,/v6/deployments,/v12/deployments,/v1/api-keys,/registration,/oauth,/login
 vercel.kv emulate
 vercel.blob emulate
+stripe.api emulate
 azure.blobs emulate
 azure.queue emulate
 azure.table emulate

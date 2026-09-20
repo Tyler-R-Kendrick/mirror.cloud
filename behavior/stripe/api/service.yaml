@@ -1,0 +1,1018 @@
+schema: bir/1
+service: stripe.api
+
+# Transcribed from the vendor-authored oracle, vercel-labs/emulate at
+# afddfabb28f1 (pinned in specs/stripe/emulate-inventory.json): the 27 route
+# registrations of packages/@emulators/stripe/src/routes/*.ts. The oracle
+# checks no authentication on any route, answers every create 200, and shapes
+# every fault as {error: {type, message, code?, param?}} with type always
+# invalid_request_error -- so the bundle checks none either, and the codec's
+# stripe envelope (not an ErrorDef code) decides what is on the wire.
+#
+# Every cell is `authored`: the document it validates against is authored too
+# (specs/stripe/api.json -- Stripe publishes OpenAPI, but the parity claim is
+# against what the oracle serves), so the bundle and the document are the same
+# grade of evidence: a reading of the oracle, not of the real service.
+provenance: authored
+
+# A required member absent from the request fails in the model check before any
+# rule here. Path labels are always bound when a route matches, and every body
+# member is optional at the model level so the bundle -- not a generic fault
+# -- can answer the oracle's missing-param shape, so this names the 404 the
+# only reachable model fault can only mean.
+missing_input_error: ResourceMissing
+
+resources:
+  # Store keys are the full prefixed ids (cus_xxx), and the record id is
+  # conditional rather than a plain prefix: the resource record re-evaluates
+  # on every write, and a patch or a cascade addressing the stored row would
+  # otherwise prefix it a second time and move it. A raw draw is hex, which
+  # can never start with one of these prefixes, so the condition tells a fresh
+  # draw from a stored id apart with no extra state.
+  customer:
+    collection: scust
+    key: id
+    id:
+      generate: { kind: hex, bytes: 12 }
+      input_members: [id]
+    record:
+      id: "string(id).startsWith('cus_') ? string(id) : 'cus_' + string(id)"
+  product:
+    collection: sprod
+    key: id
+    id:
+      generate: { kind: hex, bytes: 12 }
+      input_members: [id]
+    record:
+      id: "string(id).startsWith('prod_') ? string(id) : 'prod_' + string(id)"
+  price:
+    collection: sprice
+    key: id
+    id:
+      generate: { kind: hex, bytes: 12 }
+      input_members: [id]
+    record:
+      # product_name is storage, not wire: the checkout page renders the name
+      # beside each line item, and output expressions cannot query the store,
+      # so the price carries the name it was created with. Names and prices
+      # are immutable after creation (the oracle serves no update or delete
+      # for either), so the snapshot can never go stale.
+      id: "string(id).startsWith('price_') ? string(id) : 'price_' + string(id)"
+  payment_intent:
+    collection: spint
+    key: id
+    id:
+      generate: { kind: hex, bytes: 12 }
+      input_members: [id]
+    record:
+      id: "string(id).startsWith('pi_') ? string(id) : 'pi_' + string(id)"
+  charge:
+    collection: sch
+    key: id
+    id:
+      generate: { kind: hex, bytes: 12 }
+      input_members: [id]
+    record:
+      id: "string(id).startsWith('ch_') ? string(id) : 'ch_' + string(id)"
+  checkout_session:
+    collection: scs
+    key: id
+    id:
+      generate: { kind: hex, bytes: 12 }
+      input_members: [id]
+    record:
+      # lines is storage, not wire: each entry snapshots the price, quantity,
+      # name, unit amount and currency the session was created with, for the
+      # page the output expressions render without a store join. See the price
+      # record for why the snapshot cannot go stale.
+      id: "string(id).startsWith('cs_') ? string(id) : 'cs_' + string(id)"
+
+errors:
+  # No code: the oracle's missing-param errors carry {type, message, param}
+  # and no code member, and the codec omits what the bundle does not declare.
+  InvalidRequest:
+    http: 400
+    fault: client
+  ResourceMissing:
+    code: resource_missing
+    http: 404
+    fault: client
+  # The same code on a different status: references that arrive in the request
+  # body miss with 400, while addressing a path id that is gone misses with
+  # 404. The bundle, not the code table, decides which is which.
+  BadRef:
+    code: resource_missing
+    http: 400
+    fault: client
+  PaymentIntentUnexpectedState:
+    code: payment_intent_unexpected_state
+    http: 400
+    fault: client
+  CheckoutSessionNotOpen:
+    code: checkout_session_not_open
+    http: 400
+    fault: client
+
+operations:
+  CreateCustomer:
+    effects:
+      - counter: { name: "stripe/customer" }
+      - create:
+          resource: customer
+          record:
+            email: "('email' in input && input.email != null) ? dyn(input.email) : dyn(null)"
+            name: "('name' in input && input.name != null) ? dyn(input.name) : dyn(null)"
+            description: "('description' in input && input.description != null) ? dyn(input.description) : dyn(null)"
+            metadata: "('metadata' in input && input.metadata != null) ? dyn(input.metadata) : dyn({})"
+            created: "int(now)"
+            seq: fx.counter
+    output:
+      id: rec.id
+      object: "'customer'"
+      email: rec.email
+      name: rec.name
+      description: rec.description
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+
+  GetCustomer:
+    reads:
+      cust: { resource: customer }
+    require:
+      - cond: cust_found
+        error: ResourceMissing
+        message_expr: "\"No such customer: '\" + string(input.id) + \"'\""
+    output:
+      id: cust.id
+      object: "'customer'"
+      email: cust.email
+      name: cust.name
+      description: cust.description
+      metadata: cust.metadata
+      created: cust.created
+      livemode: "false"
+
+  UpdateCustomer:
+    reads:
+      cust: { resource: customer }
+    require:
+      - cond: cust_found
+        error: ResourceMissing
+        message_expr: "\"No such customer: '\" + string(input.id) + \"'\""
+    effects:
+      # One patch, every member falling back to what the read found, the way
+      # EditProjectEnv keeps what an edit does not name. created is not named
+      # here or on the resource, so an update can never move it.
+      - patch:
+          resource: customer
+          key: "string(cust.id)"
+          record:
+            email: "('email' in input) ? input.email : cust.email"
+            name: "('name' in input) ? input.name : cust.name"
+            description: "('description' in input) ? input.description : cust.description"
+            metadata: "('metadata' in input) ? input.metadata : cust.metadata"
+    output:
+      id: rec.id
+      object: "'customer'"
+      email: rec.email
+      name: rec.name
+      description: rec.description
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+
+  DeleteCustomer:
+    reads:
+      cust: { resource: customer }
+    require:
+      - cond: cust_found
+        error: ResourceMissing
+        message_expr: "\"No such customer: '\" + string(input.id) + \"'\""
+    effects:
+      # The cascade nullifies the customer on every payment intent, charge and
+      # checkout session that references it -- records the request never named,
+      # so a where-selected write is the only place the set can be described.
+      # The effect record names only the nulled member; the resource id is
+      # conditional, so the touched rows keep their keys.
+      - put:
+          resource: payment_intent
+          where: "item.customer_id == string(cust.id)"
+          record:
+            customer_id: "null"
+      - put:
+          resource: charge
+          where: "item.customer_id == string(cust.id)"
+          record:
+            customer_id: "null"
+      - put:
+          resource: checkout_session
+          where: "item.customer_id == string(cust.id)"
+          record:
+            customer_id: "null"
+      - delete: { resource: customer, key: "string(cust.id)" }
+    output:
+      id: "string(input.id)"
+      object: "'customer'"
+      deleted: "true"
+
+  ListCustomers:
+    # Cursor pagination without index arithmetic: the seq counter is
+    # creation-ordered, so starting_after keeps the rows older than the cursor
+    # row and ending_before keeps the rows newer than it, each read resolving
+    # the cursor row (a miss disables that cursor, as the oracle does). The
+    # negated order_by binds the base newest-first; the ending_before page is
+    # the last lim rows of it, every other page the first lim rows.
+    reads:
+      after: { resource: customer, key: "('starting_after' in input && input.starting_after != null) ? string(input.starting_after) : ''" }
+      end: { resource: customer, key: "('ending_before' in input && input.ending_before != null) ? string(input.ending_before) : ''" }
+    let:
+      lim: "('limit' in input && input.limit != null && string(input.limit).matches('^[0-9]+$')) ? (int(string(input.limit)) > 100 ? 100 : int(string(input.limit))) : 10"
+      use_after: "('starting_after' in input && input.starting_after != null && string(input.starting_after) != '')"
+      use_end: "('ending_before' in input && input.ending_before != null && string(input.ending_before) != '')"
+    select:
+      binding: base
+      resource: customer
+      order_by: "-double(item.seq)"
+      filter: >
+        (!('email' in input) || input.email == null || string(input.email) == '' || (item.email == null ? false : string(item.email) == string(input.email)))
+        && (!('created[gte]' in input) || input['created[gte]'] == null || !string(input['created[gte]']).matches('^-?[0-9]+$') || double(item.created) >= double(int(string(input['created[gte]']))))
+        && (!('created[lte]' in input) || input['created[lte]'] == null || !string(input['created[lte]']).matches('^-?[0-9]+$') || double(item.created) <= double(int(string(input['created[lte]']))))
+        && (!use_after || !after_found || double(item.seq) < double(after.seq))
+        && (use_after || !use_end || !end_found || double(item.seq) > double(end.seq))
+    output:
+      object: "'list'"
+      url: "'/v1/customers'"
+      has_more: "size(base) > lim"
+      data: >
+        ((use_end && !use_after) ? slice(base, size(base) - lim, size(base)) : slice(base, 0, lim))
+        .map(c, {'id': c.id, 'object': 'customer', 'email': c.email, 'name': c.name, 'description': c.description, 'metadata': c.metadata, 'created': c.created, 'livemode': false})
+
+  CreateProduct:
+    let:
+      # The oracle rejects whatever is falsy -- missing, empty, false, zero --
+      # and accepts anything else, so the ladder names every falsy shape.
+      name_ok: >
+        'name' in input && input.name != null && (
+          type(input.name) == string ? string(input.name) != '' : (
+          type(input.name) == bool ? input.name : (
+          type(input.name) == double ? input.name != 0.0 : (
+          type(input.name) == int || type(input.name) == uint ? input.name != 0 : true))))
+    require:
+      - cond: name_ok
+        error: InvalidRequest
+        message: "Missing required param: name."
+        fields: { param: "'name'" }
+    effects:
+      - counter: { name: "stripe/product" }
+      - create:
+          resource: product
+          record:
+            name: input.name
+            description: "('description' in input && input.description != null) ? dyn(input.description) : dyn(null)"
+            active: "('active' in input && input.active != null) ? input.active : true"
+            metadata: "('metadata' in input && input.metadata != null) ? dyn(input.metadata) : dyn({})"
+            created: "int(now)"
+            seq: fx.counter
+    output:
+      id: rec.id
+      object: "'product'"
+      name: rec.name
+      description: rec.description
+      active: rec.active
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+
+  GetProduct:
+    reads:
+      prod: { resource: product }
+    require:
+      - cond: prod_found
+        error: ResourceMissing
+        message_expr: "\"No such product: '\" + string(input.id) + \"'\""
+    output:
+      id: prod.id
+      object: "'product'"
+      name: prod.name
+      description: prod.description
+      active: prod.active
+      metadata: prod.metadata
+      created: prod.created
+      livemode: "false"
+
+  ListProducts:
+    reads:
+      after: { resource: product, key: "('starting_after' in input && input.starting_after != null) ? string(input.starting_after) : ''" }
+      end: { resource: product, key: "('ending_before' in input && input.ending_before != null) ? string(input.ending_before) : ''" }
+    let:
+      lim: "('limit' in input && input.limit != null && string(input.limit).matches('^[0-9]+$')) ? (int(string(input.limit)) > 100 ? 100 : int(string(input.limit))) : 10"
+      use_after: "('starting_after' in input && input.starting_after != null && string(input.starting_after) != '')"
+      use_end: "('ending_before' in input && input.ending_before != null && string(input.ending_before) != '')"
+      # The oracle compares with ===: only a boolean true answers ?active=true
+      # and only a boolean false answers anything else, so a form-stored
+      # "false" string answers neither filter and only the unfiltered list.
+      use_active: "('active' in input && input.active != null)"
+      want_active: "use_active && string(input.active) == 'true'"
+    select:
+      binding: base
+      resource: product
+      order_by: "-double(item.seq)"
+      filter: >
+        (!use_active || (want_active ? (type(item.active) == bool && item.active) : (type(item.active) == bool && !item.active)))
+        && (!('created[gte]' in input) || input['created[gte]'] == null || !string(input['created[gte]']).matches('^-?[0-9]+$') || double(item.created) >= double(int(string(input['created[gte]']))))
+        && (!('created[lte]' in input) || input['created[lte]'] == null || !string(input['created[lte]']).matches('^-?[0-9]+$') || double(item.created) <= double(int(string(input['created[lte]']))))
+        && (!use_after || !after_found || double(item.seq) < double(after.seq))
+        && (use_after || !use_end || !end_found || double(item.seq) > double(end.seq))
+    output:
+      object: "'list'"
+      url: "'/v1/products'"
+      has_more: "size(base) > lim"
+      data: >
+        ((use_end && !use_after) ? slice(base, size(base) - lim, size(base)) : slice(base, 0, lim))
+        .map(p, {'id': p.id, 'object': 'product', 'name': p.name, 'description': p.description, 'active': p.active, 'metadata': p.metadata, 'created': p.created, 'livemode': false})
+
+  CreatePrice:
+    reads:
+      prod: { resource: product, key: "('product' in input && input.product != null) ? string(input.product) : ''" }
+    let:
+      # Falsy in the oracle's sense, per member: the pair shares one error.
+      currency_ok: >
+        'currency' in input && input.currency != null && (
+          type(input.currency) == string ? string(input.currency) != '' : (
+          type(input.currency) == bool ? input.currency : (
+          type(input.currency) == double ? input.currency != 0.0 : (
+          type(input.currency) == int || type(input.currency) == uint ? input.currency != 0 : true))))
+      product_ok: >
+        'product' in input && input.product != null && (
+          type(input.product) == string ? string(input.product) != '' : (
+          type(input.product) == bool ? input.product : (
+          type(input.product) == double ? input.product != 0.0 : (
+          type(input.product) == int || type(input.product) == uint ? input.product != 0 : true))))
+      # Numeric coercion is the bundle's job: the codec nests the form fields
+      # and leaves the strings strings, mirroring the oracle's parse-time
+      # Number() on the members it declares numeric. Total -- every branch is
+      # safe -- because lets evaluate before the requires that reject.
+      unit_amount: >
+        !('unit_amount' in input && input.unit_amount != null) ? null : (
+          type(input.unit_amount) == string
+            ? (string(input.unit_amount) == '' ? 0
+              : (string(input.unit_amount).matches('^-?[0-9]+$') ? int(string(input.unit_amount))
+                : (string(input.unit_amount).matches('^-?[0-9]*\\.[0-9]+$') ? dyn(double(string(input.unit_amount))) : dyn(null))))
+            : (type(input.unit_amount) == int || type(input.unit_amount) == uint || type(input.unit_amount) == double ? dyn(input.unit_amount) : dyn(null)))
+    require:
+      - cond: "currency_ok && product_ok"
+        error: InvalidRequest
+        message: "Missing required param: currency and product are required."
+        fields: { param: "'currency'" }
+      - cond: "!product_ok || prod_found"
+        error: BadRef
+        message_expr: "\"No such product: '\" + string(input.product) + \"'\""
+        fields: { param: "'product'" }
+    effects:
+      - counter: { name: "stripe/price" }
+      - create:
+          resource: price
+          record:
+            product_id: "string(input.product)"
+            product_name: "string(prod.name)"
+            currency: "lower(string(input.currency))"
+            unit_amount: unit_amount
+            type: "(('recurring' in input && input.recurring != null && input.recurring != '' && input.recurring != false && input.recurring != 0) ? 'recurring' : 'one_time')"
+            active: "('active' in input && input.active != null) ? input.active : true"
+            metadata: "('metadata' in input && input.metadata != null) ? dyn(input.metadata) : dyn({})"
+            created: "int(now)"
+            seq: fx.counter
+    output:
+      id: rec.id
+      object: "'price'"
+      product: rec.product_id
+      currency: rec.currency
+      unit_amount: rec.unit_amount
+      type: rec.type
+      active: rec.active
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+
+  GetPrice:
+    reads:
+      pr: { resource: price }
+      pr_exp_product: { resource: product, key: "(('expand[]' in input && input['expand[]'] != null && type(input['expand[]']) == list) ? input['expand[]'] : []).exists(e, type(e) == string && e == 'product') && pr_found ? string(pr.product_id) : ''" }
+    require:
+      - cond: pr_found
+        error: ResourceMissing
+        message_expr: "\"No such price: '\" + string(input.id) + \"'\""
+    output:
+      id: pr.id
+      object: "'price'"
+      product: "(('expand[]' in input && input['expand[]'] != null && type(input['expand[]']) == list) ? input['expand[]'] : []).exists(e, type(e) == string && e == 'product') && pr_exp_product_found ? dyn({'id': pr_exp_product.id, 'object': 'product', 'name': pr_exp_product.name, 'active': pr_exp_product.active, 'created': pr_exp_product.created, 'livemode': false}) : dyn(pr.product_id)"
+      currency: pr.currency
+      unit_amount: pr.unit_amount
+      type: pr.type
+      active: pr.active
+      metadata: pr.metadata
+      created: pr.created
+      livemode: "false"
+
+  ListPrices:
+    reads:
+      after: { resource: price, key: "('starting_after' in input && input.starting_after != null) ? string(input.starting_after) : ''" }
+      end: { resource: price, key: "('ending_before' in input && input.ending_before != null) ? string(input.ending_before) : ''" }
+    let:
+      lim: "('limit' in input && input.limit != null && string(input.limit).matches('^[0-9]+$')) ? (int(string(input.limit)) > 100 ? 100 : int(string(input.limit))) : 10"
+      use_after: "('starting_after' in input && input.starting_after != null && string(input.starting_after) != '')"
+      use_end: "('ending_before' in input && input.ending_before != null && string(input.ending_before) != '')"
+      use_active: "('active' in input && input.active != null)"
+      want_active: "use_active && string(input.active) == 'true'"
+    select:
+      binding: base
+      resource: price
+      order_by: "-double(item.seq)"
+      filter: >
+        (!('product' in input) || input.product == null || string(input.product) == '' || string(item.product_id) == string(input.product))
+        && (!use_active || (want_active ? (type(item.active) == bool && item.active) : (type(item.active) == bool && !item.active)))
+        && (!('created[gte]' in input) || input['created[gte]'] == null || !string(input['created[gte]']).matches('^-?[0-9]+$') || double(item.created) >= double(int(string(input['created[gte]']))))
+        && (!('created[lte]' in input) || input['created[lte]'] == null || !string(input['created[lte]']).matches('^-?[0-9]+$') || double(item.created) <= double(int(string(input['created[lte]']))))
+        && (!use_after || !after_found || double(item.seq) < double(after.seq))
+        && (use_after || !use_end || !end_found || double(item.seq) > double(end.seq))
+    output:
+      object: "'list'"
+      url: "'/v1/prices'"
+      has_more: "size(base) > lim"
+      data: >
+        ((use_end && !use_after) ? slice(base, size(base) - lim, size(base)) : slice(base, 0, lim))
+        .map(p, {'id': p.id, 'object': 'price', 'product': p.product_id, 'currency': p.currency, 'unit_amount': p.unit_amount, 'type': p.type, 'active': p.active, 'metadata': p.metadata, 'created': p.created, 'livemode': false})
+
+  CreatePaymentIntent:
+    reads:
+      cust: { resource: customer, key: "('customer' in input && input.customer != null && string(input.customer) != '') ? string(input.customer) : ''" }
+    let:
+      # Total coercion for the numeric member, mirroring the oracle's
+      # parse-time Number(): digits to int, decimals to double, anything else
+      # to null -- and the guard below rejects nulls and zeros alike.
+      amount: >
+        !('amount' in input && input.amount != null) ? null : (
+          type(input.amount) == string
+            ? (string(input.amount) == '' ? 0
+              : (string(input.amount).matches('^-?[0-9]+$') ? int(string(input.amount))
+                : (string(input.amount).matches('^-?[0-9]*\\.[0-9]+$') ? dyn(double(string(input.amount))) : dyn(null))))
+            : (type(input.amount) == int || type(input.amount) == uint || type(input.amount) == double ? dyn(input.amount) : dyn(null)))
+      has_customer: "('customer' in input && input.customer != null && string(input.customer) != '')"
+    require:
+      # In the oracle's order: the pair first, then the customer reference.
+      - cond: "amount != null && amount != 0 && 'currency' in input && input.currency != null && string(input.currency) != ''"
+        error: InvalidRequest
+        message: "Missing required param: amount and currency are required."
+        fields: { param: "'amount'" }
+      - cond: "!has_customer || cust_found"
+        error: BadRef
+        message_expr: "\"No such customer: '\" + string(input.customer) + \"'\""
+        fields: { param: "'customer'" }
+    effects:
+      - counter: { name: "stripe/payment_intent" }
+      - create:
+          resource: payment_intent
+          record:
+            amount: amount
+            currency: "lower(string(input.currency))"
+            status: "(('payment_method' in input && input.payment_method != null && string(input.payment_method) != '') ? 'requires_confirmation' : 'requires_payment_method')"
+            customer_id: "has_customer ? dyn(string(input.customer)) : dyn(null)"
+            description: "('description' in input && input.description != null) ? dyn(input.description) : dyn(null)"
+            payment_method: "(('payment_method' in input && input.payment_method != null) ? dyn(input.payment_method) : dyn(null))"
+            metadata: "('metadata' in input && input.metadata != null) ? dyn(input.metadata) : dyn({})"
+            created: "int(now)"
+            seq: fx.counter
+    output:
+      id: rec.id
+      object: "'payment_intent'"
+      amount: rec.amount
+      currency: rec.currency
+      status: rec.status
+      customer: rec.customer_id
+      description: rec.description
+      payment_method: rec.payment_method
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+
+  GetPaymentIntent:
+    reads:
+      pi: { resource: payment_intent }
+      pi_exp_customer: { resource: customer, key: "(('expand[]' in input && input['expand[]'] != null && type(input['expand[]']) == list) ? input['expand[]'] : []).exists(e, type(e) == string && e == 'customer') && pi_found && pi.customer_id != null ? string(pi.customer_id) : ''" }
+    require:
+      - cond: pi_found
+        error: ResourceMissing
+        message_expr: "\"No such payment_intent: '\" + string(input.id) + \"'\""
+    output:
+      id: pi.id
+      object: "'payment_intent'"
+      amount: pi.amount
+      currency: pi.currency
+      status: pi.status
+      customer: "(('expand[]' in input && input['expand[]'] != null && type(input['expand[]']) == list) ? input['expand[]'] : []).exists(e, type(e) == string && e == 'customer') && pi_exp_customer_found ? dyn({'id': pi_exp_customer.id, 'object': 'customer', 'email': pi_exp_customer.email, 'name': pi_exp_customer.name, 'description': pi_exp_customer.description, 'metadata': pi_exp_customer.metadata, 'created': pi_exp_customer.created, 'livemode': false}) : dyn(pi.customer_id)"
+      description: pi.description
+      payment_method: pi.payment_method
+      metadata: pi.metadata
+      created: pi.created
+      livemode: "false"
+
+  UpdatePaymentIntent:
+    reads:
+      pi: { resource: payment_intent }
+    let:
+      # Total coercion, the create's shape: the oracle assigns the parsed
+      # member with no validation on this route, so a present member is
+      # stored coerced (garbage becomes null, as NaN does on the wire) and
+      # only an absent one keeps the old value.
+      amount_upd: >
+        !('amount' in input && input.amount != null) ? null : (
+          type(input.amount) == string
+            ? (string(input.amount) == '' ? 0
+              : (string(input.amount).matches('^-?[0-9]+$') ? int(string(input.amount))
+                : (string(input.amount).matches('^-?[0-9]*\\.[0-9]+$') ? dyn(double(string(input.amount))) : dyn(null))))
+            : (type(input.amount) == int || type(input.amount) == uint || type(input.amount) == double ? dyn(input.amount) : dyn(null)))
+    require:
+      - cond: pi_found
+        error: ResourceMissing
+        message_expr: "\"No such payment_intent: '\" + string(input.id) + \"'\""
+    effects:
+      - patch:
+          resource: payment_intent
+          key: "string(pi.id)"
+          record:
+            amount: "amount_upd != null ? amount_upd : pi.amount"
+            currency: "('currency' in input && input.currency != null) ? lower(string(input.currency)) : pi.currency"
+            description: "('description' in input) ? input.description : pi.description"
+            metadata: "('metadata' in input) ? input.metadata : pi.metadata"
+            payment_method: "('payment_method' in input) ? input.payment_method : pi.payment_method"
+            status: "(('payment_method' in input && input.payment_method != null) && string(pi.status) == 'requires_payment_method' ? 'requires_confirmation' : string(pi.status))"
+    output:
+      id: rec.id
+      object: "'payment_intent'"
+      amount: rec.amount
+      currency: rec.currency
+      status: rec.status
+      customer: rec.customer_id
+      description: rec.description
+      payment_method: rec.payment_method
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+
+  ConfirmPaymentIntent:
+    reads:
+      pi: { resource: payment_intent }
+    require:
+      - cond: pi_found
+        error: ResourceMissing
+        message_expr: "\"No such payment_intent: '\" + string(input.id) + \"'\""
+      - cond: "string(pi.status) == 'requires_confirmation' || string(pi.status) == 'requires_payment_method'"
+        error: PaymentIntentUnexpectedState
+        message_expr: "\"This PaymentIntent's status is \" + string(pi.status) + \", which does not allow confirmation.\""
+    effects:
+      # The charge is written first: rec is the last write's record, and the
+      # answer is the intent, so the intent's patch runs last. The confirm
+      # changes only the method and the status, so the charge copies the rest
+      # from the read.
+      - counter: { name: "stripe/charge" }
+      - create:
+          resource: charge
+          record:
+            amount: pi.amount
+            currency: pi.currency
+            status: "'succeeded'"
+            customer_id: pi.customer_id
+            payment_intent_id: "string(pi.id)"
+            description: pi.description
+            metadata: pi.metadata
+            created: "int(now)"
+            seq: fx.counter
+      - patch:
+          resource: payment_intent
+          key: "string(pi.id)"
+          record:
+            payment_method: "(('payment_method' in input && input.payment_method != null) ? input.payment_method : pi.payment_method)"
+            status: "'succeeded'"
+    output:
+      id: rec.id
+      object: "'payment_intent'"
+      amount: rec.amount
+      currency: rec.currency
+      status: rec.status
+      customer: rec.customer_id
+      description: rec.description
+      payment_method: rec.payment_method
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+
+  CancelPaymentIntent:
+    reads:
+      pi: { resource: payment_intent }
+    require:
+      - cond: pi_found
+        error: ResourceMissing
+        message_expr: "\"No such payment_intent: '\" + string(input.id) + \"'\""
+      - cond: "string(pi.status) != 'succeeded' && string(pi.status) != 'canceled'"
+        error: PaymentIntentUnexpectedState
+        message_expr: "\"This PaymentIntent's status is \" + string(pi.status) + \", which does not allow cancellation.\""
+    effects:
+      - patch:
+          resource: payment_intent
+          key: "string(pi.id)"
+          record:
+            status: "'canceled'"
+    output:
+      id: rec.id
+      object: "'payment_intent'"
+      amount: rec.amount
+      currency: rec.currency
+      status: rec.status
+      customer: rec.customer_id
+      description: rec.description
+      payment_method: rec.payment_method
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+
+  ListPaymentIntents:
+    reads:
+      after: { resource: payment_intent, key: "('starting_after' in input && input.starting_after != null) ? string(input.starting_after) : ''" }
+      end: { resource: payment_intent, key: "('ending_before' in input && input.ending_before != null) ? string(input.ending_before) : ''" }
+    let:
+      lim: "('limit' in input && input.limit != null && string(input.limit).matches('^[0-9]+$')) ? (int(string(input.limit)) > 100 ? 100 : int(string(input.limit))) : 10"
+      use_after: "('starting_after' in input && input.starting_after != null && string(input.starting_after) != '')"
+      use_end: "('ending_before' in input && input.ending_before != null && string(input.ending_before) != '')"
+    select:
+      binding: base
+      resource: payment_intent
+      order_by: "-double(item.seq)"
+      filter: >
+        (!('customer' in input) || input.customer == null || string(input.customer) == '' || (item.customer_id == null ? false : string(item.customer_id) == string(input.customer)))
+        && (!('status' in input) || input.status == null || string(input.status) == '' || string(item.status) == string(input.status))
+        && (!('created[gte]' in input) || input['created[gte]'] == null || !string(input['created[gte]']).matches('^-?[0-9]+$') || double(item.created) >= double(int(string(input['created[gte]']))))
+        && (!('created[lte]' in input) || input['created[lte]'] == null || !string(input['created[lte]']).matches('^-?[0-9]+$') || double(item.created) <= double(int(string(input['created[lte]']))))
+        && (!use_after || !after_found || double(item.seq) < double(after.seq))
+        && (use_after || !use_end || !end_found || double(item.seq) > double(end.seq))
+    output:
+      object: "'list'"
+      url: "'/v1/payment_intents'"
+      has_more: "size(base) > lim"
+      data: >
+        ((use_end && !use_after) ? slice(base, size(base) - lim, size(base)) : slice(base, 0, lim))
+        .map(p, {'id': p.id, 'object': 'payment_intent', 'amount': p.amount, 'currency': p.currency, 'status': p.status, 'customer': p.customer_id, 'description': p.description, 'payment_method': p.payment_method, 'metadata': p.metadata, 'created': p.created, 'livemode': false})
+
+  ListPaymentMethods:
+    # The oracle stores no payment methods, so the page is always empty; the
+    # only behavior is the unknown-customer 400, which reads like any get.
+    reads:
+      cust: { resource: customer, key: "('customer' in input && input.customer != null && string(input.customer) != '') ? string(input.customer) : ''" }
+    require:
+      - cond: "!('customer' in input && input.customer != null && string(input.customer) != '') || cust_found"
+        error: BadRef
+        message_expr: "\"No such customer: '\" + string(input.customer) + \"'\""
+        fields: { param: "'customer'" }
+    output:
+      object: "'list'"
+      url: "'/v1/payment_methods'"
+      has_more: "false"
+      data: "[]"
+
+  GetCharge:
+    reads:
+      ch: { resource: charge }
+      ch_exp_customer: { resource: customer, key: "(('expand[]' in input && input['expand[]'] != null && type(input['expand[]']) == list) ? input['expand[]'] : []).exists(e, type(e) == string && e == 'customer') && ch_found && ch.customer_id != null ? string(ch.customer_id) : ''" }
+      ch_exp_pi: { resource: payment_intent, key: "(('expand[]' in input && input['expand[]'] != null && type(input['expand[]']) == list) ? input['expand[]'] : []).exists(e, type(e) == string && e == 'payment_intent') && ch_found && ch.payment_intent_id != null ? string(ch.payment_intent_id) : ''" }
+    require:
+      - cond: ch_found
+        error: ResourceMissing
+        message_expr: "\"No such charge: '\" + string(input.id) + \"'\""
+    output:
+      id: ch.id
+      object: "'charge'"
+      amount: ch.amount
+      currency: ch.currency
+      status: ch.status
+      customer: "(('expand[]' in input && input['expand[]'] != null && type(input['expand[]']) == list) ? input['expand[]'] : []).exists(e, type(e) == string && e == 'customer') && ch_exp_customer_found ? dyn({'id': ch_exp_customer.id, 'object': 'customer', 'email': ch_exp_customer.email, 'name': ch_exp_customer.name, 'description': ch_exp_customer.description, 'metadata': ch_exp_customer.metadata, 'created': ch_exp_customer.created, 'livemode': false}) : dyn(ch.customer_id)"
+      payment_intent: "(('expand[]' in input && input['expand[]'] != null && type(input['expand[]']) == list) ? input['expand[]'] : []).exists(e, type(e) == string && e == 'payment_intent') && ch_exp_pi_found ? dyn({'id': ch_exp_pi.id, 'object': 'payment_intent', 'amount': ch_exp_pi.amount, 'currency': ch_exp_pi.currency, 'status': ch_exp_pi.status, 'customer': ch_exp_pi.customer_id, 'description': ch_exp_pi.description, 'payment_method': ch_exp_pi.payment_method, 'metadata': ch_exp_pi.metadata, 'created': ch_exp_pi.created, 'livemode': false}) : dyn(ch.payment_intent_id)"
+      description: ch.description
+      metadata: ch.metadata
+      created: ch.created
+      livemode: "false"
+
+  ListCharges:
+    reads:
+      after: { resource: charge, key: "('starting_after' in input && input.starting_after != null) ? string(input.starting_after) : ''" }
+      end: { resource: charge, key: "('ending_before' in input && input.ending_before != null) ? string(input.ending_before) : ''" }
+    let:
+      lim: "('limit' in input && input.limit != null && string(input.limit).matches('^[0-9]+$')) ? (int(string(input.limit)) > 100 ? 100 : int(string(input.limit))) : 10"
+      use_after: "('starting_after' in input && input.starting_after != null && string(input.starting_after) != '')"
+      use_end: "('ending_before' in input && input.ending_before != null && string(input.ending_before) != '')"
+    select:
+      binding: base
+      resource: charge
+      order_by: "-double(item.seq)"
+      filter: >
+        (!('customer' in input) || input.customer == null || string(input.customer) == '' || (item.customer_id == null ? false : string(item.customer_id) == string(input.customer)))
+        && (!('payment_intent' in input) || input.payment_intent == null || string(input.payment_intent) == '' || (item.payment_intent_id == null ? false : string(item.payment_intent_id) == string(input.payment_intent)))
+        && (!('created[gte]' in input) || input['created[gte]'] == null || !string(input['created[gte]']).matches('^-?[0-9]+$') || double(item.created) >= double(int(string(input['created[gte]']))))
+        && (!('created[lte]' in input) || input['created[lte]'] == null || !string(input['created[lte]']).matches('^-?[0-9]+$') || double(item.created) <= double(int(string(input['created[lte]']))))
+        && (!use_after || !after_found || double(item.seq) < double(after.seq))
+        && (use_after || !use_end || !end_found || double(item.seq) > double(end.seq))
+    output:
+      object: "'list'"
+      url: "'/v1/charges'"
+      has_more: "size(base) > lim"
+      data: >
+        ((use_end && !use_after) ? slice(base, size(base) - lim, size(base)) : slice(base, 0, lim))
+        .map(c, {'id': c.id, 'object': 'charge', 'amount': c.amount, 'currency': c.currency, 'status': c.status, 'customer': c.customer_id, 'payment_intent': c.payment_intent_id, 'description': c.description, 'metadata': c.metadata, 'created': c.created, 'livemode': false})
+
+  CreateCheckoutSession:
+    reads:
+      cust: { resource: customer, key: "('customer' in input && input.customer != null && string(input.customer) != '') ? string(input.customer) : ''" }
+    let:
+      mode_ok: >
+        'mode' in input && input.mode != null && (
+          type(input.mode) == string ? string(input.mode) != '' : (
+          type(input.mode) == bool ? input.mode : (
+          type(input.mode) == double ? input.mode != 0.0 : (
+          type(input.mode) == int || type(input.mode) == uint ? input.mode != 0 : true))))
+      has_customer: "('customer' in input && input.customer != null && string(input.customer) != '')"
+      has_items: "('line_items' in input && input.line_items != null)"
+      li: "has_items && type(input.line_items) == list ? input.line_items : []"
+      bad_obj: "indices(li).filter(k, type(li[k]) != map)"
+      bad_noprice: "indices(li).filter(k, type(li[k]) == map && (!('price' in li[k]) || li[k].price == null || type(li[k].price) != string || string(li[k].price) == ''))"
+      bad_qty: >
+        indices(li).filter(k, type(li[k]) == map && !(('quantity' in li[k]) && li[k].quantity != null && (
+          (type(li[k].quantity) == string && string(li[k].quantity).matches('^[0-9]+$') && int(string(li[k].quantity)) >= 1)
+          || ((type(li[k].quantity) == int || type(li[k].quantity) == uint) && li[k].quantity >= 1)
+          || (type(li[k].quantity) == double && li[k].quantity >= 1.0))))
+    select:
+      binding: prices
+      resource: price
+    require:
+      # In the oracle's order: mode, the customer reference, the array shape,
+      # then per-item object, price, price-exists (this one names the select,
+      # so it runs after it), and quantity. The rules are major over the
+      # elements where the oracle iterates element-major; single-error
+      # requests answer identically either way.
+      - cond: mode_ok
+        error: InvalidRequest
+        message: "Missing required param: mode."
+        fields: { param: "'mode'" }
+      - cond: "!has_customer || cust_found"
+        error: BadRef
+        message_expr: "\"No such customer: '\" + string(input.customer) + \"'\""
+        fields: { param: "'customer'" }
+      - cond: "!has_items || type(input.line_items) == list"
+        error: InvalidRequest
+        message: "line_items must be an array."
+        fields: { param: "'line_items'" }
+      - cond: "size(bad_obj) == 0"
+        error: InvalidRequest
+        message_expr: "\"Invalid line_items[\" + string(bad_obj[0]) + \"]: must be an object.\""
+        fields:
+          param: "\"line_items[\" + string(bad_obj[0]) + \"]\""
+      - cond: "size(bad_noprice) == 0"
+        error: InvalidRequest
+        message_expr: "\"Missing required param: line_items[\" + string(bad_noprice[0]) + \"][price].\""
+        fields:
+          param: "\"line_items[\" + string(bad_noprice[0]) + \"][price]\""
+      # This one names the select's binding, so it runs after the select, like
+      # DeleteBlobs' If-Match rule: the unknown-price check needs the price
+      # rows the select gathers.
+      - cond: "size(indices(li).filter(k, type(li[k]) == map && ('price' in li[k]) && li[k].price != null && type(li[k].price) == string && string(li[k].price) != '' && !prices.exists(p, string(p.id) == string(li[k].price)))) == 0"
+        error: BadRef
+        message_expr: "\"No such price: '\" + string(li[indices(li).filter(k, type(li[k]) == map && ('price' in li[k]) && li[k].price != null && type(li[k].price) == string && string(li[k].price) != '' && !prices.exists(p, string(p.id) == string(li[k].price)))[0]].price) + \"'\""
+        fields:
+          param: "\"line_items[\" + string(indices(li).filter(k, type(li[k]) == map && ('price' in li[k]) && li[k].price != null && type(li[k].price) == string && string(li[k].price) != '' && !prices.exists(p, string(p.id) == string(li[k].price)))[0]) + \"][price]\""
+      - cond: "size(bad_qty) == 0"
+        error: InvalidRequest
+        message_expr: "\"Invalid line_items[\" + string(bad_qty[0]) + \"][quantity]: must be a positive integer.\""
+        fields:
+          param: "\"line_items[\" + string(bad_qty[0]) + \"][quantity]\""
+    effects:
+      - counter: { name: "stripe/checkout_session" }
+      - create:
+          resource: checkout_session
+          record:
+            mode: input.mode
+            status: "'open'"
+            payment_status: "'unpaid'"
+            customer_id: "has_customer ? dyn(string(input.customer)) : dyn(null)"
+            success_url: "('success_url' in input && input.success_url != null) ? dyn(input.success_url) : dyn(null)"
+            cancel_url: "('cancel_url' in input && input.cancel_url != null) ? dyn(input.cancel_url) : dyn(null)"
+            lines: >
+              li.map(e, {'price': string(e.price),
+                'quantity': (type(e.quantity) == string ? int(string(e.quantity)) : int(e.quantity)),
+                'name': string(prices.filter(p, string(p.id) == string(e.price))[0].product_name),
+                'unit_amount': (prices.filter(p, string(p.id) == string(e.price))[0].unit_amount != null ? int(prices.filter(p, string(p.id) == string(e.price))[0].unit_amount) : 0),
+                'currency': string(prices.filter(p, string(p.id) == string(e.price))[0].currency),
+                'total': (type(e.quantity) == string ? int(string(e.quantity)) : int(e.quantity)) * (prices.filter(p, string(p.id) == string(e.price))[0].unit_amount != null ? int(prices.filter(p, string(p.id) == string(e.price))[0].unit_amount) : 0)})
+            metadata: "('metadata' in input && input.metadata != null) ? dyn(input.metadata) : dyn({})"
+            created: "int(now)"
+            seq: fx.counter
+    output:
+      id: rec.id
+      object: "'checkout.session'"
+      mode: rec.mode
+      status: rec.status
+      payment_status: rec.payment_status
+      customer: rec.customer_id
+      success_url: rec.success_url
+      cancel_url: rec.cancel_url
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+      url: "endpoint + '/checkout/' + string(rec.id)"
+
+  GetCheckoutSession:
+    reads:
+      sess: { resource: checkout_session }
+    require:
+      - cond: sess_found
+        error: ResourceMissing
+        message_expr: "\"No such checkout session: '\" + string(input.id) + \"'\""
+    output:
+      id: sess.id
+      object: "'checkout.session'"
+      mode: sess.mode
+      status: sess.status
+      payment_status: sess.payment_status
+      customer: sess.customer_id
+      success_url: sess.success_url
+      cancel_url: sess.cancel_url
+      metadata: sess.metadata
+      created: sess.created
+      livemode: "false"
+      url: "string(sess.status) == 'open' ? dyn(endpoint + '/checkout/' + string(sess.id)) : dyn(null)"
+
+  ExpireCheckoutSession:
+    reads:
+      sess: { resource: checkout_session }
+    require:
+      - cond: sess_found
+        error: ResourceMissing
+        message_expr: "\"No such checkout session: '\" + string(input.id) + \"'\""
+      - cond: "string(sess.status) == 'open'"
+        error: CheckoutSessionNotOpen
+        message: "Only open sessions can be expired."
+    effects:
+      - patch:
+          resource: checkout_session
+          key: "string(sess.id)"
+          record:
+            status: "'expired'"
+    output:
+      id: rec.id
+      object: "'checkout.session'"
+      mode: rec.mode
+      status: rec.status
+      payment_status: rec.payment_status
+      customer: rec.customer_id
+      success_url: rec.success_url
+      cancel_url: rec.cancel_url
+      metadata: rec.metadata
+      created: rec.created
+      livemode: "false"
+      url: "dyn(null)"
+
+  ListCheckoutSessions:
+    reads:
+      after: { resource: checkout_session, key: "('starting_after' in input && input.starting_after != null) ? string(input.starting_after) : ''" }
+      end: { resource: checkout_session, key: "('ending_before' in input && input.ending_before != null) ? string(input.ending_before) : ''" }
+    let:
+      lim: "('limit' in input && input.limit != null && string(input.limit).matches('^[0-9]+$')) ? (int(string(input.limit)) > 100 ? 100 : int(string(input.limit))) : 10"
+      use_after: "('starting_after' in input && input.starting_after != null && string(input.starting_after) != '')"
+      use_end: "('ending_before' in input && input.ending_before != null && string(input.ending_before) != '')"
+    select:
+      binding: base
+      resource: checkout_session
+      order_by: "-double(item.seq)"
+      filter: >
+        (!('customer' in input) || input.customer == null || string(input.customer) == '' || (item.customer_id == null ? false : string(item.customer_id) == string(input.customer)))
+        && (!('status' in input) || input.status == null || string(input.status) == '' || string(item.status) == string(input.status))
+        && (!('payment_status' in input) || input.payment_status == null || string(input.payment_status) == '' || string(item.payment_status) == string(input.payment_status))
+        && (!('created[gte]' in input) || input['created[gte]'] == null || !string(input['created[gte]']).matches('^-?[0-9]+$') || double(item.created) >= double(int(string(input['created[gte]']))))
+        && (!('created[lte]' in input) || input['created[lte]'] == null || !string(input['created[lte]']).matches('^-?[0-9]+$') || double(item.created) <= double(int(string(input['created[lte]']))))
+        && (!use_after || !after_found || double(item.seq) < double(after.seq))
+        && (use_after || !use_end || !end_found || double(item.seq) > double(end.seq))
+    output:
+      object: "'list'"
+      url: "'/v1/checkout/sessions'"
+      has_more: "size(base) > lim"
+      data: >
+        ((use_end && !use_after) ? slice(base, size(base) - lim, size(base)) : slice(base, 0, lim))
+        .map(s, {'id': s.id, 'object': 'checkout.session', 'mode': s.mode, 'status': s.status, 'payment_status': s.payment_status, 'customer': s.customer_id, 'success_url': s.success_url, 'cancel_url': s.cancel_url, 'metadata': s.metadata, 'created': s.created, 'livemode': false, 'url': s.status == 'open' ? dyn(endpoint + '/checkout/' + string(s.id)) : dyn(null)})
+
+  GetCheckoutPage:
+    # The page is mirror's own minimal markup, the way the OAuth sign-in page
+    # is: a browser flow needs a working form posting to the complete route,
+    # not the oracle's pixels. What is the oracle's is the data on it -- the
+    # line names, quantities, per-line totals, subtotal and currency -- and
+    # the status each session state answers.
+    reads:
+      sess: { resource: checkout_session, key: "('id' in input && input.id != null) ? string(input.id) : ''" }
+    output:
+      status: "!sess_found ? 404 : 200"
+      page: >
+        !sess_found
+        ? '<!doctype html><html><head><title>Session Not Found</title></head><body><h1>Session Not Found</h1><p>This checkout session does not exist.</p></body></html>'
+        : (string(sess.status) != 'open'
+          ? '<!doctype html><html><head><title>Session Expired</title></head><body><h1>Session Expired</h1><p>This checkout session is no longer available.</p><p>Status: ' + string(sess.status) + '</p></body></html>'
+          : '<!doctype html><html><head><title>Checkout</title></head><body><h1>Order summary</h1>'
+            + join(sess.lines.map(l, '<div class="line"><span class="name">' + string(l.name) + '</span><span class="qty">Qty ' + string(int(l.quantity)) + '</span><span class="total">' + ('$' + string(int(l.total) / 100) + '.' + (int(l.total) % 100 < 10 ? '0' + string(int(l.total) % 100) : string(int(l.total) % 100))) + '</span>' + (int(l.quantity) > 1 ? '<span class="unit">' + ('$' + string(int(l.unit_amount) / 100) + '.' + (int(l.unit_amount) % 100 < 10 ? '0' + string(int(l.unit_amount) % 100) : string(int(l.unit_amount) % 100))) + ' each</span>' : '') + '</div>'), '')
+            + '<div class="subtotal">Subtotal ' + ('$' + string(sum(sess.lines.map(l, int(l.total))) / 100) + '.' + (sum(sess.lines.map(l, int(l.total))) % 100 < 10 ? '0' + string(sum(sess.lines.map(l, int(l.total))) % 100) : string(sum(sess.lines.map(l, int(l.total))) % 100))) + '</div>'
+            + '<div class="total">Total due ' + ('$' + string(sum(sess.lines.map(l, int(l.total))) / 100) + '.' + (sum(sess.lines.map(l, int(l.total))) % 100 < 10 ? '0' + string(sum(sess.lines.map(l, int(l.total))) % 100) : string(sum(sess.lines.map(l, int(l.total))) % 100))) + ' ' + upper(size(sess.lines) > 0 ? string(sess.lines[0].currency) : 'usd') + '</div>'
+            + (sess.cancel_url != null && string(sess.cancel_url) != '' ? '<div class="cancel"><a href="' + string(sess.cancel_url) + '">Cancel</a></div>' : '')
+            + '<form method="post" action="/checkout/' + string(sess.id) + '/complete"><button type="submit">Pay</button></form></body></html>')
+
+  CompleteCheckoutSession:
+    reads:
+      sess: { resource: checkout_session, key: "('id' in input && input.id != null) ? string(input.id) : ''" }
+    effects:
+      - patch:
+          resource: checkout_session
+          key: "string(sess.id)"
+          when: "sess_found && string(sess.status) == 'open'"
+          record:
+            status: "'complete'"
+            payment_status: "'paid'"
+    output:
+      location: "!sess_found || string(sess.status) != 'open' ? '/checkout/' + string(input.id) : (sess.success_url != null && string(sess.success_url) != '' ? join(split(string(sess.success_url), '{CHECKOUT_SESSION_ID}'), string(sess.id)) : '')"
+      page: "sess_found && string(sess.status) == 'open' && (sess.success_url == null || string(sess.success_url) == '') ? '<!doctype html><html><head><title>Payment Complete</title></head><body><h1>Payment Complete</h1><p>Your payment was successful.</p><p>Payment received</p></body></html>' : ''"
+
+  CreateCustomerSession:
+    reads:
+      cust: { resource: customer, key: "('customer' in input && input.customer != null && string(input.customer) != '') ? string(input.customer) : ''" }
+    let:
+      has_customer: "('customer' in input && input.customer != null && string(input.customer) != '')"
+    require:
+      - cond: has_customer
+        error: InvalidRequest
+        message: "Missing required param: customer."
+        fields: { param: "'customer'" }
+      - cond: cust_found
+        error: BadRef
+        message_expr: "\"No such customer: '\" + string(input.customer) + \"'\""
+        fields: { param: "'customer'" }
+    effects:
+      - generate: { bind: secret, kind: hex, bytes: 12 }
+    output:
+      object: "'customer_session'"
+      client_secret: "'cuss_secret_' + fx.secret"
+      components: "('components' in input && input.components != null) ? dyn(input.components) : dyn({})"
+      created: "int(now)"
+      customer: "string(cust.id)"
+      expires_at: "int(now) + 1800"
+      livemode: "false"
+
+quirks:
+  - operation: GetCheckoutPage
+    note: >
+      The markup is mirror's, not the oracle's: the oracle renders its shared
+      card chrome (ui.ts) around the order data, and reproducing its pixels in
+      expressions would be transcription without behavior. What is asserted is
+      the data the page carries -- line names, quantities, per-line totals,
+      subtotal and currency in the oracle's $X.YY money shape -- plus the
+      status each session state answers and the form posting to the complete
+      route, which is what makes the browser flow work.
+  - operation: CreateCheckoutSession
+    note: >
+      The session record snapshots each line item's name, unit amount and
+      currency beside its price and quantity, and the page renders from that
+      snapshot rather than joining prices and products at view time (output
+      expressions cannot query the store). The snapshot cannot go stale:
+      the oracle serves no update or delete for products or prices, so the
+      values a session is created with are the values it keeps.
+  - operation: CreatePaymentIntent
+    note: >
+      Form-encoded numbers arrive as strings and the codec leaves them that
+      way, so the bundle coerces amount, unit_amount and quantity the way the
+      oracle's parse-time Number() does: digit strings to int, decimal strings
+      to double, anything else to null. Exotic Number() spellings (hex,
+      exponents, padded whitespace) are not reproduced; the corpus exercises
+      the integer paths both sides take.
+  - operation: CreateCheckoutSession
+    note: >
+      Required-member checks transcribe the oracle's falsiness, not presence:
+      a missing, empty, false or zero member fails, and anything else passes.
+      The failure order is the oracle's per operation, but the rules are major
+      over the line-item elements where the oracle iterates element-major --
+      a request wrong in two elements at once may name the later element's
+      defect, which no single-error request can distinguish.
+  - operation: CreateCustomerSession
+    note: >
+      Identifiers draw 12 hex bytes behind cus_/prod_/price_/pi_/ch_/cs_ (and
+      cuss_secret_ for customer-session secrets) where the oracle draws 24
+      base64url characters. Both are opaque unique strings, and the
+      differential normalizers erase the alphabet difference; what is
+      deterministic is the draw order under a seed.
+  - operation: DeleteCustomer
+    note: >
+      Webhook delivery (customer.deleted and every other event the oracle
+      dispatches) is not shipped: delivery needs the cross-service-delivery
+      primitive the shadowed AWS bundles are waiting on, recorded in PARITY.md
+      as a takeover condition. The serve state counts routes served, and every
+      route is served; the dispatch side is the gap, stated, not silent.

@@ -5475,8 +5475,10 @@ var mutants = []mutant{
 		// this replaced would have been lost silently.
 		name: "engine-write-drops-the-spread",
 		file: filepath.Join("internal", "engine", "eval.go"),
-		old:  `	if w.Spread != "" {`,
-		new:  `	if w.Spread != "" && false {`,
+		old: `	// later Get would answer those nulls.
+	if w.Spread != "" {`,
+		new: `	// later Get would answer those nulls.
+	if w.Spread != "" && false {`,
 		pkg:  "./internal/engine",
 		run:  "TestSpreadStoresWhatTheRequestCarried",
 	},

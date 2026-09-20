@@ -42,6 +42,7 @@ vercel.api	vercel/api-extra.json	authored
 vercel.api	vercel/api-extra.json	authored
 vercel.kv	vercel/kv.json	authored
 vercel.blob	vercel/blob.json	authored
+stripe.api	stripe/api.json	authored
 azure.blobs	azure/blobs.json	authored
 azure.queue	azure/queue.json	authored
 azure.table	azure/table.json	authored

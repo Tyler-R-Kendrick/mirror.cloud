@@ -307,6 +307,32 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
+		// sum folds a list of numbers into their total, the accumulation CEL's
+		// macros cannot express. Ints stay ints.
+		cel.Function("sum", cel.Overload("sum_1", []*cel.Type{dyn}, dyn,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				list, _ := fromCEL(v).([]any)
+				var total int64
+				for _, e := range list {
+					n, _ := toFloat(e)
+					total += int64(n)
+				}
+				return types.DefaultTypeAdapter.NativeToValue(total)
+			}))),
+
+		// slice is list[start:end] with the bounds clamped into range, so a
+		// cursor past the end is an empty page rather than an error.
+		cel.Function("slice", cel.Overload("slice_3", []*cel.Type{dyn, num, num}, dyn,
+			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+				list, _ := fromCEL(args[0]).([]any)
+				start, end := asInt(args[1]), asInt(args[2])
+				n := int64(len(list))
+				start = min(max(start, 0), n)
+				end = min(max(end, start), n)
+				out := make([]any, 0, end-start)
+				return types.DefaultTypeAdapter.NativeToValue(append(out, list[start:end]...))
+			}))),
+
 		cel.Function("lastSegment", cel.Overload("lastSegment_2", []*cel.Type{str, str}, str,
 			cel.BinaryBinding(func(s, sep ref.Val) ref.Val {
 				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))

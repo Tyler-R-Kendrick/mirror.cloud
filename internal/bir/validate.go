@@ -155,9 +155,11 @@ func Validate(s *Service, svc *model.Service) error {
 	for _, name := range sortedKeys(s.Errors) {
 		e := s.Errors[name]
 		where := "errors." + name
-		if e.Code == "" {
-			problems = append(problems, fmt.Errorf("%s: %s: no code", s.ServiceID, where))
-		}
+		// An empty code is legitimate where the wire error genuinely carries
+		// no code member -- Stripe's missing-param errors are {error: {type,
+		// message, param}} -- so it is not the authoring mistake it would be
+		// for an AWS service, and the codec's envelope decides what omitting
+		// it means.
 		if e.HTTP < 100 || e.HTTP > 599 {
 			problems = append(problems, fmt.Errorf("%s: %s: http %d out of range", s.ServiceID, where, e.HTTP))
 		}
@@ -260,6 +262,10 @@ func Validate(s *Service, svc *model.Service) error {
 		for i, req := range op.Require {
 			p := fmt.Sprintf("%s.require[%d]", where, i)
 			compile(p+".cond", req.Cond)
+			compile(p+".message_expr", req.MessageExpr)
+			for _, k := range sortedKeys(req.Fields) {
+				compile(p+".fields."+k, req.Fields[k])
+			}
 			if req.Error == "" {
 				problems = append(problems, fmt.Errorf("%s: %s: no error reference", s.ServiceID, p))
 			} else if _, ok := s.Errors[req.Error]; !ok {
@@ -445,7 +451,7 @@ func checkAddressing(s *Service, svc *model.Service, modelOp model.Operation, op
 			kind string
 			w    *WriteEffect
 		}{{"create", eff.Create}, {"put", eff.Put}, {"patch", eff.Patch}} {
-			if kw.w != nil {
+			if kw.w != nil && kw.w.Where == "" {
 				note(kw.w.Resource, kw.w.Key, at+"."+kw.kind)
 			}
 		}
@@ -803,6 +809,31 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 					s.ServiceID, where, kind))
 			}
 		}
+		if e.Where != "" {
+			// A where-selected write updates what is already stored, so it
+			// is meaningless on a create, and it addresses by the candidate
+			// rather than by a key or a request element, so it mixes with
+			// neither.
+			if kind == "create" {
+				*problems = append(*problems, fmt.Errorf(
+					"%s: %s.create.where: a create has no stored records to select",
+					s.ServiceID, where))
+			}
+			if e.Key != "" {
+				*problems = append(*problems, fmt.Errorf(
+					"%s: %s.%s: `where` writes every record it accepts and `key` "+
+						"writes one, so a write may name only one of them",
+					s.ServiceID, where, kind))
+			}
+			if e.ForEach != "" {
+				*problems = append(*problems, fmt.Errorf(
+					"%s: %s.%s: `where` selects from the store and `for_each` "+
+						"from the request; one write may not iterate both",
+					s.ServiceID, where, kind))
+			}
+			body = perItem
+			perItem(where+"."+kind+".where", e.Where)
+		}
 		// A write may address a record by an explicit key, exactly as a delete
 		// may. Leaving this uncompiled made the field silently unusable: the
 		// bundle loaded, and the engine then failed at request time asking for
@@ -840,10 +871,10 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 						"this wide is safe.",
 					s.ServiceID, where, kind, e.Spread))
 			}
-			if e.Spread == "item" && e.ForEach == "" {
+			if e.Spread == "item" && e.ForEach == "" && e.Where == "" {
 				*problems = append(*problems, fmt.Errorf(
-					"%s: %s.%s.spread: `item` is the element a for_each is on, "+
-						"and this write has no for_each",
+					"%s: %s.%s.spread: `item` is the element a for_each or a where "+
+						"selects, and this write has no for_each and no where",
 					s.ServiceID, where, kind))
 			}
 		}

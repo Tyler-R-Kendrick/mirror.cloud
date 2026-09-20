@@ -1479,7 +1479,7 @@ Routing is the model's now, which widens the surface rather than narrowing it. T
 
 ### The vendor-authored oracle: vercel-labs/emulate
 
-Vercel Labs publishes its own emulator, [emulate](https://github.com/vercel-labs/emulate) — stateful, production-fidelity, and maintained by the vendor, which makes it the same class of oracle Azurite is for Azure: the behavior denominator is what *it* serves, not what we guessed. Pinned at `afddfabb28f18190758203c98d8739dfd156dccf` (2026-09-16) in `specs/vercel/emulate-inventory.json`; `scripts/count-emulate-vercel.py --check` reproduces the census, and `TestVercelCensusDenominators` dies if the numbers drift.
+Vercel Labs publishes its own emulator, [emulate](https://github.com/vercel-labs/emulate) — stateful, production-fidelity, and maintained by the vendor, which makes it the same class of oracle Azurite is for Azure: the behavior denominator is what *it* serves, not what we guessed. Pinned at `afddfabb28f18190758203c98d8739dfd156dccf` (2026-09-16) in `specs/vercel/emulate-inventory.json`; `scripts/count-emulate.py --service vercel --check` reproduces the census, and `TestVercelCensusDenominators` dies if the numbers drift.
 
 The monorepo emulates fourteen providers; only `packages/@emulators/vercel` is the Vercel denominator.
 
@@ -1506,13 +1506,13 @@ The gap is closed: every route the oracle registers is served, the supplement ro
 
 ## Stripe baseline
 
-Authority: the vendor-authored oracle, [vercel-labs/emulate](https://github.com/vercel-labs/emulate) `packages/@emulators/stripe`, pinned at `afddfabb28f18190758203c98d8739dfd156dccf` (2026-09-16) in `specs/stripe/emulate-inventory.json`; `scripts/count-emulate-stripe.py --check` reproduces the census, and `TestStripeCensusDenominators` dies if the numbers drift. Stripe publishes an OpenAPI document, but the parity claim here is against what the vendor's own emulator serves, the same contract as Vercel's.
+Authority: the vendor-authored oracle, [vercel-labs/emulate](https://github.com/vercel-labs/emulate) `packages/@emulators/stripe`, pinned at `afddfabb28f18190758203c98d8739dfd156dccf` (2026-09-16) in `specs/stripe/emulate-inventory.json`; `scripts/count-emulate.py --service stripe --check` reproduces the census, and `TestStripeCensusDenominators` dies if the numbers drift. Stripe publishes an OpenAPI document, but the parity claim here is against what the vendor's own emulator serves, the same contract as Vercel's.
 
 | Denominator | Count |
 |---|---:|
 | emulate Stripe routes (vendor-authored oracle) | 27 |
 | emulate Stripe test functions | 23 |
-| emulate Stripe routes served by mirror | 0 / 27 |
+| emulate Stripe routes served by mirror | 27 / 27 |
 
 The oracle also dispatches signed webhooks for configured endpoints (`Stripe-Signature: t=<unix>,v1=<HMAC-SHA256(secret, t + "." + rawbody)>`). It has no Idempotency-Key middleware -- that replay contract is resend's, not stripe's; the inventory says so.
 
@@ -1520,14 +1520,16 @@ Serve state per oracle route file (method+path from `src/routes/*.ts`):
 
 | emulate route file | Routes | mirror serves | Missing |
 |---|---:|---:|---|
-| `customers.ts` | 5 | 0 | the customer CRUD |
-| `products.ts` | 3 | 0 | the product CRUD |
-| `prices.ts` | 3 | 0 | the price CRUD |
-| `payment-intents.ts` | 6 | 0 | create/list/get/update/confirm/cancel |
-| `payment-methods.ts` | 1 | 0 | list for a customer |
-| `charges.ts` | 2 | 0 | list/get |
-| `checkout-sessions.ts` | 6 | 0 | create/list/get/expire/complete + the hosted page |
-| `customer-sessions.ts` | 1 | 0 | create |
+| `customers.ts` | 5 | 5 | create/get/update/delete/list, the delete nullifying the customer on every referencing intent, charge and session |
+| `products.ts` | 3 | 3 | create/get/list, with the oracle's `===` active filter (a form-stored `"false"` answers neither filter) |
+| `prices.ts` | 3 | 3 | create/get/list, `expand[]=product` on the get |
+| `payment-intents.ts` | 6 | 6 | create/list/get/update/confirm/cancel; confirm mints the charge, cancel refuses succeeded/canceled |
+| `payment-methods.ts` | 1 | 1 | the always-empty page, with the unknown-customer 400 |
+| `charges.ts` | 2 | 2 | list/get, `expand[]=customer` and `expand[]=payment_intent` on the get |
+| `checkout-sessions.ts` | 6 | 6 | create/list/get/expire/complete + the hosted page (mirror's own minimal markup, recorded as a quirk; the order data is the oracle's) |
+| `customer-sessions.ts` | 1 | 1 | create, with the drawn secret expiring in 30 minutes |
+
+The gap is closed: every route the oracle registers is served as `stripe.api` B-IR data on `behavior/stripe/`, against the authored document (`specs/stripe/api.json`). The only Go is generic engine and codec capabilities the routes needed (dynamic fault messages and envelope fields, where-selected cascade writes, cursor-pagination slice, form nesting and list-collecting query members, the Stripe fault envelope and checkout page/redirect wire shapes) -- and the parity claims here stay traceable to the oracle's route list. The differential corpus lives at `test/behavior/stripe/oracle/` (63 steps over all 27 routes, captured by `scripts/capture-oracle.py --service stripe`); `TestStripeOracleDifferential` replays it without node.
 
 Stripe is a new provider for mirror: the authored spec lands on `specs/stripe/api.json`, the service as `stripe.api` B-IR data, and webhook delivery rides the same cross-service-delivery unlock the shadowed AWS bundles are waiting on -- recorded as a takeover condition, not shipped silently.
 

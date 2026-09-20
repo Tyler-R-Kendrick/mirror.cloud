@@ -20,7 +20,7 @@ import (
 // TestVercelOracleDifferential replays the canonical corpus (oracle/corpus.json)
 // against mirror's booted edge and compares with the answers recorded from the
 // vendor's own emulator (oracle/answers.json, captured by
-// scripts/capture-vercel-oracle.py against the pin in
+// scripts/capture-oracle.py --service vercel against the pin in
 // specs/vercel/emulate-inventory.json). The oracle's behavior gates mirror's
 // without CI needing node: re-capture when the pin moves.
 //
@@ -180,7 +180,7 @@ func readOracleJSON[T any](t *testing.T, name string) T {
 	return v
 }
 
-// The rewrites of scripts/capture-vercel-oracle.py, kept in the same order.
+// The rewrites of scripts/capture-oracle.py --service vercel, kept in the same order.
 var oracleNormalizers = []struct {
 	rx  *regexp.Regexp
 	rep string

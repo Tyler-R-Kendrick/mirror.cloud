@@ -520,6 +520,18 @@ operations:
   UpdatePaymentIntent:
     reads:
       pi: { resource: payment_intent }
+    let:
+      # Total coercion, the create's shape: the oracle assigns the parsed
+      # member with no validation on this route, so a present member is
+      # stored coerced (garbage becomes null, as NaN does on the wire) and
+      # only an absent one keeps the old value.
+      amount_upd: >
+        !('amount' in input && input.amount != null) ? null : (
+          type(input.amount) == string
+            ? (string(input.amount) == '' ? 0
+              : (string(input.amount).matches('^-?[0-9]+$') ? int(string(input.amount))
+                : (string(input.amount).matches('^-?[0-9]*\\.[0-9]+$') ? dyn(double(string(input.amount))) : dyn(null))))
+            : (type(input.amount) == int || type(input.amount) == uint || type(input.amount) == double ? dyn(input.amount) : dyn(null)))
     require:
       - cond: pi_found
         error: ResourceMissing
@@ -529,7 +541,7 @@ operations:
           resource: payment_intent
           key: "string(pi.id)"
           record:
-            amount: "('amount' in input && input.amount != null) ? input.amount : pi.amount"
+            amount: "amount_upd != null ? amount_upd : pi.amount"
             currency: "('currency' in input && input.currency != null) ? lower(string(input.currency)) : pi.currency"
             description: "('description' in input) ? input.description : pi.description"
             metadata: "('metadata' in input) ? input.metadata : pi.metadata"

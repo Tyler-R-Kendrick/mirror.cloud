@@ -19,7 +19,7 @@ import (
 func TestVercelCensusDenominators(t *testing.T) {
 	root := findMod(t)
 
-	doc := vercelLoadJSON(t, filepath.Join(root, "specs", "vercel", "api.json"))
+	doc := loadJSON(t, filepath.Join(root, "specs", "vercel", "api.json"))
 	paths, ok := doc["paths"].(map[string]any)
 	if !ok {
 		t.Fatal("specs/vercel/api.json has no paths object")
@@ -43,7 +43,7 @@ func TestVercelCensusDenominators(t *testing.T) {
 		t.Fatalf("narrowed vercel model = %d operations, want 104; the mirror.set narrowing moved", narrowed)
 	}
 
-	kv := vercelLoadJSON(t, filepath.Join(root, "specs", "vercel", "kv.json"))
+	kv := loadJSON(t, filepath.Join(root, "specs", "vercel", "kv.json"))
 	kvPaths := kv["paths"].(map[string]any)
 	if len(kvPaths) != 1 {
 		t.Fatalf("authored kv document = %d paths, want 1 (POST /)", len(kvPaths))
@@ -52,7 +52,7 @@ func TestVercelCensusDenominators(t *testing.T) {
 	// The vendor-authored oracle: vercel-labs/emulate, pinned in
 	// specs/vercel/emulate-inventory.json. Its Vercel service is the behavior
 	// denominator the way Azurite's test suite is Azure's.
-	inv := vercelLoadJSON(t, filepath.Join(root, "specs", "vercel", "emulate-inventory.json"))
+	inv := loadJSON(t, filepath.Join(root, "specs", "vercel", "emulate-inventory.json"))
 	if got := int(inv["routeCount"].(float64)); got != 52 {
 		t.Fatalf("emulate-inventory routeCount = %d, want 52", got)
 	}
@@ -81,19 +81,6 @@ func TestVercelCensusDenominators(t *testing.T) {
 			t.Fatalf("PARITY.md is missing the Vercel denominator row %q", needle)
 		}
 	}
-}
-
-func vercelLoadJSON(t *testing.T, path string) map[string]any {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var d map[string]any
-	if err := json.Unmarshal(b, &d); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	return d
 }
 
 func vercelLoadGzippedJSON(t *testing.T, path string) map[string]any {

@@ -919,7 +919,7 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	wait("OpenSearch size threshold did not flush", func() bool {
 		result := call(search, "Search", map[string]any{"DomainName": "sized", "Index": "events-1970-01-01", "query": map[string]any{"match_all": map[string]any{}}})
 		outer, _ := result.Output["hits"].(map[string]any)
-	hits, _ := outer["hits"].([]any)
+		hits, _ := outer["hits"].([]any)
 		return len(hits) == 2
 	})
 

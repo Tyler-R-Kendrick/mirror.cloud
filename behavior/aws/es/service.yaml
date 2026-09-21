@@ -78,7 +78,12 @@ errors:
 operations:
   CreateDomain:
     require:
-      - { cond: "string(input.DomainName) != ''", error: Validation }
+      # `has()` first: an absent member is not null here, it is a missing key,
+      # and `string(input.DomainName)` on one raises rather than returning "".
+      # A CEL error inside a require becomes InternalFailure 500, so the guard
+      # is what makes an empty request answer the client fault it declares
+      # instead of a server error.
+      - { cond: "has(input.DomainName) && string(input.DomainName) != ''", error: Validation }
     effects:
       - put: { resource: domain }
     output:

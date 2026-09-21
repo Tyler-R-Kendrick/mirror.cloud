@@ -4314,6 +4314,52 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	}
 }
 
+func TestListEncodingTypeValidation(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "list-encoding", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-encoding", "Key": "versioned"}, []byte("body"))
+	for _, operation := range []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"} {
+		t.Run(operation, func(t *testing.T) {
+			for _, value := range []string{"value", "", "URL"} {
+				_, err := invoke(t, p, operation, map[string]any{"Bucket": "list-encoding", "EncodingType": value}, nil)
+				fault := asFault(t, err)
+				if fault.Code != "InvalidArgument" || fault.Message != "Invalid Encoding Method specified in Request" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "encoding-type" || fault.Fields["ArgumentValue"] != value {
+					t.Fatalf("encoding %q fault = %#v", value, fault)
+				}
+			}
+			for _, input := range []map[string]any{{"Bucket": "list-encoding"}, {"Bucket": "list-encoding", "EncodingType": "url"}} {
+				if _, err := invoke(t, p, operation, input, nil); err != nil {
+					t.Fatalf("valid encoding %#v: %v", input, err)
+				}
+			}
+		})
+	}
+	_, err := invoke(t, p, "ListObjects", map[string]any{"Bucket": "list-encoding", "encoding-type": "value"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+		t.Fatalf("lowercase input fault = %#v", fault)
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://list-encoding.s3.us-east-1.amazonaws.com/?list-type=2&encoding-type=", nil)
+	_, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListObjectsV2", Input: map[string]any{}, Identity: ident(), HTTP: request})
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Fields["ArgumentValue"] != "" {
+		t.Fatalf("empty query fault = %#v", fault)
+	}
+}
+
+func TestListEncodingTypeCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding-golden"}, nil)
+	got := map[string]any{}
+	for _, operation := range []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"} {
+		for _, value := range []string{"value", ""} {
+			_, err := invoke(t, p, operation, map[string]any{"Bucket": "list-encoding-golden", "EncodingType": value}, nil)
+			fault := asFault(t, err)
+			got[operation+":"+value] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+		}
+	}
+	golden.AssertJSON(t, got)
+}
+
 func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil)

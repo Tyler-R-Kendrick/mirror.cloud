@@ -140,6 +140,25 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given invalid list encoding When listing Then S3 rejects every list operation", func(t *testing.T) {
+		res := do(http.MethodPut, "/list-encoding-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		for _, route := range []string{"", "list-type=2&", "versions&", "uploads&"} {
+			for _, value := range []string{"value", ""} {
+				res = do(http.MethodGet, "/list-encoding-bdd?"+route+"encoding-type="+value, nil, "")
+				body, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Invalid Encoding Method specified in Request</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>encoding-type</ArgumentName>")) {
+					t.Fatalf("route %q encoding %q: %d %s", route, value, res.StatusCode, body)
+				}
+			}
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

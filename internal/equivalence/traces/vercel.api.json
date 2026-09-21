@@ -658,8 +658,9 @@
       },
       "superseded_members": {
         "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "state": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares."
+        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {
@@ -688,8 +689,9 @@
       },
       "superseded_members": {
         "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "state": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares."
+        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {
@@ -755,8 +757,9 @@
       },
       "superseded_members": {
         "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "state": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares."
+        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
+        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {
@@ -821,7 +824,11 @@
       "recorded_as": "ListDeployments",
       "superseded_members": {
         "deployments[0].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it.",
-        "deployments[1].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it."
+        "deployments[1].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it.",
+        "deployments[0].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[1].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[0].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[1].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {
@@ -896,7 +903,9 @@
       },
       "recorded_as": "ListDeployments",
       "superseded_members": {
-        "deployments[0].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it."
+        "deployments[0].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it.",
+        "deployments[0].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[0].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {
@@ -1671,6 +1680,9 @@
         "readyState": "READY",
         "type": "LAMBDAS",
         "url": "web2-34ee92.vercel.app"
+      },
+      "superseded_members": {
+        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {
@@ -1865,6 +1877,9 @@
         "readyState": "READY",
         "type": "LAMBDAS",
         "url": "orb-a0e8b5.vercel.app"
+      },
+      "superseded_members": {
+        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {
@@ -1987,10 +2002,15 @@
         "ARN": "",
         "Project": ""
       },
-      "fault": {
-        "code": "bad_request",
-        "http_status": 400,
-        "fault": "client"
+      "superseded_members": {
+        "id": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
+        "name": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
+        "url": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
+        "projectId": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
+        "readyState": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
+        "type": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
+        "createdAt": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
+        "canceledAt": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted."
       }
     },
     {
@@ -2074,6 +2094,9 @@
             "type": "created"
           }
         ]
+      },
+      "superseded_members": {
+        "_list": "Cancel while QUEUED appends a canceled event, so the listing has four events rather than the pack's three."
       }
     },
     {
@@ -2099,6 +2122,9 @@
         "readyState": "READY",
         "type": "LAMBDAS",
         "url": "orb-a0e8b5.vercel.app"
+      },
+      "superseded_members": {
+        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {
@@ -2158,6 +2184,9 @@
           "next": null,
           "prev": null
         }
+      },
+      "superseded_members": {
+        "aliases[0].status": "ListPromoteAliases reports PENDING until productionDeploymentId is set; pack treated every READY deployment's aliases as PROMOTED."
       }
     },
     {
@@ -2678,6 +2707,14 @@
         "pagination": {
           "count": 3
         }
+      },
+      "superseded_members": {
+        "deployments[0].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[1].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[2].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[0].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[1].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
+        "deployments[2].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
       }
     },
     {

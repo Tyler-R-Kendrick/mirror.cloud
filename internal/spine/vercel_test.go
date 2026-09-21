@@ -7,12 +7,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 )
 
 func TestBootedServerVercelAPI(t *testing.T) {
+	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()
 	// Two services now, where one registration used to carry both products.
 	cfg.Services = []string{"vercel.api", "vercel.kv"}
@@ -66,8 +68,15 @@ func TestBootedServerVercelAPI(t *testing.T) {
 		t.Fatalf("get %d %#v", code, got)
 	}
 	code, dpl, _ := do(http.MethodPost, "/v13/deployments", `{"name":"app","project":"app"}`, "")
-	if code != 200 || dpl["readyState"] != "READY" {
+	if code != 200 || dpl["readyState"] != "QUEUED" {
 		t.Fatalf("deploy %d %#v", code, dpl)
+	}
+	if err := rt.Deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	code, dpl, _ = do(http.MethodGet, "/v13/deployments/"+dpl["id"].(string), "", "")
+	if code != 200 || dpl["readyState"] != "READY" {
+		t.Fatalf("get after advance %d %#v", code, dpl)
 	}
 	// Versioning is restored. The pack's route table stripped the leading
 	// version segment before matching, so every version of a path answered;
@@ -103,7 +112,8 @@ func TestBootedServerVercelAPI(t *testing.T) {
 	// tell that from a malformed request without reading the message. The
 	// error is a plain string, which is what the KV document declares and what
 	// Upstash answers -- not the REST API's {error: {code, message}}.
-	code, kv, h := do(http.MethodPost, "/", `["INCR","k"]`, "id.kv.vercel-storage.com")
+	// INCR is served now; HGET is still outside the string-command set.
+	code, kv, h := do(http.MethodPost, "/", `["HGET","k","f"]`, "id.kv.vercel-storage.com")
 	if code != 501 || h.Get("x-mirror-not-implemented") == "" {
 		t.Fatalf("kv unsupported verb %d %#v %v", code, kv, h)
 	}

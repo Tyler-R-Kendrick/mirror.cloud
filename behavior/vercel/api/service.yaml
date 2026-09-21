@@ -872,7 +872,8 @@ operations:
       deployments: >
         items.map(i, {'uid': i.uid, 'name': i.name, 'url': i.url,
           'projectId': i.projectId, 'readyState': string(i.__state),
-          'type': i.type, 'createdAt': i.createdAt, 'created': i.created})
+          'state': string(i.__state), 'type': i.type,
+          'createdAt': i.createdAt, 'created': i.created})
       pagination: "{'count': size(items)}"
 
   GetDeployment:
@@ -1779,7 +1780,8 @@ operations:
       deployments: >
         items.map(i, {'uid': i.uid, 'name': i.name, 'url': i.url,
           'projectId': i.projectId, 'readyState': string(i.__state),
-          'type': i.type, 'createdAt': i.createdAt, 'created': i.created})
+          'state': string(i.__state), 'type': i.type,
+          'createdAt': i.createdAt, 'created': i.created})
       pagination: "{'count': size(items)}"
 
   GetProjectEnv:

@@ -478,6 +478,27 @@ func TestDynamoDBQueryIndexCharacterization(t *testing.T) {
 	})
 }
 
+func TestDynamoDBMultipleUpdateExpressions(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "1"}, "data": map[string]any{"S": "original"}}})
+	updated := must("UpdateItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "1"}}, "UpdateExpression": "SET attr1 = :v1, attr2 = :v2", "ExpressionAttributeValues": map[string]any{":v1": map[string]any{"S": "value1"}, ":v2": map[string]any{"S": "value2"}}, "ReturnValues": "ALL_NEW"})
+	item := asMap(must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "1"}}}).Output["Item"])
+	if str(asMap(item["attr1"])["S"]) != "value1" || str(asMap(item["attr2"])["S"]) != "value2" {
+		t.Fatalf("updated item %#v", item)
+	}
+	golden.AssertJSON(t, map[string]any{"response": updated.Output, "item": item})
+}
+
 func TestDynamoDBExtendedOperations(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

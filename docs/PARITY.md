@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 12 / 56 (21.4%) |
-| LocalStack DynamoDB test functions not yet traced | 44 / 56 (78.6%) |
+| LocalStack DynamoDB test functions explicitly traced | 13 / 56 (23.2%) |
+| LocalStack DynamoDB test functions not yet traced | 43 / 56 (76.8%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -540,3 +540,4 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_batch_write_not_existing_table` | Batch write and transact write now validate every target table before applying requests and return `ResourceNotFoundException`; atomic, snapshot, SDK, BDD, fuzz, and mutation checks cover the missing-table path | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_invalid_query_index` | Query resolves the named GSI/LSI before scanning and rejects `ALL_ATTRIBUTES` unless its projection type is `ALL`; atomic, Verify-style snapshot, SDK contract, raw HTTP BDD, native fuzz, and mutation coverage pins the validation fault | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_valid_query_index` | The same shared index lookup permits `ALL_ATTRIBUTES` for `ALL` projections and returns the complete matching item through atomic, SDK, raw HTTP, snapshot-adjacent, and fuzz coverage | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_multiple_update_expressions` | Atomic and AWS SDK/raw HTTP round trips apply both comma-separated SET clauses and persist both attributes; a Verify-style response/item snapshot, native expression fuzz seed, and semantic mutant guard multi-assignment parsing | Mapped; race-pending |

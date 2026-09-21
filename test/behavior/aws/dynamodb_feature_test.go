@@ -172,4 +172,20 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			t.Fatalf("all projection %d %s", status, body)
 		}
 	})
+
+	t.Run("Given two SET clauses When updating an item Then both attributes persist", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"Updates","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}]}`); status != http.StatusOK {
+			t.Fatalf("create updates table %d %s", status, body)
+		}
+		if status, body := call("PutItem", `{"TableName":"Updates","Item":{"id":{"S":"1"}}}`); status != http.StatusOK {
+			t.Fatalf("put update item %d %s", status, body)
+		}
+		payload := `{"TableName":"Updates","Key":{"id":{"S":"1"}},"UpdateExpression":"SET attr1 = :v1, attr2 = :v2","ExpressionAttributeValues":{":v1":{"S":"value1"},":v2":{"S":"value2"}}}`
+		if status, body := call("UpdateItem", payload); status != http.StatusOK {
+			t.Fatalf("update item %d %s", status, body)
+		}
+		if status, body := call("GetItem", `{"TableName":"Updates","Key":{"id":{"S":"1"}}}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"attr1":{"S":"value1"}`)) || !bytes.Contains(body, []byte(`"attr2":{"S":"value2"}`)) {
+			t.Fatalf("updated item %d %s", status, body)
+		}
+	})
 }

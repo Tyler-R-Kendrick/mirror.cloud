@@ -8579,6 +8579,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBMultipleUpdateExpressions",
 		},
 		{
+			name: "dynamodb-return-empty-all-old-attributes",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `if len(attrs) == 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBPutItemReturnValues",
+		},
+		{
 			name: "dynamodb-batch-write-missing-table",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  "case \"BatchWriteItem\":\n\t\tif ri, ok := req.Input[\"RequestItems\"].(map[string]any); ok {\n\t\t\tfor tbl, spec := range ri {\n\t\t\t\tif err := requireTable(tbl); err != nil {",

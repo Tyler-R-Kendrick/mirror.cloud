@@ -1,0 +1,25 @@
+{
+  "changedAllOld": {
+    "Attributes": {
+      "data": {
+        "S": "foobar"
+      },
+      "id": {
+        "S": "1"
+      }
+    }
+  },
+  "default": {},
+  "defaultAgain": {},
+  "firstAllOld": {},
+  "sameAllOld": {
+    "Attributes": {
+      "data": {
+        "S": "foobar"
+      },
+      "id": {
+        "S": "1"
+      }
+    }
+  }
+}

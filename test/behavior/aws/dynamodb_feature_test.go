@@ -188,4 +188,18 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			t.Fatalf("updated item %d %s", status, body)
 		}
 	})
+
+	t.Run("Given PutItem ALL_OLD When replacing an item Then only existing attributes are returned", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"Returns","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}]}`); status != http.StatusOK {
+			t.Fatalf("create returns table %d %s", status, body)
+		}
+		first := `{"TableName":"Returns","Item":{"id":{"S":"1"},"data":{"S":"foobar"}},"ReturnValues":"ALL_OLD"}`
+		if status, body := call("PutItem", first); status != http.StatusOK || bytes.Contains(body, []byte(`"Attributes"`)) {
+			t.Fatalf("first all-old %d %s", status, body)
+		}
+		second := `{"TableName":"Returns","Item":{"id":{"S":"1"},"data":{"S":"barfoo"}},"ReturnValues":"ALL_OLD"}`
+		if status, body := call("PutItem", second); status != http.StatusOK || !bytes.Contains(body, []byte(`"Attributes":{"data":{"S":"foobar"}`)) {
+			t.Fatalf("replacement all-old %d %s", status, body)
+		}
+	})
 }

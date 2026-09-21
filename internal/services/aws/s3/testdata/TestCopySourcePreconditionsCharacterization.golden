@@ -1,0 +1,8 @@
+{
+  "all-positive": "success",
+  "future-modified-since": "success",
+  "if-match": "PreconditionFailed",
+  "if-modified-since": "PreconditionFailed",
+  "if-none-match": "PreconditionFailed",
+  "if-unmodified-since": "PreconditionFailed"
+}

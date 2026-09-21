@@ -855,6 +855,53 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given copy source preconditions When copying Then LocalStack evaluation order is preserved", func(t *testing.T) {
+		res := do(http.MethodPut, "/copy-conditions", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		request := func(key string, headers map[string]string) *http.Response {
+			t.Helper()
+			req, _ := http.NewRequest(http.MethodPut, ts.URL+"/copy-conditions/"+key, nil)
+			req.Header.Set("Authorization", auth)
+			for name, value := range headers {
+				req.Header.Set(name, value)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			return response
+		}
+		source := request("source", nil)
+		if source.StatusCode != http.StatusOK {
+			t.Fatalf("put source %d", source.StatusCode)
+		}
+		copySource := "/copy-conditions/source"
+		future := request("future", map[string]string{
+			"x-amz-copy-source":                   copySource,
+			"x-amz-copy-source-if-modified-since": time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat),
+		})
+		if future.StatusCode != http.StatusOK {
+			t.Fatalf("future modified-since copy %d", future.StatusCode)
+		}
+		past := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
+		ordered := request("ordered", map[string]string{
+			"x-amz-copy-source":                     copySource,
+			"x-amz-copy-source-if-match":            source.Header.Get("ETag"),
+			"x-amz-copy-source-if-none-match":       source.Header.Get("ETag"),
+			"x-amz-copy-source-if-modified-since":   past,
+			"x-amz-copy-source-if-unmodified-since": past,
+		})
+		if ordered.StatusCode != http.StatusOK {
+			t.Fatalf("ordered copy %d", ordered.StatusCode)
+		}
+	})
+
 	t.Run("Given KMS multipart encryption When completing the upload Then every stage preserves its headers", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-encryption", nil, "")
 		io.Copy(io.Discard, res.Body)

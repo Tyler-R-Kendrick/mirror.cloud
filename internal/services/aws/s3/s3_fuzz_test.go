@@ -2109,3 +2109,54 @@ func FuzzCopyObjectSSECustomerKeys(f *testing.F) {
 		}
 	})
 }
+
+func FuzzCopySourcePreconditions(f *testing.F) {
+	for mode := uint8(0); mode < 7; mode++ {
+		f.Add(mode, uint16(mode+1))
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, secondsSeed uint16) {
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-condition-fuzz"}, nil)
+		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-condition-fuzz", "Key": "source"}, []byte("source"))
+		seconds := int(secondsSeed%60) + 1
+		_ = deps.Clock.Advance(time.Duration(seconds) * time.Second)
+		modified := time.Unix(0, 0).UTC()
+		conditions := map[string]any{}
+		wantSuccess := false
+		switch mode % 7 {
+		case 0:
+			conditions["CopySourceIfMatch"] = `"wrong"`
+		case 1:
+			conditions["CopySourceIfModifiedSince"] = modified.Add(time.Duration(seconds+1) * time.Second).Format(http.TimeFormat)
+			wantSuccess = true
+		case 2:
+			conditions["CopySourceIfNoneMatch"] = `"wrong"`
+			conditions["CopySourceIfModifiedSince"] = modified.Format(http.TimeFormat)
+		case 3:
+			conditions["CopySourceIfMatch"] = put.Headers.Get("ETag")
+			conditions["CopySourceIfNoneMatch"] = put.Headers.Get("ETag")
+			conditions["CopySourceIfModifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+			conditions["CopySourceIfUnmodifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+			wantSuccess = true
+		case 4:
+			conditions["CopySourceIfUnmodifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+		case 5:
+			conditions["CopySourceIfNoneMatch"] = put.Headers.Get("ETag")
+		case 6:
+			conditions["CopySourceIfModifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+			wantSuccess = true
+		}
+		input := map[string]any{"Bucket": "copy-condition-fuzz", "Key": "destination", "CopySource": "copy-condition-fuzz/source"}
+		for key, value := range conditions {
+			input[key] = value
+		}
+		_, err := invoke(t, p, "CopyObject", input, nil)
+		if wantSuccess && err != nil {
+			t.Fatalf("mode %d: %v", mode%7, err)
+		}
+		if !wantSuccess && asFault(t, err).Code != "PreconditionFailed" {
+			t.Fatalf("mode %d: %v", mode%7, err)
+		}
+	})
+}

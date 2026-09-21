@@ -2276,7 +2276,7 @@ func TestRejectedReplicationConfigurationPreservesCurrent(t *testing.T) {
 	}
 }
 
-func TestConcurrentPutsSameKey(t *testing.T) {
+func TestConcurrentPutsAndGetsSameKey(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
 	ctx := context.Background()
@@ -2285,20 +2285,46 @@ func TestConcurrentPutsSameKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}, Body: io.NopCloser(bytes.NewReader(bytes.Repeat([]byte{0}, 16)))}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
 	var wg sync.WaitGroup
 	for i := 0; i < 32; i++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			body := bytes.Repeat([]byte{byte(n)}, 16)
-			_, _ = p.Invoke(ctx, &spi.Request{
-				Identity: id, Operation: "PutObject",
-				Input: map[string]any{"Bucket": "bucket", "Key": "k"},
-				Body:  io.NopCloser(bytes.NewReader(body)),
-			})
+			input := map[string]any{"Bucket": "bucket", "Key": "k"}
+			if n%2 == 0 {
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: input, Body: io.NopCloser(bytes.NewReader(bytes.Repeat([]byte{byte(n)}, 16)))})
+				errs <- err
+				return
+			}
+			want := 16
+			if n%4 == 3 {
+				input["Range"] = "bytes=4-7"
+				want = 4
+			}
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: input})
+			if err != nil {
+				errs <- err
+				return
+			}
+			body, err := io.ReadAll(response.Stream)
+			_ = response.Stream.Close()
+			if err == nil && (len(body) != want || !bytes.Equal(body, bytes.Repeat(body[:1], want))) {
+				err = fmt.Errorf("read %d body = %x", n, body)
+			}
+			errs <- err
 		}(i)
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}})
 	if err != nil {
 		t.Fatal(err)
@@ -2812,6 +2838,9 @@ func TestConcurrentCrossRegionBucketsPaginateWithoutAccountLeaks(t *testing.T) {
 			created, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: region}, Operation: "CreateBucket", Input: input})
 			if err == nil && created.Output["BucketArn"] != "arn:aws:s3:::"+input["Bucket"].(string) {
 				err = fmt.Errorf("create ARN: %#v", created.Output)
+			}
+			if err == nil && region == "us-east-1" {
+				_, err = p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: region}, Operation: "CreateBucket", Input: input})
 			}
 			errs <- err
 		}(i)

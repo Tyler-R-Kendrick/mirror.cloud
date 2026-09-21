@@ -56,6 +56,22 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	table := str(req.Input["TableName"])
+	requireTable := func(name string) error {
+		_, ok, err := p.col(req, "tables").Get(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found", HTTPStatus: 400, Fault: "client"}
+		}
+		return nil
+	}
+	switch req.Operation {
+	case "PutItem", "GetItem", "DeleteItem", "UpdateItem", "Query", "Scan":
+		if err := requireTable(table); err != nil {
+			return nil, err
+		}
+	}
 	switch req.Operation {
 	case "CreateTable":
 		b, _ := json.Marshal(req.Input)
@@ -114,6 +130,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"TableNames": names}}, nil
 	case "PutItem":
 		item, _ := req.Input["Item"].(map[string]any)
+		if err := p.validateItemKey(ctx, req, table, item); err != nil {
+			return nil, err
+		}
 		if err := p.checkCond(req, item); err != nil {
 			return nil, err
 		}
@@ -362,6 +381,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		out := map[string]any{}
 		if ri, ok := req.Input["RequestItems"].(map[string]any); ok {
 			for tbl, spec := range ri {
+				if err := requireTable(tbl); err != nil {
+					return nil, err
+				}
 				var items []any
 				keys, _ := asMap(spec)["Keys"].([]any)
 				for _, k := range keys {
@@ -381,11 +403,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "BatchWriteItem":
 		if ri, ok := req.Input["RequestItems"].(map[string]any); ok {
 			for tbl, spec := range ri {
+				if err := requireTable(tbl); err != nil {
+					return nil, err
+				}
 				reqs, _ := spec.([]any)
 				for _, r := range reqs {
 					m := asMap(r)
 					if put := asMap(m["PutRequest"]); len(put) > 0 {
 						item := asMap(put["Item"])
+						if err := p.validateItemKey(ctx, req, tbl, item); err != nil {
+							return nil, err
+						}
 						key := p.itemKeyFrom(ctx, req, tbl, item)
 						old := p.loadItem(ctx, req, tbl, key)
 						b, _ := json.Marshal(item)
@@ -554,6 +582,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	default:
 		return nil, spi.NotImplemented("aws.dynamodb", req.Operation, "emulate")
 	}
+}
+
+func (p *Pack) validateItemKey(ctx context.Context, req *spi.Request, table string, item map[string]any) error {
+	for _, key := range asSlice(p.tableDef(ctx, req, table)["KeySchema"]) {
+		name := str(asMap(key)["AttributeName"])
+		if name != "" && len(asMap(item[name])) == 0 {
+			return &spi.Fault{Code: "ValidationException", Message: "One or more parameter values were invalid: Missing the key " + name + " in the item", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	return nil
 }
 
 func (p *Pack) listItems(ctx context.Context, req *spi.Request, table, keyCond, filter string) (*spi.Response, error) {

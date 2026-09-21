@@ -375,6 +375,57 @@ func TestDynamoDBDataCharacterization(t *testing.T) {
 	})
 }
 
+func TestDynamoDBItemFaults(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	assertFault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != code || fault.HTTPStatus != 400 {
+			t.Fatalf("%s fault %#v", operation, err)
+		}
+	}
+	table := map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}, map[string]any{"AttributeName": "range", "KeyType": "RANGE"}}}
+	if _, err := call("CreateTable", table); err != nil {
+		t.Fatal(err)
+	}
+	assertFault("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "1"}}}, "ValidationException")
+	assertFault("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"nonKey": map[string]any{"S": "value"}}}}}}}, "ValidationException")
+	if _, err := call("DeleteTable", map[string]any{"TableName": "T"}); err != nil {
+		t.Fatal(err)
+	}
+	assertFault("Query", map[string]any{"TableName": "T"}, "ResourceNotFoundException")
+	assertFault("TransactWriteItems", map[string]any{"TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "missing", "Item": map[string]any{}}}}}, "ResourceNotFoundException")
+}
+
+func TestDynamoDBItemFaultCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err == nil {
+			return response.Output
+		}
+		fault := err.(*spi.Fault)
+		return map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
+	}
+	call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}, map[string]any{"AttributeName": "sortKey", "KeyType": "RANGE"}}})
+	invalid := call("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"nonKey": map[string]any{"S": "value"}}}}}}})
+	call("DeleteTable", map[string]any{"TableName": "T"})
+	golden.AssertJSON(t, map[string]any{
+		"invalidSchema":      invalid,
+		"queryDeleted":       call("Query", map[string]any{"TableName": "T"}),
+		"transactionMissing": call("TransactWriteItems", map[string]any{"TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "missing", "Item": map[string]any{}}}}}),
+	})
+}
+
 func TestDynamoDBExtendedOperations(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -138,4 +138,22 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			t.Fatalf("future item %d %s", status, body)
 		}
 	})
+
+	t.Run("Given invalid item targets When writing or querying Then modeled faults are returned", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"Faults","KeySchema":[{"AttributeName":"id","KeyType":"HASH"},{"AttributeName":"sortKey","KeyType":"RANGE"}]}`); status != http.StatusOK {
+			t.Fatalf("create faults table %d %s", status, body)
+		}
+		if status, body := call("BatchWriteItem", `{"RequestItems":{"Faults":[{"PutRequest":{"Item":{"nonKey":{"S":"value"}}}}]}}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ValidationException")) {
+			t.Fatalf("invalid batch schema %d %s", status, body)
+		}
+		if status, body := call("DeleteTable", `{"TableName":"Faults"}`); status != http.StatusOK {
+			t.Fatalf("delete faults table %d %s", status, body)
+		}
+		if status, body := call("Query", `{"TableName":"Faults"}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ResourceNotFoundException")) {
+			t.Fatalf("query deleted table %d %s", status, body)
+		}
+		if status, body := call("TransactWriteItems", `{"TransactItems":[{"Put":{"TableName":"missing","Item":{}}}]}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ResourceNotFoundException")) {
+			t.Fatalf("transaction missing table %d %s", status, body)
+		}
+	})
 }

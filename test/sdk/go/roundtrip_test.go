@@ -2271,6 +2271,10 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second multipart copy: %v", err)
 	}
+	zeroUploads, err := s3c.ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{Bucket: aws.String("sdk"), Prefix: aws.String("range-"), MaxUploads: aws.Int32(0)})
+	if err != nil || len(zeroUploads.Uploads) != 2 || aws.ToInt32(zeroUploads.MaxUploads) != 1000 {
+		t.Fatalf("zero max multipart uploads: %#v %v", zeroUploads, err)
+	}
 	listedUploads, err := s3c.ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{
 		Bucket: aws.String("sdk"), Prefix: aws.String("range-"), MaxUploads: aws.Int32(1),
 	})
@@ -2305,6 +2309,10 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("upload part copy: %v", err)
+	}
+	zeroParts, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, MaxParts: aws.Int32(0)})
+	if err != nil || len(zeroParts.Parts) != 1 || aws.ToInt32(zeroParts.MaxParts) != 1000 {
+		t.Fatalf("zero max parts: %#v %v", zeroParts, err)
 	}
 	listedParts, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{
 		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, MaxParts: aws.Int32(1),

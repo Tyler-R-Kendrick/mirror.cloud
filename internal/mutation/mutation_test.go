@@ -2006,6 +2006,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestListPartsAndMultipartUploads",
 		},
 		{
+			name: "s3-list-parts-keep-zero-http-limit",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if maxParts == 0 {\n\t\tmaxParts = 1000\n\t}\n\tif marker < 0 || maxParts < 0 || maxParts > 1000 {",
+			new:  "if maxParts < 0 {\n\t\tmaxParts = 1000\n\t}\n\tif marker < 0 || maxParts < 0 || maxParts > 1000 {",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartZeroLimitsUseDefaults",
+		},
+		{
+			name: "s3-list-multipart-reject-zero-limit",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if maxUploads == 0 {\n\t\tmaxUploads = 1000\n\t}\n\tif maxUploads < 1 || maxUploads > 1000 {",
+			new:  "if maxUploads < 0 {\n\t\tmaxUploads = 1000\n\t}\n\tif maxUploads < 1 || maxUploads > 1000 {",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartZeroLimitsUseDefaults",
+		},
+		{
 			name: "s3-list-parts-drop-timestamp-milliseconds",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "modified := part.modified\n\t\tif parsed, err := time.Parse(time.RFC3339Nano, modified); err == nil {\n\t\t\tmodified = parsed.UTC().Format(\"2006-01-02T15:04:05.000Z\")",

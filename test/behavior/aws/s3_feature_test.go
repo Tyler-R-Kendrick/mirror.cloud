@@ -363,8 +363,14 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		firstID := create("folder/a/one", "")
 		create("folder/file1", "CRC64NVME")
-		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2F&delimiter=%2F&max-uploads=1", nil, "")
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2F&max-uploads=0", nil, "")
 		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<MaxUploads>1000</MaxUploads>")) || bytes.Count(body, []byte("<Upload>")) != 2 {
+			t.Fatalf("zero max uploads %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2F&delimiter=%2F&max-uploads=1", nil, "")
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(body, []byte("<NextKeyMarker></NextKeyMarker>")) || !bytes.Contains(body, []byte("<NextUploadIdMarker></NextUploadIdMarker>")) {
 			t.Fatalf("first multipart page %d %s", res.StatusCode, body)
@@ -554,6 +560,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		res = do(http.MethodPut, "/parts-list-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "")
 		res.Body.Close()
+		zero := list("max-parts=0")
+		if !strings.Contains(zero, "<MaxParts>1000</MaxParts>") || !strings.Contains(zero, "<Part>") {
+			t.Fatalf("zero max parts page %s", zero)
+		}
 		page := list("max-parts=1")
 		if !strings.Contains(page, "<NextPartNumberMarker>1</NextPartNumberMarker>") || !strings.Contains(page, "<IsTruncated>false</IsTruncated>") || !strings.Contains(page, ".000Z</LastModified>") {
 			t.Fatalf("final parts page %s", page)

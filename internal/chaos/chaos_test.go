@@ -676,6 +676,10 @@ func TestConcurrentListMultipartUploadsRemainsPageable(t *testing.T) {
 	if uploads := response.Output["Uploads"].([]any); err != nil || len(uploads) != 17 {
 		t.Fatalf("final multipart uploads = %#v, err=%v", response, err)
 	}
+	response, err = call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "Prefix": "prefix/", "MaxUploads": 0})
+	if uploads := response.Output["Uploads"].([]any); err != nil || response.Output["MaxUploads"] != 1000 || len(uploads) != 17 {
+		t.Fatalf("zero max multipart uploads = %#v, err=%v", response, err)
+	}
 }
 
 func TestConcurrentListPartsRemainsPageable(t *testing.T) {
@@ -735,6 +739,11 @@ func TestConcurrentListPartsRemainsPageable(t *testing.T) {
 	response, err := call("ListParts", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID}, "")
 	if err != nil || len(response.Output["Parts"].([]any)) != 32 || response.Output["NextPartNumberMarker"] != 32 {
 		t.Fatalf("final parts = %#v, err=%v", response, err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/parts-list-chaos/key?uploadId="+fmt.Sprint(uploadID)+"&max-parts=0", nil)
+	response, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListParts", Input: map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID}, HTTP: request})
+	if err != nil || response.Output["MaxParts"] != 1000 || len(response.Output["Parts"].([]any)) != 32 {
+		t.Fatalf("zero max parts = %#v, err=%v", response, err)
 	}
 }
 

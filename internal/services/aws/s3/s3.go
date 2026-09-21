@@ -2352,7 +2352,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
 	if len(parts) == 0 {
-		return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: 400, Fault: "client"}
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "You must specify at least one part", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	var buf bytes.Buffer
 	var md5s []byte
@@ -2366,26 +2366,27 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	for index, completed := range parts {
 		item := asMap(completed)
 		number := asInt(item["PartNumber"])
+		etag := strings.Trim(strings.TrimSpace(str(item["ETag"])), `"`)
 		if number < 1 || number > 10000 {
-			return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			return nil, invalidMultipartPart(id, etag, number)
 		}
 		if number <= previous {
-			return nil, &spi.Fault{Code: "InvalidPartOrder", HTTPStatus: 400, Fault: "client"}
+			return nil, &spi.Fault{Code: "InvalidPartOrder", Message: "The list of parts was not in ascending order. Parts must be ordered by part number.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"UploadId": id}}
 		}
 		part, exists := stored[number]
 		s := md5.Sum(part.body)
-		if !exists || strings.Trim(strings.TrimSpace(str(item["ETag"])), `"`) != hex.EncodeToString(s[:]) {
-			return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: 400, Fault: "client"}
+		if !exists || etag != hex.EncodeToString(s[:]) {
+			return nil, invalidMultipartPart(id, etag, number)
 		}
 		if index < len(parts)-1 && len(part.body) < 5<<20 {
-			return nil, &spi.Fault{Code: "EntityTooSmall", HTTPStatus: 400, Fault: "client"}
+			return nil, &spi.Fault{Code: "EntityTooSmall", Message: "Your proposed upload is smaller than the minimum allowed size", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ETag": etag, "PartNumber": strconv.Itoa(number), "MinSizeAllowed": 5 << 20, "ProposedSize": len(part.body)}}
 		}
 		if u.checksumType == "COMPOSITE" && number != index+1 {
 			return nil, &spi.Fault{Code: "InternalError", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
 		}
 		partChecksum := part.checksums[checksum.header]
 		if supplied := str(item[checksum.input]); supplied != "" && supplied != partChecksum {
-			return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			return nil, &spi.Fault{Code: "InvalidPart", Message: "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ETag": etag, "PartNumber": strconv.Itoa(number), "UploadId": id}}
 		}
 		decoded, _ := base64.StdEncoding.DecodeString(partChecksum)
 		partChecksums = append(partChecksums, decoded...)
@@ -2436,6 +2437,10 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	delete(p.mpu, id)
 	p.mu.Unlock()
 	return resp, nil
+}
+
+func invalidMultipartPart(uploadID, etag string, number int) *spi.Fault {
+	return &spi.Fault{Code: "InvalidPart", Message: "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ETag": etag, "PartNumber": strconv.Itoa(number), "UploadId": uploadID}}
 }
 
 func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, error) {

@@ -1877,6 +1877,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(10001), Body: strings.NewReader("part")}); err == nil || !strings.Contains(err.Error(), "Part number must be an integer between 1 and 10000, inclusive") {
 		t.Fatalf("invalid multipart part number: %v", err)
 	}
+	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{}}); err == nil || !strings.Contains(err.Error(), "You must specify at least one part") {
+		t.Fatalf("empty multipart completion: %v", err)
+	}
+	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(9), ETag: aws.String(`\"missing\"`)}}}}); err == nil || !strings.Contains(err.Error(), "One or more of the specified parts could not be found") {
+		t.Fatalf("missing multipart completion part: %v", err)
+	}
 	otherUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
 	if err != nil {
 		t.Fatalf("create second multipart copy: %v", err)

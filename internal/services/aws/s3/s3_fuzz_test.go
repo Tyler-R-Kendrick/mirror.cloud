@@ -2135,6 +2135,31 @@ func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	})
 }
 
+func FuzzDeleteObjectMissingKeyVersionIsIdempotent(f *testing.F) {
+	f.Add("Enabled", "missing-version")
+	f.Add("Suspended", "null")
+	f.Add("Suspended", "missing-version")
+	f.Fuzz(func(t *testing.T, status, version string) {
+		if status != "Enabled" && status != "Suspended" {
+			t.Skip()
+		}
+		if version == "" || len(version) > 1024 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "missing-version-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "missing-version-fuzz", "Status": status}, nil)
+		deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "missing-version-fuzz", "Key": "missing", "VersionId": version}, nil)
+		if deleted.Status != http.StatusNoContent || deleted.Headers.Get("x-amz-version-id") != "" || deleted.Headers.Get("x-amz-delete-marker") != "" {
+			t.Fatalf("delete response = %#v", deleted)
+		}
+		listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "missing-version-fuzz"}, nil).Output
+		if len(asSliceForTest(listed["Versions"])) != 0 || len(asSliceForTest(listed["DeleteMarkers"])) != 0 {
+			t.Fatalf("missing-key delete created state: %#v", listed)
+		}
+	})
+}
+
 func FuzzSuspendedNullVersionReplacement(f *testing.F) {
 	f.Add("null", uint8(1), false)
 	f.Add("replacement", uint8(8), true)

@@ -945,6 +945,24 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a missing key in a versioned bucket When deleting an explicit version Then S3 is idempotent", func(t *testing.T) {
+		for _, tc := range []struct{ bucket, status, version string }{
+			{"missing-version-enabled-bdd", "Enabled", "missing-version"},
+			{"missing-version-suspended-bdd", "Suspended", "null"},
+		} {
+			res := do(http.MethodPut, "/"+tc.bucket, nil, "")
+			res.Body.Close()
+			res = do(http.MethodPut, "/"+tc.bucket+"?versioning", []byte("<VersioningConfiguration><Status>"+tc.status+"</Status></VersioningConfiguration>"), "")
+			res.Body.Close()
+			res = do(http.MethodDelete, "/"+tc.bucket+"/missing?versionId="+url.QueryEscape(tc.version), nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent || len(body) != 0 || res.Header.Get("x-amz-version-id") != "" || res.Header.Get("x-amz-delete-marker") != "" {
+				t.Fatalf("%s delete response = %d headers=%v body=%q", tc.status, res.StatusCode, res.Header, body)
+			}
+		}
+	})
+
 	t.Run("Given conflicting multipart completion conditions When completed Then S3 returns LocalStack faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/completion-conditional-bdd", nil, "")
 		res.Body.Close()

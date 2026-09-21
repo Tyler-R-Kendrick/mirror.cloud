@@ -4033,7 +4033,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 	if requested["OBJECTSIZE"] {
 		out["ObjectSize"] = asInt(meta["size"])
 	}
-	if requested["STORAGECLASS"] && str(meta["storageClass"]) != "STANDARD" {
+	if requested["STORAGECLASS"] {
 		out["StorageClass"] = meta["storageClass"]
 	}
 	parts := asSlice(meta["parts"])

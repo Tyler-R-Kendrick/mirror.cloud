@@ -2132,6 +2132,45 @@ func TestConcurrentInvalidWritesLeaveNoObject(t *testing.T) {
 	}
 }
 
+func TestConcurrentStandardStorageAttributesRemainVisible(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "standard-attributes-chaos"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "standard-attributes-chaos", "Key": "key"}, []byte("body")); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("GetObjectAttributes", map[string]any{"Bucket": "standard-attributes-chaos", "Key": "key", "ObjectAttributes": []string{"StorageClass"}}, nil)
+			if err == nil && response.Output["StorageClass"] != "STANDARD" {
+				err = fmt.Errorf("storage class = %#v", response.Output)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestCustomerEncryptionValidationFailurePreservesObject(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

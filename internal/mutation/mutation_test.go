@@ -6738,10 +6738,10 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestGetObjectAttributesContract",
 		},
 		{
-			name: "s3-object-attributes-return-standard-class",
+			name: "s3-object-attributes-hide-standard-class",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if requested["STORAGECLASS"] && str(meta["storageClass"]) != "STANDARD" {`,
-			new:  `if requested["STORAGECLASS"] {`,
+			old:  `if requested["STORAGECLASS"] {`,
+			new:  `if requested["STORAGECLASS"] && str(meta["storageClass"]) != "STANDARD" {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestGetObjectAttributesContract",
 		},

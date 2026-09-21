@@ -74,6 +74,25 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		return res
 	}
 
+	t.Run("Given a standard object When requesting storage attributes Then STANDARD is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/standard-attributes-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/standard-attributes-bdd/key", []byte("body"), "")
+		res.Body.Close()
+		request, _ := http.NewRequest(http.MethodGet, ts.URL+"/standard-attributes-bdd/key?attributes", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-object-attributes", "StorageClass")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<StorageClass>STANDARD</StorageClass>")) {
+			t.Fatalf("standard storage attributes %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {
 		configuration := []byte(`<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`)
 		res := do(http.MethodPut, "/cross-region-bdd", configuration, "")

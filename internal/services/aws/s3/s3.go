@@ -888,7 +888,8 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		}
 		h := http.Header{}
 		h.Set("Location", "/"+b)
-		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{}}, nil
+		h.Set("x-amz-bucket-arn", "arn:aws:s3:::"+b)
+		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"BucketArn": "arn:aws:s3:::" + b}}, nil
 	}
 	global := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets")
 	raw, exists, err := global.Get(ctx, b)
@@ -944,7 +945,8 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		}
 	}
 	h.Set("Location", location)
-	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{}}, nil
+	h.Set("x-amz-bucket-arn", "arn:aws:s3:::"+b)
+	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"BucketArn": "arn:aws:s3:::" + b}}, nil
 }
 
 func (p *Pack) deleteBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -1084,7 +1086,7 @@ func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response
 	buckets := make([]any, 0, len(listed))
 	paginated := prefixSet || regionSet || tokenSet || maxSet
 	for _, bucket := range listed {
-		item := map[string]any{"Name": bucket.name, "CreationDate": bucket.created}
+		item := map[string]any{"Name": bucket.name, "CreationDate": bucket.created, "BucketArn": "arn:aws:s3:::" + bucket.name}
 		if paginated {
 			item["BucketRegion"] = bucket.region
 		}

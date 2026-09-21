@@ -2,18 +2,22 @@
   "all": {
     "Buckets": [
       {
+        "BucketArn": "arn:aws:s3:::alpha-bucket",
         "CreationDate": "1970-01-01T00:00:00.000Z",
         "Name": "alpha-bucket"
       },
       {
+        "BucketArn": "arn:aws:s3:::team-alpha",
         "CreationDate": "1970-01-01T00:00:01.000Z",
         "Name": "team-alpha"
       },
       {
+        "BucketArn": "arn:aws:s3:::team-beta",
         "CreationDate": "1970-01-01T00:00:02.000Z",
         "Name": "team-beta"
       },
       {
+        "BucketArn": "arn:aws:s3:::team-charlie",
         "CreationDate": "1970-01-01T00:00:03.000Z",
         "Name": "team-charlie"
       }
@@ -26,6 +30,7 @@
   "last": {
     "Buckets": [
       {
+        "BucketArn": "arn:aws:s3:::team-charlie",
         "BucketRegion": "us-west-2",
         "CreationDate": "1970-01-01T00:00:03.000Z",
         "Name": "team-charlie"
@@ -40,11 +45,13 @@
   "page": {
     "Buckets": [
       {
+        "BucketArn": "arn:aws:s3:::team-alpha",
         "BucketRegion": "us-east-1",
         "CreationDate": "1970-01-01T00:00:01.000Z",
         "Name": "team-alpha"
       },
       {
+        "BucketArn": "arn:aws:s3:::team-beta",
         "BucketRegion": "us-west-2",
         "CreationDate": "1970-01-01T00:00:02.000Z",
         "Name": "team-beta"
@@ -60,11 +67,13 @@
   "regional": {
     "Buckets": [
       {
+        "BucketArn": "arn:aws:s3:::team-beta",
         "BucketRegion": "us-west-2",
         "CreationDate": "1970-01-01T00:00:02.000Z",
         "Name": "team-beta"
       },
       {
+        "BucketArn": "arn:aws:s3:::team-charlie",
         "BucketRegion": "us-west-2",
         "CreationDate": "1970-01-01T00:00:03.000Z",
         "Name": "team-charlie"

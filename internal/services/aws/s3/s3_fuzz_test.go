@@ -1310,7 +1310,9 @@ func FuzzListBucketsPagination(f *testing.F) {
 			if bucket.id.Region != "us-east-1" {
 				input["LocationConstraint"] = bucket.id.Region
 			}
-			mustInvokeAs(t, p, bucket.id, "CreateBucket", input, nil)
+			if created := mustInvokeAs(t, p, bucket.id, "CreateBucket", input, nil); created.Output["BucketArn"] != "arn:aws:s3:::"+bucket.name {
+				t.Fatalf("create ARN = %#v", created.Output)
+			}
 		}
 
 		input := map[string]any{"MaxBuckets": max, "Prefix": prefix}
@@ -1361,7 +1363,7 @@ func FuzzListBucketsPagination(f *testing.F) {
 		}
 		for i, item := range items {
 			got := item.(map[string]any)
-			if got["Name"] != want[i].name || got["BucketRegion"] != want[i].region {
+			if got["Name"] != want[i].name || got["BucketArn"] != "arn:aws:s3:::"+want[i].name || got["BucketRegion"] != want[i].region {
 				t.Fatalf("bucket %d = %#v want=%#v", i, got, want[i])
 			}
 		}

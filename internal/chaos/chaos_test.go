@@ -2087,7 +2087,10 @@ func TestConcurrentCrossRegionBucketsPaginateWithoutAccountLeaks(t *testing.T) {
 			if region != "us-east-1" {
 				input["LocationConstraint"] = region
 			}
-			_, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: region}, Operation: "CreateBucket", Input: input})
+			created, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: region}, Operation: "CreateBucket", Input: input})
+			if err == nil && created.Output["BucketArn"] != "arn:aws:s3:::"+input["Bucket"].(string) {
+				err = fmt.Errorf("create ARN: %#v", created.Output)
+			}
 			errs <- err
 		}(i)
 	}
@@ -2114,7 +2117,7 @@ func TestConcurrentCrossRegionBucketsPaginateWithoutAccountLeaks(t *testing.T) {
 		for _, item := range page.Output["Buckets"].([]any) {
 			bucket := item.(map[string]any)
 			name, region := bucket["Name"].(string), bucket["BucketRegion"].(string)
-			if !strings.HasPrefix(name, "list-a-") || (region != "us-east-1" && region != "us-west-2") || seen[name] {
+			if !strings.HasPrefix(name, "list-a-") || bucket["BucketArn"] != "arn:aws:s3:::"+name || (region != "us-east-1" && region != "us-west-2") || seen[name] {
 				t.Fatalf("leaked or duplicate bucket: %#v", bucket)
 			}
 			seen[name] = true

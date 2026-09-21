@@ -1526,6 +1526,69 @@ func TestConcurrentWriteConditionFaultDetailsRemainModeled(t *testing.T) {
 	}
 }
 
+func TestConcurrentWriteIfMatchListsNeverMutateObjects(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "write-if-match-chaos"}, "")
+	_, _ = call("PutObject", map[string]any{"Bucket": "write-if-match-chaos", "Key": "source"}, "source")
+	etags := map[string]string{}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		seed, err := call("PutObject", map[string]any{"Bucket": "write-if-match-chaos", "Key": operation}, "old")
+		if err != nil {
+			t.Fatal(err)
+		}
+		etags[operation] = seed.Headers.Get("ETag")
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "PutObject"
+			if i%2 != 0 {
+				operation = "CopyObject"
+			}
+			input := map[string]any{"Bucket": "write-if-match-chaos", "Key": operation, "IfMatch": fmt.Sprintf(`"wrong-%d", %s`, i, etags[operation])}
+			if operation == "CopyObject" {
+				input["CopySource"] = "write-if-match-chaos/source"
+			}
+			_, err := call(operation, input, "new")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match" {
+				errs <- fmt.Errorf("%s list fault = %#v", operation, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		got, err := call("GetObject", map[string]any{"Bucket": "write-if-match-chaos", "Key": operation}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(got.Stream)
+		if string(body) != "old" {
+			t.Fatalf("%s changed to %q", operation, body)
+		}
+	}
+}
+
 func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

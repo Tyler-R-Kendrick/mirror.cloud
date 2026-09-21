@@ -708,6 +708,7 @@ func SupportMatrix() string {
 	sb.WriteString("CompleteMultipartUpload returns LocalStack-compatible NotImplemented details for combined conditional headers, non-wildcard If-None-Match, and wildcard If-Match values.\n")
 	sb.WriteString("S3 PutObject and CopyObject return LocalStack-compatible NotImplemented details for combined destination conditional headers, non-wildcard If-None-Match, and wildcard If-Match values.\n")
 	sb.WriteString("S3 PutObject and CopyObject return LocalStack-compatible NoSuchKey details when destination If-Match targets a missing object and modeled PreconditionFailed conditions for ETag mismatches.\n")
+	sb.WriteString("S3 PutObject and CopyObject require one exact destination If-Match ETag, matching LocalStack rather than the comma-list matching supported by read conditions.\n")
 	sb.WriteString("CompleteMultipartUpload returns LocalStack-compatible NoSuchKey, PreconditionFailed, and ConditionalRequestConflict details when If-Match or If-None-Match object state changes across multipart initiation and completion.\n")
 	sb.WriteString("CompleteMultipartUpload omits checksum response fields for KMS-encrypted multipart objects while persisting the checksum for ChecksumMode-enabled reads.\n")
 	sb.WriteString("UploadPart validates Content-MD5 before storing a part, returning LocalStack-compatible InvalidDigest details for malformed values and BadDigest expected/calculated details for body mismatches; rejected digests leave the upload unchanged.\n")

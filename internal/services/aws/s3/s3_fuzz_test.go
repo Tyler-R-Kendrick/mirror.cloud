@@ -1970,6 +1970,34 @@ func FuzzWriteConditionFaultDetails(f *testing.F) {
 	})
 }
 
+func FuzzWriteIfMatchRequiresSingleETag(f *testing.F) {
+	f.Add("wrong", []byte("new"), false)
+	f.Add("other", []byte("new"), true)
+	f.Fuzz(func(t *testing.T, decoy string, body []byte, copyObject bool) {
+		if len(decoy)+len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-if-match-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-if-match-fuzz", "Key": "source"}, []byte("source"))
+		seed := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-if-match-fuzz", "Key": "destination"}, []byte("old"))
+		operation := "PutObject"
+		input := map[string]any{"Bucket": "write-if-match-fuzz", "Key": "destination", "IfMatch": `"` + base64.RawURLEncoding.EncodeToString([]byte(decoy)) + `", ` + seed.Headers.Get("ETag")}
+		if copyObject {
+			operation = "CopyObject"
+			input["CopySource"] = "write-if-match-fuzz/source"
+		}
+		_, err := invoke(t, p, operation, input, body)
+		fault := asFault(t, err)
+		if fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match" {
+			t.Fatalf("%s list fault = %#v", operation, fault)
+		}
+		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-if-match-fuzz", "Key": "destination"}, nil))); got != "old" {
+			t.Fatalf("%s list stored %q", operation, got)
+		}
+	})
+}
+
 func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
 	for mode := uint8(0); mode < 5; mode++ {
 		f.Add([]byte("part"), mode)

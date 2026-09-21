@@ -6348,10 +6348,18 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-write-accept-wrong-if-match",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if match != "" && !etagMatches(match, etag) && exists {`,
+			old:  `if match != "" && strings.Trim(match, "\"") != strings.Trim(etag, "\"") && exists {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestWritePreconditionFaultDetails",
+		},
+		{
+			name: "s3-write-accept-if-match-list",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if match != "" && strings.Trim(match, "\"") != strings.Trim(etag, "\"") && exists {`,
+			new:  `if match != "" && !etagMatches(match, etag) && exists {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestWriteIfMatchRequiresSingleETag",
 		},
 		{
 			name: "s3-write-accept-matching-if-none-match",

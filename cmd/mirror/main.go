@@ -13,11 +13,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/allservices"
 )
@@ -75,7 +75,7 @@ Usage:
   mirror version
 
 up flags:
-  --all                  enable every catalog service (default if none given)
+  --all                  enable every served service (default if none given)
   --profile NAME         aws-core | gcp-core
   --tier ID=mock|emulate|proxy
   --strict               refuse mock-tier (NotImplemented)
@@ -261,7 +261,7 @@ func cmdDoctor(args []string) error {
 
 	lock := "specs/mirror.lock"
 	if _, err := os.Stat(lock); err != nil {
-		say(false, "spec lock missing (bootstrap catalog in use)", "make specs-sync")
+		say(false, "spec lock missing", "make specs-sync")
 	} else {
 		say(true, "spec lock present", "")
 	}
@@ -274,7 +274,7 @@ func cmdDoctor(args []string) error {
 }
 
 func cmdServices() error {
-	b := catalog.Bundle()
+	b := specboot.Bundle()
 	emu := map[string]bool{}
 	for _, f := range registry.Factories() {
 		if f.Tier == model.TierEmulate {

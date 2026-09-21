@@ -47,7 +47,8 @@ type Metrics struct {
 	// This is not a style metric like the others; it is a live defect with a
 	// number attached. A bundle is validated against the generated model --
 	// aws.guardduty is restJson1 with ninety operations -- and served through
-	// the booted catalog, which describes it as awsJson1_1 with twenty. The
+	// the catalog specboot once booted from, which described it as awsJson1_1
+	// with twenty (specboot derives from the generated model now). The
 	// consequence is that no real SDK can reach those services: it sends
 	// `GET /detector` and the edge answers only `POST /` with an X-Amz-Target.
 	//

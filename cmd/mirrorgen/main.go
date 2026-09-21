@@ -1,4 +1,4 @@
-// Command mirrorgen ingests vendored specs (or the bootstrap catalog) and
+// Command mirrorgen ingests vendored specs and
 // emits per-service Go packages under internal/generated.
 package main
 
@@ -18,7 +18,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/fusion"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -27,6 +26,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/gcp/discovery"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/openapi"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specdiff"
 )
 
@@ -36,7 +36,6 @@ func main() {
 	outDir := flag.String("out", "internal/generated", "output directory")
 	diff := flag.Bool("diff", false, "print API-surface diff instead of generating")
 	jsonOut := flag.Bool("json", false, "machine-readable specdiff JSON")
-	forceCatalog := flag.Bool("catalog", false, "generate from the bootstrap catalog only")
 	index := flag.String("index", "", "index a spec tree: print `service-id<TAB>path` for every model found, then exit")
 	flag.Parse()
 
@@ -53,11 +52,11 @@ func main() {
 		return
 	}
 	want, err := loadSet(*setPath)
-	if err != nil && !*forceCatalog {
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "mirrorgen: %v (continuing with all ingested services)\n", err)
 	}
 
-	ingested, srcNote, err := loadBundle(ctx, *specsDir, *forceCatalog)
+	ingested, srcNote, err := loadBundle(ctx, *specsDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -72,7 +71,7 @@ func main() {
 		return
 	}
 
-	svcs, err := applySet(ingested.Services, want, *forceCatalog)
+	svcs, err := applySet(ingested.Services, want)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -84,18 +83,13 @@ func main() {
 	fmt.Fprintf(os.Stderr, "wrote %d service package(s) under %s\n", len(svcs), *outDir)
 }
 
-func loadBundle(ctx context.Context, specsDir string, forceCatalog bool) (model.Bundle, string, error) {
-	if forceCatalog {
-		b := catalog.Bundle()
-		return *b, "mirrorgen: using bootstrap catalog", nil
-	}
+func loadBundle(ctx context.Context, specsDir string) (model.Bundle, string, error) {
 	groups, n, err := ingestSpecs(ctx, specsDir)
 	if err != nil {
 		return model.Bundle{}, "", err
 	}
 	if n == 0 {
-		b := catalog.Bundle()
-		return *b, "mirrorgen: no vendored specs; using bootstrap catalog", nil
+		return model.Bundle{}, "", fmt.Errorf("mirrorgen: no vendored specs under %s; run `make specs-sync`", specsDir)
 	}
 	// Fragments are fused per provider, and the provider is the first segment
 	// of the service ID -- the same thing the rest of the system reads it as.
@@ -228,7 +222,7 @@ func runDiff(args []string, ingested model.Bundle, asJSON bool) error {
 	var oldB, newB model.Bundle
 	switch len(args) {
 	case 0:
-		oldB = *catalog.Bundle()
+		oldB = *specboot.Bundle()
 		newB = ingested
 	case 2:
 		var err error
@@ -334,25 +328,11 @@ func loadSet(path string) ([]setEntry, error) {
 // applySet reduces the ingested services to what specs/mirror.set asked for:
 // first the set of services, then -- for the vendor that publishes one
 // document per platform -- the operations a service selected by path.
-//
-// fromCatalog suppresses the second step, and that is the whole reason this is
-// a function rather than four lines in main. A `paths=` selector describes the
-// vendor's document. The bootstrap catalog is a hand-written stand-in whose
-// bindings are approximations, and most of its services bind every operation
-// to POST / because nothing in the catalog needed a URI. Narrowing one by the
-// other's paths is a category error, and because narrow deliberately treats a
-// selector that matches nothing as fatal, it is a fatal one: it took
-// `mirrorgen --catalog` down entirely for vercel.api, whose catalog operations
-// then all sat at /.
-func applySet(svcs []model.Service, want []setEntry, fromCatalog bool) ([]model.Service, error) {
+func applySet(svcs []model.Service, want []setEntry) ([]model.Service, error) {
 	if len(want) == 0 {
 		return svcs, nil
 	}
-	svcs = filterSet(svcs, want)
-	if fromCatalog {
-		return svcs, nil
-	}
-	return narrowAll(svcs, want)
+	return narrowAll(filterSet(svcs, want), want)
 }
 
 func filterSet(svcs []model.Service, want []setEntry) []model.Service {

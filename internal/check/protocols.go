@@ -13,8 +13,8 @@ import (
 //
 // The two are supposed to be the same thing. They are read from different
 // places and, for about half the bundles, they disagree: a bundle is validated
-// against the generated model and served through the booted catalog, and
-// nothing compared the two. `aws.guardduty` is validated as restJson1 with
+// against the generated model and served through the hand-authored catalog
+// specboot booted from, and nothing compared the two. `aws.guardduty` is validated as restJson1 with
 // ninety operations and served as awsJson1_1 with twenty, so an SDK sending
 // `GET /detector` reaches nothing while `POST /` with an X-Amz-Target -- which
 // no SDK sends for that service -- works.
@@ -25,6 +25,10 @@ import (
 // where the spec says CryoControllerUserManager. An SDK sends the spec's
 // value, the edge matches on the catalog's, and the request routes to no
 // service at all.
+//
+// specboot now derives the served model from the generated one, so the
+// disagreement is structurally zero; this stays because the ratchet pins it
+// there and a regression cannot rejoin quietly.
 //
 // docs/BEHAVIOR_IR.md states the intended invariant: "B-IR never redefines
 // wire shapes ... the loader fails otherwise". It holds for the shapes a

@@ -10,9 +10,9 @@ Objections to frozen interfaces in `docs/MASTER_PROMPT.md` §3 go here. They do 
 
 `spi.Identity` has no expiry member. Presigned-URL expiry is signaled by appending `:expired` to `ARN` and checking `identity.Expired`. `Parse` takes the process clock (`now time.Time`) so it does not call `time.Now`.
 
-## Catalog is bootstrap, not generated
+## The served model is the generated model
 
-S1 codegen (`cmd/mirrorgen`, `specs/`) replaces `internal/catalog` as the model source once specs are pinned. Until `make specs-sync` succeeds, the hand-built catalog is the spine.
+`internal/specboot` derives the served bundle from `internal/generated` (S1 codegen: `cmd/mirrorgen`, `specs/`), served under the wire names SDKs use. The hand-built catalog it once booted from is gone; what no specification carries -- three AWS services with no published model, and a handful of data-plane operations -- is a short table in `specboot`.
 
 ## S1 — spec ingestion
 

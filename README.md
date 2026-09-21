@@ -27,7 +27,7 @@ AWS is where the pipeline gets validated, because it has the best-published spec
 
 ## Status
 
-v1 spine is in tree: frozen interfaces, edge + codecs, emulate-tier packs, mock synthesizer, CLI. Spec ingestion (`make specs-sync`) still vendors AWS Smithy / GCS Discovery; until that pin lands, the process boots from a hand-built catalog.
+v1 spine is in tree: frozen interfaces, edge + codecs, emulate-tier packs, mock synthesizer, CLI. The process boots from the committed generated models (`internal/generated`, pinned by `specs/mirror.lock`); the three AWS services with no published model are described by hand in `internal/specboot`.
 
 ## Quick start
 

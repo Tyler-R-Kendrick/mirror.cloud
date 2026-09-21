@@ -173,9 +173,9 @@ resources:
       # resource, and `name` read from `input` would fail on a request that
       # does not carry one. It lives on the create effect instead.
       #
-      # readyState/state are views over __state. A create is born QUEUED; the
-      # engine clock must advance past the build deadlines before get/list
-      # settle through BUILDING to READY. Cancel is reachable only before that.
+      # readyState/state are views over __state. A create is born QUEUED;
+      # start_build (+1s) moves to BUILDING, finish_build (+2s) to READY.
+      # Cancel is reachable from QUEUED or BUILDING before finish_build.
       uid: id
       createdAt: "int(now) * 1000"
       created: "int(now) * 1000"
@@ -832,10 +832,10 @@ operations:
       - create:
           resource: deployment
           key: "'dpl_' + fx.depid"
-          # Born QUEUED with both build timers armed at one second. The create
-          # answer stays QUEUED until the engine clock advances; cancel is
-          # reachable before that. After Advance, get/list settle through
-          # BUILDING to READY.
+          # Born QUEUED; start_build at +1s, finish_build at +2s so BUILDING
+          # is observable between advances and CANCEL still works from there.
+          # Create answer stays QUEUED until the clock moves; cancel is
+          # reachable before start_build. Advance(2s) settles to READY.
           state: "'QUEUED'"
           deadline: { name: start_build, after: "seconds(1)" }
           record:
@@ -850,7 +850,7 @@ operations:
       - patch:
           resource: deployment
           key: "'dpl_' + fx.depid"
-          deadline: { name: finish_build, after: "seconds(1)" }
+          deadline: { name: finish_build, after: "seconds(2)" }
           record:
             uid: id
     output:
@@ -896,12 +896,15 @@ operations:
     require:
       - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
     effects:
-      # The oracle cascades: a delete takes the deployment's aliases, events
-      # and file descriptors with it.
+      # Cascade: aliases/events/files plus CI/CD children scoped under this
+      # deployment (checks, check-runs, runtime logs).
       - delete: { resource: deployment_alias_by_alias, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: deployment_alias, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: deployment_event, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: deployment_file, where: "item.deploymentId == string(dep.uid)" }
+      - delete: { resource: check, where: "true" }
+      - delete: { resource: check_run, where: "true" }
+      - delete: { resource: runtime_log, where: "true" }
       - delete: { resource: deployment }
     output:
       uid: dep.uid
@@ -2310,7 +2313,9 @@ operations:
     output: {}
 
   ArtifactQuery:
-    # Document answers a digest→metadata map; empty until artifacts exist.
+    # Document answers digest→metadata for requested hashes. Map-shaped
+    # root output from a filtered list is not expressible yet; empty map
+    # is the honest stub (Upload/Exists/Download cover the store itself).
     output: {}
 
   Status:

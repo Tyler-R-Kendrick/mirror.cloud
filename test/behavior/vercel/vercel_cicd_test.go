@@ -115,6 +115,16 @@ func TestVercelCICDParity(t *testing.T) {
 		if code != 200 || crun["id"] == nil {
 			t.Fatalf("check-run %d %#v", code, crun)
 		}
+		code, del := call(http.MethodDelete, "/v13/deployments/"+did, "")
+		if code != 200 || del["state"] != "DELETED" {
+			t.Fatalf("delete deployment %d %#v", code, del)
+		}
+		code, orphan := call(http.MethodGet, "/v1/deployments/"+did+"/checks", "")
+		if code == 200 {
+			if checks, ok := orphan["checks"].([]any); ok && len(checks) > 0 {
+				t.Fatalf("checks leaked after delete %#v", orphan)
+			}
+		}
 	})
 
 	t.Run("artifacts and rolling release and runtime logs", func(t *testing.T) {

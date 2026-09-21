@@ -92,7 +92,14 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		if code != 200 || dpl["readyState"] != "QUEUED" || dpl["url"] == nil {
 			t.Fatalf("deploy %d %#v", code, dpl)
 		}
-		if err := rt.Deps.Clock.Advance(2 * time.Second); err != nil {
+		if err := rt.Deps.Clock.Advance(1 * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		code, mid, _ := call(http.MethodGet, "/v13/deployments/"+dpl["id"].(string), "", "")
+		if code != 200 || mid["readyState"] != "BUILDING" {
+			t.Fatalf("get after +1s want BUILDING %d %#v", code, mid)
+		}
+		if err := rt.Deps.Clock.Advance(1 * time.Second); err != nil {
 			t.Fatal(err)
 		}
 		// Listing settles too: the row must not stay QUEUED after Advance

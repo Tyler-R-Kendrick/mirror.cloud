@@ -4629,21 +4629,21 @@ func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
 	}
 	v2First := mustInvoke(t, p, "ListObjectsV2", input, nil).Output
 	v2Next := v2First["NextContinuationToken"]
-	if v2Next != "folder/aSubfolder/" || v2First["KeyCount"] != 1 {
+	if v2Next != "Zm9sZGVyL2ZpbGUx" || v2First["KeyCount"] != 1 {
 		t.Fatalf("first V2 page = %#v", v2First)
 	}
 	v2Input := maps.Clone(input)
 	v2Input["ContinuationToken"] = v2Next
 	v2Second := mustInvoke(t, p, "ListObjectsV2", v2Input, nil).Output
-	if got := asSliceForTest(v2Second["Contents"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" || v2Second["ContinuationToken"] != v2Next || v2Second["NextContinuationToken"] != "folder/file1" {
+	if got := asSliceForTest(v2Second["Contents"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" || v2Second["ContinuationToken"] != v2Next || v2Second["NextContinuationToken"] != "Zm9sZGVyL2ZpbGUy" {
 		t.Fatalf("second V2 page = %#v", v2Second)
 	}
 	for _, test := range []struct {
-		query, token string
-	}{{"", "NextMarker"}, {"?list-type=2", "NextContinuationToken"}} {
+		query, token, want string
+	}{{"", "NextMarker", "folder/aSubfolder/"}, {"?list-type=2", "NextContinuationToken", "Zm9sZGVyL2ZpbGUx"}} {
 		request := httptest.NewRequest(http.MethodGet, "https://list-pagination.s3.us-east-1.amazonaws.com/"+test.query, nil)
 		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListObjectsV2", Input: input, Identity: ident(), HTTP: request})
-		if err != nil || response.Output[test.token] != "folder/aSubfolder/" {
+		if err != nil || response.Output[test.token] != test.want {
 			t.Fatalf("route %q = %#v, %v", test.query, response, err)
 		}
 	}
@@ -4668,6 +4668,29 @@ func TestListObjectsPaginationCharacterization(t *testing.T) {
 		"v2-first": v2First,
 		"v2-next":  mustInvoke(t, p, "ListObjectsV2", v2NextInput, nil).Output,
 	})
+}
+
+func TestListObjectsV2OpaqueContinuationTokens(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "opaque-tokens"}, nil)
+	for _, key := range []string{"a", "b", "c"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "opaque-tokens", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "MaxKeys": 1}, nil).Output
+	if contents := asSliceForTest(first["Contents"]); len(contents) != 1 || asMapForTest(contents[0])["Key"] != "a" || first["NextContinuationToken"] != "Yg==" {
+		t.Fatalf("first page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "MaxKeys": 1, "ContinuationToken": first["NextContinuationToken"]}, nil).Output
+	if contents := asSliceForTest(second["Contents"]); len(contents) != 1 || asMapForTest(contents[0])["Key"] != "b" || second["ContinuationToken"] != "Yg==" || second["NextContinuationToken"] != "Yw==" {
+		t.Fatalf("second page = %#v", second)
+	}
+	for _, token := range []string{"", "not-base64"} {
+		_, err := invoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "ContinuationToken": token}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.Message != "The continuation token provided is incorrect" || fault.Fields["ArgumentName"] != "continuation-token" {
+			t.Fatalf("token %q fault = %#v", token, fault)
+		}
+	}
 }
 
 func TestListObjectVersionsPagination(t *testing.T) {

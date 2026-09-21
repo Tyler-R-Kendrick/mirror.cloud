@@ -141,8 +141,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("next V1 page %s", next)
 		}
 		firstV2 := list("list-type=2&prefix=folder%2F&delimiter=%2F&max-keys=1")
-		if !strings.Contains(firstV2, "<CommonPrefixes><Prefix>folder/aSubfolder/</Prefix></CommonPrefixes>") || !strings.Contains(firstV2, "<NextContinuationToken>folder/aSubfolder/</NextContinuationToken>") || !strings.Contains(firstV2, "<KeyCount>1</KeyCount>") {
+		if !strings.Contains(firstV2, "<CommonPrefixes><Prefix>folder/aSubfolder/</Prefix></CommonPrefixes>") || !strings.Contains(firstV2, "<NextContinuationToken>Zm9sZGVyL2ZpbGUx</NextContinuationToken>") || !strings.Contains(firstV2, "<KeyCount>1</KeyCount>") {
 			t.Fatalf("first V2 page %s", firstV2)
+		}
+		nextV2 := list("list-type=2&prefix=folder%2F&delimiter=%2F&max-keys=1&continuation-token=Zm9sZGVyL2ZpbGUx")
+		if !strings.Contains(nextV2, "<Key>folder/file1</Key>") || !strings.Contains(nextV2, "<ContinuationToken>Zm9sZGVyL2ZpbGUx</ContinuationToken>") || !strings.Contains(nextV2, "<NextContinuationToken>Zm9sZGVyL2ZpbGUy</NextContinuationToken>") {
+			t.Fatalf("next V2 page %s", nextV2)
+		}
+		for _, token := range []string{"", "not-base64"} {
+			response := do(http.MethodGet, "/list-pagination-bdd?list-type=2&continuation-token="+token, nil, "")
+			fault, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(fault, []byte("<ArgumentName>continuation-token</ArgumentName>")) {
+				t.Fatalf("token %q: %d %s", token, response.StatusCode, fault)
+			}
 		}
 		defaultOwnerV2 := list("list-type=2&prefix=folder%2Ffile&max-keys=1")
 		if strings.Contains(defaultOwnerV2, "<Owner>") {

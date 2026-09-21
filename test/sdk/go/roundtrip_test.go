@@ -972,8 +972,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("second list page: %#v %v", secondList, err)
 	}
 	firstListV2, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1)})
-	if err != nil || len(firstListV2.CommonPrefixes) != 1 || aws.ToInt32(firstListV2.KeyCount) != 1 || aws.ToString(firstListV2.NextContinuationToken) != "folder/aSubfolder/" {
+	if err != nil || len(firstListV2.CommonPrefixes) != 1 || aws.ToInt32(firstListV2.KeyCount) != 1 || aws.ToString(firstListV2.NextContinuationToken) != "Zm9sZGVyL2ZpbGUx" {
 		t.Fatalf("first list V2 page: %#v %v", firstListV2, err)
+	}
+	secondListV2, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1), ContinuationToken: firstListV2.NextContinuationToken})
+	if err != nil || len(secondListV2.Contents) != 1 || aws.ToString(secondListV2.Contents[0].Key) != "folder/file1" || aws.ToString(secondListV2.ContinuationToken) != "Zm9sZGVyL2ZpbGUx" || aws.ToString(secondListV2.NextContinuationToken) != "Zm9sZGVyL2ZpbGUy" {
+		t.Fatalf("second list V2 page: %#v %v", secondListV2, err)
 	}
 	defaultOwnerV2, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/file"), MaxKeys: aws.Int32(1)})
 	if err != nil || len(defaultOwnerV2.Contents) != 1 || defaultOwnerV2.Contents[0].Owner != nil {

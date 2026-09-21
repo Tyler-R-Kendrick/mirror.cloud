@@ -849,6 +849,12 @@ operations:
   GetDeployments:
     list: { resource: deployment, member: deployments }
     output:
+      # Projected: the raw row carries __state/__deadlines, and readyState is
+      # a view. Listing must match GetDeployment after the same settle.
+      deployments: >
+        items.map(i, {'uid': i.uid, 'name': i.name, 'url': i.url,
+          'projectId': i.projectId, 'readyState': string(i.__state),
+          'type': i.type, 'createdAt': i.createdAt, 'created': i.created})
       pagination: "{'count': size(items)}"
 
   GetDeployment:
@@ -1751,6 +1757,10 @@ operations:
     # one handler, and the vendored document declares only v7.
     list: { resource: deployment, member: deployments }
     output:
+      deployments: >
+        items.map(i, {'uid': i.uid, 'name': i.name, 'url': i.url,
+          'projectId': i.projectId, 'readyState': string(i.__state),
+          'type': i.type, 'createdAt': i.createdAt, 'created': i.created})
       pagination: "{'count': size(items)}"
 
   GetProjectEnv:

@@ -95,6 +95,28 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		if err := rt.Deps.Clock.Advance(2 * time.Second); err != nil {
 			t.Fatal(err)
 		}
+		// Listing settles too: the row must not stay QUEUED after Advance
+		// just because nobody called GetDeployment.
+		code, listed, _ := call(http.MethodGet, "/v7/deployments", "", "")
+		if code != 200 {
+			t.Fatalf("list after advance %d %#v", code, listed)
+		}
+		found := false
+		for _, row := range listed["deployments"].([]any) {
+			m := row.(map[string]any)
+			if m["uid"] == dpl["id"] {
+				found = true
+				if m["readyState"] != "READY" {
+					t.Fatalf("list readyState %#v", m)
+				}
+				if _, leak := m["__state"]; leak {
+					t.Fatalf("list leaked __state: %#v", m)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("deployment missing from list %#v", listed)
+		}
 		code, got, _ := call(http.MethodGet, "/v13/deployments/"+dpl["id"].(string), "", "")
 		if code != 200 || got["readyState"] != "READY" {
 			t.Fatalf("get after advance %d %#v", code, got)

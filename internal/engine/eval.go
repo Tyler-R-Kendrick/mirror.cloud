@@ -1292,6 +1292,21 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 		if err := unmarshal(kv.Value, &rec); err != nil {
 			return err
 		}
+		// List is an observation point the same way select is: expired
+		// deadlines must advance before the caller sees the row, or a
+		// deployment listing would stay QUEUED after GetDeployment had
+		// already settled the same record to READY.
+		if res.Statechart != nil {
+			changed, err := ev.settle(rec, res.Statechart)
+			if err != nil {
+				return err
+			}
+			if changed {
+				if err := ev.putRecord(ctx, col, kv.Key, rec); err != nil {
+					return err
+				}
+			}
+		}
 		if op.List.Filter != "" {
 			ev.binds["item"] = rec
 			joined, joinErr := ev.resolveListReads(ctx, op, base)

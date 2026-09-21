@@ -2044,7 +2044,7 @@ func TestAWSSDKSQSMessageMoveTaskValidationContract(t *testing.T) {
 	if err != nil || len(listed.Results) != 2 || aws.ToString(listed.Results[1].Status) != "COMPLETED" || listed.Results[1].ApproximateNumberOfMessagesMoved != 1 {
 		t.Fatalf("default destination move task list %#v error %v", listed, err)
 	}
-	if _, err := client.CancelMessageMoveTask(context.Background(), &sqs.CancelMessageMoveTaskInput{TaskHandle: aws.String("foobared")}); err == nil || !strings.Contains(err.Error(), "TaskHandle is invalid") {
+	if _, err := client.CancelMessageMoveTask(context.Background(), &sqs.CancelMessageMoveTaskInput{TaskHandle: aws.String("foobared")}); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("invalid task handle error %v", err)
 	}
 	unknownSource := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"taskId":"00000000-0000-0000-0000-000000000000","sourceArn":"arn:aws:sqs:us-east-1:000000000000:missing"}`)))

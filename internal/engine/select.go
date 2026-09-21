@@ -125,6 +125,13 @@ func (ev *eval) runSelect(ctx context.Context, op bir.Operation) error {
 		}
 	}
 
+	// Counted after the filter and before the limit: this is what the
+	// selection was chosen from, which a limited selection cannot say for
+	// itself.
+	if sel.Count != "" {
+		ev.binds[sel.Count] = len(candidates)
+	}
+
 	limit := 0
 	if sel.Limit != "" {
 		v, err := ev.eval(base + "limit")

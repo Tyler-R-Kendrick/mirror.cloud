@@ -383,6 +383,13 @@ type Select struct {
 	Limit    string `yaml:"limit,omitempty"`
 	Group    *Group `yaml:"group,omitempty"`
 	Filter   string `yaml:"filter,omitempty"`
+	// Count binds, under this name, how many records passed the filter
+	// before the limit took its share. It exists because a limited selection
+	// cannot say how many it was chosen from, and one operation needs both:
+	// SQS's StartMessageMoveTask reports ApproximateNumberOfMessagesToMove --
+	// the number obtained when the task started -- alongside the number it
+	// has moved so far, and a rate-limited task moves one of many.
+	Count string `yaml:"count,omitempty"`
 }
 
 // Group expresses ordered-group semantics such as SQS FIFO message groups.

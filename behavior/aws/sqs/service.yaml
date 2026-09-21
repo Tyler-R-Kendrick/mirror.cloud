@@ -1234,6 +1234,13 @@ operations:
         message: "There is already a task running. Only one active task is allowed for a source queue arn at a given time."
     select:
       binding: msgs
+      # `eligible` is how many messages the task set out to move, counted
+      # before the rate limit takes its one. AWS defines
+      # ApproximateNumberOfMessagesToMove as the number obtained at the time
+      # the task starts and ...Moved as the number already moved, so a
+      # throttled task reads ToMove=3, Moved=1 -- not 1 and 1, which is what
+      # recording both from the limited selection produced.
+      count: eligible
       resource: message
       # Without a destination the move is a redrive back to where each message
       # came from, so a message that was never redriven has nowhere to go and
@@ -1264,7 +1271,7 @@ operations:
             SourceArn: "'SourceArn' in input ? input.SourceArn : ''"
             DestinationArn: "'DestinationArn' in input ? input.DestinationArn : ''"
             ApproximateNumberOfMessagesMoved: "msgs.size()"
-            ApproximateNumberOfMessagesToMove: "msgs.size()"
+            ApproximateNumberOfMessagesToMove: "eligible"
             MaxNumberOfMessagesPerSecond: >
               throttled ? dyn(int(input.MaxNumberOfMessagesPerSecond)) : dyn(null)
             Status: "throttled ? 'RUNNING' : 'COMPLETED'"
@@ -1297,8 +1304,7 @@ operations:
       # `handle` is the guard, once, so nothing below repeats it. An absent or
       # null TaskHandle becomes the empty string, which every expression here
       # already handles: it decodes to nothing, parses to null, and the first
-      # require answers InvalidParameterValue -- which is the fault the pack
-      # gave and the fault a caller should see.
+      # require answers ResourceNotFound -- a handle that names no task.
       handle: "'TaskHandle' in input && input.TaskHandle != null ? string(input.TaskHandle) : ''"
       handleDoc: >
         b64decode(handle) == '' ? null : parseJSON(b64decode(handle))
@@ -1306,9 +1312,15 @@ operations:
         handleDoc != null && 'taskId' in handleDoc && string(handleDoc.taskId) != '' &&
         'sourceArn' in handleDoc && string(handleDoc.sourceArn) != ''
     require:
+      # A handle this cannot read names no task. CancelMessageMoveTask's
+      # declared errors are InvalidAddress, InvalidSecurity, RequestThrottled,
+      # ResourceNotFoundException and UnsupportedOperation, and the reference
+      # gives ResourceNotFoundException HTTP 404 -- which is also what the
+      # pack answered for a garbage handle. InvalidParameterValue here was the
+      # bundle's invention.
       - cond: handleValid
-        error: InvalidParameterValue
-        message: "Value for parameter TaskHandle is invalid."
+        error: ResourceNotFound
+        message: "The specified message movement task does not exist."
       - cond: srcq_found
         error: ResourceNotFound
         message: "The resource that you specified for the SourceArn parameter doesn't exist."

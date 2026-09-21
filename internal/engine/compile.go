@@ -78,6 +78,9 @@ func (e *Engine) bindingNames() []string {
 		if op.Select != nil && op.Select.Binding != "" {
 			seen[op.Select.Binding] = true
 		}
+		if op.Select != nil && op.Select.Count != "" {
+			seen[op.Select.Count] = true
+		}
 		if op.List != nil {
 			for b := range op.List.Reads {
 				seen[b] = true

@@ -1,9 +1,9 @@
 {
   "invalidHandle": {
-    "Code": "InvalidParameterValue",
+    "Code": "ResourceNotFoundException",
     "Fault": "client",
-    "HTTPStatus": 400,
-    "Message": "Value for parameter TaskHandle is invalid."
+    "HTTPStatus": 404,
+    "Message": "The specified message movement task does not exist."
   },
   "invalidSource": {
     "Code": "ResourceNotFoundException",

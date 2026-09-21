@@ -5348,6 +5348,17 @@ var mutants = []mutant{
 		run:  "TestStatesSyncServiceIntegrations",
 	},
 	{
+		// `count` is what a limited selection was chosen from. Binding the
+		// taken size instead answers ToMove == Moved for every move task, and
+		// nothing that only checks the task ran notices.
+		name: "engine-select-count-after-limit",
+		file: filepath.Join("internal", "engine", "select.go"),
+		old:  `		ev.binds[sel.Count] = len(candidates)`,
+		new:  `		ev.binds[sel.Count] = 0`,
+		pkg:  "./internal/engine",
+		run:  "TestSelectCountIsTakenBeforeTheLimit",
+	},
+	{
 		// Inverting the predicate revokes exactly the assignments the request
 		// did not name and keeps the ones it did. A revoke that removes the
 		// wrong rows is the worst failure a permissions operation has, and it

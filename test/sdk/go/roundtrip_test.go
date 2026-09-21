@@ -2321,6 +2321,32 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("%s multipart precondition fault: %v", name, err)
 		}
 	}
+	for name, conditions := range map[string]struct{ match, noneMatch *string }{
+		"combined":      {aws.String(`"etag"`), aws.String("*")},
+		"if-none-match": {nil, aws.String(`"etag"`)},
+		"if-match-star": {aws.String("*"), nil},
+	} {
+		key := "write-precondition-" + name
+		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("old")}); err != nil {
+			t.Fatalf("seed %s write precondition: %v", name, err)
+		}
+		_, putErr := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("new"), IfMatch: conditions.match, IfNoneMatch: conditions.noneMatch})
+		_, copyErr := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), CopySource: aws.String("sdk/k"), IfMatch: conditions.match, IfNoneMatch: conditions.noneMatch})
+		for operation, err := range map[string]error{"PutObject": putErr, "CopyObject": copyErr} {
+			if err == nil || !strings.Contains(err.Error(), "StatusCode: 501") || !strings.Contains(err.Error(), "A header you provided implies functionality that is not implemented") {
+				t.Fatalf("%s %s precondition fault: %v", operation, name, err)
+			}
+		}
+		got, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key)})
+		if err != nil {
+			t.Fatalf("get %s after rejected writes: %v", name, err)
+		}
+		body, _ := io.ReadAll(got.Body)
+		_ = got.Body.Close()
+		if string(body) != "old" {
+			t.Fatalf("%s rejected write body = %q", name, body)
+		}
+	}
 	conditionalUpload := func(key string) (string, *s3types.CompletedMultipartUpload) {
 		t.Helper()
 		created, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String(key)})

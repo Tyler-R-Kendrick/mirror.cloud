@@ -915,6 +915,54 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given unsupported write conditions When putting or copying Then S3 returns LocalStack faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/write-precondition-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/write-precondition-bdd/source", []byte("source"), "")
+		res.Body.Close()
+		for _, operation := range []string{"PutObject", "CopyObject"} {
+			for name, conditions := range map[string]struct{ match, noneMatch, header, detail string }{
+				"combined":      {`"etag"`, "*", "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
+				"if-none-match": {"", `"etag"`, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+				"if-match-star": {"*", "", "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+			} {
+				res = do(http.MethodPut, "/write-precondition-bdd/destination", []byte("old"), "")
+				res.Body.Close()
+				request, err := http.NewRequest(http.MethodPut, ts.URL+"/write-precondition-bdd/destination", strings.NewReader("new"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Authorization", auth)
+				if operation == "CopyObject" {
+					request.Body = http.NoBody
+					request.ContentLength = 0
+					request.Header.Set("x-amz-copy-source", "/write-precondition-bdd/source")
+				}
+				if conditions.match != "" {
+					request.Header.Set("If-Match", conditions.match)
+				}
+				if conditions.noneMatch != "" {
+					request.Header.Set("If-None-Match", conditions.noneMatch)
+				}
+				response, err := http.DefaultClient.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(response.Body)
+				response.Body.Close()
+				if response.StatusCode != http.StatusNotImplemented || !bytes.Contains(body, []byte("<Code>NotImplemented</Code>")) || !bytes.Contains(body, []byte("<Header>"+conditions.header+"</Header>")) || !bytes.Contains(body, []byte("<additionalMessage>"+conditions.detail+"</additionalMessage>")) {
+					t.Fatalf("%s %s write precondition fault %d %s", operation, name, response.StatusCode, body)
+				}
+				res = do(http.MethodGet, "/write-precondition-bdd/destination", nil, "")
+				body, _ = io.ReadAll(res.Body)
+				res.Body.Close()
+				if res.StatusCode != http.StatusOK || string(body) != "old" {
+					t.Fatalf("%s %s changed destination = %d %q", operation, name, res.StatusCode, body)
+				}
+			}
+		}
+	})
+
 	t.Run("Given DeleteObject preconditions When deleting Then S3 returns LocalStack NotImplemented faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/delete-precondition-bdd", nil, "")
 		res.Body.Close()

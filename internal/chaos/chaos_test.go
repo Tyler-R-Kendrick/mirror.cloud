@@ -1395,6 +1395,68 @@ func TestConcurrentCompleteMultipartPreconditionFaultsRemainModeled(t *testing.T
 	}
 }
 
+func TestConcurrentWritePreconditionFaultsNeverMutateObject(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "write-precondition-chaos"}, "")
+	_, _ = call("PutObject", map[string]any{"Bucket": "write-precondition-chaos", "Key": "source"}, "source")
+	_, _ = call("PutObject", map[string]any{"Bucket": "write-precondition-chaos", "Key": "destination"}, "old")
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "PutObject"
+			input := map[string]any{"Bucket": "write-precondition-chaos", "Key": "destination"}
+			if i%2 != 0 {
+				operation = "CopyObject"
+				input["CopySource"] = "write-precondition-chaos/source"
+			}
+			header, detail := "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"
+			switch i % 3 {
+			case 0:
+				input["IfMatch"], input["IfNoneMatch"] = `"etag"`, "*"
+				header, detail = "If-Match,If-None-Match", "Multiple conditional request headers present in the request"
+			case 1:
+				input["IfNoneMatch"] = `"etag"`
+			case 2:
+				input["IfMatch"] = "*"
+			}
+			_, err := call(operation, input, "new")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != header || fault.Fields["additionalMessage"] != detail {
+				errs <- fmt.Errorf("%s precondition fault = %#v", operation, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	got, err := call("GetObject", map[string]any{"Bucket": "write-precondition-chaos", "Key": "destination"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Stream)
+	if string(body) != "old" {
+		t.Fatalf("rejected writes stored %q", body)
+	}
+}
+
 func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

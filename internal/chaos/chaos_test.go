@@ -231,6 +231,60 @@ func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
 			t.Fatalf("rejected copy %d persisted", i)
 		}
 	}
+	errs = make(chan error, 32)
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("multipart-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "copy-conditions", "Key": key}, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			input := map[string]any{"Bucket": "copy-conditions", "Key": key, "UploadId": created.Output["UploadId"], "PartNumber": 1, "CopySource": "copy-conditions/source"}
+			wantSuccess := i%4 < 2
+			switch i % 4 {
+			case 0:
+				input["CopySourceIfModifiedSince"] = future
+			case 1:
+				input["CopySourceIfMatch"], input["CopySourceIfNoneMatch"] = etag, etag
+				input["CopySourceIfModifiedSince"], input["CopySourceIfUnmodifiedSince"] = past, past
+			case 2:
+				input["CopySourceIfMatch"] = `"wrong", ` + etag
+			case 3:
+				input["CopySourceIfNoneMatch"] = `"wrong"`
+				input["CopySourceIfModifiedSince"] = modified
+			}
+			response, err := call("UploadPartCopy", input, nil)
+			listed, listErr := call("ListParts", map[string]any{"Bucket": "copy-conditions", "Key": key, "UploadId": created.Output["UploadId"]}, nil)
+			var parts []any
+			if listed != nil {
+				parts, _ = listed.Output["Parts"].([]any)
+			}
+			if wantSuccess {
+				if err != nil || listErr != nil || response.Headers.Get("ETag") != etag || len(parts) != 1 {
+					errs <- fmt.Errorf("multipart copy %d = %#v, parts %#v, %v, %v", i, response, parts, err, listErr)
+				}
+				return
+			}
+			fault, _ := err.(*spi.Fault)
+			condition := "x-amz-copy-source-If-Match"
+			if i%4 == 3 {
+				condition = "x-amz-copy-source-If-Modified-Since"
+			}
+			if fault == nil || fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != condition || listErr != nil || len(parts) != 0 {
+				errs <- fmt.Errorf("rejected multipart copy %d = %v, parts %#v, %v", i, err, parts, listErr)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
 }
 
 func TestConcurrentCopyObjectChecksumsRemainDeterministic(t *testing.T) {

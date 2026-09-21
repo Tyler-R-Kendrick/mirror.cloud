@@ -3505,19 +3505,64 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 			conditions["CopySourceIfModifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
 			wantSuccess = true
 		}
-		input := map[string]any{"Bucket": "copy-condition-fuzz", "Key": "destination", "CopySource": "copy-condition-fuzz/source"}
-		for key, value := range conditions {
-			input[key] = value
-		}
-		_, err := invoke(t, p, "CopyObject", input, nil)
-		if wantSuccess && err != nil {
-			t.Fatalf("mode %d: %v", mode%7, err)
-		}
-		if !wantSuccess {
-			fault := asFault(t, err)
-			if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.Fields["Condition"] != faultCondition {
-				t.Fatalf("mode %d: %#v", mode%7, fault)
+		for _, operation := range []string{"CopyObject", "UploadPartCopy"} {
+			input := map[string]any{"Bucket": "copy-condition-fuzz", "Key": "destination-" + strings.ToLower(operation), "CopySource": "copy-condition-fuzz/source"}
+			if operation == "UploadPartCopy" {
+				created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "copy-condition-fuzz", "Key": input["Key"]}, nil)
+				input["UploadId"], input["PartNumber"] = created.Output["UploadId"], 1
 			}
+			for key, value := range conditions {
+				input[key] = value
+			}
+			_, err := invoke(t, p, operation, input, nil)
+			if wantSuccess && err != nil {
+				t.Fatalf("%s mode %d: %v", operation, mode%7, err)
+			}
+			if !wantSuccess {
+				fault := asFault(t, err)
+				if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.Fields["Condition"] != faultCondition {
+					t.Fatalf("%s mode %d: %#v", operation, mode%7, fault)
+				}
+			}
+		}
+	})
+}
+
+func FuzzUploadPartCopyRangeBounds(f *testing.F) {
+	f.Add([]byte("0123456789"), uint16(0), uint16(8), uint8(0))
+	f.Add([]byte("x"), uint16(4), uint16(9), uint8(1))
+	f.Add([]byte("xy"), uint16(0), uint16(7), uint8(2))
+	f.Fuzz(func(t *testing.T, body []byte, startSeed, endSeed uint16, mode uint8) {
+		if len(body) == 0 {
+			body = []byte{0}
+		} else if len(body) > 4096 {
+			body = body[:4096]
+		}
+		start, end, wantCode := 0, 0, ""
+		switch mode % 3 {
+		case 0:
+			start = int(startSeed) % len(body)
+			end = start + int(endSeed)%(len(body)-start)
+		case 1:
+			start = len(body) + int(startSeed)%1024
+			end, wantCode = start+int(endSeed)%1024, "InvalidRequest"
+		case 2:
+			start = int(startSeed) % len(body)
+			end, wantCode = len(body)+int(endSeed)%1024, "InvalidArgument"
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-range-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-range-fuzz", "Key": "source"}, body)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "copy-range-fuzz", "Key": "destination"}, nil)
+		_, err := invoke(t, p, "UploadPartCopy", map[string]any{
+			"Bucket": "copy-range-fuzz", "Key": "destination", "UploadId": created.Output["UploadId"], "PartNumber": 1,
+			"CopySource": "copy-range-fuzz/source", "CopySourceRange": fmt.Sprintf("bytes=%d-%d", start, end),
+		}, nil)
+		if wantCode == "" && err != nil {
+			t.Fatal(err)
+		}
+		if wantCode != "" && asFault(t, err).Code != wantCode {
+			t.Fatalf("mode %d range %d-%d: %v", mode%3, start, end, err)
 		}
 	})
 }

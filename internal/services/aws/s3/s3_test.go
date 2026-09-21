@@ -5223,52 +5223,77 @@ func TestListObjectVersionsUnversionedOrder(t *testing.T) {
 }
 
 func TestUploadPartCopyConditionsAndRange(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	body := bytes.Repeat([]byte("0123456789"), 600000)
-	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "large"}, body)
+	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "source"}, []byte("0123456789"))
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "source"}, nil)
+	modified, err := http.ParseTime(head.Headers.Get("Last-Modified"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = deps.Clock.Advance(2 * time.Second)
 	createUpload := func(key string) string {
 		t.Helper()
 		response := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": key}, nil)
 		return response.Output["UploadId"].(string)
 	}
-
-	_, err := invoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": createUpload("rejected"), "PartNumber": 1, "CopySource": "bucket/large", "CopySourceIfMatch": `"wrong"`,
-	}, nil)
-	if fault := asFault(t, err); fault.Code != "PreconditionFailed" {
-		t.Fatalf("condition fault = %#v", fault)
+	characterization := map[string]any{}
+	type copyCase struct {
+		name, copyRange, code, condition string
+		conditions                       map[string]any
+		size                             int
 	}
-
-	uploadID := createUpload("range")
-	part := mustInvoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": uploadID, "PartNumber": 1, "CopySource": "bucket/large",
-		"CopySourceIfMatch": source.Headers.Get("ETag"), "CopySourceRange": "bytes=10-19",
-	}, nil)
-	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
-	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "range"}, nil)); string(got) != "0123456789" {
-		t.Fatalf("range copy = %q", got)
+	cases := []copyCase{
+		{name: "no-range", size: 10},
+		{name: "range-0-8", copyRange: "bytes=0-8", size: 9},
+		{name: "range-1-1", copyRange: "bytes=1-1", size: 1},
+		{name: "range-0-0", copyRange: "bytes=0-0", size: 1},
+		{name: "if-match", conditions: map[string]any{"CopySourceIfMatch": source.Headers.Get("ETag")}, size: 10},
+		{name: "if-none-match", conditions: map[string]any{"CopySourceIfNoneMatch": `"not-matching"`}, size: 10},
+		{name: "if-unmodified-since", conditions: map[string]any{"CopySourceIfUnmodifiedSince": modified.Add(time.Second).Format(http.TimeFormat)}, size: 10},
+		{name: "if-modified-since", conditions: map[string]any{"CopySourceIfModifiedSince": modified.Add(-time.Second).Format(http.TimeFormat)}, size: 10},
+		{name: "future-if-modified-since", conditions: map[string]any{"CopySourceIfModifiedSince": time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)}, size: 10},
+		{name: "failed-if-match", conditions: map[string]any{"CopySourceIfMatch": `"not-matching"`}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-Match"},
+		{name: "failed-if-none-match", conditions: map[string]any{"CopySourceIfNoneMatch": source.Headers.Get("ETag")}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-None-Match"},
+		{name: "failed-if-unmodified-since", conditions: map[string]any{"CopySourceIfUnmodifiedSince": modified.Add(-time.Second).Format(http.TimeFormat)}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-Unmodified-Since"},
+		{name: "if-match-overrides-unmodified", conditions: map[string]any{"CopySourceIfMatch": source.Headers.Get("ETag"), "CopySourceIfUnmodifiedSince": modified.Add(-time.Second).Format(http.TimeFormat)}, size: 10},
+		{name: "failed-none-match-and-unmodified", conditions: map[string]any{"CopySourceIfNoneMatch": `"not-matching"`, "CopySourceIfUnmodifiedSince": modified.Add(-time.Second).Format(http.TimeFormat)}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-Unmodified-Since"},
+		{name: "failed-if-modified-since", conditions: map[string]any{"CopySourceIfModifiedSince": modified.Format(http.TimeFormat)}, code: "PreconditionFailed", condition: "x-amz-copy-source-If-Modified-Since"},
 	}
-
-	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": createUpload("invalid-range"), "PartNumber": 1, "CopySource": "bucket/large", "CopySourceRange": "bytes=7000000-7000001",
-	}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRange" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable {
-		t.Fatalf("range fault = %#v", fault)
+	malformed := []string{"0-8", "bytes=1-0", "bytes=-1-", "bytes=0--1", "bytes=0-1,3-4,7-9", "bytes=-", "bytes=-0", "bytes=1-", "bytes=-2", "bytes=-15"}
+	for _, value := range malformed {
+		cases = append(cases, copyCase{name: "invalid-" + value, copyRange: value, code: "InvalidArgument"})
 	}
-	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": createUpload("malformed-range"), "PartNumber": 1, "CopySource": "bucket/large", "CopySourceRange": "0-1",
-	}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
-		t.Fatalf("malformed range fault = %#v", fault)
+	cases = append(cases,
+		copyCase{name: "range-past-end", copyRange: "bytes=0-100", code: "InvalidArgument"},
+		copyCase{name: "range-after-object", copyRange: "bytes=100-200", code: "InvalidRequest"},
+	)
+	for _, tc := range cases {
+		uploadID := createUpload(tc.name)
+		input := map[string]any{"Bucket": "bucket", "Key": tc.name, "UploadId": uploadID, "PartNumber": 1, "CopySource": "bucket/source"}
+		if tc.copyRange != "" {
+			input["CopySourceRange"] = tc.copyRange
+		}
+		for key, value := range tc.conditions {
+			input[key] = value
+		}
+		_, err := invoke(t, p, "UploadPartCopy", input, nil)
+		parts := asSliceForTest(mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": tc.name, "UploadId": uploadID}, nil).Output["Parts"])
+		if tc.code == "" {
+			if err != nil || len(parts) != 1 || asMapForTest(parts[0])["Size"] != tc.size {
+				t.Fatalf("%s = parts %#v, err %v", tc.name, parts, err)
+			}
+			characterization[tc.name] = map[string]any{"size": tc.size, "status": http.StatusOK}
+			continue
+		}
+		fault := asFault(t, err)
+		if fault.Code != tc.code || fault.HTTPStatus != http.StatusBadRequest && fault.HTTPStatus != http.StatusPreconditionFailed || tc.condition != "" && fault.Fields["Condition"] != tc.condition || len(parts) != 0 {
+			t.Fatalf("%s = fault %#v, parts %#v", tc.name, fault, parts)
+		}
+		characterization[tc.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
 	}
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "small"}, []byte("small"))
-	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
-		"UploadId": createUpload("too-small"), "PartNumber": 1, "CopySource": "bucket/small", "CopySourceRange": "bytes=0-1",
-	}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
-		t.Fatalf("small range fault = %#v", fault)
-	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestListObjectsV2Prefix(t *testing.T) {

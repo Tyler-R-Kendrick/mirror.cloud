@@ -2214,6 +2214,98 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given multipart copy ranges and source conditions When uploading a part Then AWS outcomes are preserved", func(t *testing.T) {
+		res := do(http.MethodPut, "/upload-part-copy-bdd", nil, "")
+		res.Body.Close()
+		source := do(http.MethodPut, "/upload-part-copy-bdd/source", []byte("0123456789"), "")
+		source.Body.Close()
+		etag := source.Header.Get("ETag")
+		head := do(http.MethodHead, "/upload-part-copy-bdd/source", nil, "")
+		modified, err := http.ParseTime(head.Header.Get("Last-Modified"))
+		head.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = deps.Clock.Advance(2 * time.Second)
+		defer deps.Clock.Advance(-2 * time.Second)
+		createUpload := func(key string) string {
+			t.Helper()
+			response := do(http.MethodPost, "/upload-part-copy-bdd/"+key+"?uploads", nil, "")
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			var created struct {
+				UploadID string `xml:"UploadId"`
+			}
+			if response.StatusCode != http.StatusOK || xml.Unmarshal(body, &created) != nil || created.UploadID == "" {
+				t.Fatalf("create upload %s: %d %s", key, response.StatusCode, body)
+			}
+			return created.UploadID
+		}
+		copyPart := func(name string, headers map[string]string) (*http.Response, []byte) {
+			t.Helper()
+			path := "/upload-part-copy-bdd/" + name + "?partNumber=1&uploadId=" + url.QueryEscape(createUpload(name))
+			request, _ := http.NewRequest(http.MethodPut, ts.URL+path, nil)
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("x-amz-copy-source", "/upload-part-copy-bdd/source")
+			for key, value := range headers {
+				request.Header.Set(key, value)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, body
+		}
+		for _, tc := range []struct {
+			name, copyRange, errorText string
+			status                     int
+		}{
+			{name: "no-range", status: http.StatusOK},
+			{name: "small-range", copyRange: "bytes=0-8", status: http.StatusOK},
+			{name: "malformed", copyRange: "0-8", status: http.StatusBadRequest, errorText: "x-amz-copy-source-range value must be of the form"},
+			{name: "past-end", copyRange: "bytes=0-100", status: http.StatusBadRequest, errorText: "Range specified is not valid for source object of size: 10"},
+			{name: "after-object", copyRange: "bytes=100-200", status: http.StatusBadRequest, errorText: "specified copy range is invalid for the source object size"},
+		} {
+			headers := map[string]string{}
+			if tc.copyRange != "" {
+				headers["x-amz-copy-source-range"] = tc.copyRange
+			}
+			response, body := copyPart(tc.name, headers)
+			if response.StatusCode != tc.status || tc.errorText != "" && !bytes.Contains(body, []byte(tc.errorText)) {
+				t.Fatalf("%s range = %d %s", tc.name, response.StatusCode, body)
+			}
+		}
+		past, future := modified.Add(-time.Second).Format(http.TimeFormat), modified.Add(time.Second).Format(http.TimeFormat)
+		for _, tc := range []struct {
+			name, condition, value, errorCondition string
+			status                                 int
+		}{
+			{name: "if-match", condition: "x-amz-copy-source-if-match", value: etag, status: http.StatusOK},
+			{name: "if-none-match", condition: "x-amz-copy-source-if-none-match", value: `"not-matching"`, status: http.StatusOK},
+			{name: "if-unmodified-since", condition: "x-amz-copy-source-if-unmodified-since", value: future, status: http.StatusOK},
+			{name: "if-modified-since", condition: "x-amz-copy-source-if-modified-since", value: past, status: http.StatusOK},
+			{name: "failed-if-match", condition: "x-amz-copy-source-if-match", value: `"not-matching"`, status: http.StatusPreconditionFailed, errorCondition: "x-amz-copy-source-If-Match"},
+			{name: "failed-if-none-match", condition: "x-amz-copy-source-if-none-match", value: etag, status: http.StatusPreconditionFailed, errorCondition: "x-amz-copy-source-If-None-Match"},
+			{name: "failed-if-unmodified-since", condition: "x-amz-copy-source-if-unmodified-since", value: past, status: http.StatusPreconditionFailed, errorCondition: "x-amz-copy-source-If-Unmodified-Since"},
+			{name: "failed-if-modified-since", condition: "x-amz-copy-source-if-modified-since", value: modified.Format(http.TimeFormat), status: http.StatusPreconditionFailed, errorCondition: "x-amz-copy-source-If-Modified-Since"},
+		} {
+			response, body := copyPart(tc.name, map[string]string{tc.condition: tc.value})
+			if response.StatusCode != tc.status || tc.errorCondition != "" && !bytes.Contains(body, []byte(tc.errorCondition)) {
+				t.Fatalf("%s condition = %d %s", tc.name, response.StatusCode, body)
+			}
+		}
+		matched, body := copyPart("match-overrides-unmodified", map[string]string{"x-amz-copy-source-if-match": etag, "x-amz-copy-source-if-unmodified-since": past})
+		if matched.StatusCode != http.StatusOK {
+			t.Fatalf("matched condition precedence = %d %s", matched.StatusCode, body)
+		}
+		rejected, body := copyPart("none-match-and-unmodified", map[string]string{"x-amz-copy-source-if-none-match": `"not-matching"`, "x-amz-copy-source-if-unmodified-since": past})
+		if rejected.StatusCode != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("x-amz-copy-source-If-Unmodified-Since")) {
+			t.Fatalf("rejected condition precedence = %d %s", rejected.StatusCode, body)
+		}
+	})
+
 	t.Run("Given versioned copy destinations When conditionally copying Then current versions and delete markers govern writes", func(t *testing.T) {
 		res := do(http.MethodPut, "/copy-write-bdd", nil, "")
 		res.Body.Close()

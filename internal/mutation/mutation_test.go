@@ -6044,7 +6044,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-ignore-multipart-checksum-type-mismatch",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if requestedType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type")); requestedType != "" && requestedType != u.checksumType {`,
+			old:  `if requestedType != "" && requestedType != u.checksumType {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartChecksumContract",
@@ -6212,7 +6212,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-ignore-completed-object-checksum",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if supplied := requestCondition(req, checksum.input, checksum.header); u.checksumType == "FULL_OBJECT" && supplied != "" && supplied != objectChecksum {`,
+			old:  `if supplied := requestCondition(req, checksum.input, checksum.header); u.checksumType == "FULL_OBJECT" && supplied != "" && (requestedType == "" || supplied != objectChecksum) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartChecksumContract",
@@ -6220,8 +6220,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-validate-composite-object-checksum",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `u.checksumType == "FULL_OBJECT" && supplied != "" && supplied != objectChecksum`,
-			new:  `supplied != "" && supplied != objectChecksum`,
+			old:  `u.checksumType == "FULL_OBJECT" && supplied != "" && (requestedType == "" || supplied != objectChecksum)`,
+			new:  `supplied != "" && (requestedType == "" || supplied != objectChecksum)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartChecksumContract",
 		},
@@ -6236,8 +6236,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-misclassify-alternate-completed-object-checksum",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified did not match the calculated checksum.", strings.ToLower(u.checksumAlgorithm)), HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
-			new:  `return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+			old:  "if other.algorithm != checksum.algorithm && requestCondition(req, other.input, other.header) != \"\" {\n\t\t\t\treturn nil, &spi.Fault{Code: \"BadDigest\", Message: fmt.Sprintf(\"The %s you specified did not match the calculated checksum.\", strings.ToLower(u.checksumAlgorithm)), HTTPStatus: http.StatusBadRequest, Fault: \"client\"}",
+			new:  "if other.algorithm != checksum.algorithm && requestCondition(req, other.input, other.header) != \"\" {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidRequest\", HTTPStatus: http.StatusBadRequest, Fault: \"client\"}",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartChecksumContract",
+		},
+		{
+			name: "s3-accept-implicit-full-object-checksum-type",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `(requestedType == "" || supplied != objectChecksum)`,
+			new:  `supplied != objectChecksum`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartChecksumContract",
 		},

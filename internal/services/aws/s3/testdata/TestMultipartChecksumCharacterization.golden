@@ -15,6 +15,11 @@
     "tags": "env=snapshot",
     "type": "COMPOSITE"
   },
+  "fullObjectType": {
+    "code": "BadDigest",
+    "message": "The crc32 you specified did not match the calculated checksum.",
+    "status": 400
+  },
   "list": {
     "algorithm": "SHA256",
     "part": "FqDusHkbbJJFH9KE3Z9Zngp9vn9uvqbi0tBsf3SuwRI=",

@@ -694,6 +694,7 @@ func SupportMatrix() string {
 	sb.WriteString("S3 multipart completion ignores an x-amz-mp-object-size value of zero and reports LocalStack's computed-size InvalidRequest for nonzero mismatches.\n")
 	sb.WriteString("S3 composite multipart completion derives its aggregate checksum from manifest part checksums and ignores a separately supplied aggregate value.\n")
 	sb.WriteString("S3 multipart completion rejects an object checksum for an algorithm other than the upload's selected algorithm with LocalStack's selected-algorithm BadDigest fault.\n")
+	sb.WriteString("S3 FULL_OBJECT multipart completion requires an explicit matching checksum type when the selected object checksum is supplied, matching LocalStack's BadDigest behavior.\n")
 	sb.WriteString("UploadPart, CompleteMultipartUpload, ListParts, and AbortMultipartUpload return LocalStack-compatible NoSuchUpload status, message, and UploadId details for missing IDs or mismatched keys.\n")
 	sb.WriteString("UploadPart validates upload identity before the part number and returns LocalStack-compatible InvalidArgument status, message, ArgumentName, and ArgumentValue details for numbers outside 1 through 10,000.\n")
 	sb.WriteString("CompleteMultipartUpload returns LocalStack-compatible InvalidRequest, InvalidPartOrder, InvalidPart, and EntityTooSmall messages and fault details for empty, unordered, missing, mismatched, and undersized part manifests.\n")

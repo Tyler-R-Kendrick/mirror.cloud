@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"hash/crc32"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -1716,6 +1717,62 @@ func FuzzUploadPartContentMD5(f *testing.F) {
 			}
 		} else if err != nil {
 			t.Fatalf("valid digest %q: %v", digest, err)
+		}
+	})
+}
+
+func FuzzUploadPartChecksumFaults(f *testing.F) {
+	body := []byte("part")
+	sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+	f.Add(body, "!", uint8(0))
+	f.Add(body, "AAAAAA==", uint8(0))
+	f.Add(body, base64.StdEncoding.EncodeToString(sum), uint8(0))
+	f.Add(body, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", uint8(1))
+	f.Add(body, "", uint8(2))
+	f.Fuzz(func(t *testing.T, body []byte, value string, mode uint8) {
+		if len(body) > 4096 || len(value) > 128 || !utf8.ValidString(value) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-checksum-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-checksum-fuzz", "Key": "key", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+		input := map[string]any{"Bucket": "upload-part-checksum-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": 1}
+		switch mode % 3 {
+		case 0:
+			input["ChecksumCRC32"] = value
+		case 1:
+			input["ChecksumSHA256"] = value
+		case 2:
+			input["ChecksumAlgorithm"] = "SHA256"
+		}
+		_, err := invoke(t, p, "UploadPart", input, body)
+		if mode%3 == 2 || mode%3 == 1 && value != "" {
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256" {
+				t.Fatalf("algorithm mismatch fault = %#v", fault)
+			}
+			return
+		}
+		if value == "" {
+			if err != nil {
+				t.Fatalf("empty checksum: %v", err)
+			}
+			return
+		}
+		decoded, decodeErr := base64.StdEncoding.DecodeString(value)
+		calculatedBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(calculatedBytes, crc32.ChecksumIEEE(body))
+		calculated := base64.StdEncoding.EncodeToString(calculatedBytes)
+		if decodeErr != nil || len(decoded) != len(calculatedBytes) {
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "Value for x-amz-checksum-crc32 header is invalid." {
+				t.Fatalf("malformed checksum %q fault = %#v", value, fault)
+			}
+		} else if value != calculated {
+			if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The CRC32 you specified did not match the calculated checksum." {
+				t.Fatalf("mismatched checksum %q fault = %#v", value, fault)
+			}
+		} else if err != nil {
+			t.Fatalf("valid checksum %q: %v", value, err)
 		}
 	})
 }

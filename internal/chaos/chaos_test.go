@@ -9,6 +9,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -668,6 +669,58 @@ func TestConcurrentUploadPartContentMD5FaultsRemainModeled(t *testing.T) {
 	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListParts", Input: map[string]any{"Bucket": "upload-part-md5-chaos", "Key": "key", "UploadId": uploadID}})
 	if err != nil || len(listed.Output["Parts"].([]any)) != 0 {
 		t.Fatalf("rejected digests stored parts = %#v, err=%v", listed, err)
+	}
+}
+
+func TestConcurrentUploadPartChecksumFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "upload-part-checksum-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateMultipartUpload", Input: map[string]any{"Bucket": "upload-part-checksum-chaos", "Key": "key", "ChecksumAlgorithm": "CRC32"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "upload-part-checksum-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": i + 1}
+			wantCode, wantMessage := "InvalidRequest", "Value for x-amz-checksum-crc32 header is invalid."
+			switch i % 3 {
+			case 0:
+				input["ChecksumCRC32"] = "!"
+			case 1:
+				input["ChecksumCRC32"] = base64.StdEncoding.EncodeToString(make([]byte, crc32.Size))
+				wantCode, wantMessage = "BadDigest", "The CRC32 you specified did not match the calculated checksum."
+			case 2:
+				input["ChecksumSHA256"] = base64.StdEncoding.EncodeToString(make([]byte, 32))
+				wantMessage = "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256"
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UploadPart", Input: input, Body: io.NopCloser(strings.NewReader(fmt.Sprintf("part-%d", i)))})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != wantCode || fault.Message != wantMessage {
+				errs <- fmt.Errorf("checksum fault %d = %#v", i, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListParts", Input: map[string]any{"Bucket": "upload-part-checksum-chaos", "Key": "key", "UploadId": uploadID}})
+	if err != nil || len(listed.Output["Parts"].([]any)) != 0 {
+		t.Fatalf("rejected checksums stored parts = %#v, err=%v", listed, err)
 	}
 }
 

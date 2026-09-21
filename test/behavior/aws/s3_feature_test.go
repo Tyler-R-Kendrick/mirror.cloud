@@ -342,6 +342,46 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an invalid upload part checksum When uploaded Then S3 returns modeled faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/upload-part-checksum-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/upload-part-checksum-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		upload := func(header, checksum string) (int, []byte) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+"/upload-part-checksum-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), strings.NewReader("part"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set(header, checksum)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, body
+		}
+		status, body := upload("x-amz-checksum-crc64nvme", "!")
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>Value for x-amz-checksum-crc64nvme header is invalid.</Message>")) {
+			t.Fatalf("malformed upload part checksum %d %s", status, body)
+		}
+		status, body = upload("x-amz-checksum-crc64nvme", "AAAAAAAAAAA=")
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(body, []byte("<Message>The CRC64NVME you specified did not match the calculated checksum.</Message>")) {
+			t.Fatalf("mismatched upload part checksum %d %s", status, body)
+		}
+		status, body = upload("x-amz-checksum-sha256", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>Checksum Type mismatch occurred, expected checksum Type: crc64nvme, actual checksum Type: sha256</Message>")) {
+			t.Fatalf("mismatched upload part checksum algorithm %d %s", status, body)
+		}
+	})
+
 	t.Run("Given an invalid multipart completion When submitted Then S3 returns modeled faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/completion-fault-bdd", nil, "")
 		res.Body.Close()

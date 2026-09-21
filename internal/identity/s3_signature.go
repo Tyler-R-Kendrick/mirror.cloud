@@ -85,8 +85,9 @@ func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
 	if !ok {
 		return signatureFault()
 	}
-	canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
-	if !ok {
+	names := strings.Split(signedHeaders, ";")
+	canonicalHeaders, ok := signedHeaderValues(r, names)
+	if !ok || !s3AmzHeadersSigned(r, names) {
 		return signatureFault()
 	}
 	date := r.Header.Get("X-Amz-Date")
@@ -322,8 +323,9 @@ func VerifyS3PresignedV4(r *http.Request, secret string) *spi.Fault {
 		return signatureFault()
 	}
 	signedHeaders := q.Get("X-Amz-SignedHeaders")
-	canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
-	if !ok {
+	names := strings.Split(signedHeaders, ";")
+	canonicalHeaders, ok := signedHeaderValues(r, names)
+	if !ok || !s3AmzHeadersSigned(r, names) {
 		return signatureFault()
 	}
 	payloadHash := q.Get("X-Amz-Content-Sha256")
@@ -469,6 +471,16 @@ func signedHeaderValues(r *http.Request, names []string) (string, bool) {
 		b.WriteByte('\n')
 	}
 	return b.String(), true
+}
+
+func s3AmzHeadersSigned(r *http.Request, names []string) bool {
+	for name := range r.Header {
+		name = strings.ToLower(name)
+		if strings.HasPrefix(name, "x-amz-") && name != "x-amz-content-sha256" && !containsString(names, name) {
+			return false
+		}
+	}
+	return true
 }
 
 func canonicalPath(u *url.URL) string {

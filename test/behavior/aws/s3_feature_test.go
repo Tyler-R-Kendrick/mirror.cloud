@@ -264,6 +264,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		strictServer := httptest.NewServer(edge.New(strict, strictDeps, strictReg, "test").Handler())
 		defer strictServer.Close()
+		unsignedTarget := "/signed/object?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=8752c43939826ec5e949abb74845c6ac5a92ea98f5114bbdc6db1e78fe2b7e5e"
+		unsignedRequest, _ := http.NewRequest(http.MethodGet, strictServer.URL+unsignedTarget, nil)
+		unsignedRequest.Host = "s3.localhost.localstack.cloud"
+		unsignedRequest.Header.Set("X-Amz-User-Agent", "test")
+		response, err = http.DefaultClient.Do(unsignedRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("unsigned x-amz header %d %s", response.StatusCode, body)
+		}
 		for name, strictTarget := range map[string]string{
 			"sigv2":  "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
 			"sigv4":  target,

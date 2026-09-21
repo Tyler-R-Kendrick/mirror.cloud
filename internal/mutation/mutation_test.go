@@ -5424,7 +5424,7 @@ var mutants = []mutant{
 		// out, and nothing in the response says so.
 		name: "engine-for-each-writes-only-the-last-element",
 		file: filepath.Join("internal", "engine", "eval.go"),
-		old: `		if err := ev.writeOne(ctx, path, w, create); err != nil {
+		old: `		if err := ev.writeOne(ctx, path, w, create, patch); err != nil {
 			return err
 		}
 		if rec, ok := ev.binds["rec"].(map[string]any); ok {
@@ -5437,7 +5437,7 @@ var mutants = []mutant{
 	}
 	if len(list) > 0 {
 		ev.binds["item"] = list[len(list)-1]
-		if err := ev.writeOne(ctx, path, w, create); err != nil {
+		if err := ev.writeOne(ctx, path, w, create, patch); err != nil {
 			return err
 		}
 		if rec, ok := ev.binds["rec"].(map[string]any); ok {
@@ -5498,13 +5498,19 @@ var mutants = []mutant{
 		}
 	}
 
-	// Resource-level record members first, then effect-level overrides.
-	for _, k := range sortedKeysAny(res.Record) {
-		v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
-		if err != nil {
-			return err
+	// Resource schema fills creates, puts, and patches that mint a missing
+	// row. A patch on an existing row only overlays the effect's fields -
+	// re-running schema against the current input would replace create-time
+	// attributes with whatever the updating operation carried (SQS
+	// SetQueueAttributes wiping DelaySeconds).
+	if !patch || !found {
+		for _, k := range sortedKeysAny(res.Record) {
+			v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
+			if err != nil {
+				return err
+			}
+			rec[k] = v
 		}
-		rec[k] = v
 	}
 	for _, k := range sortedKeysAny(w.Record) {
 		v, err := ev.recordValue(ctx, path+".record."+k, w.Record[k])
@@ -5513,12 +5519,14 @@ var mutants = []mutant{
 		}
 		rec[k] = v
 	}`,
-		new: `	for _, k := range sortedKeysAny(res.Record) {
-		v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
-		if err != nil {
-			return err
+		new: `	if !patch || !found {
+		for _, k := range sortedKeysAny(res.Record) {
+			v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
+			if err != nil {
+				return err
+			}
+			rec[k] = v
 		}
-		rec[k] = v
 	}
 	for _, k := range sortedKeysAny(w.Record) {
 		v, err := ev.recordValue(ctx, path+".record."+k, w.Record[k])
@@ -5569,8 +5577,8 @@ var mutants = []mutant{
 				continue
 			}
 		}
-		if err := ev.writeOne(ctx, path, w, create); err != nil {`,
-		new: `		if err := ev.writeOne(ctx, path, w, create); err != nil {`,
+		if err := ev.writeOne(ctx, path, w, create, patch); err != nil {`,
+		new: `		if err := ev.writeOne(ctx, path, w, create, patch); err != nil {`,
 		pkg: "./internal/engine",
 		run: "TestAPerElementGuardSkipsOnlyTheElementsThatFailIt",
 	},

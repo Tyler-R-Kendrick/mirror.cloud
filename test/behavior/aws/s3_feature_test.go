@@ -2277,7 +2277,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/acl-bdd?acl", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Owner>")) || !bytes.Contains(body, []byte("<Permission>FULL_CONTROL</Permission>")) || bytes.Contains(body, []byte("GetBucketAclResult")) {
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Owner>")) || !bytes.Contains(body, []byte("<Permission>FULL_CONTROL</Permission>")) || bytes.Contains(body, []byte("<DisplayName>")) || bytes.Contains(body, []byte("GetBucketAclResult")) {
 			t.Fatalf("default bucket ACL %d %s", res.StatusCode, body)
 		}
 		public := []byte(`<AccessControlPolicy><Owner><ID>000000000000</ID><DisplayName>mirror</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>000000000000</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>`)

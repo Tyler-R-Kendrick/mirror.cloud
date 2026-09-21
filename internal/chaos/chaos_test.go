@@ -221,6 +221,64 @@ func TestConcurrentCopyObjectChecksumsRemainDeterministic(t *testing.T) {
 	}
 }
 
+func TestConcurrentS3OwnerIdentitiesRemainDeterministic(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	asMap := func(value any) map[string]any { result, _ := value.(map[string]any); return result }
+	asSlice := func(value any) []any { result, _ := value.([]any); return result }
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "owner-identity-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var err error
+			switch i % 3 {
+			case 0:
+				listed, callErr := call("ListBuckets", nil)
+				err = callErr
+				if err == nil && asMap(listed.Output["Owner"])["DisplayName"] != nil {
+					err = fmt.Errorf("list owner %d = %#v", i, listed.Output["Owner"])
+				}
+			case 1:
+				acl, callErr := call("GetBucketAcl", map[string]any{"Bucket": "owner-identity-chaos"})
+				err = callErr
+				if err == nil {
+					grant := asMap(asSlice(acl.Output["Grants"])[0])
+					if asMap(acl.Output["Owner"])["DisplayName"] != nil || asMap(grant["Grantee"])["DisplayName"] != nil {
+						err = fmt.Errorf("ACL owner %d = %#v", i, acl.Output)
+					}
+				}
+			case 2:
+				key := fmt.Sprintf("multipart-%d", i)
+				created, callErr := call("CreateMultipartUpload", map[string]any{"Bucket": "owner-identity-chaos", "Key": key})
+				err = callErr
+				if err == nil {
+					parts, listErr := call("ListParts", map[string]any{"Bucket": "owner-identity-chaos", "Key": key, "UploadId": created.Output["UploadId"]})
+					if listErr != nil || asMap(parts.Output["Initiator"])["DisplayName"] != "webfile" || asMap(parts.Output["Owner"])["DisplayName"] != nil {
+						err = fmt.Errorf("multipart owner %d = %#v, %v", i, parts, listErr)
+					}
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -917,9 +917,18 @@ func FuzzACLConfigurations(f *testing.F) {
 		if !valid && asFault(t, err).Code != wantFault {
 			t.Fatalf("mode=%d value=%q fault=%v", mode, value, err)
 		}
-		grants := asSliceForTest(mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["Grants"])
+		acl := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket, "Key": key}, nil).Output
+		grants := asSliceForTest(acl["Grants"])
 		if valid && len(grants) == 0 || !valid && len(grants) != 2 {
 			t.Fatalf("stored ACL = %#v", grants)
+		}
+		if asMapForTest(acl["Owner"])["DisplayName"] != nil {
+			t.Fatalf("owner display name = %#v", acl["Owner"])
+		}
+		for _, grant := range grants {
+			if asMapForTest(asMapForTest(grant)["Grantee"])["DisplayName"] != nil {
+				t.Fatalf("grantee display name = %#v", grant)
+			}
 		}
 	})
 }

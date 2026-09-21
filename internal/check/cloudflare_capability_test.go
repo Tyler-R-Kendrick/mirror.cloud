@@ -16,19 +16,22 @@ var cloudflareNativePassIDs = []string{
 	"CF-KV-MULTIPART",
 }
 
+// Live optional-runtime cases that already have executable evidence.
+var cloudflareLivePass = map[string]string{
+	"CF-KV-COHERENCE":   "miniflare", // Worker↔KV on pinned Miniflare; REST bridge still open
+	"CF-CELLD-IDENTITY": "celld",     // pinned binary --version only
+}
+
 var cloudflarePendingIDs = []string{
-	"CF-KV-COHERENCE",
 	"CF-WORKER-UPLOAD",
 	"CF-DO-RESTART",
-	"CF-CELLD-IDENTITY",
 	"CF-OFFLINE",
 	"CF-SNAPSHOT",
 }
 
 // TestCloudflareCapabilityManifest loads the Cloudflare capability ledger and
-// asserts every case status is one of the allowed set; native cases already
-// covered by tests stay pass with test name references; miniflare/celld cases
-// stay not-run/unavailable (never pass).
+// asserts statuses stay honest: native + live-backed cases pass with test refs;
+// remaining optional-runtime cases stay not-run/unavailable.
 func TestCloudflareCapabilityManifest(t *testing.T) {
 	root := findMod(t)
 	doc := loadJSON(t, filepath.Join(root, "docs", "cloudflare-capability.manifest.json"))
@@ -84,7 +87,23 @@ func TestCloudflareCapabilityManifest(t *testing.T) {
 		}
 	}
 
-	const pendingReason = "miniflare/celld integration pending"
+	for id, backend := range cloudflareLivePass {
+		c, ok := byID[id]
+		if !ok {
+			t.Fatalf("missing live case %s", id)
+		}
+		if c["status"] != "pass" {
+			t.Fatalf("%s: status=%v want pass", id, c["status"])
+		}
+		if c["backend"] != backend {
+			t.Fatalf("%s: backend=%v want %s", id, c["backend"], backend)
+		}
+		tests, _ := c["tests"].([]any)
+		if len(tests) == 0 {
+			t.Fatalf("%s: pass case needs non-empty tests references", id)
+		}
+	}
+
 	for _, id := range cloudflarePendingIDs {
 		c, ok := byID[id]
 		if !ok {
@@ -92,10 +111,10 @@ func TestCloudflareCapabilityManifest(t *testing.T) {
 		}
 		status, _ := c["status"].(string)
 		if status != "not-run" && status != "unavailable" {
-			t.Fatalf("%s: status=%q want not-run or unavailable (do not claim miniflare pass)", id, status)
+			t.Fatalf("%s: status=%q want not-run or unavailable", id, status)
 		}
-		if c["reason"] != pendingReason {
-			t.Fatalf("%s: reason=%v want %q", id, c["reason"], pendingReason)
+		if c["reason"] == nil || c["reason"] == "" {
+			t.Fatalf("%s: pending case needs a reason", id)
 		}
 	}
 }

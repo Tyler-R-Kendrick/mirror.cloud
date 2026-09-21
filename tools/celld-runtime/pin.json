@@ -1,0 +1,33 @@
+{
+  "name": "celld",
+  "version": "0.5.1",
+  "repo": "https://github.com/denoland/celld",
+  "release_url": "https://github.com/denoland/celld/releases/tag/v0.5.1",
+  "license": "Apache-2.0",
+  "license_note": "Upstream Apache-2.0 (denoland/celld). Binary is optional, explicit-pin only; mirror does not vendor source.",
+  "host": {
+    "os": "linux",
+    "arch": "aarch64"
+  },
+  "asset": {
+    "name": "celld-aarch64-unknown-linux-gnu.gz",
+    "url": "https://github.com/denoland/celld/releases/download/v0.5.1/celld-aarch64-unknown-linux-gnu.gz",
+    "sha256": "375c7cd9446d61e6ee2c263d6be792650153ffd7cd562b2c4b6b644776b4494e",
+    "sha256_file": "celld-aarch64-unknown-linux-gnu.gz.sha256"
+  },
+  "binary": {
+    "path": "bin/celld",
+    "sha256": "2a2c853c803f694c104f6b32968bf1601f7dab006bb52eebcca14ce9726c7224",
+    "version_command": [
+      "--version"
+    ],
+    "version_output": "celld 0.5.1",
+    "sha256_file": "celld.sha256"
+  },
+  "verified_at": "2026-09-21",
+  "notes": [
+    "Binary and .gz live under bin/ (gitignored via repo-root bin/). Commit pin.json + *.sha256 only.",
+    "celld dev needs esbuild on PATH (or CELLD_ESBUILD). Without it, Start identity still works; Worker/DO bundling does not.",
+    "Local DO persist/restart observed via examples/cloudflare-celld (counter n continued after celld dev restart). Capability manifest CF-DO-RESTART stays unavailable until a wired CI/integration job owns that claim."
+  ]
+}

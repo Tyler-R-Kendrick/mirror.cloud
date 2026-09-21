@@ -69,3 +69,22 @@ go test ./test/behavior/cloudflare/ ./internal/spine/ ./internal/proto/aws/restj
 - Snapshot without backend data: Miniflare snapshot not implemented; not claimed.
 - Manifest does not mark miniflare/celld as pass.
 EOF
+
+## Wave 2 — optional runtimes
+
+### Miniflare
+
+- Pin: `tools/cloudflare-runtime` → `miniflare@3.20250718.3`
+- Helper: JSON-lines v1 protocol (`helper.mjs` + `worker.mjs`)
+- Live: `go test -tags=miniflare ./internal/execution/miniflare` → TestLiveKVPutGet, TestLiveWorkerFetchThenKVGet **pass**
+- CF-KV-COHERENCE marked pass (Worker↔KV). Public REST bridge still pending.
+
+### celld
+
+- Pin: `v0.5.1` aarch64 linux, sha256 in `tools/celld-runtime/pin.json`
+- `TestStartRecordsIdentity` pass; Call still CapErrUnsupported
+- CF-DO-RESTART remains unavailable (example observed locally with esbuild; not CI-owned)
+
+### Still open
+
+Workers public upload API, D1/R2/Queues/Workflows B-IR surface, offline tripwires, coordinated snapshots, REST↔Miniflare authority bridge.

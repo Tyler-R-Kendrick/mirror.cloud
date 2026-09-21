@@ -101,3 +101,5 @@ specs/aws/
 
 # Teed test output, so `make known-red` can say which of a run's failures were expected.
 ci-run.log
+tools/*/node_modules/
+tools/celld-runtime/bin/

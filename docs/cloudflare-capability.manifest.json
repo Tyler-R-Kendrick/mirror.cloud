@@ -1,17 +1,7 @@
 {
   "schema": "mirror.cloud/cloudflare-capability/v1",
-  "note": "Ledger of Cloudflare acceptance cases. Native pass rows cite existing Go tests. Miniflare/celld rows stay unavailable until a live integration records versions and green runs — never claimed pass here.",
+  "note": "Ledger of Cloudflare acceptance cases. Native pass rows cite existing Go tests. Miniflare/celld rows stay unavailable until a live integration records versions and green runs \u2014 never claimed pass here.",
   "cases": [
-    {
-      "id": "CF-BOOT-NATIVE",
-      "status": "pass",
-      "backend": "native",
-      "evidence": "test/behavior/cloudflare",
-      "tests": [
-        "test/behavior/cloudflare.TestCloudflareKVBehavior",
-        "internal/runtime.TestCloudflareAliasBoot"
-      ]
-    },
     {
       "id": "CF-ALIASES",
       "status": "pass",
@@ -23,13 +13,39 @@
       ]
     },
     {
-      "id": "CF-TITLE",
+      "id": "CF-BOOT-NATIVE",
       "status": "pass",
       "backend": "native",
       "evidence": "test/behavior/cloudflare",
       "tests": [
-        "test/behavior/cloudflare.TestCloudflareKVNativeRepairs/CF-TITLE_empty_null_wrong-type_rename"
+        "test/behavior/cloudflare.TestCloudflareKVBehavior",
+        "internal/runtime.TestCloudflareAliasBoot"
       ]
+    },
+    {
+      "id": "CF-CELLD-IDENTITY",
+      "status": "pass",
+      "backend": "celld",
+      "evidence": "internal/execution/celld",
+      "tests": [
+        "internal/execution/celld.TestStartRecordsIdentity"
+      ],
+      "note": "Pinned binary version probe only"
+    },
+    {
+      "id": "CF-DELETE",
+      "status": "pass",
+      "backend": "native",
+      "evidence": "test/behavior/cloudflare",
+      "tests": [
+        "test/behavior/cloudflare.TestCloudflareKVNativeRepairs/CF-DELETE_cascade"
+      ]
+    },
+    {
+      "id": "CF-DO-RESTART",
+      "status": "unavailable",
+      "backend": "celld",
+      "reason": "celld Session does not wire DO Call; local example observed but not CI-owned"
     },
     {
       "id": "CF-KV-BINARY",
@@ -41,12 +57,23 @@
       ]
     },
     {
-      "id": "CF-KV-TIME",
+      "id": "CF-KV-COHERENCE",
+      "status": "pass",
+      "backend": "miniflare",
+      "evidence": "internal/execution/miniflare",
+      "tests": [
+        "internal/execution/miniflare.TestLiveWorkerFetchThenKVGet",
+        "internal/execution/miniflare.TestLiveKVPutGet"
+      ],
+      "note": "Worker write then kv.get on same Miniflare namespace; public REST bridge still pending"
+    },
+    {
+      "id": "CF-KV-MULTIPART",
       "status": "pass",
       "backend": "native",
       "evidence": "test/behavior/cloudflare",
       "tests": [
-        "test/behavior/cloudflare.TestCloudflareKVNativeRepairs/CF-KV-TIME_expiration_ttl"
+        "test/behavior/cloudflare.TestCloudflareKVNativeRepairs/CF-KV-MULTIPART_value_and_metadata"
       ]
     },
     {
@@ -59,42 +86,13 @@
       ]
     },
     {
-      "id": "CF-DELETE",
+      "id": "CF-KV-TIME",
       "status": "pass",
       "backend": "native",
       "evidence": "test/behavior/cloudflare",
       "tests": [
-        "test/behavior/cloudflare.TestCloudflareKVNativeRepairs/CF-DELETE_cascade"
+        "test/behavior/cloudflare.TestCloudflareKVNativeRepairs/CF-KV-TIME_expiration_ttl"
       ]
-    },
-    {
-      "id": "CF-KV-MULTIPART",
-      "status": "pass",
-      "backend": "native",
-      "evidence": "test/behavior/cloudflare",
-      "tests": [
-        "test/behavior/cloudflare.TestCloudflareKVNativeRepairs/CF-KV-MULTIPART_value_and_metadata"
-      ]
-    },
-    {
-      "id": "CF-KV-COHERENCE",
-      "status": "unavailable",
-      "reason": "miniflare/celld integration pending"
-    },
-    {
-      "id": "CF-WORKER-UPLOAD",
-      "status": "unavailable",
-      "reason": "miniflare/celld integration pending"
-    },
-    {
-      "id": "CF-DO-RESTART",
-      "status": "unavailable",
-      "reason": "miniflare/celld integration pending"
-    },
-    {
-      "id": "CF-CELLD-IDENTITY",
-      "status": "unavailable",
-      "reason": "miniflare/celld integration pending"
     },
     {
       "id": "CF-OFFLINE",
@@ -103,6 +101,20 @@
     },
     {
       "id": "CF-SNAPSHOT",
+      "status": "unavailable",
+      "reason": "miniflare/celld integration pending"
+    },
+    {
+      "id": "CF-TITLE",
+      "status": "pass",
+      "backend": "native",
+      "evidence": "test/behavior/cloudflare",
+      "tests": [
+        "test/behavior/cloudflare.TestCloudflareKVNativeRepairs/CF-TITLE_empty_null_wrong-type_rename"
+      ]
+    },
+    {
+      "id": "CF-WORKER-UPLOAD",
       "status": "unavailable",
       "reason": "miniflare/celld integration pending"
     }

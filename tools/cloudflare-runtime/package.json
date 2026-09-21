@@ -1,0 +1,13 @@
+{
+  "name": "@mirror/cloudflare-runtime",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pinned Miniflare helper for mirror.cloud optional execution profile",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "miniflare": "3.20250718.3"
+  }
+}

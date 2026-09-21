@@ -21,7 +21,8 @@ Verified native cases (see `test/behavior/cloudflare`): CF-BOOT-NATIVE, CF-ALIAS
 
 ## Miniflare / celld
 
-Not yet a green live integration in this branch wave. The capability seam (`spi.CapabilitySession`) and process-supervision path are the attach points. Until a live CI job records Miniflare/celld versions and passes CF-KV-COHERENCE / CF-DO-RESTART, those profiles are **unavailable**, not silently mocked.
+- **Miniflare:** pinned at `tools/cloudflare-runtime` (`miniflare@3.20250718.3`). Live tests (`go test -tags=miniflare ./internal/execution/miniflare`) prove Worker↔KV on one namespace (CF-KV-COHERENCE). Public REST→same namespace bridge still pending.
+- **celld:** pin `v0.5.1` under `tools/celld-runtime` (sha256 in `pin.json`). Identity Start works; DO restart remains **unavailable** in the capability ledger until a CI-owned job owns it.
 
 ## Trust and offline
 

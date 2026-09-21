@@ -4,6 +4,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,9 @@ type Config struct {
 	// Env is the base environment. nil means os.Environ(). Always scrubbed.
 	Env []string
 
+	// Stdio, when true, attaches pipes; Proc.Stdin/Stdout are set.
+	Stdio bool
+
 	// ReadyFile, if set, must appear before Start returns.
 	ReadyFile string
 	// ReadyURL, if set, must return HTTP 2xx before Start returns (loopback OK).
@@ -32,6 +36,10 @@ type Config struct {
 type Proc struct {
 	cancel context.CancelFunc
 	done   <-chan error
+
+	// Stdin/Stdout set when Config.Stdio is true. Closed by Close.
+	Stdin  io.WriteCloser
+	Stdout io.ReadCloser
 
 	mu     sync.Mutex
 	closed bool
@@ -80,6 +88,23 @@ func Start(parent context.Context, cfg Config) (*Proc, error) {
 	}
 	cmd.Env = ScrubEnv(base)
 
+	var stdin io.WriteCloser
+	var stdout io.ReadCloser
+	if cfg.Stdio {
+		var err error
+		stdin, err = cmd.StdinPipe()
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		stdout, err = cmd.StdoutPipe()
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		cmd.Stderr = io.Discard
+	}
+
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, err
@@ -90,7 +115,7 @@ func Start(parent context.Context, cfg Config) (*Proc, error) {
 		close(done)
 	}()
 
-	p := &Proc{cancel: cancel, done: done}
+	p := &Proc{cancel: cancel, done: done, Stdin: stdin, Stdout: stdout}
 	if err := p.waitReady(ctx, cfg); err != nil {
 		_ = p.Close()
 		return nil, err
@@ -155,6 +180,9 @@ func (p *Proc) Close() error {
 	p.closed = true
 	p.mu.Unlock()
 
+	if p.Stdin != nil {
+		_ = p.Stdin.Close()
+	}
 	p.cancel()
 	<-p.done
 	return nil

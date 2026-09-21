@@ -1,0 +1,12 @@
+{
+  "GetObject": {
+    "cacheControl": "ÄMÄZÕÑ S3",
+    "contentDisposition": "attachment; filename=\"test_—_file%E2%80%94_é_2.pdf\"",
+    "contentLanguage": "de"
+  },
+  "HeadObject": {
+    "cacheControl": "ÄMÄZÕÑ S3",
+    "contentDisposition": "attachment; filename=\"test_—_file%E2%80%94_é_2.pdf\"",
+    "contentLanguage": "de"
+  }
+}

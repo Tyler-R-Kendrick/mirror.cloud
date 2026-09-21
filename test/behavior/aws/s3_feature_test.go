@@ -123,6 +123,22 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || string(body) != "abc123" || res.Header.Get("Cache-Control") != "no-cache" || res.Header.Get("Content-Language") != "de" || res.Header.Get("Content-Disposition") != `attachment; filename="foo.jpg"` || res.Header.Get("Content-Type") != "binary/octet-stream" || res.Header.Get("x-amz-server-side-encryption") != "AES256" {
 			t.Fatalf("get UTF-8 object %d %#v %q", res.StatusCode, res.Header, body)
 		}
+		unicodeDisposition := `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`
+		request, _ = http.NewRequest(http.MethodPut, ts.URL+"/utf8-metadata-bdd/unicode-system", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("Cache-Control", "ÄMÄZÕÑ S3")
+		request.Header.Set("Content-Language", "de")
+		request.Header.Set("Content-Disposition", unicodeDisposition)
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodGet, "/utf8-metadata-bdd/unicode-system", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "ÄMÄZÕÑ S3" || res.Header.Get("Content-Language") != "de" || res.Header.Get("Content-Disposition") != unicodeDisposition {
+			t.Fatalf("Unicode system metadata %d %#v", res.StatusCode, res.Header)
+		}
 	})
 
 	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {
@@ -1974,6 +1990,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		req.Header.Set("Authorization", auth)
 		req.Header.Set("x-amz-meta-non-ascii", "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=")
 		req.Header.Set("x-amz-meta-fake-encoded", "=?UTF-8?Q?actually-ascii?=")
+		req.Header.Set("x-amz-meta-TEST_META_1", "foo")
+		req.Header.Set("x-amz-meta-__meta_2", "bar")
 		res, err = http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -1984,7 +2002,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		res = do(http.MethodHead, "/rfc2047-bdd/object", nil, "")
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || res.Header.Get("x-amz-meta-fake-encoded") != "actually-ascii" {
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || res.Header.Get("x-amz-meta-fake-encoded") != "actually-ascii" || res.Header.Get("x-amz-meta-test_meta_1") != "foo" || res.Header.Get("x-amz-meta-__meta_2") != "bar" {
 			t.Fatalf("head metadata %d %v", res.StatusCode, res.Header)
 		}
 

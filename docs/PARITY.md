@@ -1414,7 +1414,8 @@ The counting contract, frozen by `TestVercelCensusDenominators`: the vendored do
 |---|---:|
 | Vercel REST document operations (vendored) | 417 |
 | Vercel REST document paths (vendored) | 297 |
-| Narrowed `vercel.api` model operations | 50 |
+| Narrowed `vercel.api` model operations | 89 |
+| CI/CD operations served by mirror | 49 / 49 |
 | `vercel.kv` authored-document operations | 1 (`Command`) |
 
 The pack's own characterization golden went with it; two equivalence recordings replace it -- 100 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer. 41 of the 100 are recorded from the pack; the 59 covering the operations the pack never served are authored against the bundle, which the recording itself says in its note.
@@ -1425,12 +1426,13 @@ KV's document is authored rather than vendored, and is the first such entry in t
 
 **Versioning is restored, and it is a visible break.** `vercelRoute` stripped the leading version segment before matching -- any `v` followed by a digit -- so `/v1/projects`, `/v9/projects` and `/v99/projects` were one route. That is not four transcription slips in the table; it is the table erasing versioning, which made four of its rows name a version the document does not serve. Listing projects is `/v10` where the pack answered `/v9`; project env is `/v10` where it answered `/v9`; project domains is `/v9` where it answered `/v10`; listing deployments is `/v7` where it answered `/v6`. A client written against the emulator's laxity breaks, which is the same shape as Cloudflare's percent-encoded slash: the document is `declared` and the pack's tolerance was `authored`.
 
-Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it with `fields=` to the fifty operations the bundle serves (oracle routes plus the pack's REST surface), so the generated model and the emulate surface are the same set — no mock-tier leftovers on the served path. Feature flags, rolling release, check-runs and the rest stay in the vendored document and answer as unknown operations outside the model rather than as silent mock synthesis.
+Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it with `fields=` to the eighty-nine operations the bundle serves (oracle routes, the pack's REST surface, and the CI/CD gap: checks, aliases, artifacts, rolling release, rollback, file contents, runtime logs), so the generated model and the served surface are the same set — no mock-tier leftovers. Marketplace, git-namespace search, log drains, webhooks, sandboxes, edge config, and the integration deployment-action route stay outside the model.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the emulated Vercel slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the two fault envelopes and the three generic rules this extraction needed) |
-| Vercel REST operations served by the bundle | 50 / 50 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model) |
+| Vercel REST operations served by the bundle | 89 / 89 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model) |
+| CI/CD operations served by mirror | 49 / 49 |
 | Vercel KV commands served | 14 string commands (SET, GET, DEL, EXISTS, PING, INCR, DECR, INCRBY, DECRBY, APPEND, STRLEN, EXPIRE, TTL, SETEX; hashes/lists/sets/pipelines answer 501 `MirrorNotImplemented`) |
 | Live Vercel probe | none (not required) |
 
@@ -1446,7 +1448,7 @@ Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror
 | `DELETE /v9/projects/{idOrName}/env/{id}` (`RemoveProjectEnv`) | Recording replays delete by reference to the created variable, a double delete 404/`not_found`, and the listing that shrinks |
 | `POST /v10/projects/{idOrName}/domains` (`AddProjectDomain`) | Recording replays create, an absent name and an empty one 400/`bad_request`, and an unknown project 404. A domain is `verified: true` immediately, which is the pack's behaviour and not the real API's -- recorded as a quirk |
 | `GET /v9/projects/{idOrName}/domains` (`GetProjectDomains`) | Recording replays the listing; `projectId` is projected back onto each row, because a parent-scoped record cannot see its parent |
-| `POST /v13/deployments` (`CreateDeployment`) | Recording replays create against an existing project, create against one that does not exist -- which creates the project too, the pack's behaviour and not the real API's, recorded as a quirk -- and an absent or empty name 400. Booted and BDD assert `readyState: READY`. `uid`, `state` and `created` are superseded: the document declares them on a LISTED deployment and not on this response |
+| `POST /v13/deployments` (`CreateDeployment`) | Born `QUEUED` with one-second build deadlines on the engine clock; create answer is QUEUED (departs from emulate's READY). After `Clock.Advance`, get/list settle QUEUED→BUILDING→READY. Creating for an unknown project still creates the project (quirk). BDD + oracle differential (deploy step expects QUEUED) |
 | `GET /v7/deployments` (`GetDeployments`) | Recording replays the two-entry listing and the listing after a delete. `deployments[i].id` is superseded -- the listed item shape declares `uid` and the pack answered both |
 | `GET /v13/deployments/{idOrUrl}` (`GetDeployment`) | Recording replays get by reference and an unknown id 404/`not_found` |
 | `DELETE /v13/deployments/{id}` (`DeleteDeployment`) | Recording replays delete answering `{uid, state: DELETED}` and a double delete 404/`not_found` |
@@ -1461,7 +1463,7 @@ Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror
 | `GET /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`GetCustomEnvironment`) | Authored recording steps replay the get by slug AND by id -- the label's two spellings, through the slug index -- and an unknown one 404; BDD does both over HTTP |
 | `PATCH /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`UpdateCustomEnvironment`) | Authored recording step replays a description update; bundle behavior test asserts slug and id survive the patch (addressed by slug, the write must still merge against the id-keyed row) |
 | `DELETE /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`RemoveCustomEnvironment`) | Authored recording steps replay the remove answering the removed environment and a double remove 404; booted and BDD DELETE then GET 404. `deleteUnassignedEnvironmentVariables` is accepted and read by nothing |
-| `POST /v10/projects/{projectId}/promote/{deploymentId}` (`RequestPromote`) | Authored recording steps replay the empty 201 and a 404 for each side unknown; booted and BDD promote a real deployment. A promote moves no stored state a client can read back -- recorded as a quirk |
+| `POST /v10/projects/{projectId}/promote/{deploymentId}` (`RequestPromote`) | Sets the project's `productionDeploymentId`. Concurrent promote leaves one pointer. BDD + chaos-style concurrent promote in `TestVercelCICDParity` |
 | `GET /v2/teams` (`GetTeams`) | Authored recording step replays the empty listing -- teams are account fixtures and the vendored document declares no create, so nothing populates them; booted GET over HTTP. Unpaginated, `next`/`prev` null -- recorded as a quirk |
 | `GET /v2/teams/{teamId}` (`GetTeam`) | Authored recording step replays the unknown-team 404/`not_found`; booted GET 404. The happy path is unreachable until a team fixture exists |
 | `PATCH /v2/teams/{teamId}` (`PatchTeam`) | Authored recording step replays the unknown-team 404. Honors the four members the oracle's patch does (name, slug, description, avatar); the owner-only 403 and slug-conflict 409 have no counterpart -- recorded as quirks |
@@ -1469,9 +1471,9 @@ Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror
 | `GET /v2/deployments/{id}/aliases` (`ListDeploymentAliases`) | Authored recording steps replay the one-entry listing after a create (CreateDeployment writes the alias row, as the oracle does) and an unknown deployment 404. The projection answers `uid` and `alias` -- the members the document's item shape declares of the four the oracle sends -- recorded as a quirk |
 | `GET /v3/deployments/{idOrUrl}/events` (`GetDeploymentEvents`) | Authored recording steps replay created/building/ready after a create, newest first (the oracle's default direction), the canceled event a cancel appends, and an unknown deployment 404; the response is the document's bare array |
 | `GET /v6/deployments/{id}/files` (`ListDeploymentFiles`) | Authored recording steps replay the root-wrapped tree with the uploaded file's descriptor and an unknown deployment 404. Bare array where the oracle wraps in `{files: [...]}`; the tree is flat -- recorded as quirks |
-| `PATCH /v12/deployments/{id}/cancel` (`CancelDeployment`) | Authored recording steps replay the refusal: the oracle and mirror both birth deployments READY, so the QUEUED/BUILDING guard refuses every cancel with 400/`bad_request`, and an unknown deployment 404s. The loosened version of this guard answered 200 until the differential corpus caught it against the vendor's emulator -- recorded as a quirk |
+| `PATCH /v12/deployments/{id}/cancel` (`CancelDeployment`) | Legal only from QUEUED/BUILDING → CANCELED. Reachable before the clock advances; after settle to READY, refuses 400 like emulate. Oracle corpus cancel (after clock advance in the differential) still 400. BDD clock-jump cancel |
 | `POST /v2/files` (`UploadFile`) | Authored recording steps replay the digest registration answering the document's empty object (the oracle answers a bare array; the model can serialize only the one oneOf arm) and a missing digest 400/`bad_request` |
-| `GET /v1/projects/{projectId}/promote/aliases` (`ListPromoteAliases`) | Authored recording steps replay the document's `{aliases, pagination}` arm (the oracle's `{status, alias}` shape is one the model cannot serialize) and an unknown project 404 |
+| `GET /v1/projects/{projectId}/promote/aliases` (`ListPromoteAliases`) | PROMOTED when the alias's deployment is the production pointer; otherwise PENDING |
 | `PATCH /v1/projects/{idOrName}/protection-bypass` (`UpdateProjectProtectionBypass`) | Authored recording steps replay generate with a caller-chosen secret, an update's note edit, a revoke-with-regenerate under a fresh secret, a plain revoke answering the empty map, and an unknown project 404. The map lives on the project record, which GetProjects now projects around -- recorded as a quirk |
 | `POST /` on `*.kv.vercel-storage.com` (`Command`) | Its own recording: SET, GET, a GET that misses answering `{result: null}` rather than a fault, `get` folding to `GET`, DEL answering 1 then 0, INCR answering 1 on a missing key, four malformed commands answering 400, and HSET answering 501 `MirrorNotImplemented` with the `x-mirror-not-implemented` header. Chaos `TestVercelConcurrentKVSetGet` |
 | Vercel faults vs AWS faults | Two envelopes, because they are two documents' answers. The REST API answers `{error: {code, message}}` and KV the bare `{error: "..."}` Upstash answers; neither carries `x-amzn-errortype`. Mutant `vercel-kv-encodes-the-rest-fault` |
@@ -1502,6 +1504,21 @@ Serve state per emulate route group (method+path from `src/routes/*.ts`):
 | `oauth.ts` | 4 | 4 | the local flow end to end: authorize page (mirror's own minimal form markup, recorded as a quirk), callback issues one-shot codes, token exchange with PKCE S256, userinfo |
 | `blob.ts` | 8 | 8 | `vercel.blob` serves the whole data plane: upload (overwrite/ETag/suffix rules), list (folded/cursor/prefix), head, delete, content serving with 304 and `?download=1`; mpu answers the oracle's own 400 refusal |
 
+### CI/CD surface (49 / 49)
+
+Denominator: the CI/CD slice of the vendored REST document (deployments lifecycle, checks v1/v2, aliases, artifacts/remote cache, rolling release, rollback, file contents, runtime logs). UploadFile and ListPromoteAliases are supporting reads inside that slice. The integration deployment-action route is out (needs an installation store). No live `api.vercel.com` differential.
+
+| Vercel operation | Mirror evidence |
+|---|---|
+| Checks v1 (`CreateCheck`, `GetAllChecks`, `GetCheck`, `UpdateCheck`, `RerequestCheck`) | `TestVercelCICDParity` HTTP path; records keyed by deployment; states registered/running/completed |
+| Checks v2 / check-runs (10 ops) | Project checks + deployment check-runs; list runs returns `runs: []` until a writer exists; `TestVercelCICDParity` |
+| Aliases (`AssignAlias`, `ListAliases`, `GetAlias`, `DeleteAlias`, `PatchUrlProtectionBypass`) | Rows on `deployment_alias`; assign/list/get/delete gated in `TestVercelCICDParity` |
+| Artifacts (7 ops) | Content-addressed `artifact` collection; upload/status/delete-all; download empty blob (bytes not retained) |
+| Rolling release (8 ops) | One config + one active release per project; billing status is a fixed fixture (quirk) |
+| `GetDeploymentFileContents` | Empty body; UploadFile registers digest/size only (quirk) |
+| `RequestRollback` / rollback description | Sets `productionDeploymentId` like promote; description stored on the project |
+| `GetRuntimeLogs` | Stub empty log row until a writer exists |
+
 The gap is closed: every route the oracle registers is served, the supplement routes via an authored document (`specs/vercel/api-extra.json`, fused into `vercel.api` by `x-mirror-service`), Blob via `vercel.blob`. Everything lands as B-IR data on `behavior/vercel/` — the only Go is three generic codec capabilities the routes needed (header-member decode, form bodies, and the OAuth page/redirect wire shapes) — and the parity claims here stay traceable to the oracle's route list.
 
 ## Stripe baseline
@@ -1528,10 +1545,6 @@ Serve state per oracle route file (method+path from `src/routes/*.ts`):
 | `charges.ts` | 2 | 2 | list/get, `expand[]=customer` and `expand[]=payment_intent` on the get |
 | `checkout-sessions.ts` | 6 | 6 | create/list/get/expire/complete + the hosted page (mirror's own minimal markup, recorded as a quirk; the order data is the oracle's) |
 | `customer-sessions.ts` | 1 | 1 | create, with the drawn secret expiring in 30 minutes |
-
-The gap is closed: every route the oracle registers is served as `stripe.api` B-IR data on `behavior/stripe/`, against the authored document (`specs/stripe/api.json`). The only Go is generic engine and codec capabilities the routes needed (dynamic fault messages and envelope fields, where-selected cascade writes, cursor-pagination slice, form nesting and list-collecting query members, the Stripe fault envelope and checkout page/redirect wire shapes) -- and the parity claims here stay traceable to the oracle's route list. The differential corpus lives at `test/behavior/stripe/oracle/` (63 steps over all 27 routes, captured by `scripts/capture-oracle.py --service stripe`); `TestStripeOracleDifferential` replays it without node.
-
-Stripe is a new provider for mirror: the authored spec lands on `specs/stripe/api.json`, the service as `stripe.api` B-IR data, and webhook delivery rides the same cross-service-delivery unlock the shadowed AWS bundles are waiting on -- recorded as a takeover condition, not shipped silently.
 
 ## SNS baseline
 

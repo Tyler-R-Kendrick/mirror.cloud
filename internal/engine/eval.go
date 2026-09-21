@@ -1186,6 +1186,9 @@ func (ev *eval) removeWhere(ctx context.Context, path string, col spi.Collection
 			return err
 		}
 	}
+	// So a delete-all can answer how many rows went: CEL sees numbers as
+	// float64, matching every other count the engine binds.
+	ev.binds["deleted_count"] = float64(len(doomed))
 	return nil
 }
 
@@ -1291,6 +1294,21 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 		rec := map[string]any{}
 		if err := unmarshal(kv.Value, &rec); err != nil {
 			return err
+		}
+		// List is an observation point the same way select is: expired
+		// deadlines must advance before the caller sees the row, or a
+		// deployment listing would stay QUEUED after GetDeployment had
+		// already settled the same record to READY.
+		if res.Statechart != nil {
+			changed, err := ev.settle(rec, res.Statechart)
+			if err != nil {
+				return err
+			}
+			if changed {
+				if err := ev.putRecord(ctx, col, kv.Key, rec); err != nil {
+					return err
+				}
+			}
 		}
 		if op.List.Filter != "" {
 			ev.binds["item"] = rec

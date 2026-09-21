@@ -15,7 +15,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.ssm` | `awsJson1_1` | 152 | 0 |
 | `aws.secretsmanager` | `awsJson1_1` | 23 | 0 |
 | `gcp.storage` | `gcpRestJson` | 87 | 0 |
-| `vercel.api` | `restJson1` | 50 | 0 |
+| `vercel.api` | `restJson1` | 89 | 0 |
 | `vercel.kv` | `restJson1` | 1 | 0 |
 | `vercel.blob` | `restJson1` | 7 | 0 |
 | `stripe.api` | `restJson1` | 27 | 0 |

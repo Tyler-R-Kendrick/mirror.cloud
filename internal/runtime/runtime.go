@@ -16,7 +16,6 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/blobs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
@@ -625,7 +624,7 @@ type SupportRow struct {
 
 // SupportRows derives emulate counts from pack Operations(), not the full ingested spec.
 func SupportRows() []SupportRow {
-	b := catalog.Bundle()
+	b := specboot.Bundle()
 	packOps := map[string]int{}
 	// Constructing a service to ask what it serves needs real dependencies:
 	// hand-written packs happen to tolerate a zero Deps, but a data-defined

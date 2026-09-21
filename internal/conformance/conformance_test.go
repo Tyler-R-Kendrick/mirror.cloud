@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/awsjson"
@@ -20,6 +19,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -53,7 +53,7 @@ func codecFor(p model.Protocol) proto.Codec {
 }
 
 func TestCodecRoundTripAndFaultEnvelope(t *testing.T) {
-	b := catalog.Bundle()
+	b := specboot.Bundle()
 	for i := range b.Services {
 		svc := &b.Services[i]
 		c := codecFor(svc.Protocol)
@@ -158,7 +158,7 @@ func fillLabels(uri string) string {
 }
 
 func TestPackOperationsAreCatalogued(t *testing.T) {
-	b := catalog.Bundle()
+	b := specboot.Bundle()
 	reg, err := registry.New(spitest.Deps(t), nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +192,7 @@ func TestFaultErrorString(t *testing.T) {
 }
 
 func TestDecodeConsumesBodyOnce(t *testing.T) {
-	svc := catalog.Bundle().ServiceByID("aws.dynamodb")
+	svc := specboot.Bundle().ServiceByID("aws.dynamodb")
 	c := awsjson.New10()
 	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(`{"TableName":"T"}`)))
 	r.Header.Set("X-Amz-Target", "DynamoDB_20120810.ListTables")

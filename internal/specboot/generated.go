@@ -23,55 +23,11 @@ var servedAs = map[string]string{
 	"aws.opensearch":           "aws.es",
 }
 
-// adoptGenerated replaces each service's wire description with the one
-// generated from the vendored specification, keeping the ID the runtime serves
-// it under.
-//
-// Until this ran, a bundle was *validated* against `internal/generated` and
-// *served* through the hand-authored catalog, and nothing compared the two.
-// They disagreed for fifty-three of the ninety-seven behavior bundles on
-// protocol, on X-Amz-Target prefix, or on both: `aws.guardduty` was validated
-// as restJson1 with ninety operations and served as awsJson1_1 with twenty, so
-// the request an SDK makes reached nothing while the request no SDK makes
-// worked. Twenty-eight of the prefix disagreements are transcription slips --
-// `AmazonDMS20160101` where the specification says `AmazonDMSv20160101`.
-//
-// docs/BEHAVIOR_IR.md states the invariant this restores: "B-IR never
-// redefines wire shapes ... the loader fails otherwise". It held for the shapes
-// a bundle projects and not for the protocol those shapes travel in, because
-// the loader and the edge read different descriptions of the same service.
-//
-// Operations are unioned rather than replaced. A pack may serve an operation
-// the vendored specification does not carry -- a newer API, or one the catalog
-// was written against -- and dropping it would take the service away rather
-// than correct it. The generated operation wins where both have one, since it
-// is the one with a URI, a target and shape IDs.
-func adoptGenerated(b *model.Bundle) {
-	for i := range b.Services {
-		svc := &b.Services[i]
-		gen, err := generated.Model(generatedID(svc.ID))
-		if err != nil {
-			continue
-		}
-		svc.Namespace = gen.Namespace
-		svc.Protocol = gen.Protocol
-		svc.EndpointPrefix = gen.EndpointPrefix
-		svc.TargetPrefix = gen.TargetPrefix
-		svc.QueryVersion = gen.QueryVersion
-		svc.XMLNamespace = gen.XMLNamespace
-		svc.Aliases = gen.Aliases
-		// The hosts the specification declares. The catalog cannot carry these
-		// honestly -- they are spec facts, and transcribing them here is how
-		// the protocol disagreements this function exists to fix got in -- so
-		// the generated model is the only source, and forgetting this line
-		// would leave the demux's host resolution answering for nothing while
-		// every test that reads a generated model directly still passed.
-		svc.Hosts = gen.Hosts
-		svc.Shapes = gen.Shapes
-		svc.Source = gen.Source
-		svc.Operations = unionOperations(gen.Operations, svc.Operations)
-	}
-}
+// servedAlsoAsSpec names the specification IDs in servedAs that stay served
+// under their own ID as well. OpenSearch is the one: `aws.es` carries the
+// 2021 control plane with a behavior bundle of its own, beside the
+// `aws.opensearch` pack. The other four are served under the wire name alone.
+var servedAlsoAsSpec = map[string]bool{"aws.es": true}
 
 // generatedID maps a served service ID onto the ID the generated models are
 // keyed by.

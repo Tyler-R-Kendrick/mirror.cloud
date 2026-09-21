@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
@@ -173,35 +172,6 @@ func TestTheAdoptedModelIsTheGeneratedOne(t *testing.T) {
 		if len(svc.Shapes) != len(gen.Shapes) {
 			t.Errorf("%s is served with %d shapes and validated against %d",
 				svc.ID, len(svc.Shapes), len(gen.Shapes))
-		}
-	}
-}
-
-// TestNoServiceLosesAnOperation keeps the union honest. A pack may serve an
-// operation the vendored specification does not carry, and replacing the
-// operation list rather than unioning it would take that operation away --
-// silently, since a missing operation answers as a 501 rather than a failure.
-func TestNoServiceLosesAnOperation(t *testing.T) {
-	adopted := Bundle()
-	for _, before := range catalog.Bundle().Services {
-		after := adopted.ServiceByID(before.ID)
-		if after == nil {
-			t.Errorf("%s is in the catalog and not in the served bundle", before.ID)
-			continue
-		}
-		have := map[string]bool{}
-		for _, op := range after.Operations {
-			have[op.Name] = true
-		}
-		var lost []string
-		for _, op := range before.Operations {
-			if !have[op.Name] {
-				lost = append(lost, op.Name)
-			}
-		}
-		sort.Strings(lost)
-		if len(lost) > 0 {
-			t.Errorf("%s lost %d operation(s) to adoption: %v", before.ID, len(lost), lost)
 		}
 	}
 }

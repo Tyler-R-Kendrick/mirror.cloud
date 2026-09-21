@@ -12244,6 +12244,17 @@ var mutants = []mutant{
 		run:  "TestASharedPrefixResolvesTheSameWayEveryTime",
 	},
 	{
+		// A target prefix is the whole segment before the dot. Matching it as
+		// a bare prefix lets EC2's `AmazonEC2` claim every ECS request, and
+		// which service wins is then an accident of bundle order.
+		name: "demux-target-prefix-is-not-a-whole-segment",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `			if svc.TargetPrefix != "" && strings.HasPrefix(target, svc.TargetPrefix+".") {`,
+		new:  `			if svc.TargetPrefix != "" && strings.HasPrefix(target, svc.TargetPrefix) {`,
+		pkg:  "./internal/services/aws/ecs",
+		run:  "TestBootedServerECSClusterTask",
+	},
+	{
 		name: "demux-skip-parsing-the-form",
 		file: filepath.Join("internal", "edge", "edge.go"),
 		old:  "\t\t_ = r.ParseForm()",
@@ -12252,28 +12263,34 @@ var mutants = []mutant{
 		run:  "TestBootedServerS3SelectSQL",
 	},
 	{
-		name: "specboot-serve-the-hand-authored-protocol",
-		file: filepath.Join("internal", "specboot", "generated.go"),
-		old:  "\t\tsvc.Protocol = gen.Protocol",
-		new:  "\t\t_ = gen.Protocol",
+		// A wire name replaces the specification's ID; keeping both serves
+		// CloudWatch twice on one endpoint, which is the confusion specboot's
+		// history is about.
+		name: "specboot-serve-under-both-ids",
+		file: filepath.Join("internal", "specboot", "specboot.go"),
+		old:  "\t\t\tdelete(served, spec)",
+		new:  "\t\t\t_ = spec",
 		pkg:  "./internal/specboot",
-		run:  "TestTheAdoptedModelIsTheGeneratedOne",
+		run:  "TestBundleServesEveryGeneratedService",
 	},
 	{
 		name: "specboot-replace-operations-instead-of-unioning",
-		file: filepath.Join("internal", "specboot", "generated.go"),
-		old:  "\t\tsvc.Operations = unionOperations(gen.Operations, svc.Operations)",
+		file: filepath.Join("internal", "specboot", "specboot.go"),
+		old:  "\t\tsvc.Operations = unionOperations(gen.Operations, authored(unmodeledOps[id]...))",
 		new:  "\t\tsvc.Operations = gen.Operations",
 		pkg:  "./internal/specboot",
-		run:  "TestNoServiceLosesAnOperation",
+		run:  "TestUnmodeledOperationsSurvive",
 	},
 	{
-		name: "specboot-drop-the-signing-name",
-		file: filepath.Join("internal", "specboot", "generated.go"),
-		old:  "\t\tsvc.Aliases = gen.Aliases",
-		new:  "\t\tsvc.Aliases = nil",
+		// A service no specification describes is served from a hand table;
+		// one that is neither generated nor recorded in specs/aws-dirs.json as
+		// unavailable upstream is a service nobody ingested.
+		name: "specboot-unmodeled-service-nobody-declared",
+		file: filepath.Join("internal", "specboot", "specboot.go"),
+		old:  "\t\tjson11(\"aws.qldb\", \"qldb\", \"AmazonQLDB\",",
+		new:  "\t\tjson11(\"aws.qldb-mutated\", \"qldb\", \"AmazonQLDB\",",
 		pkg:  "./internal/specboot",
-		run:  "TestTheSigningNameIsCarried",
+		run:  "TestEveryServedServiceIsDescribedByASpecification",
 	},
 	{
 		name: "smithy-ignore-the-sigv4-signing-name",
@@ -12479,14 +12496,6 @@ var mutants = []mutant{
 		new:  `p.col(req, "ccres-mutated").Put(ctx, id, b)`,
 		pkg:  "./internal/services/aws/cloudcontrol",
 		run:  "TestCreatedResourceRoundTrip",
-	},
-	{
-		name: "catalog-drop-cloudcontrol",
-		file: filepath.Join("internal", "catalog", "catalog.go"),
-		old:  `svc("aws.cloudcontrol", "cloudcontrolapi"`,
-		new:  `svc("aws.cloudcontrol-mutated", "cloudcontrolapi"`,
-		pkg:  "./internal/catalog",
-		run:  "TestBundleCharacterization",
 	},
 	{
 		name: "events-deliver-disabled-rule",
@@ -13193,14 +13202,6 @@ var mutants = []mutant{
 		new:  `false && invocation != "REQUEST_RESPONSE" && invocation != "FIRE_AND_FORGET"`,
 		pkg:  "./internal/services/aws/pipes",
 		run:  "TestPipesStepFunctionsTarget",
-	},
-	{
-		name: "catalog-drop-start-sync-execution",
-		file: filepath.Join("internal", "catalog", "catalog.go"),
-		old:  `"StartExecution", "StartSyncExecution", "StopExecution"`,
-		new:  `"StartExecution", "StopExecution"`,
-		pkg:  "./internal/catalog",
-		run:  "TestBundleCharacterization",
 	},
 	{
 		name: "pipes-skip-step-functions-enrichment",
@@ -20492,14 +20493,15 @@ var mutants = []mutant{
 		run:  "TestDeclaredHostsPlaceTheirService",
 	},
 	{
-		// The hosts a specification declares reach the served model through
-		// adoptGenerated. Drop that one line and host resolution answers for
-		// nothing, while every test reading a generated model directly still
-		// passes -- which is why the test counts the hosts it found.
+		// The served service is the generated one, copied whole. A copy that
+		// names the fields it wants forgets Hosts, and host resolution then
+		// answers for nothing while every test reading a generated model
+		// directly still passes -- which is why the test counts the hosts it
+		// found.
 		name: "adopted-model-drops-declared-hosts",
-		file: filepath.Join("internal", "specboot", "generated.go"),
-		old:  "		svc.Hosts = gen.Hosts",
-		new:  "		svc.Hosts = nil",
+		file: filepath.Join("internal", "specboot", "specboot.go"),
+		old:  "\t\tsvc := *gen",
+		new:  "\t\tsvc := model.Service{ID: gen.ID, Protocol: gen.Protocol, EndpointPrefix: gen.EndpointPrefix, TargetPrefix: gen.TargetPrefix, Aliases: gen.Aliases, Operations: gen.Operations, Shapes: gen.Shapes, Source: gen.Source}",
 		pkg:  "./internal/edge",
 		run:  "TestDeclaredHostsPlaceTheirService",
 	},

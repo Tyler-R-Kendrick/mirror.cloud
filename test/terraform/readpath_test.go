@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
@@ -24,7 +24,7 @@ func TestReadPathOpsAreImplemented(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cat := catalog.Bundle()
+	cat := specboot.Bundle()
 	var svcID string
 	for _, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)

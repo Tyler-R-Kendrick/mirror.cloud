@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/identity"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/idgen"
@@ -28,6 +27,7 @@ import (
 	graphqlproto "github.com/tyler-r-kendrick/mirror.cloud/internal/proto/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -48,7 +48,7 @@ type Server struct {
 func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string) *Server {
 	b := deps.Model
 	if b == nil || len(b.Services) == 0 {
-		b = catalog.Bundle()
+		b = specboot.Bundle()
 		deps.Model = b
 	}
 	s := &Server{
@@ -470,7 +470,10 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		}
 		for i := range s.bundle.Services {
 			svc := &s.bundle.Services[i]
-			if svc.TargetPrefix != "" && strings.HasPrefix(target, svc.TargetPrefix) {
+			// The prefix is the whole segment before the dot: `AmazonEC2` must
+			// not claim `AmazonEC2ContainerServiceV20141113.CreateCluster`,
+			// which it did whenever EC2 sorted before ECS.
+			if svc.TargetPrefix != "" && strings.HasPrefix(target, svc.TargetPrefix+".") {
 				return svc
 			}
 		}

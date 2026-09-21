@@ -10,16 +10,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 )
 
 func TestEmitRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	svc := catalog.Bundle().ServiceByID("aws.s3")
+	svc := specboot.Bundle().ServiceByID("aws.s3")
 	if svc == nil {
-		t.Fatal("catalog missing aws.s3")
+		t.Fatal("served bundle missing aws.s3")
 	}
 	if err := emitService(dir, *svc); err != nil {
 		t.Fatal(err)
@@ -78,11 +78,8 @@ func TestLoadSet(t *testing.T) {
 
 func TestLoadBundleAndSpecIngestion(t *testing.T) {
 	ctx := context.Background()
-	if bundle, note, err := loadBundle(ctx, "missing", true); err != nil || len(bundle.Services) == 0 || !strings.Contains(note, "bootstrap") {
-		t.Fatalf("catalog bundle %d %q %v", len(bundle.Services), note, err)
-	}
-	if bundle, note, err := loadBundle(ctx, filepath.Join(t.TempDir(), "missing"), false); err != nil || len(bundle.Services) == 0 || !strings.Contains(note, "no vendored") {
-		t.Fatalf("fallback bundle %d %q %v", len(bundle.Services), note, err)
+	if _, _, err := loadBundle(ctx, filepath.Join(t.TempDir(), "missing")); err == nil || !strings.Contains(err.Error(), "no vendored specs") {
+		t.Fatalf("an empty spec tree must refuse, not fall back: %v", err)
 	}
 	dir := t.TempDir()
 	aws := `{"smithy":"2.0","shapes":{"com.example#Demo":{"type":"service","operations":[{"target":"com.example#Ping"}],"traits":{"aws.protocols#awsJson1_0":{},"aws.api#service":{"endpointPrefix":"demo","sdkId":"Demo"}}},"com.example#Ping":{"type":"operation","input":{"target":"com.example#Input"},"output":{"target":"com.example#Output"}},"com.example#Input":{"type":"structure","members":{}},"com.example#Output":{"type":"structure","members":{}}}}`
@@ -96,7 +93,7 @@ func TestLoadBundleAndSpecIngestion(t *testing.T) {
 	if err != nil || count != 2 || len(groups) != 2 {
 		t.Fatalf("ingested groups=%d count=%d err=%v", len(groups), count, err)
 	}
-	bundle, note, err := loadBundle(ctx, dir, false)
+	bundle, note, err := loadBundle(ctx, dir)
 	if err != nil || len(bundle.Services) != 2 || !strings.Contains(note, "2 spec file") {
 		t.Fatalf("fused bundle %#v %q %v", bundle.Services, note, err)
 	}

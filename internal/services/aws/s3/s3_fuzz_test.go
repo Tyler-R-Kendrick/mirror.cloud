@@ -2924,11 +2924,14 @@ func FuzzCopyObjectChecksums(f *testing.F) {
 			expected = base64.StdEncoding.EncodeToString(sum)
 		}
 		copied := mustInvoke(t, p, "CopyObject", input, nil)
-		if copied.Output[output] != expected || copied.Output["ChecksumType"] != "FULL_OBJECT" {
+		modifiedValue, ok := copied.Output["LastModified"].(string)
+		modified, modifiedErr := time.Parse(time.RFC3339, modifiedValue)
+		if copied.Output[output] != expected || copied.Output["ChecksumType"] != "FULL_OBJECT" || !ok || modifiedErr != nil {
 			t.Fatalf("copy output = %#v", copied.Output)
 		}
 		head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "copy-checksum-fuzz", "Key": "destination", "ChecksumMode": "ENABLED"}, nil)
-		if head.Headers.Get(header) != expected || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		stored, storedErr := http.ParseTime(head.Headers.Get("Last-Modified"))
+		if storedErr != nil || !modified.Equal(stored) || head.Headers.Get(header) != expected || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
 			t.Fatalf("copy headers = %v", head.Headers)
 		}
 	})

@@ -1284,7 +1284,12 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		event = "ObjectCreated:Post"
 	}
 	p.notify(ctx, req, b, key, event, metaDoc)
-	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"ETag": etag}}, nil
+	out := map[string]any{"ETag": etag}
+	if req.Operation == "CopyObject" {
+		modified, _ := http.ParseTime(mtime)
+		out["LastModified"] = modified.UTC().Format(time.RFC3339)
+	}
+	return &spi.Response{Status: 200, Headers: h, Output: out}, nil
 }
 
 func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {

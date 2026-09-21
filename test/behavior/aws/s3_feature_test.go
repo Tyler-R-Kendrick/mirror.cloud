@@ -3142,6 +3142,15 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(copyResult, []byte("<ChecksumSHA256>"+checksum+"</ChecksumSHA256>")) || !bytes.Contains(copyResult, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
 			t.Fatalf("copy result %d %s", res.StatusCode, copyResult)
 		}
+		var copied struct {
+			LastModified string `xml:"LastModified"`
+		}
+		if err := xml.Unmarshal(copyResult, &copied); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := time.Parse(time.RFC3339, copied.LastModified); err != nil {
+			t.Fatalf("copy LastModified %q: %v", copied.LastModified, err)
+		}
 		res = request(http.MethodHead, "/copy-checksum-behavior/destination", map[string]string{"x-amz-checksum-mode": "ENABLED"})
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-checksum-sha256") != checksum || res.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" {

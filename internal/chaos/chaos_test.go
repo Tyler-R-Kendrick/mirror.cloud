@@ -257,10 +257,20 @@ func TestConcurrentCopyObjectChecksumsRemainDeterministic(t *testing.T) {
 			if err == nil && (copied.Output["ChecksumCRC32"] != checksum || copied.Output["ChecksumType"] != "FULL_OBJECT") {
 				err = fmt.Errorf("copy %d = %#v", i, copied.Output)
 			}
+			var modified time.Time
+			if err == nil {
+				var modifiedErr error
+				modified, modifiedErr = time.Parse(time.RFC3339, fmt.Sprint(copied.Output["LastModified"]))
+				if modifiedErr != nil {
+					err = fmt.Errorf("copy time %d = %#v: %v", i, copied.Output["LastModified"], modifiedErr)
+				}
+			}
 			if err == nil {
 				head, headErr := call("HeadObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": key, "ChecksumMode": "ENABLED"}, nil)
-				if headErr != nil || head.Headers.Get("x-amz-checksum-crc32") != checksum || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+				if headErr != nil {
 					err = fmt.Errorf("head %d = %#v, %v", i, head, headErr)
+				} else if stored, storedErr := http.ParseTime(head.Headers.Get("Last-Modified")); storedErr != nil || !modified.Equal(stored) || head.Headers.Get("x-amz-checksum-crc32") != checksum || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+					err = fmt.Errorf("head %d = %#v", i, head)
 				}
 			}
 			errs <- err

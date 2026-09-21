@@ -5868,6 +5868,23 @@ func TestListObjectVersionsPagination(t *testing.T) {
 	}
 }
 
+func TestListObjectsDefaultThousandBoundary(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "thousand-boundary"}, nil)
+	for index := range 1010 {
+		key := fmt.Sprintf("key-%04d", index)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "thousand-boundary", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "thousand-boundary", "Delimiter": "/"}, nil).Output
+	if len(asSliceForTest(first["Contents"])) != 1000 || first["IsTruncated"] != true || first["NextMarker"] != "key-0999" {
+		t.Fatalf("first page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "thousand-boundary", "Marker": first["NextMarker"]}, nil).Output
+	if len(asSliceForTest(second["Contents"])) != 10 || second["IsTruncated"] != false {
+		t.Fatalf("second page = %#v", second)
+	}
+}
+
 func TestListObjectVersionsManyVersionsPagination(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "many-versions"}, nil)

@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,7 +79,15 @@ func (f *sqsFixture) must(op string, in map[string]any) map[string]any {
 func (f *sqsFixture) queue(name string, attrs map[string]any) string {
 	f.t.Helper()
 	in := map[string]any{"QueueName": name}
-	if attrs != nil {
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
+	if strings.HasSuffix(name, ".fifo") {
+		if _, ok := attrs["FifoQueue"]; !ok {
+			attrs["FifoQueue"] = "true"
+		}
+	}
+	if len(attrs) > 0 {
 		in["Attributes"] = attrs
 	}
 	return f.must("CreateQueue", in)["QueueUrl"].(string)
@@ -86,7 +95,10 @@ func (f *sqsFixture) queue(name string, attrs map[string]any) string {
 
 func (f *sqsFixture) receive(url string, max int) []any {
 	f.t.Helper()
-	out := f.must("ReceiveMessage", map[string]any{"QueueUrl": url, "MaxNumberOfMessages": max})
+	out := f.must("ReceiveMessage", map[string]any{
+		"QueueUrl": url, "MaxNumberOfMessages": max,
+		"AttributeNames": []any{"All"},
+	})
 	items, _ := out["Messages"].([]any)
 	return items
 }
@@ -178,18 +190,15 @@ func TestRedriveMovesToTheDeadLetterQueue(t *testing.T) {
 	})
 	f.must("SendMessage", map[string]any{"QueueUrl": srcURL, "MessageBody": "poison"})
 
-	// Two deliveries are within the policy. The third exceeds it, and is the
-	// one that moves the message -- the bundle transcribes the pack, which
-	// decides redrive at receive and still returns the message it is moving.
-	// Real SQS moves it without delivering it again; the bundle records that
-	// disagreement as a quirk rather than silently correcting it here.
-	for i := 1; i <= 3; i++ {
+	// Two deliveries are within the policy. The third exceeds it and moves
+	// the message without returning it -- pack parity (afterReceive skips).
+	for i := 1; i <= 2; i++ {
 		if n := len(f.receive(srcURL, 10)); n != 1 {
 			t.Fatalf("delivery %d got %d messages, want 1", i, n)
 		}
 	}
 	if n := len(f.receive(srcURL, 10)); n != 0 {
-		t.Fatalf("the message stayed in the source queue after exceeding maxReceiveCount; got %d", n)
+		t.Fatalf("redrive delivery should omit the message; got %d", n)
 	}
 	moved := f.receive(dlqURL, 10)
 	if len(moved) != 1 {
@@ -200,9 +209,9 @@ func TestRedriveMovesToTheDeadLetterQueue(t *testing.T) {
 	}
 }
 
-// TestFifoGroupIsExclusiveWhileInFlight: ordering within a group means the
-// second message waits for the first to settle, while another group is free to
-// be delivered in the same batch.
+// TestFifoGroupIsExclusiveWhileInFlight: a group with a message in flight is
+// partial and sorts behind complete groups; within a group, consecutive
+// visible messages drain up to the limit (pack FIFO receive).
 func TestFifoGroupIsExclusiveWhileInFlight(t *testing.T) {
 	f := newSQS(t)
 	url := f.queue("q.fifo", map[string]any{
@@ -216,33 +225,33 @@ func TestFifoGroupIsExclusiveWhileInFlight(t *testing.T) {
 		})
 	}
 
-	first := f.receive(url, 10)
+	// Cap at 2: drain takes a1 then a2 from g1 before opening g2.
+	first := f.receive(url, 2)
 	if len(first) != 2 {
-		t.Fatalf("want one message per group, got %d", len(first))
+		t.Fatalf("want g1 drained to the limit, got %d", len(first))
 	}
-	bodies := map[string]bool{}
-	for _, m := range first {
-		bodies[m.(map[string]any)["Body"].(string)] = true
+	if first[0].(map[string]any)["Body"] != "a1" || first[1].(map[string]any)["Body"] != "a2" {
+		t.Fatalf("want a1 then a2, got %v", first)
 	}
-	if !bodies["a1"] || !bodies["b1"] {
-		t.Fatalf("want the head of each group, got %v", bodies)
+	// g2 is still complete and free; g1 is fully in flight.
+	next := f.receive(url, 10)
+	if len(next) != 1 || next[0].(map[string]any)["Body"] != "b1" {
+		t.Fatalf("want b1 from the untouched group, got %v", next)
 	}
 	if n := len(f.receive(url, 10)); n != 0 {
-		t.Fatalf("both groups have a message in flight; got %d", n)
+		t.Fatalf("everything is in flight; got %d", n)
 	}
 
-	// Deleting g1's head opens the group; g2's is still in flight.
-	handle := ""
 	for _, m := range first {
-		rec := m.(map[string]any)
-		if rec["Body"] == "a1" {
-			handle = rec["ReceiptHandle"].(string)
-		}
+		f.must("DeleteMessage", map[string]any{
+			"QueueUrl": url, "ReceiptHandle": m.(map[string]any)["ReceiptHandle"],
+		})
 	}
-	f.must("DeleteMessage", map[string]any{"QueueUrl": url, "ReceiptHandle": handle})
-	next := f.receive(url, 10)
-	if len(next) != 1 || next[0].(map[string]any)["Body"] != "a2" {
-		t.Fatalf("want a2 once g1 was released, got %v", next)
+	f.must("DeleteMessage", map[string]any{
+		"QueueUrl": url, "ReceiptHandle": next[0].(map[string]any)["ReceiptHandle"],
+	})
+	if n := len(f.receive(url, 10)); n != 0 {
+		t.Fatalf("queue should be empty, got %d", n)
 	}
 }
 
@@ -318,16 +327,17 @@ func TestLongPollReturnsEarlyWhenTimeAdvances(t *testing.T) {
 
 // TestSendMessageBatchIsSendMessage: the batch shape delegates rather than
 // reimplementing, so a per-entry failure lands in Failed while the rest succeed.
+// FIFO missing-group is a whole-batch fault (pack); use a standard queue here.
 func TestSendMessageBatchIsSendMessage(t *testing.T) {
 	f := newSQS(t)
-	url := f.queue("q.fifo", map[string]any{"ContentBasedDeduplication": "true"})
+	url := f.queue("q", nil)
 	out := f.must("SendMessageBatch", map[string]any{
 		"QueueUrl": url,
 		"Entries": []any{
-			map[string]any{"Id": "ok", "MessageBody": "a", "MessageGroupId": "g"},
-			// No group on a FIFO queue: the singular operation rejects it, and
-			// the batch reports that entry rather than failing as a whole.
-			map[string]any{"Id": "bad", "MessageBody": "b"},
+			map[string]any{"Id": "ok", "MessageBody": "a"},
+			// Empty body: the singular operation rejects it, and the batch
+			// reports that entry rather than failing as a whole.
+			map[string]any{"Id": "bad", "MessageBody": ""},
 		},
 	})
 	successful, _ := out["Successful"].([]any)
@@ -355,8 +365,10 @@ func TestPurgeQueueEmptiesEverything(t *testing.T) {
 	f.receive(url, 1) // one is now invisible
 
 	f.must("PurgeQueue", map[string]any{"QueueUrl": url})
-	attrs := f.must("GetQueueAttributes", map[string]any{"QueueUrl": url})["Attributes"].(map[string]any)
+	attrs := f.must("GetQueueAttributes", map[string]any{"QueueUrl": url, "AttributeNames": []any{"All"}})["Attributes"].(map[string]any)
 	if attrs["ApproximateNumberOfMessages"] != "0" {
 		t.Fatalf("purge left %v messages", attrs["ApproximateNumberOfMessages"])
 	}
 }
+
+

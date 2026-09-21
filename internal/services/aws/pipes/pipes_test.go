@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -20,7 +21,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -98,7 +98,7 @@ func TestPipesSQSDeliveryStateAndFiltering(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	for _, name := range []string{"source", "target", "filtered-source", "filtered-target"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
@@ -161,7 +161,7 @@ func TestPipesRetriesFailedTargetWithoutDeletingSource(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "source"})
 	invoke(t, p, id, "CreatePipe", pipeInput("retry", "source", "late"))
 	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "source", "MessageBody": "retry-me"})
@@ -200,7 +200,7 @@ func TestPipesRetrySurvivesClockAdvanceDuringWaitRegistration(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("worker did not reach initial wait")
 	}
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "source"})
 	invoke(t, p, id, "CreatePipe", pipeInput("retry-registration", "source", "late"))
 	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "source", "MessageBody": "retry-me"})
@@ -236,7 +236,7 @@ func TestPipesKinesisDeliveryAndCheckpoint(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	stream, queue := kinesis.New(deps), sqs.New(deps)
+	stream, queue := kinesis.New(deps), bundled.Handler("aws.sqs", deps)
 	invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "events"})
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "target"})
 	invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "events", "PartitionKey": "old", "Data": []byte("before")})
@@ -332,7 +332,7 @@ func TestPipesKinesisPartialBatchCheckpoint(t *testing.T) {
 func TestPipesKinesisRetryAgeAndDeadLetterPolicy(t *testing.T) {
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	deps := spitest.Deps(t)
-	stream, queue := kinesis.New(deps), sqs.New(deps)
+	stream, queue := kinesis.New(deps), bundled.Handler("aws.sqs", deps)
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "stream-dlq"})
 	dlq := queueARN(id, "stream-dlq")
 
@@ -388,7 +388,7 @@ func TestPipesDynamoDBStreamDeliveryAndCheckpoint(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	database, queue := dynamodb.New(deps), sqs.New(deps)
+	database, queue := dynamodb.New(deps), bundled.Handler("aws.sqs", deps)
 	created := invoke(t, database, id, "CreateTable", map[string]any{
 		"TableName": "Events", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
 		"StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"},
@@ -484,7 +484,7 @@ func TestPipesStepFunctionsTarget(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue, machine := sqs.New(deps), states.New(deps)
+	queue, machine := bundled.Handler("aws.sqs", deps), states.New(deps)
 	for _, name := range []string{"states-source", "async-states-source", "failed-states-source"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
@@ -547,7 +547,7 @@ func TestPipesStepFunctionsEnrichment(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue, machine := sqs.New(deps), states.New(deps)
+	queue, machine := bundled.Handler("aws.sqs", deps), states.New(deps)
 	for _, name := range []string{"enrich-states-source", "enrich-states-target", "failed-enrich-states-source", "failed-enrich-states-target"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
@@ -601,7 +601,7 @@ func TestPipesAPIGatewayEnrichment(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue, function, gateway := sqs.New(deps), lambda.New(deps), apigateway.New(deps)
+	queue, function, gateway := bundled.Handler("aws.sqs", deps), lambda.New(deps), apigateway.New(deps)
 	for _, name := range []string{"api-source", "api-target"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
@@ -678,7 +678,7 @@ func TestPipesAPIDestinationEnrichmentAndTarget(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue, eventbridge := sqs.New(deps), events.New(deps)
+	queue, eventbridge := bundled.Handler("aws.sqs", deps), events.New(deps)
 	defer eventbridge.Close()
 	for _, name := range []string{"destination-source", "destination-target", "api-target-source", "destination-failed-source"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
@@ -807,7 +807,7 @@ func TestPipesTargetInputTemplate(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	for _, name := range []string{"source", "target"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
@@ -841,7 +841,7 @@ func TestPipesLambdaPartialBatchResponse(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	function := lambda.New(deps)
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "source"})
 	partial := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event[-1]['messageId']}]}\n"
@@ -891,7 +891,7 @@ func TestPipesLambdaEnrichment(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	function := lambda.New(deps)
 	for _, name := range []string{"source", "target", "empty-source", "empty-target", "failed-source", "failed-target"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})

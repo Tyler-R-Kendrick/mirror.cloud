@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/store"
@@ -57,7 +57,7 @@ func TestSchedulerWaitsForAbsoluteDeadline(t *testing.T) {
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	deps := spitest.Deps(t)
 	deps.Clock = &deadlineRaceClock{Controllable: clock.NewControllable()}
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "jobs"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestSchedulerDeliversRestoredSchedule(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-west-2"}
 	deps := spitest.Deps(t)
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "jobs"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestSchedulerStateUpdateAndGroups(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	_, _ = queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "jobs"}})
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateScheduleGroup", Input: map[string]any{"Name": "batch"}}); err != nil {
 		t.Fatal(err)
@@ -290,7 +290,7 @@ func TestSchedulerFlexibleWindowRetryAndDLQ(t *testing.T) {
 	defer p.Close()
 	eventPack := events.New(deps)
 	defer eventPack.Close()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	for _, name := range []string{"jobs", "failures"} {
 		if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
 			t.Fatal(err)

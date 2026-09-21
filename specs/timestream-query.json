@@ -1,0 +1,45 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Timestream Query supplement",
+    "version": "authored-1",
+    "description": "The Query operation the Timestream smithy model does not declare but the mirror serves: not SQL, a substring match of the QueryString against stored database/table names, answering one ScalarValue row per stored record. Fused into aws.timestream by x-mirror-service; the vendored model keeps every other operation, its protocol and its shapes."
+  },
+  "x-mirror-service": "aws.timestream",
+  "paths": {
+    "/": {
+      "post": {
+        "operationId": "Query",
+        "summary": "Substring query over written batches",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "QueryString": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The fixed one-column header and one row per matching record, null rows when nothing matches.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ColumnInfo": { "type": "array", "items": { "type": "object" } },
+                    "Rows": { "type": "array", "items": { "type": "object" }, "nullable": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

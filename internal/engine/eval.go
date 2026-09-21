@@ -41,6 +41,12 @@ type eval struct {
 	// this particular operation happened to call it, so the template stays the
 	// same across every operation that touches the resource.
 	resIDs map[string]string
+	// lastCol is the collection name most recently resolved, so a put can
+	// publish a bus wake keyed to that collection for long-poll waiters.
+	lastCol string
+	// sqsWakes are "sqs" bus payloads deferred until Invoke releases its
+	// mutex, so ESM consumers can re-enter the same cached Engine.
+	sqsWakes [][]byte
 }
 
 func (e *Engine) newEval(req *spi.Request, op bir.Operation) *eval {
@@ -57,6 +63,15 @@ func (e *Engine) newEval(req *spi.Request, op bir.Operation) *eval {
 // activation builds the CEL variable set. Only declared bindings, the request,
 // the identity and an injected clock reading are visible — never the store.
 func (ev *eval) activation() map[string]any {
+	headers := map[string]string{}
+	hasHTTP := ev.req.HTTP != nil
+	if hasHTTP {
+		for k, vs := range ev.req.HTTP.Header {
+			if len(vs) > 0 {
+				headers[k] = vs[0]
+			}
+		}
+	}
 	act := map[string]any{
 		"input": ev.req.Input,
 		"identity": map[string]any{
@@ -65,10 +80,13 @@ func (ev *eval) activation() map[string]any {
 			"arn":     ev.req.Identity.ARN,
 			"project": ev.req.Identity.Project,
 		},
-		"now": ev.e.deps.Clock.Now(),
-		"id":  ev.id,
-		"fx":  ev.fx,
-		"hit": map[string]any{},
+		"now":      ev.e.deps.Clock.Now(),
+		"now_ms":   ev.e.deps.Clock.Now().UnixMilli(),
+		"id":       ev.id,
+		"fx":       ev.fx,
+		"hit":      map[string]any{},
+		"headers":  headers,
+		"has_http": hasHTTP,
 		// The base URL the caller actually reached. Services that hand back
 		// URLs to themselves -- an SQS queue URL, a GCS resumable-upload
 		// location -- have to echo the endpoint the client used, or the client
@@ -223,23 +241,33 @@ func (ev *eval) resolveRead(ctx context.Context, name string, read bir.Read) err
 	if err != nil {
 		return err
 	}
-	raw, found, err := col.Get(ctx, key)
+	// loadRecord follows key aliases and settles timers, so a prior receipt
+	// handle still finds its message and an expired visibility timeout is
+	// observed before require rules run.
+	rec, found, changed, err := ev.loadRecord(ctx, col, key, res)
 	if err != nil {
 		return err
 	}
-	rec := map[string]any{}
-	if found {
-		if err := unmarshal(raw, &rec); err != nil {
+	if found && changed {
+		if err := ev.settleWrite(ctx, col, key, res, rec, true, false); err != nil {
 			return err
 		}
 	}
-	// Views derive from a record, so there is nothing to derive when there
-	// is none. An operation that names a view guards on _found first, and
-	// the require rule that does so runs before anything reads it.
 	if found {
+		// Other packs plant bare keys (S3's notification target is `{}`).
+		// When the resource declares a name member, surface the collection
+		// key there so views and expressions that read q.name do not fault.
+		// Resources without a name member (CodeDeploy deployments) stay untouched.
+		if _, declares := res.Record["name"]; declares {
+			if _, ok := rec["name"]; !ok && key != "" {
+				rec["name"] = key
+			}
+		}
 		if err := ev.applyViews(read.Resource, res, rec); err != nil {
 			return err
 		}
+	} else {
+		rec = map[string]any{}
 	}
 	ev.binds[name] = rec
 	ev.binds[name+"_found"] = found
@@ -454,15 +482,15 @@ func (ev *eval) runEffects(ctx context.Context, op bir.Operation) error {
 		path := fmt.Sprintf("operations.%s.effects[%d]", ev.req.Operation, i)
 		switch {
 		case eff.Create != nil:
-			if err := ev.write(ctx, path+".create", *eff.Create, true); err != nil {
+			if err := ev.write(ctx, path+".create", *eff.Create, true, false); err != nil {
 				return err
 			}
 		case eff.Put != nil:
-			if err := ev.write(ctx, path+".put", *eff.Put, false); err != nil {
+			if err := ev.write(ctx, path+".put", *eff.Put, false, false); err != nil {
 				return err
 			}
 		case eff.Patch != nil:
-			if err := ev.write(ctx, path+".patch", *eff.Patch, false); err != nil {
+			if err := ev.write(ctx, path+".patch", *eff.Patch, false, true); err != nil {
 				return err
 			}
 		case eff.Delete != nil:
@@ -512,8 +540,10 @@ func (ev *eval) runEffects(ctx context.Context, op bir.Operation) error {
 }
 
 // write runs a create, put or patch: once, or once per element when the effect
-// declares a for_each.
-func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, create bool) error {
+// declares a for_each. patch=true means only effect record fields update an
+// existing row - resource schema is not re-evaluated against the current
+// input (that would wipe create-time attributes on SetQueueAttributes).
+func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, create, patch bool) error {
 	if _, ok := ev.e.ir.Resources[w.Resource]; !ok {
 		return fmt.Errorf("engine: %s: unknown resource %q", path, w.Resource)
 	}
@@ -530,10 +560,10 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		}
 	}
 	if w.ForEach == "" && w.Where == "" {
-		return ev.writeOne(ctx, path, w, create)
+		return ev.writeOne(ctx, path, w, create, patch)
 	}
 	if w.Where != "" {
-		return ev.writeWhere(ctx, path, w)
+		return ev.writeWhere(ctx, path, w, patch)
 	}
 
 	elems, err := ev.eval(path + ".for_each")
@@ -586,7 +616,7 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 				continue
 			}
 		}
-		if err := ev.writeOne(ctx, path, w, create); err != nil {
+		if err := ev.writeOne(ctx, path, w, create, patch); err != nil {
 			return err
 		}
 		if rec, ok := ev.binds["rec"].(map[string]any); ok {
@@ -601,7 +631,7 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 // a delete's `where` and a list's `filter` have. It is the cascade a request
 // cannot enumerate: the records it owes an update are named by what they
 // store, not by anything the caller sent.
-func (ev *eval) writeWhere(ctx context.Context, path string, w bir.WriteEffect) error {
+func (ev *eval) writeWhere(ctx context.Context, path string, w bir.WriteEffect, patch bool) error {
 	res, ok := ev.e.ir.Resources[w.Resource]
 	if !ok {
 		return fmt.Errorf("engine: %s: unknown resource %s", path, w.Resource)
@@ -656,15 +686,15 @@ func (ev *eval) writeWhere(ctx context.Context, path string, w bir.WriteEffect) 
 				rec[k] = v
 			}
 		}
-		// Resource-level record members first, then effect-level overrides --
-		// writeOne's merge order, over the stored record rather than an empty
-		// one.
-		for _, k := range sortedKeysAny(res.Record) {
-			v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
-			if err != nil {
-				return err
+		// Put rebuilds from the resource schema; patch only applies effect fields.
+		if !patch {
+			for _, k := range sortedKeysAny(res.Record) {
+				v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
+				if err != nil {
+					return err
+				}
+				rec[k] = v
 			}
-			rec[k] = v
 		}
 		for _, k := range sortedKeysAny(w.Record) {
 			v, err := ev.recordValue(ctx, path+".record."+k, w.Record[k])
@@ -749,7 +779,7 @@ func (ev *eval) spread(from string) (map[string]any, error) {
 //
 // Everything it reads from the effect is the same whether the write runs once
 // or per element; what differs is only whether `item` is bound around it.
-func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, create bool) error {
+func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, create, patch bool) error {
 	res, ok := ev.e.ir.Resources[w.Resource]
 	if !ok {
 		return fmt.Errorf("engine: %s: unknown resource %q", path, w.Resource)
@@ -789,6 +819,7 @@ func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, cr
 	}
 
 	rec := map[string]any{}
+	found := false
 	if !create {
 		// An update addresses an existing record. When the store key is a
 		// record member rather than the ID, the key is whatever the caller
@@ -802,7 +833,9 @@ func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, cr
 				key = k
 			}
 		}
-		raw, found, err := col.Get(ctx, key)
+		var raw []byte
+		var err error
+		raw, found, err = col.Get(ctx, key)
 		if err != nil {
 			return err
 		}
@@ -834,13 +867,19 @@ func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, cr
 		}
 	}
 
-	// Resource-level record members first, then effect-level overrides.
-	for _, k := range sortedKeysAny(res.Record) {
-		v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
-		if err != nil {
-			return err
+	// Resource schema fills creates, puts, and patches that mint a missing
+	// row. A patch on an existing row only overlays the effect's fields -
+	// re-running schema against the current input would replace create-time
+	// attributes with whatever the updating operation carried (SQS
+	// SetQueueAttributes wiping DelaySeconds).
+	if !patch || !found {
+		for _, k := range sortedKeysAny(res.Record) {
+			v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
+			if err != nil {
+				return err
+			}
+			rec[k] = v
 		}
-		rec[k] = v
 	}
 	for _, k := range sortedKeysAny(w.Record) {
 		v, err := ev.recordValue(ctx, path+".record."+k, w.Record[k])
@@ -911,13 +950,56 @@ func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, cr
 	return nil
 }
 
+// flushSQSWakes publishes deferred Send wakes. Call after releasing e.mu.
+func (ev *eval) flushSQSWakes() {
+	if ev.e.deps.Bus == nil {
+		return
+	}
+	for _, body := range ev.sqsWakes {
+		_ = ev.e.deps.Bus.Publish(context.Background(), "sqs", body)
+	}
+	ev.sqsWakes = nil
+}
+
 // putRecord marshals and stores one record.
 func (ev *eval) putRecord(ctx context.Context, col spi.Collection, key string, rec map[string]any) error {
 	blob, err := marshal(rec)
 	if err != nil {
 		return err
 	}
-	return col.Put(ctx, key, blob)
+	if err := col.Put(ctx, key, blob); err != nil {
+		return err
+	}
+	if ev.e.deps.Bus != nil && ev.lastCol != "" {
+		_ = ev.e.deps.Bus.Publish(ctx, "collection:"+ev.lastCol, nil)
+		// Lambda (and anything else that subscribed the pack's topic) wakes on
+		// "sqs" with the message body — collection wakes only long-poll. The
+		// pack published only on Send, never on receive/visibility writes;
+		// publishing those would re-enter ESM consumers forever.
+		if strings.HasPrefix(ev.lastCol, "msgs:") &&
+			(ev.req.Operation == "SendMessage" || ev.req.Operation == "SendMessageBatch") {
+			payload := map[string]any{}
+			_ = unmarshal(blob, &payload)
+			if _, ok := payload["queue"]; !ok {
+				payload["queue"] = strings.TrimPrefix(ev.lastCol, "msgs:")
+			}
+			if _, ok := payload["account"]; !ok {
+				payload["account"] = ev.req.Identity.Account
+			}
+			if _, ok := payload["region"]; !ok {
+				payload["region"] = ev.req.Identity.Region
+			}
+			if _, ok := payload["queueArn"]; !ok {
+				q := fmt.Sprint(payload["queue"])
+				payload["queueArn"] = "arn:aws:sqs:" + ev.req.Identity.Region + ":" + ev.req.Identity.Account + ":" + q
+			}
+			raw, err := marshal(payload)
+			if err == nil {
+				ev.sqsWakes = append(ev.sqsWakes, raw)
+			}
+		}
+	}
+	return nil
 }
 
 // recordValue evaluates one member of a record literal. A string is an
@@ -1172,9 +1254,25 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 	} else {
 		limit := 0
 		after := ""
+		prefix := ""
+		if op.List.Prefix != "" {
+			v, err := ev.eval(base + "prefix")
+			if err != nil {
+				return err
+			}
+			prefix = fmt.Sprint(v)
+		}
 		if modelOp.Pagination != nil {
-			if v, ok := ev.req.Input[modelOp.Pagination.InputToken]; ok {
-				after = fmt.Sprint(v)
+			if v, ok := ev.req.Input[modelOp.Pagination.InputToken]; ok && fmt.Sprint(v) != "" {
+				if op.List.After != "" {
+					decoded, err := ev.eval(base + "after")
+					if err != nil {
+						return err
+					}
+					after = fmt.Sprint(decoded)
+				} else {
+					after = fmt.Sprint(v)
+				}
 			}
 			if v, ok := ev.req.Input[modelOp.Pagination.PageSize]; ok {
 				if n, isNum := toFloat(v); isNum {
@@ -1182,7 +1280,7 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 				}
 			}
 		}
-		entries, more, err = col.List(ctx, "", after, limit)
+		entries, more, err = col.List(ctx, prefix, after, limit)
 		if err != nil {
 			return err
 		}
@@ -1236,6 +1334,15 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 		}
 		items = append(items, rec)
 		last = kv.Key
+		if op.List.Token != "" {
+			ev.binds["item"] = rec
+			tok, tokErr := ev.eval(base + "token")
+			delete(ev.binds, "item")
+			if tokErr != nil {
+				return tokErr
+			}
+			last = fmt.Sprint(tok)
+		}
 	}
 	ev.binds["__list"] = items
 	ev.binds["__list_more"] = more
@@ -1318,8 +1425,10 @@ func (ev *eval) project(op bir.Operation, modelOp model.Operation) (map[string]a
 			return nil, err
 		}
 		// A member the operation drops when null is absent rather than null
-		// on the wire; anything else answers null as usual.
+		// on the wire; anything else answers null as usual. List pre-fills
+		// Member from __list, so omit_null must delete that filler too.
 		if v == nil && slices.Contains(op.OmitNull, member) {
+			delete(out, member)
 			continue
 		}
 		out[member] = v
@@ -1439,10 +1548,13 @@ func sortedKeysAny(m map[string]any) []string { return sortedKeys(m) }
 // request arrived without an HTTP context, which is how unit tests and replayed
 // traces reach the engine.
 func (ev *eval) endpoint() string {
-	if ev.req.HTTP != nil && ev.req.HTTP.Host != "" {
-		return "http://" + ev.req.HTTP.Host
+	base := defaultEndpoint
+	if ev.req.AdvertiseURL != "" {
+		base = strings.TrimRight(ev.req.AdvertiseURL, "/")
+	} else if ev.req.HTTP != nil && ev.req.HTTP.Host != "" {
+		base = "http://" + ev.req.HTTP.Host
 	}
-	return defaultEndpoint
+	return sqsEndpoint(base, ev.e.deps.SQSEndpointStrategy, ev.req.Identity.Region)
 }
 
 // defaultEndpoint matches the address `mirror up` listens on, so a URL handed

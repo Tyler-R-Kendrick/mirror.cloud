@@ -360,9 +360,12 @@ func Validate(s *Service, svc *model.Service) error {
 				}
 			}
 			compile(where+".list.key", l.Key)
+			compile(where+".list.prefix", l.Prefix)
+			compile(where+".list.after", l.After)
 			// The filter sees one candidate record as `item`, its per-item
 			// joins, and nothing the rest of the operation cannot see.
 			itemScope := append(append([]string{}, scope...), "item")
+			compilerFor(itemScope...)(where+".list.token", l.Token)
 			perItemKey := compilerFor(itemScope...)
 			for _, b := range sortedKeys(l.Reads) {
 				r := l.Reads[b]
@@ -774,9 +777,7 @@ func validateStatechart(s *Service, where string, sc *Statechart, compile func(s
 				}
 				for j, act := range tr.Actions {
 					aw := fmt.Sprintf("%s.actions[%d]", tw, j)
-					for _, k := range sortedKeys(act.Set) {
-						compile(aw+".set."+k, act.Set[k])
-					}
+					compileAny(aw+".set", act.Set, compile)
 					if act.Deadline != nil {
 						compile(aw+".deadline.after", act.Deadline.After)
 						if act.Deadline.Name == "" {

@@ -15,7 +15,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -139,7 +138,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 
 	t.Run("sqs", func(t *testing.T) {
 		deps := spitest.Deps(t)
-		p := sqs.New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		seen := map[string]bool{}
 		inv := func(op string, in map[string]any) *spi.Response {
 			return call(t, p, ctx, id, seen, op, in, nil, "")

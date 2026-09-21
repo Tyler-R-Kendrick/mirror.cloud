@@ -207,7 +207,7 @@ func (ev *eval) runAction(ctx context.Context, path, resource string, res bir.Re
 	switch {
 	case a.Set != nil:
 		for _, k := range sortedKeys(a.Set) {
-			v, err := ev.eval(path + ".set." + k)
+			v, err := ev.recordValue(ctx, path+".set."+k, a.Set[k])
 			if err != nil {
 				return false, err
 			}
@@ -323,7 +323,11 @@ func asDuration(v any) (time.Duration, bool) {
 func (ev *eval) loadRecord(ctx context.Context, col spi.Collection, key string,
 	res bir.Resource) (rec map[string]any, found, changed bool, err error) {
 
-	raw, found, err := col.Get(ctx, key)
+	resolved, err := ev.resolveKeyAlias(ctx, res, key)
+	if err != nil {
+		return nil, false, false, err
+	}
+	raw, found, err := col.Get(ctx, resolved)
 	if err != nil || !found {
 		return nil, found, false, err
 	}
@@ -333,4 +337,31 @@ func (ev *eval) loadRecord(ctx context.Context, col spi.Collection, key string,
 	}
 	changed, err = ev.settle(rec, res.Statechart)
 	return rec, true, changed, err
+}
+
+// resolveKeyAlias follows KeyAliases until the current store key, or returns
+// the input when there is no alias chain. Caps the walk so a cycle cannot hang
+// a request.
+func (ev *eval) resolveKeyAlias(ctx context.Context, res bir.Resource, key string) (string, error) {
+	if res.KeyAliases == "" || key == "" {
+		return key, nil
+	}
+	name, err := ev.interpolate(res.KeyAliases)
+	if err != nil {
+		return key, err
+	}
+	aliases := ev.e.scope(ev.req).Collection(name)
+	seen := map[string]bool{}
+	for !seen[key] {
+		seen[key] = true
+		next, ok, err := aliases.Get(ctx, key)
+		if err != nil {
+			return key, err
+		}
+		if !ok || len(next) == 0 {
+			return key, nil
+		}
+		key = string(next)
+	}
+	return key, nil
 }

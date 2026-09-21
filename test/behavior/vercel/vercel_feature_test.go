@@ -118,13 +118,27 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("get after del %d %#v", code, gone)
 		}
 	})
+	t.Run("Given KV INCR When repeated Then the counter advances", func(t *testing.T) {
+		code, incr, _ := call(http.MethodPost, "/", `["INCR","n"]`, "kv.vercel-storage.com")
+		if code != 200 || incr["result"] != float64(1) {
+			t.Fatalf("incr %d %#v", code, incr)
+		}
+		code, incr2, _ := call(http.MethodPost, "/", `["INCR","n"]`, "kv.vercel-storage.com")
+		if code != 200 || incr2["result"] != float64(2) {
+			t.Fatalf("incr2 %d %#v", code, incr2)
+		}
+		code, get, _ := call(http.MethodPost, "/", `["GET","n"]`, "kv.vercel-storage.com")
+		if code != 200 || get["result"] != "2" {
+			t.Fatalf("get after incr %d %#v", code, get)
+		}
+	})
 	t.Run("Given an unimplemented verb When sent Then 501 says so", func(t *testing.T) {
-		// Three commands of Redis, not Redis. INCR is a real command the real
-		// service answers, so the refusal says the emulator has not got to it
-		// -- not that the caller sent something malformed.
-		code, body, hdr := call(http.MethodPost, "/", `["INCR","k"]`, "kv.vercel-storage.com")
+		// Hashes are outside the LocalStack-class string surface. HSET is a
+		// real command the real service answers, so the refusal says the
+		// emulator has not got to it -- not that the caller sent nonsense.
+		code, body, hdr := call(http.MethodPost, "/", `["HSET","h","f","v"]`, "kv.vercel-storage.com")
 		if code != 501 || hdr.Get("x-mirror-not-implemented") == "" {
-			t.Fatalf("incr %d %#v %#v", code, hdr, body)
+			t.Fatalf("hset %d %#v %#v", code, hdr, body)
 		}
 		// KV's errors are a plain string, which is what its document declares
 		// and what Upstash answers -- not the REST API's {error:{code,message}}.

@@ -55,6 +55,11 @@ func (ev *eval) runSelect(ctx context.Context, op bir.Operation) error {
 			return err
 		}
 	}
+	drain := grouping && sel.Group.Drain
+	// Drain needs every group member (including in-flight) to know which
+	// groups are partial and where the leading selectable run ends.
+	groupAll := map[string][]selected{}
+	var groupOrder []string
 
 	for _, kv := range entries {
 		rec := map[string]any{}
@@ -80,6 +85,17 @@ func (ev *eval) runSelect(ctx context.Context, op bir.Operation) error {
 			// behind it may be delivered until that one is settled or returns.
 			blockedGroups[fmt.Sprint(rec[sel.Group.By])] = true
 		}
+		item := selected{key: kv.Key, rec: rec}
+		if drain {
+			g := fmt.Sprint(rec[sel.Group.By])
+			if g == "" || g == "<nil>" {
+				g = kv.Key
+			}
+			if _, ok := groupAll[g]; !ok {
+				groupOrder = append(groupOrder, g)
+			}
+			groupAll[g] = append(groupAll[g], item)
+		}
 		if sel.State != "" && state != sel.State {
 			continue
 		}
@@ -94,12 +110,18 @@ func (ev *eval) runSelect(ctx context.Context, op bir.Operation) error {
 				continue
 			}
 		}
-		candidates = append(candidates, selected{key: kv.Key, rec: rec})
+		candidates = append(candidates, item)
 	}
 
 	if sel.OrderBy != "" {
 		if err := ev.sortSelected(candidates, sel.OrderBy); err != nil {
 			return err
+		}
+		for g, members := range groupAll {
+			if err := ev.sortSelected(members, sel.OrderBy); err != nil {
+				return err
+			}
+			groupAll[g] = members
 		}
 	}
 
@@ -114,28 +136,119 @@ func (ev *eval) runSelect(ctx context.Context, op bir.Operation) error {
 		}
 	}
 
-	// Pass two: take in order, at most one per group when grouping, skipping
-	// groups that are blocked.
-	takenGroups := map[string]bool{}
 	var taken []selected
-	for _, c := range candidates {
-		if grouping {
-			g := fmt.Sprint(c.rec[sel.Group.By])
-			if g != "" && g != "<nil>" {
-				if blockedGroups[g] || takenGroups[g] {
-					continue
+	if drain {
+		taken = ev.drainGroups(groupOrder, groupAll, candidates, sel, blockedGroups, limit)
+	} else {
+		// Pass two: take in order, at most one per group when grouping, skipping
+		// groups that are blocked.
+		takenGroups := map[string]bool{}
+		for _, c := range candidates {
+			if grouping {
+				g := fmt.Sprint(c.rec[sel.Group.By])
+				if g != "" && g != "<nil>" {
+					if blockedGroups[g] || takenGroups[g] {
+						continue
+					}
+					takenGroups[g] = true
 				}
-				takenGroups[g] = true
 			}
-		}
-		taken = append(taken, c)
-		if limit > 0 && len(taken) >= limit {
-			break
+			taken = append(taken, c)
+			if limit > 0 && len(taken) >= limit {
+				break
+			}
 		}
 	}
 
 	ev.setSelection(sel.Binding, taken)
 	return nil
+}
+
+// drainGroups is SQS FIFO receive: consecutive selectable messages from a
+// group, groups with an in-flight member after complete ones, never-received
+// groups before redelivered ones, then by the group's first order_by key.
+func (ev *eval) drainGroups(order []string, all map[string][]selected, selectable []selected,
+	sel *bir.Select, _ map[string]bool, limit int) []selected {
+
+	selectableSet := map[string]bool{}
+	for _, c := range selectable {
+		selectableSet[c.key] = true
+	}
+	partial := map[string]bool{}
+	received := map[string]bool{}
+	firstRank := map[string]int{}
+	for i, g := range order {
+		firstRank[g] = i
+		members := all[g]
+		leading := 0
+		for _, m := range members {
+			if !selectableSet[m.key] {
+				break
+			}
+			leading++
+		}
+		if leading > 0 && leading < len(members) {
+			partial[g] = true
+		}
+		for _, m := range members {
+			if n, ok := toFloat(m.rec["receiveCount"]); ok && n > 0 {
+				received[g] = true
+				break
+			}
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := order[i], order[j]
+		if partial[a] != partial[b] {
+			return !partial[a]
+		}
+		if received[a] != received[b] {
+			return !received[a]
+		}
+		return firstRank[a] < firstRank[b]
+	})
+	// Re-rank by first selectable's order among candidates when order_by set:
+	// firstRank from discovery order is a stand-in; candidates are already
+	// sorted, so prefer the group whose first selectable appears earliest.
+	pos := map[string]int{}
+	for i, c := range selectable {
+		g := fmt.Sprint(c.rec[sel.Group.By])
+		if g == "" || g == "<nil>" {
+			g = c.key
+		}
+		if _, ok := pos[g]; !ok {
+			pos[g] = i
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := order[i], order[j]
+		if partial[a] != partial[b] {
+			return !partial[a]
+		}
+		if received[a] != received[b] {
+			return !received[a]
+		}
+		pa, oka := pos[a]
+		pb, okb := pos[b]
+		if oka && okb && pa != pb {
+			return pa < pb
+		}
+		return firstRank[a] < firstRank[b]
+	})
+
+	var taken []selected
+	for _, g := range order {
+		for _, m := range all[g] {
+			if !selectableSet[m.key] {
+				break
+			}
+			taken = append(taken, m)
+			if limit > 0 && len(taken) >= limit {
+				return taken
+			}
+		}
+	}
+	return taken
 }
 
 // setSelection binds the chosen records, both for expressions (as a list of
@@ -189,6 +302,42 @@ func (ev *eval) sortSelected(items []selected, orderBy string) error {
 	return nil
 }
 
+// nextDeadline answers the earliest armed deadline among the selection's
+// records that has not fired yet, so a waiter can park on the instant a
+// record becomes selectable rather than on its own timeout.
+func (ev *eval) nextDeadline(ctx context.Context, op bir.Operation) (time.Time, bool) {
+	if op.Select == nil {
+		return time.Time{}, false
+	}
+	res, ok := ev.e.ir.Resources[op.Select.Resource]
+	if !ok || res.Statechart == nil {
+		return time.Time{}, false
+	}
+	col, err := ev.collection(res)
+	if err != nil {
+		return time.Time{}, false
+	}
+	entries, _, err := col.List(ctx, "", "", 0)
+	if err != nil {
+		return time.Time{}, false
+	}
+	now := ev.e.deps.Clock.Now()
+	var next time.Time
+	for _, kv := range entries {
+		rec := map[string]any{}
+		if err := unmarshal(kv.Value, &rec); err != nil {
+			continue
+		}
+		for _, at := range deadlinesOf(rec) {
+			when := time.Unix(0, at)
+			if when.After(now) && (next.IsZero() || when.Before(next)) {
+				next = when
+			}
+		}
+	}
+	return next, !next.IsZero()
+}
+
 // runWait is long polling as an engine capability rather than per-service code.
 //
 // It re-runs the selection until the bundle's condition holds or the timeout
@@ -227,21 +376,48 @@ func (ev *eval) runWait(ctx context.Context, op bir.Operation) error {
 	}
 
 	deadline := ev.e.deps.Clock.Now().Add(timeout)
+
+	// Subscribe before parking so a create that races the park still wakes us.
+	var wake <-chan struct{}
+	var cancel func()
+	if ev.e.deps.Bus != nil && op.Select != nil {
+		res, ok := ev.e.ir.Resources[op.Select.Resource]
+		if ok {
+			colName, err := ev.interpolate(res.Collection)
+			if err == nil && colName != "" {
+				ch := make(chan struct{}, 1)
+				wake = ch
+				cancel = ev.e.deps.Bus.Subscribe("collection:"+colName, func(context.Context, []byte) {
+					select {
+					case ch <- struct{}{}:
+					default:
+					}
+				})
+			}
+		}
+	}
+	if cancel != nil {
+		defer cancel()
+	}
+
 	for {
 		now := ev.e.deps.Clock.Now()
 		if !now.Before(deadline) {
 			return nil
 		}
-		// The instant to wake at, worked out from the reading above rather
-		// than from whenever the timer happens to be registered: an advance
-		// landing in between would otherwise park this past a deadline that
-		// has already passed. See spi.Clock.AfterTime.
-		wake := now.Add(waitPoll)
-		if wake.After(deadline) {
-			wake = deadline
+		// Park until the deadline, the next armed deadline among the records
+		// being waited on, or a bus wakeup from a write to this selection's
+		// collection -- the long-poll contract, not a poll loop. An armed
+		// deadline is why a record may become selectable with nobody writing:
+		// a delayed message reappears on its own instant, and a waiter that
+		// slept past it would answer empty with the message already visible.
+		park := deadline
+		if at, ok := ev.nextDeadline(ctx, op); ok && at.After(now) && at.Before(park) {
+			park = at
 		}
 		select {
-		case <-ev.e.deps.Clock.AfterTime(wake):
+		case <-ev.e.deps.Clock.AfterTime(park):
+		case <-wake:
 		case <-ctx.Done():
 			return nil
 		}
@@ -257,8 +433,3 @@ func (ev *eval) runWait(ctx context.Context, op bir.Operation) error {
 		}
 	}
 }
-
-// waitPoll bounds how long one park lasts, so a message that arrives mid-wait
-// is picked up promptly instead of at the end of the whole timeout. A bus
-// wakeup would be tighter; this is correct without one, and correctness first.
-const waitPoll = 100 * time.Millisecond

@@ -41,6 +41,10 @@
     "body": "hello",
     "status": 200
   },
+  "v4a-unsigned_stored": {
+    "body": "hello",
+    "status": 200
+  },
   "v4a_stored": {
     "body": "hello",
     "status": 200
@@ -57,6 +61,17 @@
     "status": 403
   },
   "v4a_trailer_valid": {
+    "status": 200
+  },
+  "v4a_unsigned_trailer_bad_checksum": {
+    "code": "BadDigest",
+    "status": 400
+  },
+  "v4a_unsigned_trailer_signed_chunk": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "v4a_unsigned_trailer_valid": {
     "status": 200
   },
   "valid": {

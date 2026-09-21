@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
@@ -120,6 +121,61 @@ func TestConcurrentS3ResponseIDsRemainDistinct(t *testing.T) {
 	}
 	if len(seen) != 64 {
 		t.Fatalf("unique request IDs = %d, want 64", len(seen))
+	}
+}
+
+func TestConcurrentSigV4AUnsignedTrailersDoNotCrossContaminate(t *testing.T) {
+	deps := spitest.Deps(t)
+	if err := deps.Clock.Advance(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Sub(deps.Clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	cfg.S3ValidatePresignedSignatures = true
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/v4a-unsigned", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			extension := ""
+			want := http.StatusOK
+			if i%2 != 0 {
+				extension = ";chunk-signature=unexpected"
+				want = http.StatusForbidden
+			}
+			raw := "5" + extension + "\r\nhello\r\n0\r\nx-amz-checksum-crc32c:mnG7TA==\r\n\r\n"
+			request := httptest.NewRequest(http.MethodPut, "/v4a-unsigned/object", strings.NewReader(raw))
+			request.Host = "s3.localhost.localstack.cloud:4566"
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+			request.Header.Set("X-Amz-Date", "20990101T000000Z")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			request.Header.Set("X-Amz-Region-Set", "us-east-1")
+			request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+			request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set;x-amz-trailer,Signature=304402201f09d982734f868ab87f6e305473f7ef74a6882095dbf5d0f0b97bede169993402204a4c59017095e2ffaf861e04fc6c73b5d1c9b0d8c041b7fd2acb05d0a4c356f3")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != want {
+				errs <- fmt.Errorf("request %d status %d, want %d", i, recorder.Code, want)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 

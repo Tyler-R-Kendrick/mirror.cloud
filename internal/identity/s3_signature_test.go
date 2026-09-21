@@ -366,12 +366,18 @@ func TestVerifyS3StreamingV4A(t *testing.T) {
 		}
 		return hexSignature
 	}
-	for _, trailerMode := range []bool{false, true} {
-		t.Run(map[bool]string{false: "payload", true: "trailer"}[trailerMode], func(t *testing.T) {
+	for _, mode := range []string{"payload", "trailer", "unsigned-trailer"} {
+		t.Run(mode, func(t *testing.T) {
+			trailerMode := mode != "payload"
+			unsignedTrailerMode := mode == "unsigned-trailer"
 			payloadHash := "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD"
 			signedHeaders := "content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set"
-			if trailerMode {
+			if unsignedTrailerMode {
+				payloadHash = "STREAMING-UNSIGNED-PAYLOAD-TRAILER"
+			} else if trailerMode {
 				payloadHash += "-TRAILER"
+			}
+			if trailerMode {
 				signedHeaders += ";x-amz-trailer"
 			}
 			request := httptest.NewRequest(http.MethodPut, "https://examplebucket.s3.amazonaws.com/object", nil)
@@ -399,15 +405,20 @@ func TestVerifyS3StreamingV4A(t *testing.T) {
 			signatures := make([]string, len(chunks))
 			previous := seed
 			empty := sha256.Sum256(nil)
-			for i, chunk := range chunks {
-				chunkHash := sha256.Sum256(chunk)
-				payload := strings.Join([]string{strings.TrimLeft(previous, "*"), hex.EncodeToString(empty[:]), hex.EncodeToString(chunkHash[:])}, "\n")
-				signatures[i] = sign(t, strings.Join([]string{"AWS4-ECDSA-P256-SHA256-PAYLOAD", date, scope, payload}, "\n"), true)
-				previous = signatures[i]
+			if !unsignedTrailerMode {
+				for i, chunk := range chunks {
+					chunkHash := sha256.Sum256(chunk)
+					payload := strings.Join([]string{strings.TrimLeft(previous, "*"), hex.EncodeToString(empty[:]), hex.EncodeToString(chunkHash[:])}, "\n")
+					signatures[i] = sign(t, strings.Join([]string{"AWS4-ECDSA-P256-SHA256-PAYLOAD", date, scope, payload}, "\n"), true)
+					previous = signatures[i]
+				}
 			}
 			trailers := http.Header(nil)
 			if trailerMode {
-				trailers = http.Header{"X-Amz-Checksum-Crc32c": {"mnG7TA=="}, "X-Amz-Trailer-Signature": {strings.Repeat("0", 144)}}
+				trailers = http.Header{"X-Amz-Checksum-Crc32c": {"mnG7TA=="}}
+			}
+			if trailerMode && !unsignedTrailerMode {
+				trailers.Set("X-Amz-Trailer-Signature", strings.Repeat("0", 144))
 				canonicalTrailer, ok := canonicalS3StreamingTrailers(request, trailers, true)
 				if !ok {
 					t.Fatal("invalid test trailers")
@@ -418,6 +429,24 @@ func TestVerifyS3StreamingV4A(t *testing.T) {
 			}
 			if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault != nil {
 				t.Fatalf("valid SigV4A stream rejected: %#v", fault)
+			}
+			if unsignedTrailerMode {
+				authorization := request.Header.Get("Authorization")
+				request.Header.Set("Authorization", strings.Replace(authorization, ";x-amz-trailer", "", 1))
+				if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+					t.Fatalf("unsigned SigV4A trailer declaration accepted: %#v", fault)
+				}
+				request.Header.Set("Authorization", authorization)
+				signatures[0] = "unexpected"
+				if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+					t.Fatalf("unsigned SigV4A stream with chunk signature accepted: %#v", fault)
+				}
+				signatures[0] = ""
+				trailers.Set("X-Amz-Extra", "value")
+				if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+					t.Fatalf("undeclared unsigned SigV4A trailer accepted: %#v", fault)
+				}
+				return
 			}
 			chunks[0][0] = 'j'
 			if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {

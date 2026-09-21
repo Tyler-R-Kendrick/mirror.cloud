@@ -1024,12 +1024,18 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || len(checksummedVersions.Versions) != 1 || len(checksummedVersions.Versions[0].ChecksumAlgorithm) != 1 || checksummedVersions.Versions[0].ChecksumAlgorithm[0] != s3types.ChecksumAlgorithmSha256 || checksummedVersions.Versions[0].ChecksumType != s3types.ChecksumTypeFullObject {
 		t.Fatalf("checksummed versions: %#v %v", checksummedVersions, err)
 	}
-	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String("encoded/a b+"), Body: strings.NewReader("body")}); err != nil {
-		t.Fatal(err)
+	for _, key := range []string{"encoded/a b+", "encoded/a!b+"} {
+		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String(key), Body: strings.NewReader("body")}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	encodedVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("encoded/"), EncodingType: s3types.EncodingTypeUrl})
-	if err != nil || len(encodedVersions.Versions) != 1 || aws.ToString(encodedVersions.Versions[0].Key) != "encoded/a%20b%2B" || aws.ToString(encodedVersions.Prefix) != "encoded/" {
+	encodedVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("encoded/"), MaxKeys: aws.Int32(1), EncodingType: s3types.EncodingTypeUrl})
+	if err != nil || len(encodedVersions.Versions) != 1 || aws.ToString(encodedVersions.Versions[0].Key) != "encoded/a%20b%2B" || aws.ToString(encodedVersions.Prefix) != "encoded/" || aws.ToString(encodedVersions.NextKeyMarker) != "encoded/a%20b%2B" || aws.ToString(encodedVersions.NextVersionIdMarker) == "" {
 		t.Fatalf("encoded versions: %#v %v", encodedVersions, err)
+	}
+	encodedNext, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("encoded/"), MaxKeys: aws.Int32(1), EncodingType: s3types.EncodingTypeUrl, KeyMarker: encodedVersions.NextKeyMarker, VersionIdMarker: encodedVersions.NextVersionIdMarker})
+	if err != nil || len(encodedNext.Versions) != 1 || aws.ToString(encodedNext.Versions[0].Key) != "encoded/a%21b%2B" || aws.ToString(encodedNext.KeyMarker) != "encoded/a%20b%2B" {
+		t.Fatalf("encoded next version page: %#v %v", encodedNext, err)
 	}
 	for _, key := range []string{"folder/a/one", "folder/file1", "folder/file2"} {
 		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String(key), Body: strings.NewReader("body")}); err != nil {

@@ -13724,6 +13724,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestListObjectVersionsURLResponseEncoding",
 		},
 		{
+			name: "s3-list-versions-skip-valid-marker-decoding",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if decoded, err := url.PathUnescape(keyMarker); err == nil {`,
+			new:  `if decoded, err := url.PathUnescape(keyMarker); err != nil {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListObjectVersionsURLMarkerRoundTrip",
+		},
+		{
+			name: "s3-list-versions-reencode-decoded-marker",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `keyMarker = decoded`,
+			new:  `keyMarker = s3URLEncode(decoded)`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListObjectVersionsURLMarkerRoundTrip",
+		},
+		{
 			name: "s3-list-versions-drop-common-prefix",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `entries = append(entries, entry{key: value, row: map[string]any{"Prefix": value}, prefix: true})`,

@@ -1,0 +1,56 @@
+{
+  "first": {
+    "CommonPrefixes": null,
+    "DeleteMarkers": null,
+    "Delimiter": "",
+    "EncodingType": "url",
+    "IsTruncated": true,
+    "KeyMarker": "",
+    "MaxKeys": 1,
+    "Name": "version-url-markers",
+    "NextKeyMarker": "folder/a%20key",
+    "NextVersionIdMarker": "7c589129",
+    "Prefix": "folder/",
+    "VersionIdMarker": "",
+    "Versions": [
+      {
+        "ETag": "\"32c9339897be1ce561b30016c9d75fd7\"",
+        "IsLatest": true,
+        "Key": "folder/a%20key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 12,
+        "StorageClass": "STANDARD",
+        "VersionId": "7c589129"
+      }
+    ]
+  },
+  "second": {
+    "CommonPrefixes": null,
+    "DeleteMarkers": null,
+    "Delimiter": "",
+    "EncodingType": "url",
+    "IsTruncated": false,
+    "KeyMarker": "folder/a%20key",
+    "MaxKeys": 1,
+    "Name": "version-url-markers",
+    "Prefix": "folder/",
+    "VersionIdMarker": "7c589129",
+    "Versions": [
+      {
+        "ETag": "\"45a8a011dfec580ec89b1f379664d5a2\"",
+        "IsLatest": true,
+        "Key": "folder/a%21key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 12,
+        "StorageClass": "STANDARD",
+        "VersionId": "5f59f223"
+      }
+    ]
+  }
+}

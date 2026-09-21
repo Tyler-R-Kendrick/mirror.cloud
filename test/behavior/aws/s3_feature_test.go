@@ -215,6 +215,27 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a%20b/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<Key>folder/root%20%3F</Key>")) {
 			t.Fatalf("version URL list: %d %s", res.StatusCode, body)
 		}
+		for _, key := range []string{"marker/a%20key", "marker/a%21key"} {
+			res = do(http.MethodPut, "/list-url-bdd/"+key, []byte("body"), "")
+			res.Body.Close()
+		}
+		res = do(http.MethodGet, "/list-url-bdd?versions&prefix=marker%2F&max-keys=1&encoding-type=url", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		var first struct {
+			NextKeyMarker       string `xml:"NextKeyMarker"`
+			NextVersionIDMarker string `xml:"NextVersionIdMarker"`
+		}
+		if err := xml.Unmarshal(body, &first); err != nil || first.NextKeyMarker != "marker/a%20key" || first.NextVersionIDMarker == "" {
+			t.Fatalf("first encoded version page: %d %s", res.StatusCode, body)
+		}
+		query := "versions&prefix=marker%2F&max-keys=1&encoding-type=url&key-marker=" + url.QueryEscape(first.NextKeyMarker) + "&version-id-marker=" + url.QueryEscape(first.NextVersionIDMarker)
+		res = do(http.MethodGet, "/list-url-bdd?"+query, nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<KeyMarker>marker/a%20key</KeyMarker>")) || !bytes.Contains(body, []byte("<Key>marker/a%21key</Key>")) {
+			t.Fatalf("next encoded version page: %d %s", res.StatusCode, body)
+		}
 	})
 
 	t.Run("Given a checksummed version When listing versions Then checksum metadata is returned", func(t *testing.T) {

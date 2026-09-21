@@ -4823,6 +4823,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestRESTXMLServiceDecodeContracts",
 		},
 		{
+			name: "s3-restxml-invent-notification-filter-name",
+			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+			old:  "for _, rule := range source.Filter.Key.Rules {\n\t\t\t\t\t\t\tdecoded := map[string]any{}",
+			new:  "for _, rule := range source.Filter.Key.Rules {\n\t\t\t\t\t\t\tdecoded := map[string]any{\"Name\": \"\"}",
+			pkg:  "./internal/proto/aws/restxml",
+			run:  "TestRESTXMLServiceDecodeContracts",
+		},
+		{
 			name: "s3-restxml-drop-notification-root",
 			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
 			old:  `if op.Name == "GetBucketNotificationConfiguration" {`,

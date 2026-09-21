@@ -511,7 +511,7 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 			t.Errorf("%s decode %#v %v", test.operation, decoded, err)
 		}
 	}
-	notification := `<NotificationConfiguration><QueueConfiguration><Id>queue</Id><Queue>arn:aws:sqs:us-east-1:111111111111:q</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>images/</Value></FilterRule></S3Key></Filter></QueueConfiguration><TopicConfiguration><Topic>arn:aws:sns:us-east-1:111111111111:t</Topic><Event>s3:ObjectRemoved:*</Event></TopicConfiguration><CloudFunctionConfiguration><CloudFunction>arn:aws:lambda:us-east-1:111111111111:function:f</CloudFunction><Event>s3:ObjectCreated:Put</Event></CloudFunctionConfiguration><EventBridgeConfiguration/></NotificationConfiguration>`
+	notification := `<NotificationConfiguration><QueueConfiguration><Id>queue</Id><Queue>arn:aws:sqs:us-east-1:111111111111:q</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>images/</Value></FilterRule><FilterRule><Value>test</Value></FilterRule><FilterRule><Name>prefix</Name></FilterRule><FilterRule/></S3Key></Filter></QueueConfiguration><TopicConfiguration><Topic>arn:aws:sns:us-east-1:111111111111:t</Topic><Event>s3:ObjectRemoved:*</Event></TopicConfiguration><CloudFunctionConfiguration><CloudFunction>arn:aws:lambda:us-east-1:111111111111:function:f</CloudFunction><Event>s3:ObjectCreated:Put</Event></CloudFunctionConfiguration><EventBridgeConfiguration/></NotificationConfiguration>`
 	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketNotificationConfiguration"}, httptest.NewRequest(http.MethodPut, "/bucket?notification", strings.NewReader(notification)))
 	notificationConfiguration, _ := decoded.Input["NotificationConfiguration"].(map[string]any)
 	queues, _ := notificationConfiguration["QueueConfigurations"].([]any)
@@ -520,9 +520,12 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	keyFilter, _ := filter["Key"].(map[string]any)
 	filterRules, _ := keyFilter["FilterRules"].([]any)
 	filterRule, _ := filterRules[0].(map[string]any)
+	missingName, _ := filterRules[1].(map[string]any)
+	missingValue, _ := filterRules[2].(map[string]any)
+	missingBoth, _ := filterRules[3].(map[string]any)
 	topics, _ := notificationConfiguration["TopicConfigurations"].([]any)
 	lambdas, _ := notificationConfiguration["LambdaFunctionConfigurations"].([]any)
-	if err != nil || queue["Id"] != "queue" || filterRule["Value"] != "images/" || len(topics) != 1 || len(lambdas) != 1 || !reflect.DeepEqual(notificationConfiguration["EventBridgeConfiguration"], map[string]any{}) {
+	if err != nil || queue["Id"] != "queue" || filterRule["Value"] != "images/" || !reflect.DeepEqual(missingName, map[string]any{"Value": "test"}) || !reflect.DeepEqual(missingValue, map[string]any{"Name": "prefix"}) || len(missingBoth) != 0 || len(topics) != 1 || len(lambdas) != 1 || !reflect.DeepEqual(notificationConfiguration["EventBridgeConfiguration"], map[string]any{}) {
 		t.Fatalf("notification decode %#v %v", decoded, err)
 	}
 	ownership := `<OwnershipControls><Rule><ObjectOwnership>ObjectWriter</ObjectOwnership></Rule></OwnershipControls>`

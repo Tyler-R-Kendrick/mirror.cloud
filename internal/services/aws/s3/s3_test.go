@@ -643,7 +643,7 @@ func TestBucketNotificationEventBridgeDelivery(t *testing.T) {
 		return response
 	}
 	invokePack(queuePack, "CreateQueue", map[string]any{"QueueName": "events"})
-	invokePack(eventPack, "PutRule", map[string]any{"Name": "s3", "EventPattern": `{"source":["aws.s3"],"detail-type":["Object Created"]}`})
+	invokePack(eventPack, "PutRule", map[string]any{"Name": "s3", "EventPattern": `{"source":["aws.s3"],"detail-type":["Object Created","Object Deleted","Object ACL Updated","Object Restore Initiated","Object Restore Completed"]}`})
 	invokePack(eventPack, "PutTargets", map[string]any{"Rule": "s3", "Targets": []any{map[string]any{
 		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:123456789012:events",
 	}}})
@@ -654,19 +654,62 @@ func TestBucketNotificationEventBridgeDelivery(t *testing.T) {
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
 		"Bucket": bucket, "NotificationConfiguration": map[string]any{"EventBridgeConfiguration": map[string]any{}},
 	}, nil)
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+	created := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	mustInvoke(t, p, "PutObjectAcl", map[string]any{"Bucket": bucket, "Key": "created", "ACL": "public-read"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "archived", "StorageClass": "GLACIER"}, []byte("archive"))
+	mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": bucket, "Key": "archived", "Days": 1}, nil)
+	mustInvokeAs(t, p, spi.Identity{Account: id.Account, Region: "us-west-2"}, "PutObject", map[string]any{"Bucket": bucket, "Key": "cross-region"}, []byte("regional"))
+	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "created"}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "created", "VersionId": created.Headers.Get("x-amz-version-id")}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Suspended"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("null-version"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "created", "VersionId": marker.Headers.Get("x-amz-version-id")}, nil)
 
 	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "events", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
-	if len(messages) != 1 {
+	if len(messages) != 10 {
 		t.Fatalf("eventbridge messages = %#v", messages)
 	}
-	var event map[string]any
-	if err := json.Unmarshal([]byte(asMapForTest(messages[0])["Body"].(string)), &event); err != nil {
-		t.Fatal(err)
+	byType := map[string][]map[string]any{}
+	for _, message := range messages {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(asMapForTest(message)["Body"].(string)), &event); err != nil {
+			t.Fatal(err)
+		}
+		detail := asMapForTest(event["detail"])
+		if event["source"] != "aws.s3" || event["region"] != id.Region || asMapForTest(detail["bucket"])["name"] != bucket {
+			t.Fatalf("eventbridge notification = %#v", event)
+		}
+		byType[event["detail-type"].(string)] = append(byType[event["detail-type"].(string)], detail)
 	}
-	detail := asMapForTest(event["detail"])
-	if event["source"] != "aws.s3" || event["detail-type"] != "Object Created" || asMapForTest(detail["bucket"])["name"] != bucket || asMapForTest(detail["object"])["key"] != "created" {
-		t.Fatalf("eventbridge notification = %#v", event)
+	if len(byType["Object Created"]) != 4 || len(byType["Object Deleted"]) != 3 || len(byType["Object ACL Updated"]) != 1 || len(byType["Object Restore Initiated"]) != 1 || len(byType["Object Restore Completed"]) != 1 {
+		t.Fatalf("eventbridge event types = %#v", byType)
+	}
+	createdKeys := map[string]bool{}
+	for _, detail := range byType["Object Created"] {
+		object := asMapForTest(detail["object"])
+		createdKeys[object["key"].(string)] = true
+		if object["key"] == "created" && object["version-id"] != created.Headers.Get("x-amz-version-id") {
+			if object["version-id"] != nil {
+				t.Fatalf("created version = %#v", detail)
+			}
+		}
+	}
+	if !createdKeys["created"] || !createdKeys["archived"] || !createdKeys["cross-region"] {
+		t.Fatalf("created keys = %#v", createdKeys)
+	}
+	deletionTypes := map[string]bool{}
+	for _, detail := range byType["Object Deleted"] {
+		deletionTypes[detail["deletion-type"].(string)] = true
+	}
+	if !deletionTypes["Delete Marker Created"] || !deletionTypes["Permanently Deleted"] {
+		t.Fatalf("deletion types = %#v", deletionTypes)
+	}
+	if object := asMapForTest(byType["Object ACL Updated"][0]["object"]); object["key"] != "created" || object["size"] != nil || object["sequencer"] != nil {
+		t.Fatalf("ACL event = %#v", byType["Object ACL Updated"][0])
+	}
+	if byType["Object Restore Completed"][0]["restore-expiry-time"] == "" || byType["Object Restore Completed"][0]["source-ip-address"] != nil {
+		t.Fatalf("restore completed event = %#v", byType["Object Restore Completed"][0])
 	}
 }
 

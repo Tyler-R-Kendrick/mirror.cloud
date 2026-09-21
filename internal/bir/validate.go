@@ -248,6 +248,11 @@ func Validate(s *Service, svc *model.Service) error {
 		if op.List != nil || opWritesEach(op) {
 			scope = append(scope, "items")
 		}
+		// A delete-where effect binds how many rows it removed, so delete-all
+		// answers can report a count without a second list pass.
+		if opDeletesWhere(op) {
+			scope = append(scope, "deleted_count")
+		}
 		compile := compilerFor(scope...)
 
 		// `fx` is one binding holding a map, so every key type-checks and a key
@@ -1095,6 +1100,15 @@ func opWritesEach(op Operation) bool {
 	return false
 }
 
+func opDeletesWhere(op Operation) bool {
+	for _, e := range op.Effects {
+		if e.Delete != nil && e.Delete.Where != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // asMapAny narrows an inline output block to the map form the compiler walks.
 func asMapAny(v any) map[string]any {
 	m, _ := v.(map[string]any)
@@ -1125,7 +1139,7 @@ var ReservedVariables = []string{"endpoint", "identity", "input", "now"}
 // not the record, and the engine has no way to tell the author which was
 // meant.
 var ReservedBindings = []string{
-	"arn", "event", "fx", "hit", "id", "item", "items", "rec",
+	"arn", "deleted_count", "event", "fx", "hit", "id", "item", "items", "rec",
 }
 
 func reservedVariable(name string) bool {

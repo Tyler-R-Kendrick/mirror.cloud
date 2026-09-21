@@ -63,6 +63,7 @@ func (e *Engine) bindingNames() []string {
 	seen := map[string]bool{
 		"id": true, "rec": true, "event": true, "fx": true,
 		"hit": true, "item": true, "arn": true, "items": true,
+		"deleted_count": true,
 	}
 	for name := range e.ir.Resources {
 		seen[name] = true

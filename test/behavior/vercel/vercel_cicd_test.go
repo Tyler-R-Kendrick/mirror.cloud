@@ -79,6 +79,10 @@ func TestVercelCICDParity(t *testing.T) {
 		if code != 200 || got["uid"] != uid {
 			t.Fatalf("get %d %#v", code, got)
 		}
+		code, byHost := call(http.MethodGet, "/v4/aliases/cicd.example", "")
+		if code != 200 || byHost["uid"] != uid {
+			t.Fatalf("get by hostname %d %#v", code, byHost)
+		}
 		code, del := call(http.MethodDelete, "/v2/aliases/"+uid, "")
 		if code != 200 || del["status"] != "SUCCESS" {
 			t.Fatalf("delete %d %#v", code, del)
@@ -132,6 +136,10 @@ func TestVercelCICDParity(t *testing.T) {
 		code, st := call(http.MethodGet, "/v8/artifacts/status", "")
 		if code != 200 || st["status"] != "enabled" {
 			t.Fatalf("artifact status %d %#v", code, st)
+		}
+		code, gone := call(http.MethodDelete, "/v8/artifacts", "")
+		if code != 200 || gone["deletedCount"] != float64(1) {
+			t.Fatalf("delete all artifacts %d %#v", code, gone)
 		}
 		code, cfg := call(http.MethodPatch, "/v1/projects/"+pid+"/rolling-release/config", `{"target":"production","stages":[]}`)
 		if code != 200 || cfg["rollingRelease"] == nil {

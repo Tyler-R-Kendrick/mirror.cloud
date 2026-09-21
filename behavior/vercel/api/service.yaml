@@ -266,6 +266,18 @@ resources:
     id:
       derive: "''"
 
+  # Hostname → uid so GetAlias can resolve idOrAlias either as the store key
+  # or as the alias string the document's path label allows.
+  deployment_alias_by_alias:
+    collection: vdepaliasby
+    id:
+      derive: >
+        ('alias' in input && input.alias != null && string(input.alias) != '') ? string(input.alias)
+          : (('idOrAlias' in input && input.idOrAlias != null) ? string(input.idOrAlias) : '')
+    record:
+      uid: "''"
+      deploymentId: "''"
+
   # A deployment's build events, written by CreateDeployment (created,
   # building, ready -- the three the oracle pushes) and CancelDeployment. The
   # key is the deployment id plus a serial suffix so one flat collection holds
@@ -764,6 +776,12 @@ operations:
             deploymentId: "'dpl_' + fx.depid"
             projectId: "by_name_found ? string(by_name.project) : 'prj_' + fx.newproj"
       - put:
+          resource: deployment_alias_by_alias
+          key: "string(input.name) + '-' + fx.host + '.vercel.app'"
+          record:
+            uid: "'als_' + fx.depid"
+            deploymentId: "'dpl_' + fx.depid"
+      - put:
           resource: deployment_event
           key: "'dpl_' + fx.depid + ':1'"
           record:
@@ -879,6 +897,7 @@ operations:
     effects:
       # The oracle cascades: a delete takes the deployment's aliases, events
       # and file descriptors with it.
+      - delete: { resource: deployment_alias_by_alias, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: deployment_alias, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: deployment_event, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: deployment_file, where: "item.deploymentId == string(dep.uid)" }
@@ -1929,6 +1948,12 @@ operations:
     effects:
       - generate: { bind: als, kind: hex, bytes: 10 }
       - put:
+          resource: deployment_alias_by_alias
+          key: "string(input.alias)"
+          record:
+            uid: "'als_' + fx.als"
+            deploymentId: "string(dep.uid)"
+      - put:
           resource: deployment_alias
           key: "'als_' + fx.als"
           record:
@@ -1948,13 +1973,18 @@ operations:
 
   GetAlias:
     reads:
-      als: { resource: deployment_alias, key: "string(input.idOrAlias)" }
+      # by_alias before found: reads resolve in name order when equally ready,
+      # and the key expression of found needs by_alias_found already bound.
+      by_alias: { resource: deployment_alias_by_alias, key: "string(input.idOrAlias)" }
+      found:
+        resource: deployment_alias
+        key: "by_alias_found ? string(by_alias.uid) : string(input.idOrAlias)"
     require:
-      - { cond: als_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: found_found, error: NotFound, message: "The requested resource was not found." }
     output:
-      uid: als.uid
-      alias: als.alias
-      deploymentId: als.deploymentId
+      uid: found.uid
+      alias: found.alias
+      deploymentId: found.deploymentId
 
   DeleteAlias:
     reads:
@@ -1962,6 +1992,7 @@ operations:
     require:
       - { cond: als_found, error: NotFound, message: "The requested resource was not found." }
     effects:
+      - delete: { resource: deployment_alias_by_alias, key: "string(als.alias)", missing: ignore }
       - delete: { resource: deployment_alias, key: "string(als.uid)" }
     output:
       status: "'SUCCESS'"
@@ -2291,7 +2322,7 @@ operations:
     effects:
       - delete: { resource: artifact, where: "true" }
     output:
-      deletedCount: "0"
+      deletedCount: deleted_count
 
   GetRollingReleaseConfig:
     reads:

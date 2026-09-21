@@ -1186,6 +1186,9 @@ func (ev *eval) removeWhere(ctx context.Context, path string, col spi.Collection
 			return err
 		}
 	}
+	// So a delete-all can answer how many rows went: CEL sees numbers as
+	// float64, matching every other count the engine binds.
+	ev.binds["deleted_count"] = float64(len(doomed))
 	return nil
 }
 

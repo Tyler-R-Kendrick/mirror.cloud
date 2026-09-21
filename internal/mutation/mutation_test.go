@@ -958,6 +958,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestListObjectOwnerIdentityCharacterization",
 		},
 		{
+			name: "s3-list-drop-bucket-region",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if req.Identity.Region != \"us-east-1\" {\n\t\tout[\"BucketRegion\"] = req.Identity.Region\n\t}\n\theaders := http.Header{}",
+			new:  "if false {\n\t\tout[\"BucketRegion\"] = req.Identity.Region\n\t}\n\theaders := http.Header{}",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListObjectsBucketRegionCharacterization",
+		},
+		{
+			name: "s3-list-return-default-bucket-region",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if req.Identity.Region != \"us-east-1\" {\n\t\tout[\"BucketRegion\"] = req.Identity.Region\n\t}\n\theaders := http.Header{}",
+			new:  "if true {\n\t\tout[\"BucketRegion\"] = req.Identity.Region\n\t}\n\theaders := http.Header{}",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListObjectsBucketRegionCharacterization",
+		},
+		{
 			name: "s3-ignore-copy-source-version",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if version != \"\" {\n\t\tcollection, metaKey = \"versions\", metaKey+\"/\"+version",

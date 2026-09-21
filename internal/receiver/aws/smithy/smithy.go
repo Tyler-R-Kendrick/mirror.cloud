@@ -244,7 +244,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 			if ns := namespace(sid); ns != namespace(id) && sh.Type != "service" {
 				continue
 			}
-			ms := model.Shape{ID: sid, Kind: kindOf(sh.Type), Members: map[string]model.Member{}}
+			ms := model.Shape{ID: sid, Kind: kindOf(sh.Type), Members: map[string]model.Member{}, XMLName: xmlNameOf(sh.Traits)}
 			for n, m := range sh.Members {
 				ms.Members[n] = model.Member{
 					Shape:    m.Target,
@@ -270,6 +270,18 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		return nil, nil
 	}
 	return out, nil
+}
+
+// xmlNameOf is the shape-level xmlName: the element a structure is written
+// as when it is a restXml body's root. Every S3 response root -- ListBucketResult,
+// BucketLoggingStatus, AccessControlPolicy -- is one of these, and an encoder
+// that does not have it can only transcribe them by hand.
+func xmlNameOf(traits json.RawMessage) string {
+	var t struct {
+		Name string `json:"smithy.api#xmlName"`
+	}
+	_ = json.Unmarshal(traits, &t)
+	return t.Name
 }
 
 func decodeNamed(traits json.RawMessage, name string, dst any) {

@@ -165,6 +165,13 @@ type Shape struct {
 	Constraints   Constraints
 	Streaming     bool // blob streaming payload
 	Error         *ErrorTrait
+	// XMLName is the element a structure is written as when it is the root
+	// of a restXml body -- GetBucketLoggingOutput answers as
+	// `<BucketLoggingStatus>` -- from the shape's own xmlName trait. Members
+	// carry theirs in Binding; this is the one on the shape. Omitted when
+	// empty so that adding it leaves every model without the trait
+	// byte-identical.
+	XMLName       string `json:",omitempty"`
 	Doc           string
 	UnknownTraits []string // recorded, never fatal
 }

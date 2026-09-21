@@ -12244,6 +12244,17 @@ var mutants = []mutant{
 		run:  "TestDecodeDeleteObjectsXML",
 	},
 	{
+		// The shape-level xmlName is the element a restXml body's root is
+		// written as. A receiver that drops it leaves the encoder transcribing
+		// every S3 response root by hand, which is where this started.
+		name: "smithy-drop-the-shape-xml-name",
+		file: filepath.Join("internal", "receiver", "aws", "smithy", "smithy.go"),
+		old:  "Members: map[string]model.Member{}, XMLName: xmlNameOf(sh.Traits)}",
+		new:  "Members: map[string]model.Member{}}",
+		pkg:  "./internal/receiver/aws/smithy",
+		run:  "TestIngestRecordsWhereAMemberSitsOnTheWire",
+	},
+	{
 		// The reference validates a body against its schema; a walker that
 		// skips elements it does not know accepts what S3 answers MalformedXML
 		// to, and every pack that answered that from the raw body stops.

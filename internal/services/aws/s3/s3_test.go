@@ -5002,7 +5002,7 @@ func TestMultipartChecksumContract(t *testing.T) {
 	delete(complete["MultipartUpload"].(map[string]any)["Parts"].([]any)[0].(map[string]any), "ChecksumCRC32")
 	complete["ChecksumType"] = "COMPOSITE"
 	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
-	if fault := asFault(t, err); fault.Code != "BadDigest" {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The upload was created using the FULL_OBJECT checksum mode. The complete request must use the same checksum mode." || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("complete checksum type fault = %#v", fault)
 	}
 	complete["ChecksumType"] = "FULL_OBJECT"
@@ -5099,6 +5099,10 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id, "PartNumber": 1}, []byte("snapshot"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id}, nil)
+	mismatch := completeInput(id, completedPart(1, part))
+	mismatch["ChecksumType"] = "FULL_OBJECT"
+	_, err := invoke(t, p, "CompleteMultipartUpload", mismatch, nil)
+	fault := asFault(t, err)
 	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil)
 	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil).Output["TagSet"]
@@ -5106,6 +5110,7 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 		"create":   map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"], "storageClass": "STANDARD_IA", "tags": "env=snapshot"},
 		"part":     map[string]any{"checksum": part.Headers.Get("x-amz-checksum-sha256")},
 		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
+		"mismatch": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus},
 		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "type": done.Output["ChecksumType"]},
 		"object":   map[string]any{"storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
 	})

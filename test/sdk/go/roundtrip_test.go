@@ -1912,6 +1912,13 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("checksum-fault"), UploadId: checksumFaultUpload.UploadId, PartNumber: aws.Int32(1), ChecksumSHA256: aws.String("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="), Body: strings.NewReader("part")}); err == nil || !strings.Contains(err.Error(), "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256") {
 		t.Fatalf("mismatched upload part checksum algorithm: %v", err)
 	}
+	checksumFaultPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("checksum-fault"), UploadId: checksumFaultUpload.UploadId, PartNumber: aws.Int32(1), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32, Body: strings.NewReader("part")})
+	if err != nil {
+		t.Fatalf("upload checksum part for completion fault: %v", err)
+	}
+	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("checksum-fault"), UploadId: checksumFaultUpload.UploadId, ChecksumType: s3types.ChecksumTypeFullObject, MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: checksumFaultPart.ETag, ChecksumCRC32: checksumFaultPart.ChecksumCRC32}}}}); err == nil || !strings.Contains(err.Error(), "The upload was created using the COMPOSITE checksum mode. The complete request must use the same checksum mode.") {
+		t.Fatalf("mismatched complete checksum type: %v", err)
+	}
 	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{}}); err == nil || !strings.Contains(err.Error(), "You must specify at least one part") {
 		t.Fatalf("empty multipart completion: %v", err)
 	}

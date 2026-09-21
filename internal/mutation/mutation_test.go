@@ -5930,6 +5930,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestMultipartChecksumContract",
 		},
 		{
+			name: "s3-complete-checksum-type-use-bad-digest",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using the %s checksum mode. The complete request must use the same checksum mode.", u.checksumType), HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+			new:  `return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The upload was created using the %s checksum mode. The complete request must use the same checksum mode.", u.checksumType), HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartChecksumContract",
+		},
+		{
+			name: "s3-complete-checksum-type-drop-message",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using the %s checksum mode. The complete request must use the same checksum mode.", u.checksumType), HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+			new:  `return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartChecksumContract",
+		},
+		{
 			name: "s3-ignore-completed-object-checksum",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if supplied := requestCondition(req, checksum.input, checksum.header); supplied != "" && supplied != objectChecksum {`,

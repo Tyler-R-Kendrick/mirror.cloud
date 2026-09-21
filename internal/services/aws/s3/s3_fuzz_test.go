@@ -1674,6 +1674,33 @@ func FuzzMultipartCompletionFaults(f *testing.F) {
 	})
 }
 
+func FuzzCompleteMultipartChecksumTypeFault(f *testing.F) {
+	f.Add([]byte("part"), false)
+	f.Add([]byte("part"), true)
+	f.Fuzz(func(t *testing.T, body []byte, composite bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "complete-checksum-type-fuzz"}, nil)
+		selected, requested := "FULL_OBJECT", "COMPOSITE"
+		if composite {
+			selected, requested = requested, selected
+		}
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "complete-checksum-type-fuzz", "Key": "key", "ChecksumAlgorithm": "CRC32", "ChecksumType": selected}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "complete-checksum-type-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, body)
+		input := completeInput(uploadID, completedPart(1, part))
+		input["ChecksumType"] = requested
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		want := "The upload was created using the " + selected + " checksum mode. The complete request must use the same checksum mode."
+		if fault.Code != "InvalidRequest" || fault.Message != want || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("checksum type %s -> %s fault = %#v", selected, requested, fault)
+		}
+	})
+}
+
 func FuzzUploadPartContentMD5(f *testing.F) {
 	f.Add([]byte("part"), "!", false)
 	f.Add([]byte("part"), "AAAAAAAAAAAAAAAAAAAAAA==", false)

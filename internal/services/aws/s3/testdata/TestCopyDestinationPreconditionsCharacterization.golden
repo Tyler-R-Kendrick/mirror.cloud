@@ -1,0 +1,67 @@
+{
+  "afterDeleteETag": "\"4d96fd1280dd67fe2eac895339a0a8e3\"",
+  "deleteMarkers": 2,
+  "faults": {
+    "combined": {
+      "code": "NotImplemented",
+      "fields": {
+        "Header": "If-Match,If-None-Match",
+        "additionalMessage": "Multiple conditional request headers present in the request"
+      },
+      "message": "A header you provided implies functionality that is not implemented",
+      "status": 501
+    },
+    "if-match-delete-marker": {
+      "code": "NoSuchKey",
+      "fields": {
+        "Key": "destination"
+      },
+      "message": "The specified key does not exist.",
+      "status": 404
+    },
+    "if-match-wrong": {
+      "code": "PreconditionFailed",
+      "fields": {
+        "Condition": "If-Match"
+      },
+      "message": "At least one of the pre-conditions you specified did not hold",
+      "status": 412
+    },
+    "if-none-match-existing": {
+      "code": "PreconditionFailed",
+      "fields": {
+        "Condition": "If-None-Match"
+      },
+      "message": "At least one of the pre-conditions you specified did not hold",
+      "status": 412
+    },
+    "in-place-if-none-match": {
+      "code": "PreconditionFailed",
+      "fields": {
+        "Condition": "If-None-Match"
+      },
+      "message": "At least one of the pre-conditions you specified did not hold",
+      "status": 412
+    },
+    "non-wildcard-if-none-match": {
+      "code": "NotImplemented",
+      "fields": {
+        "Header": "If-None-Match",
+        "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"
+      },
+      "message": "A header you provided implies functionality that is not implemented",
+      "status": 501
+    },
+    "wildcard-if-match": {
+      "code": "NotImplemented",
+      "fields": {
+        "Header": "If-Match",
+        "additionalMessage": "We don't accept the provided value of If-Match header for this API"
+      },
+      "message": "A header you provided implies functionality that is not implemented",
+      "status": 501
+    }
+  },
+  "firstETag": "\"4d96fd1280dd67fe2eac895339a0a8e3\"",
+  "versions": 7
+}

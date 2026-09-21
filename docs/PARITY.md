@@ -12,7 +12,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 159 / 463 (34.3%) |
+| LocalStack S3 test functions explicitly traced | 166 / 463 (35.9%) |
 | LocalStack S3 test functions not yet traced | 304 / 463 (65.7%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
@@ -186,6 +186,13 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_api.py::TestS3ObjectWritePrecondition::test_multipart_if_match_etag` | `TestCompleteMultipartIfMatchRequiresSingleETag`, AWS SDK contract, HTTP BDD, snapshot, and mutation coverage verify the first exact match succeeds, its multipart ETag differs, the stale original ETag fails, and the current multipart ETag permits replacement | Mapped and race-clean |
 | `test_s3_api.py::TestS3ObjectWritePrecondition::test_put_object_if_match_versioned_bucket` | Atomic characterization, AWS SDK contract, HTTP BDD, snapshot, and mutation coverage verify only the current live version participates, a delete marker returns `NoSuchKey`, and matching overwrites retain history | Mapped and race-clean |
 | `test_s3_api.py::TestS3ObjectWritePrecondition::test_put_object_if_match_and_if_none_match_validation` | Atomic characterization, AWS SDK contract, HTTP BDD, fuzz, chaos, snapshot, and mutation coverage verify combined write conditions return the exact 501 response before storage mutation | Mapped and race-clean |
+| `test_s3_api.py::TestS3ObjectWritePrecondition::test_copy_object_if_none_match` | Atomic characterization, AWS SDK contract, HTTP BDD, snapshot, fuzz, chaos, and mutation coverage verify a missing destination succeeds and an existing destination returns the exact precondition failure | Mapped and race-clean |
+| `test_s3_api.py::TestS3ObjectWritePrecondition::test_copy_object_if_match` | Atomic characterization, AWS SDK contract, HTTP BDD, snapshot, fuzz, chaos, and mutation coverage verify current-ETag replacement, wrong-ETag rejection, and the exact missing-destination fault | Mapped and race-clean |
+| `test_s3_api.py::TestS3ObjectWritePrecondition::test_copy_object_if_none_match_versioned_bucket` | Atomic characterization, AWS SDK contract, HTTP BDD, and snapshot coverage verify a live current version blocks copying while a current delete marker permits it and retains version history | Mapped and race-clean |
+| `test_s3_api.py::TestS3ObjectWritePrecondition::test_copy_object_if_match_versioned_bucket` | Atomic characterization, AWS SDK contract, HTTP BDD, and snapshot coverage verify only the current version's ETag matches, delete markers return `NoSuchKey`, and later live versions can be replaced | Mapped and race-clean |
+| `test_s3_api.py::TestS3ObjectWritePrecondition::test_copy_object_precondition_write_validation` | The shared write validator, exact characterization snapshots, AWS SDK contract, HTTP BDD, fuzz, and mutation coverage verify unsupported values and combined headers return LocalStack's exact faults, including the corrected `If-Match` field | Mapped and race-clean |
+| `test_s3_api.py::TestS3ObjectWritePrecondition::test_copy_object_if_none_match_in_place` | Atomic characterization, AWS SDK contract, and HTTP BDD verify a same-key copy with explicit storage class still evaluates the destination condition first and returns 412 | Mapped and race-clean |
+| `test_s3_api.py::TestS3ObjectWritePrecondition::test_copy_object_if_match_in_place` | Atomic characterization, AWS SDK contract, and HTTP BDD verify a same-key copy with explicit storage class succeeds when the destination ETag matches | Mapped and race-clean |
 | `test_s3_api.py::TestS3MetricsConfiguration::test_put_bucket_metrics_configuration` | `TestBucketMetricsConfigurationCharacterization`, AWS SDK contract, and HTTP BDD verify exact 200 status, empty body, filter persistence, and ID preservation | Mapped and race-clean |
 | `test_s3_api.py::TestS3MetricsConfiguration::test_overwrite_bucket_metrics_configuration` | Characterization and HTTP BDD verify replacement updates the stored prefix without creating a second configuration | Mapped and race-clean |
 | `test_s3_api.py::TestS3MetricsConfiguration::test_list_bucket_metrics_configurations` | Atomic named-configuration coverage, characterization snapshots, and HTTP BDD verify deterministic list output and non-truncated state | Mapped and race-clean |
@@ -207,4 +214,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 159/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 166/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

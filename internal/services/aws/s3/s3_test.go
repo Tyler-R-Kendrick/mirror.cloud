@@ -4256,6 +4256,77 @@ func TestCopyObjectConditions(t *testing.T) {
 	}
 }
 
+func TestCopyDestinationPreconditionsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	const bucket, source, destination = "copy-write-conditions", "source", "destination"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+	sourcePut := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": source}, []byte("source content"))
+	copyObject := func(key, match, noneMatch string) (*spi.Response, error) {
+		t.Helper()
+		input := map[string]any{"Bucket": bucket, "Key": key, "CopySource": bucket + "/" + source}
+		if match != "" {
+			input["IfMatch"] = match
+		}
+		if noneMatch != "" {
+			input["IfNoneMatch"] = noneMatch
+		}
+		return invoke(t, p, "CopyObject", input, nil)
+	}
+	faults := map[string]any{}
+	wantFault := func(name string, err error, code string, status int) {
+		t.Helper()
+		fault := asFault(t, err)
+		if fault.Code != code || fault.HTTPStatus != status {
+			t.Fatalf("%s fault = %#v", name, fault)
+		}
+		faults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+
+	first, err := copyObject(destination, "", "*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = copyObject(destination, "", "*")
+	wantFault("if-none-match-existing", err, "PreconditionFailed", http.StatusPreconditionFailed)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": destination}, nil)
+	afterDelete, err := copyObject(destination, "", "*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = copyObject(destination, `"wrong-etag"`, "")
+	wantFault("if-match-wrong", err, "PreconditionFailed", http.StatusPreconditionFailed)
+	matched, err := copyObject(destination, afterDelete.Headers.Get("ETag"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": destination}, nil)
+	_, err = copyObject(destination, matched.Headers.Get("ETag"), "")
+	wantFault("if-match-delete-marker", err, "NoSuchKey", http.StatusNotFound)
+	current := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": destination}, []byte("current"))
+	if _, err := copyObject(destination, current.Headers.Get("ETag"), ""); err != nil {
+		t.Fatal(err)
+	}
+	for name, conditions := range map[string]struct{ match, noneMatch string }{
+		"non-wildcard-if-none-match": {noneMatch: sourcePut.Headers.Get("ETag")},
+		"wildcard-if-match":          {match: "*"},
+		"combined":                   {match: "*", noneMatch: sourcePut.Headers.Get("ETag")},
+	} {
+		_, err := copyObject("validation-"+name, conditions.match, conditions.noneMatch)
+		wantFault(name, err, "NotImplemented", http.StatusNotImplemented)
+	}
+	_, err = invoke(t, p, "CopyObject", map[string]any{"Bucket": bucket, "Key": source, "CopySource": bucket + "/" + source, "IfNoneMatch": "*", "StorageClass": "STANDARD"}, nil)
+	wantFault("in-place-if-none-match", err, "PreconditionFailed", http.StatusPreconditionFailed)
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": bucket, "Key": source, "CopySource": bucket + "/" + source, "IfMatch": sourcePut.Headers.Get("ETag"), "StorageClass": "STANDARD"}, nil); err != nil {
+		t.Fatalf("in-place If-Match: %v", err)
+	}
+	listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": bucket}, nil).Output
+	golden.AssertJSON(t, map[string]any{
+		"faults": faults, "firstETag": first.Headers.Get("ETag"), "afterDeleteETag": afterDelete.Headers.Get("ETag"),
+		"versions": len(asSliceForTest(listed["Versions"])), "deleteMarkers": len(asSliceForTest(listed["DeleteMarkers"])),
+	})
+}
+
 func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
@@ -6528,7 +6599,7 @@ func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {
 	}{
 		{"combined", map[string]any{"IfMatch": `"etag"`, "IfNoneMatch": "*"}, "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
 		{"if-none-match", map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
-		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-Match", "We don't accept the provided value of If-Match header for this API"},
 	}
 	characterization := map[string]any{}
 	for index, test := range tests {
@@ -6561,7 +6632,7 @@ func TestWritePreconditionFaults(t *testing.T) {
 	}{
 		{"combined", map[string]any{"IfMatch": `"etag"`, "IfNoneMatch": "*"}, "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
 		{"if-none-match", map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
-		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-Match", "We don't accept the provided value of If-Match header for this API"},
 	}
 	characterization := map[string]any{}
 	for _, operation := range []string{"PutObject", "CopyObject"} {
@@ -6684,7 +6755,7 @@ func TestPutObjectIfMatchLifecycleCharacterization(t *testing.T) {
 		input["Bucket"], input["Key"] = bucket, key
 		_, err := invoke(t, p, "PutObject", input, nil)
 		fault := asFault(t, err)
-		if name == "wrong" && (fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match") || name == "star" && (fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != "If-None-Match") || name == "combined" && (fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != "If-Match,If-None-Match") {
+		if name == "wrong" && (fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match") || name == "star" && (fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != "If-Match") || name == "combined" && (fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != "If-Match,If-None-Match") {
 			t.Fatalf("%s If-Match fault = %#v", name, fault)
 		}
 		faults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}

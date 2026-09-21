@@ -3081,6 +3081,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 
 	ddb := dynamodb.NewFromConfig(awscfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })
+	if _, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("missing")}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") {
+		t.Fatalf("missing table ttl describe: %v", err)
+	}
+	if _, err := ddb.UpdateTimeToLive(context.Background(), &dynamodb.UpdateTimeToLiveInput{TableName: aws.String("missing"), TimeToLiveSpecification: &ddbtypes.TimeToLiveSpecification{Enabled: aws.Bool(true), AttributeName: aws.String("ttl")}}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") {
+		t.Fatalf("missing table ttl update: %v", err)
+	}
 	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
 		TableName: aws.String("T"),
 		KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}},
@@ -3090,6 +3096,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		BillingMode: ddbtypes.BillingModePayPerRequest,
 	}); err != nil {
 		t.Fatalf("create table: %v", err)
+	}
+	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
+		t.Fatalf("default ttl: %#v %v", ttl, err)
+	}
+	if ttl, err := ddb.UpdateTimeToLive(context.Background(), &dynamodb.UpdateTimeToLiveInput{TableName: aws.String("T"), TimeToLiveSpecification: &ddbtypes.TimeToLiveSpecification{Enabled: aws.Bool(true), AttributeName: aws.String("ttl")}}); err != nil || ttl.TimeToLiveSpecification == nil || !aws.ToBool(ttl.TimeToLiveSpecification.Enabled) {
+		t.Fatalf("enable ttl: %#v %v", ttl, err)
 	}
 	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
 		TableName:            aws.String("T"),

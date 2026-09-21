@@ -76,6 +76,71 @@ func TestTableLifecycleCharacterization(t *testing.T) {
 	})
 }
 
+func TestDynamoDBTTLMissingTableFaults(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, operation := range []string{"DescribeTimeToLive", "UpdateTimeToLive"} {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{
+			"TableName": "missing", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"},
+		}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "ResourceNotFoundException" || fault.HTTPStatus != 400 {
+			t.Fatalf("%s fault %#v", operation, fault)
+		}
+	}
+}
+
+func TestDynamoDBTTLDoesNotSurviveTableRecreation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	table := map[string]any{"TableName": "T"}
+	must("CreateTable", table)
+	must("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
+	must("DeleteTable", table)
+	must("CreateTable", table)
+	description := asMap(must("DescribeTimeToLive", table).Output["TimeToLiveDescription"])
+	if description["TimeToLiveStatus"] != "DISABLED" || description["AttributeName"] != nil {
+		t.Fatalf("recreated table retained ttl %#v", description)
+	}
+}
+
+func TestDynamoDBTTLCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			fault := err.(*spi.Fault)
+			return map[string]any{"code": fault.Code, "message": fault.Message}
+		}
+		return response.Output
+	}
+	missing := map[string]any{"TableName": "missing", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}}
+	created := map[string]any{"TableName": "T"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTable", Input: created}); err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"missingDescribe": call("DescribeTimeToLive", missing),
+		"missingUpdate":   call("UpdateTimeToLive", missing),
+		"default":         call("DescribeTimeToLive", created),
+		"enable":          call("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}}),
+		"enabled":         call("DescribeTimeToLive", created),
+	})
+}
+
 func TestQueryKeyConditionNotUnfilteredScan(t *testing.T) {
 	p := &Pack{deps: spitest.Deps(t)}
 	ctx := context.Background()

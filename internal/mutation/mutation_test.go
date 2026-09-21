@@ -8499,6 +8499,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBTagLifecycle",
 		},
 		{
+			name: "dynamodb-drop-put-item-payload",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  "old := p.loadItem(ctx, req, table, key)\n\t\tb, _ := json.Marshal(item)",
+			new:  "old := p.loadItem(ctx, req, table, key)\n\t\tb, _ := json.Marshal(map[string]any{})",
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBUnicodeAndLargeScan",
+		},
+		{
+			name: "dynamodb-zero-scan-counts",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `out := map[string]any{"Items": items, "Count": len(items), "ScannedCount": len(kvs)}`,
+			new:  `out := map[string]any{"Items": items, "Count": 0, "ScannedCount": 0}`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBUnicodeAndLargeScan",
+		},
+		{
 			name: "dynamodb-allow-duplicate-table-create",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  `} else if ok {`,

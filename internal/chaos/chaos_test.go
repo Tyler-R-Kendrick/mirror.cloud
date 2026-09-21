@@ -197,7 +197,11 @@ func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
 				return
 			}
 			fault, _ := err.(*spi.Fault)
-			if fault == nil || fault.Code != "PreconditionFailed" {
+			condition := "x-amz-copy-source-If-Match"
+			if i%4 == 3 {
+				condition = "x-amz-copy-source-If-Modified-Since"
+			}
+			if fault == nil || fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.Fields["Condition"] != condition {
 				errs <- fmt.Errorf("rejected copy %d = %v", i, err)
 			}
 		}()

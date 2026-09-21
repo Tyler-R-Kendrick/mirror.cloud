@@ -1816,7 +1816,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("s3 metadata %#v", got)
 	}
 	listETag := aws.String(`"wrong", ` + aws.ToString(got.ETag))
-	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), IfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), IfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "At least one of the pre-conditions you specified did not hold") {
 		t.Fatalf("get If-Match list: %v", err)
 	}
 	listRead, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), IfNoneMatch: listETag})
@@ -1994,7 +1994,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("conditional copy: %v", err)
 	}
-	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("listed-copy"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("listed-copy"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "At least one of the pre-conditions you specified did not hold") {
 		t.Fatalf("copy source If-Match list: %v", err)
 	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{

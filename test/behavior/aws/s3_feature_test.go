@@ -1978,7 +1978,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("create bucket %d", res.StatusCode)
 		}
-		request := func(key string, headers map[string]string) *http.Response {
+		request := func(key string, headers map[string]string) (*http.Response, []byte) {
 			t.Helper()
 			req, _ := http.NewRequest(http.MethodPut, ts.URL+"/copy-conditions/"+key, nil)
 			req.Header.Set("Authorization", auth)
@@ -1989,20 +1989,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			io.Copy(io.Discard, response.Body)
+			body, _ := io.ReadAll(response.Body)
 			response.Body.Close()
-			return response
+			return response, body
 		}
-		source := request("source", nil)
+		source, _ := request("source", nil)
 		if source.StatusCode != http.StatusOK {
 			t.Fatalf("put source %d", source.StatusCode)
 		}
 		copySource := "/copy-conditions/source"
-		listed := request("listed", map[string]string{"x-amz-copy-source": copySource, "x-amz-copy-source-if-match": `"wrong", ` + source.Header.Get("ETag")})
-		if listed.StatusCode != http.StatusPreconditionFailed {
-			t.Fatalf("listed source condition %d", listed.StatusCode)
+		listed, listedBody := request("listed", map[string]string{"x-amz-copy-source": copySource, "x-amz-copy-source-if-match": `"wrong", ` + source.Header.Get("ETag")})
+		if listed.StatusCode != http.StatusPreconditionFailed || !bytes.Contains(listedBody, []byte("At least one of the pre-conditions you specified did not hold")) || !bytes.Contains(listedBody, []byte("x-amz-copy-source-If-Match")) {
+			t.Fatalf("listed source condition %d %s", listed.StatusCode, listedBody)
 		}
-		future := request("future", map[string]string{
+		future, _ := request("future", map[string]string{
 			"x-amz-copy-source":                   copySource,
 			"x-amz-copy-source-if-modified-since": time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat),
 		})
@@ -2010,7 +2010,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("future modified-since copy %d", future.StatusCode)
 		}
 		past := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
-		ordered := request("ordered", map[string]string{
+		ordered, _ := request("ordered", map[string]string{
 			"x-amz-copy-source":                     copySource,
 			"x-amz-copy-source-if-match":            source.Header.Get("ETag"),
 			"x-amz-copy-source-if-none-match":       source.Header.Get("ETag"),

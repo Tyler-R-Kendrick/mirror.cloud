@@ -5933,18 +5933,18 @@ func etagMatches(condition, etag string) bool {
 	return condition == "*" || strings.Trim(condition, `"`) == strings.Trim(etag, `"`)
 }
 
-func preconditionFailed() error {
-	return &spi.Fault{Code: "PreconditionFailed", HTTPStatus: 412, Fault: "client"}
+func preconditionFailed(condition string) error {
+	return &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: 412, Fault: "client", Fields: map[string]any{"Condition": condition}}
 }
 
 func checkReadPreconditions(req *spi.Request, etag, modified string) (bool, error) {
 	if match := requestCondition(req, "IfMatch", "If-Match"); match != "" {
 		if !etagMatches(match, etag) {
-			return false, preconditionFailed()
+			return false, preconditionFailed("If-Match")
 		}
 	} else if value := requestCondition(req, "IfUnmodifiedSince", "If-Unmodified-Since"); value != "" {
 		if condition, err := http.ParseTime(value); err == nil && sourceModifiedAfter(modified, condition) {
-			return false, preconditionFailed()
+			return false, preconditionFailed("If-Unmodified-Since")
 		}
 	}
 	if noneMatch := requestCondition(req, "IfNoneMatch", "If-None-Match"); noneMatch != "" {
@@ -5992,13 +5992,13 @@ func checkCopySourcePreconditions(req *spi.Request, etag, modified string, now t
 	match := requestCondition(req, "CopySourceIfMatch", "x-amz-copy-source-if-match")
 	if match != "" {
 		if !etagMatches(match, etag) {
-			return preconditionFailed()
+			return preconditionFailed("x-amz-copy-source-If-Match")
 		}
 		if value := requestCondition(req, "CopySourceIfModifiedSince", "x-amz-copy-source-if-modified-since"); value != "" {
 			condition, conditionErr := http.ParseTime(value)
 			modifiedAt, modifiedErr := http.ParseTime(modified)
 			if conditionErr != nil || modifiedErr != nil || condition.After(modifiedAt) {
-				return preconditionFailed()
+				return preconditionFailed("x-amz-copy-source-If-Modified-Since")
 			}
 		}
 		if requestCondition(req, "CopySourceIfUnmodifiedSince", "x-amz-copy-source-if-unmodified-since") != "" {
@@ -6007,18 +6007,18 @@ func checkCopySourcePreconditions(req *spi.Request, etag, modified string, now t
 	}
 	if value := requestCondition(req, "CopySourceIfUnmodifiedSince", "x-amz-copy-source-if-unmodified-since"); value != "" {
 		if condition, err := http.ParseTime(value); err != nil || sourceModifiedAfter(modified, condition) {
-			return preconditionFailed()
+			return preconditionFailed("x-amz-copy-source-If-Unmodified-Since")
 		}
 	}
 	noneMatch := requestCondition(req, "CopySourceIfNoneMatch", "x-amz-copy-source-if-none-match")
 	if noneMatch != "" {
 		if etagMatches(noneMatch, etag) {
-			return preconditionFailed()
+			return preconditionFailed("x-amz-copy-source-If-None-Match")
 		}
 	}
 	if value := requestCondition(req, "CopySourceIfModifiedSince", "x-amz-copy-source-if-modified-since"); value != "" {
 		if condition, err := http.ParseTime(value); err != nil || !sourceModifiedAfter(modified, condition) && condition.Before(now) {
-			return preconditionFailed()
+			return preconditionFailed("x-amz-copy-source-If-Modified-Since")
 		}
 	}
 	return nil

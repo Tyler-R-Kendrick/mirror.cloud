@@ -15,3 +15,5 @@ The test suite keeps each failure mode independently runnable:
 `internal/golden` is the stdlib-only Verify equivalent. Set `UPDATE_GOLDEN=1` only when intentionally accepting a reviewed snapshot.
 
 `make test-coverage` merges atomic package and cross-package integration profiles and enforces an 80% whole-module floor, including generated and command packages. Mutation tests run separately because they contribute no production statements. `make test-race` runs the race detector separately because the normal build is CGO-free.
+
+See [PARITY.md](PARITY.md) for the pinned LocalStack behavioral traceability denominator and current audited percentage; line coverage and operation routing are reported separately there.

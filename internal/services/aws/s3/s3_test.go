@@ -4773,6 +4773,40 @@ func TestListObjectVersionsPagination(t *testing.T) {
 	}
 }
 
+func TestListObjectVersionChecksumMetadata(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-checksums"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-checksums", "Status": "Enabled"}, nil)
+	body := []byte("checksummed")
+	sum := sha256.Sum256(body)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-checksums", "Key": "key", "ChecksumSHA256": base64.StdEncoding.EncodeToString(sum[:])}, body)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-checksums", "Key": "key"}, []byte("plain"))
+	versions := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-checksums"}, nil).Output["Versions"])
+	if len(versions) != 2 {
+		t.Fatalf("versions = %#v", versions)
+	}
+	withChecksum := 0
+	characterization := []any{}
+	for _, value := range versions {
+		row := asMapForTest(value)
+		characterization = append(characterization, map[string]any{"latest": row["IsLatest"], "algorithm": row["ChecksumAlgorithm"], "type": row["ChecksumType"]})
+		if row["ChecksumAlgorithm"] == nil {
+			if row["ChecksumType"] != nil {
+				t.Fatalf("plain version = %#v", row)
+			}
+			continue
+		}
+		withChecksum++
+		if !reflect.DeepEqual(row["ChecksumAlgorithm"], []any{"SHA256"}) || row["ChecksumType"] != "FULL_OBJECT" {
+			t.Fatalf("checksummed version = %#v", row)
+		}
+	}
+	if withChecksum != 1 {
+		t.Fatalf("checksummed versions = %d: %#v", withChecksum, versions)
+	}
+	golden.AssertJSON(t, characterization)
+}
+
 func TestListObjectVersionsCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list-golden"}, nil)

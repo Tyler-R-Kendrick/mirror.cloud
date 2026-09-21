@@ -2042,17 +2042,7 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 			modified = parsed.UTC().Format(time.RFC3339)
 		}
 		content := map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": modified, "StorageClass": meta["storageClass"]}
-		storedChecksums := asMap(meta["checksums"])
-		var algorithms []any
-		for _, checksum := range checksums {
-			if str(storedChecksums[checksum.header]) != "" {
-				algorithms = append(algorithms, checksum.algorithm)
-			}
-		}
-		if len(algorithms) > 0 {
-			content["ChecksumAlgorithm"] = algorithms
-			content["ChecksumType"] = str(meta["checksumType"])
-		}
+		setListChecksumMetadata(content, meta)
 		if req.Operation == "ListObjects" || truthy(req.Input["FetchOwner"]) || truthy(req.Input["fetch-owner"]) {
 			content["Owner"] = map[string]any{"ID": req.Identity.Account}
 		}
@@ -2935,6 +2925,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 					storageClass = "STANDARD"
 				}
 				row["ETag"], row["Size"], row["StorageClass"] = meta["etag"], meta["size"], storageClass
+				setListChecksumMetadata(row, meta)
 			}
 			entries = append(entries, entry{key: key, version: version, row: row, marker: deleteMarker})
 		}
@@ -5809,6 +5800,20 @@ func setChecksumHeaders(headers http.Header, meta map[string]any) {
 			checksumType = "FULL_OBJECT"
 		}
 		headers.Set("x-amz-checksum-type", checksumType)
+	}
+}
+
+func setListChecksumMetadata(row, meta map[string]any) {
+	stored := asMap(meta["checksums"])
+	var algorithms []any
+	for _, checksum := range checksums {
+		if str(stored[checksum.header]) != "" {
+			algorithms = append(algorithms, checksum.algorithm)
+		}
+	}
+	if len(algorithms) > 0 {
+		row["ChecksumAlgorithm"] = algorithms
+		row["ChecksumType"] = str(meta["checksumType"])
 	}
 }
 

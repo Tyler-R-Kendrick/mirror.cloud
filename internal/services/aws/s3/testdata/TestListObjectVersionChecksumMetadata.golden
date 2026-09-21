@@ -1,0 +1,14 @@
+[
+  {
+    "algorithm": null,
+    "latest": true,
+    "type": null
+  },
+  {
+    "algorithm": [
+      "SHA256"
+    ],
+    "latest": false,
+    "type": "FULL_OBJECT"
+  }
+]

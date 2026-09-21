@@ -209,6 +209,29 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a checksummed version When listing versions Then checksum metadata is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/version-checksum-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/version-checksum-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		body := []byte("checksummed")
+		sum := sha256.Sum256(body)
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+"/version-checksum-bdd/key", bytes.NewReader(body))
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-checksum-sha256", base64.StdEncoding.EncodeToString(sum[:]))
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodGet, "/version-checksum-bdd?versions", nil, "")
+		listed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(listed, []byte("<ChecksumAlgorithm>SHA256</ChecksumAlgorithm><ChecksumType>FULL_OBJECT</ChecksumType>")) || bytes.Contains(listed, []byte("<member>")) {
+			t.Fatalf("listed versions: %d %s", res.StatusCode, listed)
+		}
+	})
+
 	t.Run("Given invalid list encoding When listing Then S3 rejects every list operation", func(t *testing.T) {
 		res := do(http.MethodPut, "/list-encoding-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

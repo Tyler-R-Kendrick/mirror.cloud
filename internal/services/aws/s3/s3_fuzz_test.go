@@ -1523,8 +1523,14 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 		p := s3.New(spitest.Deps(t))
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list-fuzz"}, nil)
 		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-list-fuzz", "Status": "Enabled"}, nil)
-		for range 5 {
-			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-fuzz", "Key": "prefix/key"}, []byte("body"))
+		body := []byte("body")
+		sum := sha256.Sum256(body)
+		for i := range 5 {
+			input := map[string]any{"Bucket": "version-list-fuzz", "Key": "prefix/key"}
+			if i == 2 {
+				input["ChecksumSHA256"] = base64.StdEncoding.EncodeToString(sum[:])
+			}
+			mustInvoke(t, p, "PutObject", input, body)
 		}
 		all := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list-fuzz", "Prefix": "prefix/"}, nil).Output["Versions"])
 		start, maxKeys := int(startSeed)%len(all), int(maxSeed%5)+1
@@ -1540,7 +1546,8 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 			t.Fatalf("start=%d max=%d page=%#v", start, maxKeys, page)
 		}
 		for index := range got {
-			if asMapForTest(got[index])["VersionId"] != asMapForTest(all[start+index])["VersionId"] {
+			gotRow, wantRow := asMapForTest(got[index]), asMapForTest(all[start+index])
+			if gotRow["VersionId"] != wantRow["VersionId"] || !reflect.DeepEqual(gotRow["ChecksumAlgorithm"], wantRow["ChecksumAlgorithm"]) || gotRow["ChecksumType"] != wantRow["ChecksumType"] {
 				t.Fatalf("version %d = %#v want %#v", index, got[index], all[start+index])
 			}
 		}

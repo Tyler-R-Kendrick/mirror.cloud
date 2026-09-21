@@ -244,6 +244,11 @@ func TestIngestRecordsWhereAMemberSitsOnTheWire(t *testing.T) {
 	if got := svc.Shapes["com.example#PutOutput"].XMLName; got != "PutResult" {
 		t.Errorf("shape-level xmlName is %q, want PutResult", got)
 	}
+	// Declaration order is what the reference writes an XML body in; a map
+	// cannot keep it, so the receiver reads it from the document's tokens.
+	if got := svc.Shapes["com.example#PutInput"].MemberOrder; len(got) == 0 || got[0] != "Id" {
+		t.Errorf("member order is %v, want the document's, starting with Id", got)
+	}
 }
 
 // TestARequiredMemberKeepsItsRequirement. The binding is read from the same

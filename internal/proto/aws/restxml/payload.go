@@ -79,7 +79,12 @@ var liftedMembers = map[string][]string{
 
 // payloadMember is the one input member bound to the body.
 func payloadMember(svc *model.Service, op *model.Operation) (string, model.Member, bool) {
-	for name, m := range svc.Shapes[op.Input].Members {
+	return payloadOf(svc, op.Input)
+}
+
+// payloadOf is the one member of a structure bound to the body, if any.
+func payloadOf(svc *model.Service, shapeID string) (string, model.Member, bool) {
+	for name, m := range svc.Shapes[shapeID].Members {
 		if m.Binding.Location == "payload" {
 			return name, m, true
 		}

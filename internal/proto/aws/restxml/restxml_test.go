@@ -148,7 +148,7 @@ func TestEncodeDeleteObjectsXML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `<?xml version="1.0" encoding="UTF-8"?><DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Deleted><Key>k</Key><VersionId>v1</VersionId></Deleted><Error><Code>NoSuchVersion</Code><Key>missing</Key></Error></DeleteResult>`
+	want := `<?xml version="1.0" encoding="UTF-8"?><DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Deleted><Key>k</Key><VersionId>v1</VersionId></Deleted><Error><Key>missing</Key><Code>NoSuchVersion</Code></Error></DeleteResult>`
 	if w.Body.String() != want {
 		t.Fatalf("body %q want %q", w.Body.String(), want)
 	}
@@ -231,8 +231,10 @@ func TestEncodeObjectLockXML(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := `<?xml version="1.0" encoding="UTF-8"?><` + test.root + ` xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`
-			if !strings.HasPrefix(w.Body.String(), want) || !strings.HasSuffix(w.Body.String(), "</"+test.root+">") {
-				t.Fatalf("body %q", w.Body.String())
+			// The payload is the root's contents, not nested under a second
+			// copy of the root -- so the root element appears exactly once.
+			if body := w.Body.String(); !strings.HasPrefix(body, want) || !strings.HasSuffix(body, "</"+test.root+">") || strings.Count(body, "<"+test.root) != 1 {
+				t.Fatalf("body %q", body)
 			}
 		})
 	}
@@ -318,7 +320,7 @@ func TestNamedConfigurationXML(t *testing.T) {
 	if err := (Codec{}).Encode(s3(), s3op("ListBucketIntelligentTieringConfigurations"), w, &spi.Response{Output: map[string]any{"IsTruncated": false, "IntelligentTieringConfigurationList": []any{tiering.want}}}); err != nil {
 		t.Fatal(err)
 	}
-	if body := w.Body.String(); strings.Contains(body, "<member>") || strings.Contains(body, "<Tierings>") || strings.Count(body, "<Tiering>") != 2 || !strings.Contains(body, `<ListBucketIntelligentTieringConfigurationsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`) {
+	if body := w.Body.String(); strings.Contains(body, "<member>") || strings.Contains(body, "<Tierings>") || strings.Count(body, "<Tiering>") != 2 || !strings.Contains(body, `<ListBucketIntelligentTieringConfigurationsOutput xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`) {
 		t.Fatalf("tiering XML %q", body)
 	}
 
@@ -692,7 +694,7 @@ func FuzzEmptyResponseHeaders(f *testing.F) {
 			operation, status, contentLength = "DeleteObjectTagging", http.StatusNoContent, ""
 		}
 		w := httptest.NewRecorder()
-		if err := (Codec{}).Encode(s3(), &model.Operation{Name: operation}, w, &spi.Response{Status: status}); err != nil {
+		if err := (Codec{}).Encode(s3(), s3op(operation), w, &spi.Response{Status: status}); err != nil {
 			t.Fatal(err)
 		}
 		if w.Body.Len() != 0 || w.Header().Get("Content-Type") != "" || w.Header().Get("Content-Length") != contentLength {
@@ -719,9 +721,11 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if err := codec.Encode(svc, s3op("PutObject"), w, &spi.Response{}); err != nil || w.Body.Len() != 0 || w.Header().Get("Content-Type") != "application/xml" {
 		t.Fatalf("empty response %v %#v %q", err, w.Header(), w.Body.String())
 	}
+	// A modelled response root carries the service's namespace, as the
+	// reference's does; an operation the model does not describe answers bare.
 	for _, test := range []struct{ operation, root string }{
-		{"ListBuckets", "ListAllMyBucketsResult"},
-		{"ListObjectsV2", "ListBucketResult"},
+		{"ListBuckets", `ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"`},
+		{"ListObjectsV2", `ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"`},
 		{"Custom", "CustomResult"},
 	} {
 		w = httptest.NewRecorder()
@@ -736,23 +740,24 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	err := codec.Encode(svc, s3op("ListBuckets"), w, &spi.Response{Output: map[string]any{
 		"Buckets": []any{map[string]any{"Name": "one", "CreationDate": "date", "BucketRegion": "us-west-2"}},
 	}})
-	if body := w.Body.String(); err != nil || !strings.Contains(body, "<Buckets><Bucket><BucketRegion>us-west-2</BucketRegion><CreationDate>date</CreationDate><Name>one</Name></Bucket></Buckets>") || strings.Contains(body, "<member>") {
+	if body := w.Body.String(); err != nil || !strings.Contains(body, "<Buckets><Bucket><Name>one</Name><CreationDate>date</CreationDate><BucketRegion>us-west-2</BucketRegion></Bucket></Buckets>") || strings.Contains(body, "<member>") {
 		t.Fatalf("bucket list response %v %s", err, body)
 	}
 	w = httptest.NewRecorder()
 	err = codec.Encode(svc, s3op("GetObjectAttributes"), w, &spi.Response{Output: map[string]any{
 		"ObjectSize": 4, "StorageClass": "STANDARD", "ObjectParts": map[string]any{"TotalPartsCount": 1, "Parts": []any{map[string]any{"PartNumber": 1}}}, "Checksum": map[string]any{"ChecksumCRC32": "sum"}, "ETag": "etag",
+		"VersionId": "v1", // bound to x-amz-version-id: a header, never an element
 	}})
-	if body, want := w.Body.String(), "<?xml version=\"1.0\" encoding=\"UTF-8\"?><GetObjectAttributesResponse><ETag>etag</ETag><Checksum><ChecksumCRC32>sum</ChecksumCRC32></Checksum><ObjectParts><PartsCount>1</PartsCount><Part><PartNumber>1</PartNumber></Part></ObjectParts><StorageClass>STANDARD</StorageClass><ObjectSize>4</ObjectSize></GetObjectAttributesResponse>"; err != nil || body != want {
+	if body, want := w.Body.String(), "<?xml version=\"1.0\" encoding=\"UTF-8\"?><GetObjectAttributesResponse xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><ETag>etag</ETag><Checksum><ChecksumCRC32>sum</ChecksumCRC32></Checksum><ObjectParts><PartsCount>1</PartsCount><Part><PartNumber>1</PartNumber></Part></ObjectParts><StorageClass>STANDARD</StorageClass><ObjectSize>4</ObjectSize></GetObjectAttributesResponse>"; err != nil || body != want {
 		t.Fatalf("object attributes response %v %s", err, body)
 	}
 	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
 		w = httptest.NewRecorder()
-		err := codec.Encode(svc, &model.Operation{Name: operation}, w, &spi.Response{Output: map[string]any{
+		err := codec.Encode(svc, s3op(operation), w, &spi.Response{Output: map[string]any{
 			"Contents": []any{map[string]any{"Key": "folder/file", "ChecksumAlgorithm": []any{"SHA256", "CRC32"}}}, "CommonPrefixes": []any{map[string]any{"Prefix": "folder/subfolder/"}}, "BucketRegion": "us-west-2",
 		}})
 		body := w.Body.String()
-		if err != nil || !strings.Contains(body, "<ChecksumAlgorithm>SHA256</ChecksumAlgorithm><ChecksumAlgorithm>CRC32</ChecksumAlgorithm><Key>folder/file</Key>") || !strings.Contains(body, "<CommonPrefixes><Prefix>folder/subfolder/</Prefix></CommonPrefixes>") || !strings.Contains(body, "<BucketRegion>us-west-2</BucketRegion>") || strings.Contains(body, "<member>") {
+		if err != nil || !strings.Contains(body, "<Key>folder/file</Key><ChecksumAlgorithm>SHA256</ChecksumAlgorithm><ChecksumAlgorithm>CRC32</ChecksumAlgorithm>") || !strings.Contains(body, "<CommonPrefixes><Prefix>folder/subfolder/</Prefix></CommonPrefixes>") || !strings.Contains(body, "<BucketRegion>us-west-2</BucketRegion>") || strings.Contains(body, "<member>") {
 			t.Fatalf("%s flattened response %v %s", operation, err, body)
 		}
 	}
@@ -765,7 +770,7 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		t.Fatalf("bucket ownership response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
-	if err := codec.Encode(svc, s3op("GetPublicAccessBlock"), w, &spi.Response{Output: map[string]any{"PublicAccessBlockConfiguration": map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": true}}}); err != nil || !strings.Contains(w.Body.String(), `<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>true</BlockPublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><IgnorePublicAcls>false</IgnorePublicAcls><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>`) {
+	if err := codec.Encode(svc, s3op("GetPublicAccessBlock"), w, &spi.Response{Output: map[string]any{"PublicAccessBlockConfiguration": map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": true}}}); err != nil || !strings.Contains(w.Body.String(), `<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>`) {
 		t.Fatalf("public access block response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()

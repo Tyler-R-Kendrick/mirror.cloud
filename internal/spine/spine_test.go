@@ -265,7 +265,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	assertMultipartEncryption("part copy", part2Headers)
 	if code, b, _ := do(http.MethodGet, "/bucket-q/m?uploadId="+uploadID+"&max-parts=1", "", nil); code != 200 {
 		t.Fatalf("list parts page 1 %d %s", code, b)
-	} else if !bytes.Contains(b, []byte("<Part><ChecksumCRC32>")) || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<PartNumber>1</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(b, []byte("<NextPartNumberMarker>1</NextPartNumberMarker>")) || !bytes.Contains(b, []byte("<ChecksumAlgorithm>CRC32</ChecksumAlgorithm>")) || !bytes.Contains(b, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
+	} else if !bytes.Contains(b, []byte("<Part><PartNumber>")) || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<PartNumber>1</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(b, []byte("<NextPartNumberMarker>1</NextPartNumberMarker>")) || !bytes.Contains(b, []byte("<ChecksumAlgorithm>CRC32</ChecksumAlgorithm>")) || !bytes.Contains(b, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
 		t.Fatalf("list parts page 1 %s", b)
 	}
 	if code, b, _ := do(http.MethodGet, "/bucket-q/m?uploadId="+uploadID+"&part-number-marker=1&max-parts=1", "", nil); code != 200 {
@@ -329,7 +329,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("part and range %d %s", code, b)
 	}
 	attributeHeaders := map[string]string{"x-amz-object-attributes": "ETag,Checksum,ObjectParts,StorageClass,ObjectSize", "x-amz-max-parts": "1"}
-	if code, b, h := do(http.MethodGet, "/bucket-q/m?attributes", "", attributeHeaders); code != http.StatusOK || !bytes.Contains(b, []byte("<GetObjectAttributesResponse>")) || !bytes.Contains(b, []byte("<Checksum><ChecksumCRC32>"+checksum+"</ChecksumCRC32><ChecksumType>FULL_OBJECT</ChecksumType></Checksum>")) || !bytes.Contains(b, []byte("<ObjectParts><PartsCount>2</PartsCount></ObjectParts>")) || !bytes.Contains(b, []byte("<ObjectSize>"+strconv.Itoa(size)+"</ObjectSize>")) || !bytes.Contains(b, []byte("<StorageClass>STANDARD_IA</StorageClass>")) || bytes.Contains(b, []byte("<member>")) || h.Get("Last-Modified") == "" {
+	if code, b, h := do(http.MethodGet, "/bucket-q/m?attributes", "", attributeHeaders); code != http.StatusOK || !bytes.Contains(b, []byte("<GetObjectAttributesResponse xmlns=")) || !bytes.Contains(b, []byte("<Checksum><ChecksumCRC32>"+checksum+"</ChecksumCRC32><ChecksumType>FULL_OBJECT</ChecksumType></Checksum>")) || !bytes.Contains(b, []byte("<ObjectParts><PartsCount>2</PartsCount></ObjectParts>")) || !bytes.Contains(b, []byte("<ObjectSize>"+strconv.Itoa(size)+"</ObjectSize>")) || !bytes.Contains(b, []byte("<StorageClass>STANDARD_IA</StorageClass>")) || bytes.Contains(b, []byte("<member>")) || h.Get("Last-Modified") == "" {
 		t.Fatalf("get object attributes %d %s %v", code, b, h)
 	}
 	if code, b, _ := do(http.MethodGet, "/bucket-q/m?tagging", "", nil); code != http.StatusOK || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<TagSet><Tag><Key>env</Key><Value>test</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag></TagSet>")) {

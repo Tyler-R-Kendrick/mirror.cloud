@@ -171,7 +171,12 @@ type Shape struct {
 	// carry theirs in Binding; this is the one on the shape. Omitted when
 	// empty so that adding it leaves every model without the trait
 	// byte-identical.
-	XMLName       string `json:",omitempty"`
+	XMLName string `json:",omitempty"`
+	// MemberOrder is the members in the order the specification declares
+	// them, which is the order the reference writes them in an XML body and
+	// the order a sequence-validating client expects. Members is a map and
+	// cannot say. Omitted when empty.
+	MemberOrder   []string `json:",omitempty"`
 	Doc           string
 	UnknownTraits []string // recorded, never fatal
 }

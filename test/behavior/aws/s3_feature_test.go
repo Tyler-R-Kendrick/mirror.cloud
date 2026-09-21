@@ -446,7 +446,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("first V1 page %s", first)
 		}
 		next := list("prefix=folder%2F&delimiter=%2F&max-keys=1&marker=" + url.QueryEscape("folder/aSubfolder/"))
-		if !strings.Contains(next, "<Contents><ETag>") || !strings.Contains(next, "<Key>folder/file1</Key>") || !strings.Contains(next, "<Owner><ID>000000000000</ID></Owner>") || strings.Contains(next, "<DisplayName>") || !strings.Contains(next, "<Marker>folder/aSubfolder/</Marker>") {
+		if !strings.Contains(next, "<Contents><Key>") || !strings.Contains(next, "<Key>folder/file1</Key>") || !strings.Contains(next, "<Owner><ID>000000000000</ID></Owner>") || strings.Contains(next, "<DisplayName>") || !strings.Contains(next, "<Marker>folder/aSubfolder/</Marker>") {
 			t.Fatalf("next V1 page %s", next)
 		}
 		firstV2 := list("list-type=2&prefix=folder%2F&delimiter=%2F&max-keys=1")
@@ -2175,7 +2175,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		copyBody, _ := io.ReadAll(copied.Body)
 		copied.Body.Close()
-		if copied.StatusCode != http.StatusOK || copied.Header.Get("x-amz-server-side-encryption") != "aws:kms" || copied.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || copied.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || !bytes.Contains(copyBody, []byte("<CopyObjectResult>")) {
+		if copied.StatusCode != http.StatusOK || copied.Header.Get("x-amz-server-side-encryption") != "aws:kms" || copied.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || copied.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || !bytes.Contains(copyBody, []byte("<CopyObjectResult")) {
 			t.Fatalf("kms copy %d %#v %s", copied.StatusCode, copied.Header, copyBody)
 		}
 		if response, body := request(http.MethodGet, "/kms-validation-bdd/copied", ""); response.StatusCode != http.StatusOK || string(body) != "body" || response.Header.Get("x-amz-server-side-encryption") != "aws:kms" || response.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || response.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
@@ -2940,7 +2940,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodPut, "/reserved-create-tags", reserved, "")
 		fault, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte(`User-defined tag keys can't start with "aws:".`)) || bytes.Contains(fault, []byte("<TagKey>")) {
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte(`User-defined tag keys can't start with &quot;aws:&quot;.`)) || bytes.Contains(fault, []byte("<TagKey>")) {
 			t.Fatalf("reserved create tag %d %s", res.StatusCode, fault)
 		}
 	})
@@ -3923,7 +3923,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/metrics-bdd?metrics", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ListBucketMetricsConfigurationsResult")) || !bytes.Contains(body, []byte("<MetricsConfiguration>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ListMetricsConfigurationsResult")) || !bytes.Contains(body, []byte("<MetricsConfiguration>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
 			t.Fatalf("list metrics %d %s", res.StatusCode, body)
 		}
 		res = do(http.MethodDelete, "/metrics-bdd?metrics&id=metrics", nil, "")

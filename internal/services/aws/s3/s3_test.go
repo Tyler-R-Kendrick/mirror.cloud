@@ -6839,16 +6839,39 @@ func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {
 	input["IfNoneMatch"] = "*"
 	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
 
-	put("changed-after-initiation", "old")
+	oldETag := put("changed-after-initiation", "old")
 	uploadID, input = upload("changed-after-initiation")
 	_ = deps.Clock.Advance(2 * time.Second)
-	input["IfMatch"] = put("changed-after-initiation", "new")
+	newETag := put("changed-after-initiation", "new")
+	input["IfMatch"] = oldETag
+	wantFault("changed-after-initiation-old-etag", uploadID, input, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, map[string]any{"Condition": "If-Match"})
+	input["IfMatch"] = newETag
 	wantFault("changed-after-initiation", uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-Match", "Key": "changed-after-initiation"})
+	_, input = upload("changed-after-initiation")
+	input["IfMatch"] = newETag
+	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
 
-	etag := put("unchanged", "old")
-	_, input = upload("unchanged")
+	etag := put("identical-after-initiation", "same")
+	uploadID, input = upload("identical-after-initiation")
+	_ = deps.Clock.Advance(2 * time.Second)
+	if replacement := put("identical-after-initiation", "same"); replacement != etag {
+		t.Fatalf("identical replacement ETag = %q, want %q", replacement, etag)
+	}
+	input["IfMatch"] = etag
+	wantFault("identical-after-initiation", uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-Match", "Key": "identical-after-initiation"})
+	_, input = upload("identical-after-initiation")
 	input["IfMatch"] = etag
 	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+
+	etag = put("deleted-if-match", "same")
+	uploadID, input = upload("deleted-if-match")
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "deleted-if-match"}, nil)
+	input["IfMatch"] = etag
+	wantFault("deleted-if-match", uploadID, input, "NoSuchKey", "The specified key does not exist.", http.StatusNotFound, map[string]any{"Key": "deleted-if-match"})
+	_ = deps.Clock.Advance(2 * time.Second)
+	put("deleted-if-match", "same")
+	wantFault("recreated-if-match", uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-Match", "Key": "deleted-if-match"})
+
 	_, input = upload("absent")
 	input["IfNoneMatch"] = "*"
 	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)

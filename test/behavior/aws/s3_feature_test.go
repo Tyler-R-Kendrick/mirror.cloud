@@ -1215,6 +1215,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	})
 
 	t.Run("Given conflicting multipart completion conditions When completed Then S3 returns LocalStack faults", func(t *testing.T) {
+		startedAt := deps.Clock.Now()
+		defer func() { _ = deps.Clock.Advance(startedAt.Sub(deps.Clock.Now())) }()
 		res := do(http.MethodPut, "/completion-conditional-bdd", nil, "")
 		res.Body.Close()
 		start := func(key string) (string, string) {
@@ -1313,6 +1315,58 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		status, body = complete("deleted", uploadID, manifest, "", "*")
 		if status != http.StatusOK {
 			t.Fatalf("restarted complete If-None-Match %d %s", status, body)
+		}
+
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-put", []byte("old"), "")
+		oldETag := res.Header.Get("ETag")
+		res.Body.Close()
+		uploadID, manifest = start("if-match-put")
+		_ = deps.Clock.Advance(2 * time.Second)
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-put", []byte("new"), "")
+		newETag := res.Header.Get("ETag")
+		res.Body.Close()
+		status, body = complete("if-match-put", uploadID, manifest, oldETag, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("stale complete If-Match %d %s", status, body)
+		}
+		status, body = complete("if-match-put", uploadID, manifest, newETag, "")
+		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("changed complete If-Match %d %s", status, body)
+		}
+		uploadID, manifest = start("if-match-put")
+		status, body = complete("if-match-put", uploadID, manifest, newETag, "")
+		if status != http.StatusOK {
+			t.Fatalf("restarted complete If-Match %d %s", status, body)
+		}
+
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-identical", []byte("same"), "")
+		identicalETag := res.Header.Get("ETag")
+		res.Body.Close()
+		uploadID, manifest = start("if-match-identical")
+		_ = deps.Clock.Advance(2 * time.Second)
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-identical", []byte("same"), "")
+		res.Body.Close()
+		status, body = complete("if-match-identical", uploadID, manifest, identicalETag, "")
+		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) {
+			t.Fatalf("identical complete If-Match %d %s", status, body)
+		}
+
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-delete", []byte("same"), "")
+		deletedETag := res.Header.Get("ETag")
+		res.Body.Close()
+		uploadID, manifest = start("if-match-delete")
+		res = do(http.MethodDelete, "/completion-conditional-bdd/if-match-delete", nil, "")
+		res.Body.Close()
+		status, body = complete("if-match-delete", uploadID, manifest, deletedETag, "")
+		if status != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) {
+			t.Fatalf("deleted complete If-Match %d %s", status, body)
+		}
+		_ = deps.Clock.Advance(2 * time.Second)
+		res = do(http.MethodPut, "/completion-conditional-bdd/if-match-delete", []byte("same"), "")
+		res.Body.Close()
+		status, body = complete("if-match-delete", uploadID, manifest, deletedETag, "")
+		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) {
+			t.Fatalf("recreated complete If-Match %d %s", status, body)
 		}
 	})
 

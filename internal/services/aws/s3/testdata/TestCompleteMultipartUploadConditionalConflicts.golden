@@ -8,6 +8,14 @@
     "message": "The conditional request cannot succeed due to a conflicting operation against this resource.",
     "status": 409
   },
+  "changed-after-initiation-old-etag": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
   "created-after-initiation": {
     "code": "PreconditionFailed",
     "fields": {
@@ -25,6 +33,14 @@
     "message": "The conditional request cannot succeed due to a conflicting operation against this resource.",
     "status": 409
   },
+  "deleted-if-match": {
+    "code": "NoSuchKey",
+    "fields": {
+      "Key": "deleted-if-match"
+    },
+    "message": "The specified key does not exist.",
+    "status": 404
+  },
   "existing-before-delete": {
     "code": "PreconditionFailed",
     "fields": {
@@ -32,6 +48,15 @@
     },
     "message": "At least one of the pre-conditions you specified did not hold",
     "status": 412
+  },
+  "identical-after-initiation": {
+    "code": "ConditionalRequestConflict",
+    "fields": {
+      "Condition": "If-Match",
+      "Key": "identical-after-initiation"
+    },
+    "message": "The conditional request cannot succeed due to a conflicting operation against this resource.",
+    "status": 409
   },
   "mismatched-if-match": {
     "code": "PreconditionFailed",
@@ -48,5 +73,14 @@
     },
     "message": "The specified key does not exist.",
     "status": 404
+  },
+  "recreated-if-match": {
+    "code": "ConditionalRequestConflict",
+    "fields": {
+      "Condition": "If-Match",
+      "Key": "deleted-if-match"
+    },
+    "message": "The conditional request cannot succeed due to a conflicting operation against this resource.",
+    "status": 409
   }
 }

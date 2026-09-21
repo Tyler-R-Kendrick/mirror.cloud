@@ -266,7 +266,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		body := []byte(`<Delete><Object><Key>first</Key></Object><Object><Key>second</Key></Object></Delete>`)
 		digest := md5.Sum(body)
-		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/anonymous-delete-bdd?delete", bytes.NewReader(body))
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/anonymous-delete-bdd/?delete", bytes.NewReader(body))
 		request.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(digest[:]))
 		res, err = http.DefaultClient.Do(request)
 		if err != nil {

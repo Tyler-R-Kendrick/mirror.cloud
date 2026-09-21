@@ -400,6 +400,20 @@ func TestCreateBucketTags(t *testing.T) {
 	})
 }
 
+func TestMissingBucketFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	got := map[string]any{}
+	for _, operation := range []string{"GetObject", "DeleteBucket", "GetBucketNotificationConfiguration"} {
+		_, err := invoke(t, p, operation, map[string]any{"Bucket": "does-not-exist", "Key": "foobar"}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.Message != "The specified bucket does not exist" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "does-not-exist" {
+			t.Fatalf("%s missing bucket = %#v", operation, fault)
+		}
+		got[operation] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "bucketName": fault.Fields["BucketName"]}
+	}
+	golden.AssertJSON(t, got)
+}
+
 func TestBucketNotificationConfiguration(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
@@ -6143,6 +6157,32 @@ func TestGetObjectAttributesContract(t *testing.T) {
 	}
 
 	golden.AssertJSON(t, map[string]any{"standard": standard.Output, "page": page.Output, "lastPage": lastPage, "emptyPage": emptyPage, "full": fullAttrs})
+}
+
+func TestGetObjectAttributesVersionedCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "versioned-attributes", "Key": "key"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": input["Bucket"], "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", input, []byte("69\n420\n"))
+	mustInvoke(t, p, "PutObject", input, []byte("version 2"))
+	attributes := "ETag, Checksum, ObjectParts, StorageClass, ObjectSize"
+	current := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": input["Bucket"], "Key": input["Key"], "ObjectAttributes": attributes}, nil)
+	compact := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": input["Bucket"], "Key": input["Key"], "ObjectAttributes": strings.ReplaceAll(attributes, " ", "")}, nil)
+	if !reflect.DeepEqual(current.Output, compact.Output) || current.Output["ObjectSize"] != 9 || current.Output["StorageClass"] != "STANDARD" {
+		t.Fatalf("spaced attributes = %#v; compact = %#v", current.Output, compact.Output)
+	}
+	mustInvoke(t, p, "DeleteObject", input, nil)
+	_, err := invoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": input["Bucket"], "Key": input["Key"], "ObjectAttributes": []string{"ETag"}}, nil)
+	deleted := asFault(t, err)
+	if deleted.Code != "NoSuchKey" || deleted.Headers.Get("x-amz-delete-marker") != "true" {
+		t.Fatalf("deleted current attributes = %#v", deleted)
+	}
+	versioned := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": input["Bucket"], "Key": input["Key"], "VersionId": first.Headers.Get("x-amz-version-id"), "ObjectAttributes": []string{"ETag", "StorageClass", "ObjectSize"}}, nil)
+	if versioned.Output["ObjectSize"] != 7 || versioned.Output["StorageClass"] != "STANDARD" || versioned.Output["ETag"] != first.Headers.Get("ETag") {
+		t.Fatalf("versioned attributes = %#v", versioned.Output)
+	}
+	golden.AssertJSON(t, map[string]any{"current": current.Output, "deleted": map[string]any{"code": deleted.Code, "deleteMarker": deleted.Headers.Get("x-amz-delete-marker")}, "versioned": versioned.Output})
 }
 
 func TestWriteChecksumValidation(t *testing.T) {

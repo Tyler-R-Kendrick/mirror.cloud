@@ -1,0 +1,20 @@
+{
+  "DeleteBucket": {
+    "bucketName": "does-not-exist",
+    "code": "NoSuchBucket",
+    "message": "The specified bucket does not exist",
+    "status": 404
+  },
+  "GetBucketNotificationConfiguration": {
+    "bucketName": "does-not-exist",
+    "code": "NoSuchBucket",
+    "message": "The specified bucket does not exist",
+    "status": 404
+  },
+  "GetObject": {
+    "bucketName": "does-not-exist",
+    "code": "NoSuchBucket",
+    "message": "The specified bucket does not exist",
+    "status": 404
+  }
+}

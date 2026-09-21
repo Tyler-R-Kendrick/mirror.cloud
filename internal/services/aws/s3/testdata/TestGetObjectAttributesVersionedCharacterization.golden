@@ -1,0 +1,16 @@
+{
+  "current": {
+    "ETag": "\"d4ca1ed7571e2e7b1f1c375bd50fa220\"",
+    "ObjectSize": 9,
+    "StorageClass": "STANDARD"
+  },
+  "deleted": {
+    "code": "NoSuchKey",
+    "deleteMarker": "true"
+  },
+  "versioned": {
+    "ETag": "\"e92499db864217242396e8ef766079a9\"",
+    "ObjectSize": 7,
+    "StorageClass": "STANDARD"
+  }
+}

@@ -88,15 +88,27 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		request, _ := http.NewRequest(http.MethodGet, ts.URL+"/standard-attributes-bdd/key?attributes", nil)
 		request.Header.Set("Authorization", auth)
-		request.Header.Set("x-amz-object-attributes", "StorageClass")
+		request.Header.Set("x-amz-object-attributes", "ETag, Checksum, ObjectParts, StorageClass, ObjectSize")
 		res, err = http.DefaultClient.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<StorageClass>STANDARD</StorageClass>")) {
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<StorageClass>STANDARD</StorageClass>")) || !bytes.Contains(body, []byte("<ObjectSize>4</ObjectSize>")) {
 			t.Fatalf("standard storage attributes %d %s", res.StatusCode, body)
+		}
+		request, _ = http.NewRequest(http.MethodGet, ts.URL+"/standard-attributes-bdd/key?attributes", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-object-attributes", "ETag,Checksum,ObjectParts,StorageClass,ObjectSize")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compact, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Equal(body, compact) {
+			t.Fatalf("compact object attributes %d %s; spaced %s", res.StatusCode, compact, body)
 		}
 	})
 
@@ -169,6 +181,21 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || string(body) != "space" {
 			t.Fatalf("copy encoded source %d %q", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a missing bucket When accessed Then each operation returns NoSuchBucket", func(t *testing.T) {
+		for _, request := range []struct{ method, path string }{
+			{http.MethodGet, "/does-not-exist/foobar"},
+			{http.MethodDelete, "/does-not-exist"},
+			{http.MethodGet, "/does-not-exist?notification"},
+		} {
+			res := do(request.method, request.path, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchBucket</Code>")) || !bytes.Contains(body, []byte("<BucketName>does-not-exist</BucketName>")) {
+				t.Fatalf("%s %s missing bucket: %d %s", request.method, request.path, res.StatusCode, body)
+			}
 		}
 	})
 

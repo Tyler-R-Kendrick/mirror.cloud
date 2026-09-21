@@ -370,5 +370,3 @@ func TestPurgeQueueEmptiesEverything(t *testing.T) {
 		t.Fatalf("purge left %v messages", attrs["ApproximateNumberOfMessages"])
 	}
 }
-
-

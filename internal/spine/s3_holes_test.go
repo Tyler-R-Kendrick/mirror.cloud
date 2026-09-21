@@ -14,8 +14,8 @@ import (
 
 	"encoding/json"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 )
 
 func TestBootedServerS3VersioningPaginationPresign(t *testing.T) {

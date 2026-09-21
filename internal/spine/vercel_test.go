@@ -98,12 +98,19 @@ func TestBootedServerVercelAPI(t *testing.T) {
 	if code != 200 || kv["result"] != nil {
 		t.Fatalf("kv get after del %d %#v", code, kv)
 	}
-	// An unimplemented verb is 501 with the header that says so, not a 400:
-	// INCR is a real command this emulator does not serve, and a client can
-	// tell that from a malformed request without reading the message. The
-	// error is a plain string, which is what the KV document declares and what
-	// Upstash answers -- not the REST API's {error: {code, message}}.
-	code, kv, h := do(http.MethodPost, "/", `["INCR","k"]`, "id.kv.vercel-storage.com")
+	// An unimplemented verb is 501 with the header that says so, not a 400: a
+	// client can tell "mirror has not got to this yet" from "you sent
+	// nonsense" without reading the message. The error is a plain string,
+	// which is what the KV document declares and what Upstash answers -- not
+	// the REST API's {error: {code, message}}.
+	//
+	// HSET, not INCR. INCR was the example until the KV bundle grew the whole
+	// INCR/DECR/INCRBY/DECRBY family, at which point this assertion was
+	// testing that an IMPLEMENTED verb reports itself unimplemented -- so it
+	// failed, correctly. The verb here has to be one the bundle's supported
+	// list genuinely omits, and hashes are what its own comment names as
+	// waiting for evidence.
+	code, kv, h := do(http.MethodPost, "/", `["HSET","h","f","v"]`, "id.kv.vercel-storage.com")
 	if code != 501 || h.Get("x-mirror-not-implemented") == "" {
 		t.Fatalf("kv unsupported verb %d %#v %v", code, kv, h)
 	}

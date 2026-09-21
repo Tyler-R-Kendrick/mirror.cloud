@@ -97,7 +97,13 @@ operations:
       # `cond` is a precondition: the error fires when it does NOT hold. An
       # explicitly empty title reaches here, because the engine's model check
       # asks whether a required member is present, not whether it is non-empty.
-      - { cond: "string(input.title) != ''", error: InvalidInput, message: "Title is required" }
+      #
+      # And a request that omits `title` ENTIRELY reaches here too, which is
+      # what `has()` is for: an absent member is a missing key, not a null, so
+      # `string(input.title)` on one raises, and a CEL error inside a require
+      # becomes InternalFailure 500. Without the guard the "no title" case
+      # answered a server error instead of the 10007 it declares.
+      - { cond: "has(input.title) && string(input.title) != ''", error: InvalidInput, message: "Title is required" }
       - { cond: "!taken_found", error: NamespaceTitleTaken, message: "A namespace with this account ID and title already exists" }
     effects:
       # The title index is written before the namespace, and the order matters:

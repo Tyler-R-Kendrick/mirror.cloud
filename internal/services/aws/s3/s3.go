@@ -2506,7 +2506,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 			return nil, &spi.Fault{Code: "ConditionalRequestConflict", Message: "The conditional request cannot succeed due to a conflicting operation against this resource.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match", "Key": key}}
 		} else if match != "" && !exists {
 			return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"Key": key}}
-		} else if match != "" && !etagMatches(match, str(current["etag"])) {
+		} else if match != "" && strings.Trim(match, "\"") != strings.Trim(str(current["etag"]), "\"") {
 			return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-Match"}}
 		} else if initiated, initiatedErr := time.Parse(time.RFC3339Nano, u.initiated); match != "" && initiatedErr == nil {
 			if modified, modifiedErr := http.ParseTime(str(current["mtime"])); modifiedErr == nil && initiated.Before(modified) {

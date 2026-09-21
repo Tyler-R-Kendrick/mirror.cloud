@@ -2432,7 +2432,11 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("seed complete If-Match list: %v", err)
 	}
 	uploadID, manifest := conditionalUpload("complete-if-match-list")
-	if err := completeConditional("complete-if-match-list", uploadID, manifest, aws.String(`"wrong", `+aws.ToString(seedCompleteList.ETag)), nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+	listCondition := aws.String(`"wrong", ` + aws.ToString(seedCompleteList.ETag))
+	if err := completeConditional("complete-if-match-list", uploadID, &s3types.CompletedMultipartUpload{}, listCondition, nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+		t.Fatalf("complete If-Match validation order: %v", err)
+	}
+	if err := completeConditional("complete-if-match-list", uploadID, manifest, listCondition, nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
 		t.Fatalf("complete If-Match list fault: %v", err)
 	}
 	if parts, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-match-list"), UploadId: aws.String(uploadID)}); err != nil || len(parts.Parts) != 1 {

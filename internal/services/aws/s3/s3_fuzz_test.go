@@ -2041,6 +2041,7 @@ func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
 			code, message, status, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, key
 		case 5:
 			input["IfMatch"] = `"wrong", ` + seedETag
+			input["MultipartUpload"] = map[string]any{}
 		}
 		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
 		fault := asFault(t, err)

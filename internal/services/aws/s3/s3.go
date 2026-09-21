@@ -2291,7 +2291,7 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	u := p.mpu[id]
 	if !matchesMultipartUpload(u, req) {
 		p.mu.Unlock()
-		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
+		return nil, noSuchUpload(id)
 	}
 	algorithm := u.checksumAlgorithm
 	encryption := map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}
@@ -2312,7 +2312,7 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	u = p.mpu[id]
 	if !matchesMultipartUpload(u, req) {
 		p.mu.Unlock()
-		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
+		return nil, noSuchUpload(id)
 	}
 	u.parts[pn] = multipartPart{body: body, modified: p.deps.Clock.Now().UTC().Format(time.RFC3339), checksums: provided}
 	p.mu.Unlock()
@@ -2348,7 +2348,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	p.mu.Unlock()
 	if !matchesMultipartUpload(u, req) {
-		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: 404, Fault: "client"}
+		return nil, noSuchUpload(id)
 	}
 	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
 	if len(parts) == 0 {
@@ -2472,7 +2472,7 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 	defer p.mu.Unlock()
 	u := p.mpu[id]
 	if !matchesMultipartUpload(u, req) {
-		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
+		return nil, noSuchUpload(id)
 	}
 	numbers := make([]int, 0, len(u.parts))
 	for number := range u.parts {
@@ -2868,7 +2868,7 @@ func (p *Pack) abortMPU(ctx context.Context, req *spi.Request) (*spi.Response, e
 	p.mu.Lock()
 	if !matchesMultipartUpload(p.mpu[id], req) {
 		p.mu.Unlock()
-		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
+		return nil, noSuchUpload(id)
 	}
 	delete(p.mpu, id)
 	p.mu.Unlock()
@@ -2878,6 +2878,10 @@ func (p *Pack) abortMPU(ctx context.Context, req *spi.Request) (*spi.Response, e
 func matchesMultipartUpload(upload *mpu, req *spi.Request) bool {
 	bucket, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	return upload != nil && (bucket == "" || upload.bucket == bucket) && (key == "" || upload.key == key)
+}
+
+func noSuchUpload(id string) *spi.Fault {
+	return &spi.Fault{Code: "NoSuchUpload", Message: "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"UploadId": id}}
 }
 
 func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response, error) {

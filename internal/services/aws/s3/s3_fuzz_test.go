@@ -1587,6 +1587,36 @@ func FuzzListPartsPagination(f *testing.F) {
 	})
 }
 
+func FuzzNoSuchUploadFaults(f *testing.F) {
+	f.Add(uint8(0), "missing", false)
+	f.Add(uint8(3), "", true)
+	f.Fuzz(func(t *testing.T, operationSeed uint8, uploadID string, wrongKey bool) {
+		if !utf8.ValidString(uploadID) || len(uploadID) > 128 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-fault-fuzz"}, nil)
+		validID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-fault-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		key := "key"
+		if wrongKey {
+			uploadID, key = validID, "wrong"
+		} else {
+			uploadID += "-missing"
+		}
+		operations := []string{"UploadPart", "CompleteMultipartUpload", "ListParts", "AbortMultipartUpload"}
+		operation := operations[int(operationSeed)%len(operations)]
+		input := map[string]any{"Bucket": "multipart-fault-fuzz", "Key": key, "UploadId": uploadID, "PartNumber": 1}
+		if operation == "CompleteMultipartUpload" {
+			input["MultipartUpload"] = map[string]any{"Parts": []any{}}
+		}
+		_, err := invoke(t, p, operation, input, []byte("part"))
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchUpload" || fault.Message != "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed." || fault.Fields["UploadId"] != uploadID {
+			t.Fatalf("%s fault = %#v", operation, fault)
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

@@ -5261,12 +5261,32 @@ func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 			if input["Bucket"] == "wrong" {
 				expected = "NoSuchBucket"
 			}
-			if fault := asFault(t, err); fault.Code != expected || fault.HTTPStatus != http.StatusNotFound {
+			fault := asFault(t, err)
+			if fault.Code != expected || fault.HTTPStatus != http.StatusNotFound {
 				t.Fatalf("%s fault = %#v", operation, fault)
+			}
+			if expected == "NoSuchUpload" && (fault.Message != "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed." || fault.Fields["UploadId"] != input["UploadId"]) {
+				t.Fatalf("%s modeled fault = %#v", operation, fault)
 			}
 		}
 	}
 	mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": uploadID}, nil)
+}
+
+func TestNoSuchUploadCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-fault-golden"}, nil)
+	results := map[string]any{}
+	for _, operation := range []string{"UploadPart", "CompleteMultipartUpload", "ListParts", "AbortMultipartUpload"} {
+		input := map[string]any{"Bucket": "multipart-fault-golden", "Key": "key", "UploadId": "missing", "PartNumber": 1}
+		if operation == "CompleteMultipartUpload" {
+			input["MultipartUpload"] = map[string]any{"Parts": []any{}}
+		}
+		_, err := invoke(t, p, operation, input, []byte("part"))
+		fault := asFault(t, err)
+		results[operation] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+	golden.AssertJSON(t, results)
 }
 
 func TestMultipartPartNumberBounds(t *testing.T) {

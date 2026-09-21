@@ -1181,6 +1181,38 @@ func FuzzObjectLockDefaultRetention(f *testing.F) {
 	})
 }
 
+func FuzzObjectLockConfigurationValidation(f *testing.F) {
+	f.Add("GOVERNANCE", int8(1), int8(0), true, false)
+	f.Add("COMPLIANCE", int8(0), int8(1), false, true)
+	f.Add("INVALID", int8(1), int8(0), true, false)
+	f.Add("GOVERNANCE", int8(1), int8(1), true, true)
+	f.Fuzz(func(t *testing.T, mode string, days, years int8, includeDays, includeYears bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "lock-validation-fuzz", "ObjectLockEnabledForBucket": true}, nil)
+		retention := map[string]any{"Mode": mode}
+		if includeDays {
+			retention["Days"] = int(days)
+		}
+		if includeYears {
+			retention["Years"] = int(years)
+		}
+		_, err := invoke(t, p, "PutObjectLockConfiguration", map[string]any{"Bucket": "lock-validation-fuzz", "ObjectLockConfiguration": map[string]any{
+			"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": retention},
+		}}, nil)
+		validMode := mode == "GOVERNANCE" || mode == "COMPLIANCE"
+		validDuration := includeDays != includeYears && (includeDays && days > 0 || includeYears && years > 0)
+		if validMode && validDuration {
+			if err != nil {
+				t.Fatalf("valid configuration rejected: mode=%q days=%d years=%d include=(%t,%t): %v", mode, days, years, includeDays, includeYears, err)
+			}
+			return
+		}
+		if got := asFault(t, err); got.Code != "MalformedXML" || got.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("invalid configuration fault = %#v", got)
+		}
+	})
+}
+
 func FuzzBucketNames(f *testing.F) {
 	for _, name := range []string{"", "ab", "abc", "bucket-name", "example.com", "adjacent..dots", "192.168.5.4", "999.999.999.999", "reserved--table-s3", strings.Repeat("a", 63), strings.Repeat("a", 64)} {
 		f.Add(name)

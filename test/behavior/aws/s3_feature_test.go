@@ -55,6 +55,9 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if method == http.MethodPut && path == "/object-lock" {
 			req.Header.Set("x-amz-bucket-object-lock-enabled", "true")
 		}
+		if path == "/object-lock-plain?delete" {
+			req.Header.Set("x-amz-bypass-governance-retention", "false")
+		}
 		if method == http.MethodPut && path == "/create-owned" {
 			req.Header.Set("x-amz-object-ownership", "BucketOwnerPreferred")
 		}
@@ -3575,6 +3578,26 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		restored.Body.Close()
 		if restored.StatusCode != http.StatusOK || string(body) != "old" || restored.Header.Get("x-amz-version-id") == version {
 			t.Fatalf("restored = %d %q %v", restored.StatusCode, body, restored.Header)
+		}
+	})
+
+	t.Run("Given a plain bucket When object lock is requested Then AWS faults are preserved", func(t *testing.T) {
+		created := do(http.MethodPut, "/object-lock-plain", nil, "")
+		created.Body.Close()
+		if created.StatusCode >= 300 {
+			t.Fatalf("create plain bucket = %d", created.StatusCode)
+		}
+		missing := do(http.MethodGet, "/object-lock-plain?object-lock", nil, "")
+		missingBody, _ := io.ReadAll(missing.Body)
+		missing.Body.Close()
+		if missing.StatusCode != http.StatusNotFound || !bytes.Contains(missingBody, []byte("ObjectLockConfigurationNotFoundError")) || !bytes.Contains(missingBody, []byte("does not exist for this bucket")) {
+			t.Fatalf("missing configuration = %d %s", missing.StatusCode, missingBody)
+		}
+		bulk := do(http.MethodPost, "/object-lock-plain?delete", []byte("<Delete><Object><Key>key</Key></Object></Delete>"), "")
+		bulkBody, _ := io.ReadAll(bulk.Body)
+		bulk.Body.Close()
+		if bulk.StatusCode != http.StatusBadRequest || !bytes.Contains(bulkBody, []byte("InvalidArgument")) || !bytes.Contains(bulkBody, []byte("only applicable to Object Lock enabled buckets")) {
+			t.Fatalf("invalid bulk bypass = %d %s", bulk.StatusCode, bulkBody)
 		}
 	})
 

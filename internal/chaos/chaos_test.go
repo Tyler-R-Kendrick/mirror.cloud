@@ -637,6 +637,54 @@ func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSuspendedWritesKeepOneNullVersion(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "suspended-version-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "suspended-version-chaos", "Status": "Enabled"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := call("PutObject", map[string]any{"Bucket": "suspended-version-chaos", "Key": "key"}, "enabled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "suspended-version-chaos", "Status": "Suspended"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("PutObject", map[string]any{"Bucket": "suspended-version-chaos", "Key": "key"}, fmt.Sprintf("null-%d", i))
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := call("ListObjectVersions", map[string]any{"Bucket": "suspended-version-chaos"}, "")
+	versions := listed.Output["Versions"].([]any)
+	if err != nil || len(versions) != 2 || versions[0].(map[string]any)["VersionId"] != "null" || versions[1].(map[string]any)["VersionId"] != enabled.Headers.Get("x-amz-version-id") {
+		t.Fatalf("suspended versions = %#v, err=%v", listed, err)
+	}
+}
+
 func TestConcurrentListMultipartUploadsRemainsPageable(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

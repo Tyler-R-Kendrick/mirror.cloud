@@ -4047,6 +4047,56 @@ func TestDeleteObjectRestoresPreviousVersion(t *testing.T) {
 	})
 }
 
+func TestSuspendedVersioningReplacesNullVersion(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("unversioned"))
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
+	enabled := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("enabled"))
+	enabledVersion := enabled.Headers.Get("x-amz-version-id")
+
+	beforeSuspension := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil)
+	if body := string(readStream(t, beforeSuspension)); body != "unversioned" {
+		t.Fatalf("converted null version = %q", body)
+	}
+	converted := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "bucket"}, nil).Output["Versions"])
+	if len(converted) != 2 || asMapForTest(converted[0])["VersionId"] != enabledVersion || asMapForTest(converted[0])["IsLatest"] != true || asMapForTest(converted[1])["VersionId"] != "null" || asMapForTest(converted[1])["IsLatest"] != false {
+		t.Fatalf("converted versions = %#v", converted)
+	}
+
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Suspended"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first null"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("second null"))
+
+	listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "bucket"}, nil).Output
+	suspendedVersions := listed
+	versions := asSliceForTest(listed["Versions"])
+	if len(versions) != 2 || asMapForTest(versions[0])["VersionId"] != "null" || asMapForTest(versions[1])["VersionId"] != enabledVersion {
+		t.Fatalf("suspended versions = %#v", listed)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil))); body != "second null" {
+		t.Fatalf("replacement null version = %q", body)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": enabledVersion}, nil))); body != "enabled" {
+		t.Fatalf("preserved enabled version = %q", body)
+	}
+
+	deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
+	if deleted.Headers.Get("x-amz-delete-marker") != "true" || deleted.Headers.Get("x-amz-version-id") != "null" {
+		t.Fatalf("suspended delete = %#v", deleted.Headers)
+	}
+	listed = mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "bucket"}, nil).Output
+	if markers := asSliceForTest(listed["DeleteMarkers"]); len(markers) != 1 || asMapForTest(markers[0])["VersionId"] != "null" {
+		t.Fatalf("suspended delete marker = %#v", listed)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil)
+	restoredBody := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)))
+	if restoredBody != "enabled" {
+		t.Fatalf("restored enabled version = %q", restoredBody)
+	}
+	golden.AssertJSON(t, map[string]any{"suspended": suspendedVersions, "deleted": listed, "restoredBody": restoredBody})
+}
+
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

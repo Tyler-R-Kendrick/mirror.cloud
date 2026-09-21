@@ -1,0 +1,75 @@
+{
+  "deleted": {
+    "CommonPrefixes": null,
+    "DeleteMarkers": [
+      {
+        "IsLatest": true,
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "VersionId": "null"
+      }
+    ],
+    "Delimiter": "",
+    "IsTruncated": false,
+    "KeyMarker": "",
+    "MaxKeys": 1000,
+    "Name": "bucket",
+    "Prefix": "",
+    "VersionIdMarker": "",
+    "Versions": [
+      {
+        "ETag": "\"a10311459433adf322f2590a4987c423\"",
+        "IsLatest": false,
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 7,
+        "StorageClass": "STANDARD",
+        "VersionId": "7c589129"
+      }
+    ]
+  },
+  "restoredBody": "enabled",
+  "suspended": {
+    "CommonPrefixes": null,
+    "DeleteMarkers": null,
+    "Delimiter": "",
+    "IsTruncated": false,
+    "KeyMarker": "",
+    "MaxKeys": 1000,
+    "Name": "bucket",
+    "Prefix": "",
+    "VersionIdMarker": "",
+    "Versions": [
+      {
+        "ETag": "\"02652239ef1ba2e2acd69174e5f6a432\"",
+        "IsLatest": true,
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 11,
+        "StorageClass": "STANDARD",
+        "VersionId": "null"
+      },
+      {
+        "ETag": "\"a10311459433adf322f2590a4987c423\"",
+        "IsLatest": false,
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 7,
+        "StorageClass": "STANDARD",
+        "VersionId": "7c589129"
+      }
+    ]
+  }
+}

@@ -5348,6 +5348,17 @@ var mutants = []mutant{
 		run:  "TestStatesSyncServiceIntegrations",
 	},
 	{
+		// `count` is what a limited selection was chosen from. Binding the
+		// taken size instead answers ToMove == Moved for every move task, and
+		// nothing that only checks the task ran notices.
+		name: "engine-select-count-after-limit",
+		file: filepath.Join("internal", "engine", "select.go"),
+		old:  `		ev.binds[sel.Count] = len(candidates)`,
+		new:  `		ev.binds[sel.Count] = 0`,
+		pkg:  "./internal/engine",
+		run:  "TestSelectCountIsTakenBeforeTheLimit",
+	},
+	{
 		// Inverting the predicate revokes exactly the assignments the request
 		// did not name and keeps the ones it did. A revoke that removes the
 		// wrong rows is the worst failure a permissions operation has, and it
@@ -5359,6 +5370,40 @@ var mutants = []mutant{
 		new:  `if !keep {`,
 		pkg:  "./internal/engine",
 		run:  "TestDeleteWhereRemovesEveryMatch",
+	},
+	{
+		// The shorthand is only safe because it expands to exactly the long
+		// form. A get that forgets its require reads the record and answers
+		// nulls for a missing one instead of the fault it named -- and every
+		// bundle rewritten to the shorthand would inherit that silently.
+		name: "bir-get-shorthand-drops-its-require",
+		file: filepath.Join("internal", "bir", "crud.go"),
+		old:  `			op.Require = []Require{{Cond: "rec_found", Error: spec.Error}}`,
+		new:  `			op.Require = nil`,
+		pkg:  "./internal/bir",
+		run:  "TestShorthandExpandsToExactlyTheLongForm",
+	},
+	{
+		// `missing: ignore` is the difference between a delete that tolerates
+		// an absent record and one that faults on it. A shorthand that drops
+		// it turns every idempotent delete in the tree into a NotFound.
+		name: "bir-delete-shorthand-drops-missing",
+		file: filepath.Join("internal", "bir", "crud.go"),
+		old:  `			op.Effects = []Effect{{Delete: &DeleteEffect{Resource: spec.Resource, Key: spec.Key, Missing: spec.Missing}}}`,
+		new:  `			op.Effects = []Effect{{Delete: &DeleteEffect{Resource: spec.Resource, Key: spec.Key}}}`,
+		pkg:  "./internal/bir",
+		run:  "TestShorthandExpandsToExactlyTheLongForm",
+	},
+	{
+		// Wrap places the record under one member; dropping it answers the
+		// record's members at the top level, which no SDK reading the
+		// declared output shape can find.
+		name: "bir-shorthand-ignores-wrap",
+		file: filepath.Join("internal", "bir", "crud.go"),
+		old:  `		if spec.Wrap != "" {`,
+		new:  `		if false {`,
+		pkg:  "./internal/bir",
+		run:  "TestShorthandExpandsToExactlyTheLongForm",
 	},
 	{
 		// A check that stops reading derive expressions passes `workspaces`

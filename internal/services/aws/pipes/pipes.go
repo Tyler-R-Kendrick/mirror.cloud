@@ -42,6 +42,10 @@ type Pack struct {
 	done      chan struct{}
 	cancels   []func()
 	closeOnce sync.Once
+	// draining serializes drain: the loop and a caller that drains directly
+	// both read a stream's checkpoint before either writes it back, and two
+	// drains in flight deliver the same batch twice.
+	draining sync.Mutex
 }
 
 // New constructs the pack and resumes running pipes.
@@ -289,6 +293,8 @@ func (p *Pack) loop() {
 }
 
 func (p *Pack) drain(ctx context.Context) bool {
+	p.draining.Lock()
+	defer p.draining.Unlock()
 	more := false
 	scopes, err := p.deps.Store.Scopes(ctx)
 	if err != nil {

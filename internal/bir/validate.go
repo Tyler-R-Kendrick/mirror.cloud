@@ -234,6 +234,9 @@ func Validate(s *Service, svc *model.Service) error {
 		if op.Select != nil && op.Select.Binding != "" {
 			scope = append(scope, op.Select.Binding)
 		}
+		if op.Select != nil && op.Select.Count != "" {
+			scope = append(scope, op.Select.Count)
+		}
 		// A write effect binds the record it wrote as `rec`, which is how an
 		// operation returns what it just created without restating it. It is
 		// in scope only for operations that actually write, so referring to it

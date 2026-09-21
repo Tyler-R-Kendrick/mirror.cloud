@@ -34,20 +34,8 @@ errors:
     fault: client
 
 operations:
-  StartTranscriptionJob:
-    effects:
-      - put: { resource: job }
-    output:
-      TranscriptionJob: rec
-
-  GetTranscriptionJob:
-    reads:
-      j: { resource: job }
-    require:
-      - { cond: j_found, error: NotFound }
-    output:
-      TranscriptionJob: j
-
+  StartTranscriptionJob: {put: {resource: job, wrap: TranscriptionJob}}
+  GetTranscriptionJob: {get: {resource: job, error: NotFound, wrap: TranscriptionJob}}
   # TranscriptionJobSummary declares neither Media nor Transcript, so the
   # summarised form of a job is not the stored record.
   ListTranscriptionJobs:
@@ -60,35 +48,13 @@ operations:
           'LanguageCode': j.LanguageCode
         })
 
-  DeleteTranscriptionJob:
-    effects:
-      - delete: { resource: job, missing: ignore }
-
-  CreateVocabulary:
-    effects:
-      - put: { resource: vocabulary }
-    output:
-      VocabularyName: rec.VocabularyName
-      LanguageCode: rec.LanguageCode
-      VocabularyState: rec.VocabularyState
-
-  GetVocabulary:
-    reads:
-      v: { resource: vocabulary }
-    require:
-      - { cond: v_found, error: NotFound }
-    output:
-      VocabularyName: v.VocabularyName
-      LanguageCode: v.LanguageCode
-      VocabularyState: v.VocabularyState
-
+  DeleteTranscriptionJob: {delete: {resource: job, missing: ignore}}
+  CreateVocabulary: {put: {resource: vocabulary}}
+  GetVocabulary: {get: {resource: vocabulary, error: NotFound}}
   ListVocabularies:
     list: { resource: vocabulary, member: Vocabularies, paginate: model }
 
-  DeleteVocabulary:
-    effects:
-      - delete: { resource: vocabulary, missing: ignore }
-
+  DeleteVocabulary: {delete: {resource: vocabulary, missing: ignore}}
 quirks:
   - operation: StartTranscriptionJob
     note: >

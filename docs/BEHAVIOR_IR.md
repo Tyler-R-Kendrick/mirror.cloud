@@ -99,6 +99,29 @@ list:
 
 `filter` is a predicate over each candidate record, bound as `item`.
 
+### `get`, `create`, `put`, `delete` — the shorthand
+
+Four operation shapes recur more than every other combined: read one record and fault when it is absent, write one record, or remove one, answering with the record's own members where there is an answer. Fingerprinting every operation in the tree by structure found 2,469 operations in 222 shapes, with those at the top, so they have a shorthand — expanded at load into exactly the long form, the same way `list:` exists because it was the same eight lines in a hundred packs.
+
+```yaml
+GetVocabulary:         { get: { resource: vocabulary, error: NotFound } }
+CreateVocabulary:      { put: { resource: vocabulary } }
+GetTranscriptionJob:   { get: { resource: job, error: NotFound, wrap: TranscriptionJob } }
+StartTranscriptionJob: { put: { resource: job, wrap: TranscriptionJob } }
+DeleteVocabulary:      { delete: { resource: vocabulary, missing: ignore } }
+```
+
+Each stands for a full operation with the record bound as `rec`:
+
+```yaml
+GetVocabulary:
+  reads: { rec: { resource: vocabulary } }
+  require: [ { cond: rec_found, error: NotFound } ]
+  output: { VocabularyName: rec.VocabularyName, LanguageCode: rec.LanguageCode, VocabularyState: rec.VocabularyState }
+```
+
+Without `wrap` the answer is every member the resource's `record` declares, projected by name; with it, the record itself under that one output member, which is how most Describe and Create responses are shaped. `key` passes through to the read or write; `missing` passes through to a delete, which answers nothing. A `get` must name its `error`; nothing else may have one; none may sit beside a long-form key. **The long form is not deprecated** — it is what every operation that is not exactly this shape uses, and the loader refuses the shorthand rather than guess whenever it would mean anything else. Nothing past the loader knows the shorthand exists, which is what lets a bundle be rewritten from long to short with its recorded trace proving nothing changed.
+
 ### Values an expression can name
 
 Beyond `input`, `identity` and `now`, the bindings depend on where the expression sits, and the loader rejects anything out of scope:
@@ -111,6 +134,7 @@ Beyond `input`, `identity` and `now`, the bindings depend on where the expressio
 | `<name>`, `<name>_found` | operations with `reads:` | each read binding and whether it was there |
 | `item` | `list.filter`, `delete.where`, a write's `for_each` or `where` | the candidate under consideration: a stored record for the first three, one element of the request's list for the fourth |
 | `event` | statechart transitions | the triggering event |
+| `<select.count>` | operations with `select:` | how many candidates the selection was chosen from, after `filter` and before `limit` -- what a limited selection cannot say for itself (SQS's `ApproximateNumberOfMessagesToMove` beside a rate-capped move) |
 | `fx` | operations with effects | earlier effect results, by name |
 
 `arn` deserves the emphasis: a resource's ARN template becomes a value the record names, rather than five string pieces concatenated at the call site. The tree it replaces has 189 hand-built ARN strings, each free to get the partition, the region or a separator subtly wrong — and several do.
@@ -327,6 +351,8 @@ The 152 hand-written packs are not waste — they are the **migration oracle**:
    **References.** An input may name a value an earlier step produced — `{"$fromStep": 2, "$fromPath": "SynthesisTask.TaskId"}` — resolved against the *candidate's* own answers. Without this a trace cannot express read-after-create for any generated identifier, because the recording holds the identifier the reference issued and the candidate issues a different one. Recordings written before this existed avoided the problem by using caller-chosen names, which meant read-after-create was silently ungated.
 
    **Superseded steps.** A step may carry `superseded: <reason>`, saying its recorded output is known to be wrong and is deliberately not matched — most often because the operation's own output shape (`declared`) contradicts what the pack returned (`authored`). The step still runs, so the state behind later steps is real, and the outcome class is still compared. This is a hole in the gate by construction, so it is a visible one: every superseded step is logged with its reason on every run, and the count is reported beside the result. A recording that accumulates them has stopped gating much.
+
+   **Re-cut steps.** A step may instead carry `recut: <reason>`, saying its recorded output was replaced with the reference's documented behavior, cited in the reason. Unlike a superseded step it is still compared in full: the hole is not in the gate but in the pack, and the recording now says what the reference says rather than what the pack did. The reasons are logged on every run beside the superseded ones, for the same reason. `RECUT_SPEC=<file> go test ./internal/equivalence/ -run TestRecut` rewrites the named steps from the bundle's own answers, so a re-cut is a bundle change plus a cited decision, never a hand-edited expectation.
 3. Wave order — **hard-first spike, easy-first mass**: wave 0 proves the schema ceiling (shield + memorydb + sqs + sns/kms) and then **freezes schema v1**; wave 1 mass-extracts the ~117 trivial packs in parallel with zero engine churn; wave 2 the ~19 medium; wave 3 the hard dozen, where "extracted" is defined as *B-IR shell + fat moved-verbatim primitive* — always mechanically completable, never "DynamoDB in YAML."
 4. When probed evidence contradicts a pack, **B-IR follows the corpus**, the legacy expectation is updated citing the cassette hash, and the divergence lands in the behavioral changelog. Equivalence gates the migration; the corpus gates the truth.
 

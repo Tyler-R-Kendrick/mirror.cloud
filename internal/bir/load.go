@@ -103,6 +103,11 @@ func Load(fsys fs.FS, dir string, svc *model.Service) (*Service, error) {
 			dir, out.ServiceID, svc.ID)
 	}
 
+	// Shorthand first, so the validator and everything after it see only
+	// the long form it stands for.
+	if err := expandCrud(out); err != nil {
+		return nil, err
+	}
 	if err := Validate(out, svc); err != nil {
 		return nil, err
 	}

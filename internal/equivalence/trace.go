@@ -73,7 +73,25 @@ type StepEntry struct {
 	// This is a hole in the gate by construction. It is a visible, reviewable,
 	// individually-justified hole, which is the most a two-tier oracle can
 	// offer: equivalence gates the migration, evidence gates the truth.
+	//
+	// It is the wrong tool when the evidence says what the answer IS. A
+	// superseded step is no longer compared, so the behavior the evidence
+	// established is not gated either; Recut is for that case.
 	Superseded string `json:"superseded,omitempty"`
+	// Recut states that this step's expectation was replaced -- output or
+	// fault -- with the documented behavior of the real service, and why,
+	// citing what was consulted. Unlike Superseded, the step stays fully
+	// compared: the expectation is the truth as best established, and the
+	// gate enforces it from here on.
+	//
+	// The fear behind Superseded's doc is real, and this is not an exception
+	// to it: an expectation is never re-cut to whatever the bundle happened
+	// to produce, only to what the reference says, with the reason written
+	// here so a reviewer can check the citation rather than the diff. Every
+	// recut is reported on every run, the same as every superseded step, for
+	// the same reason -- the only defence against a recording drifting toward
+	// its candidate is having to read what changed.
+	Recut string `json:"recut,omitempty"`
 	// SupersededMembers states, per output path, why that one member is not
 	// compared. It is the narrow form of Superseded and the one to reach for
 	// first: a pack that answers a member its response shape does not declare
@@ -208,6 +226,9 @@ func (f *File) Superseded() map[int]string {
 	for i, e := range f.Steps {
 		if e.Superseded != "" {
 			out[i] = e.Superseded
+		}
+		if e.Recut != "" {
+			out[i] = strings.TrimSpace(out[i] + "\n  re-cut to the reference: " + e.Recut)
 		}
 		// A per-member exemption is a hole in the gate too, a smaller one, and
 		// it is reported the same way for the same reason: the only defence

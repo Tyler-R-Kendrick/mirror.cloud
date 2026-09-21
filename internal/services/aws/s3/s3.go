@@ -2476,7 +2476,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		if u.checksumType == "COMPOSITE" {
 			objectChecksum = checksumValue(checksum.input, partChecksums) + fmt.Sprintf("-%d", len(parts))
 		}
-		if supplied := requestCondition(req, checksum.input, checksum.header); supplied != "" && supplied != objectChecksum {
+		if supplied := requestCondition(req, checksum.input, checksum.header); u.checksumType == "FULL_OBJECT" && supplied != "" && supplied != objectChecksum {
 			return nil, &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 		for _, other := range checksums {

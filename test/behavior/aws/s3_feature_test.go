@@ -292,7 +292,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		res.Body.Close()
 		res = do(http.MethodPut, "/multipart-composite-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("checked"), "")
-		etag := res.Header.Get("ETag")
+		etag, partChecksum := res.Header.Get("ETag"), res.Header.Get("x-amz-checksum-crc32")
 		res.Body.Close()
 		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
 		res = do(http.MethodPost, "/multipart-composite-bdd/object?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
@@ -300,6 +300,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(fault, []byte("missing for part 1")) {
 			t.Fatalf("missing composite checksum: %d %s", res.StatusCode, fault)
+		}
+		manifest = []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag><ChecksumCRC32>` + partChecksum + `</ChecksumCRC32></Part></CompleteMultipartUpload>`)
+		complete, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-composite-bdd/object?uploadId="+url.QueryEscape(created.UploadID), bytes.NewReader(manifest))
+		complete.Header.Set("Authorization", auth)
+		complete.Header.Set("x-amz-checksum-crc32", "AA==")
+		res, err = http.DefaultClient.Do(complete)
+		if err != nil {
+			t.Fatal(err)
+		}
+		completed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(completed, []byte("<ChecksumCRC32>")) || bytes.Contains(completed, []byte("<ChecksumCRC32>AA==</ChecksumCRC32>")) {
+			t.Fatalf("ignored composite aggregate: %d %s", res.StatusCode, completed)
 		}
 	})
 

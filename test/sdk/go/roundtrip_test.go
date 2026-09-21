@@ -481,6 +481,18 @@ func TestS3MultipartContract(t *testing.T) {
 	if response.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(fault, []byte("missing for part 1")) {
 		t.Fatalf("missing composite checksum: %d %s", response.StatusCode, fault)
 	}
+	manifest = "<CompleteMultipartUpload><Part><ETag>" + part.Header.Get("ETag") + "</ETag><PartNumber>1</PartNumber><ChecksumCRC32>" + part.Header.Get("x-amz-checksum-crc32") + "</ChecksumCRC32></Part></CompleteMultipartUpload>"
+	request, _ = http.NewRequest(http.MethodPost, ts.URL+"/multipart-contract/composite?uploadId="+url.QueryEscape(upload.UploadID), strings.NewReader(manifest))
+	request.Header.Set("x-amz-checksum-crc32", "AA==")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || !bytes.Contains(completed, []byte("<ChecksumCRC32>")) || bytes.Contains(completed, []byte("<ChecksumCRC32>AA==</ChecksumCRC32>")) {
+		t.Fatalf("ignored composite aggregate: %d %s", response.StatusCode, completed)
+	}
 	createPart := func(key string) (string, string) {
 		_, initiated := do(http.MethodPost, "/multipart-contract/"+key+"?uploads", "")
 		if err := xml.Unmarshal(initiated, &upload); err != nil {

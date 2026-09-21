@@ -390,7 +390,12 @@ func TestConcurrentListMultipartUploadsRemainsPageable(t *testing.T) {
 					return
 				}
 				uploads := response.Output["Uploads"].([]any)
-				if len(uploads) == 0 || len(uploads) > 3 || response.Output["NextKeyMarker"] != "prefix/key" || response.Output["NextUploadIdMarker"] != uploads[len(uploads)-1].(map[string]any)["UploadId"] {
+				if len(uploads) == 0 {
+					errs <- fmt.Errorf("empty multipart page = %#v", response.Output)
+					return
+				}
+				first := uploads[0].(map[string]any)
+				if len(uploads) > 3 || response.Output["NextKeyMarker"] != "prefix/key" || response.Output["NextUploadIdMarker"] != uploads[len(uploads)-1].(map[string]any)["UploadId"] || first["ChecksumAlgorithm"] != "CRC64NVME" || first["ChecksumType"] != "FULL_OBJECT" || first["Initiator"].(map[string]any)["DisplayName"] != "webfile" {
 					errs <- fmt.Errorf("multipart page = %#v", response.Output)
 					return
 				}
@@ -462,7 +467,7 @@ func TestConcurrentListPartsRemainsPageable(t *testing.T) {
 					return
 				}
 			}
-			if len(parts) == 0 && response.Output["NextPartNumberMarker"] != 0 || len(parts) > 0 && response.Output["NextPartNumberMarker"] != parts[len(parts)-1].(map[string]any)["PartNumber"] {
+			if len(parts) == 0 && response.Output["NextPartNumberMarker"] != 0 || len(parts) > 0 && response.Output["NextPartNumberMarker"] != parts[len(parts)-1].(map[string]any)["PartNumber"] || response.Output["ChecksumAlgorithm"] != "CRC64NVME" || response.Output["ChecksumType"] != "FULL_OBJECT" || response.Output["Initiator"].(map[string]any)["DisplayName"] != "webfile" {
 				errs <- fmt.Errorf("parts marker: %#v", response.Output)
 				return
 			}

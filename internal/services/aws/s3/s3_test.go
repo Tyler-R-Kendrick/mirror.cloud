@@ -5399,7 +5399,7 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "k"}, nil)
 	id, _ := created.Output["UploadId"].(string)
 	empty := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "MaxParts": 0}, nil).Output
-	if len(empty["Parts"].([]any)) != 0 || empty["MaxParts"] != 1000 || empty["NextPartNumberMarker"] != 0 || asMapForTest(empty["Initiator"])["ID"] != "123456789012" || asMapForTest(empty["Owner"])["ID"] != "123456789012" {
+	if len(empty["Parts"].([]any)) != 0 || empty["MaxParts"] != 1000 || empty["NextPartNumberMarker"] != 0 || asMapForTest(empty["Initiator"])["ID"] != "123456789012" || asMapForTest(empty["Initiator"])["DisplayName"] != "webfile" || asMapForTest(empty["Owner"])["ID"] != "123456789012" {
 		t.Fatalf("empty ListParts %v", empty)
 	}
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "PartNumber": 1}, []byte("AAA"))
@@ -5453,6 +5453,10 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	uploads, _ := ups.Output["Uploads"].([]any)
 	if len(uploads) != 2 {
 		t.Fatalf("ListMultipartUploads %v", ups.Output)
+	}
+	firstUpload, secondUpload := asMapForTest(uploads[0]), asMapForTest(uploads[1])
+	if firstUpload["Key"] != "k" || firstUpload["ChecksumAlgorithm"] != "CRC64NVME" || firstUpload["ChecksumType"] != "FULL_OBJECT" || asMapForTest(firstUpload["Initiator"])["DisplayName"] != "webfile" || secondUpload["Key"] != "paged" || secondUpload["ChecksumAlgorithm"] != "CRC32" || secondUpload["ChecksumType"] != "COMPOSITE" || asMapForTest(secondUpload["Initiator"])["DisplayName"] != "webfile" {
+		t.Fatalf("ListMultipartUploads metadata %v", uploads)
 	}
 	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
 	mustInvoke(t, p, "AbortMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "paged", "UploadId": pagedID}, nil)

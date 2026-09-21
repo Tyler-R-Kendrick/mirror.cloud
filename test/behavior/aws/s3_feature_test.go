@@ -223,6 +223,12 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(body, []byte("<NextKeyMarker></NextKeyMarker>")) || !bytes.Contains(body, []byte("<NextUploadIdMarker></NextUploadIdMarker>")) {
 			t.Fatalf("first multipart page %d %s", res.StatusCode, body)
 		}
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2Ffile1", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ChecksumAlgorithm>CRC64NVME</ChecksumAlgorithm>")) || !bytes.Contains(body, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) || !bytes.Contains(body, []byte("<DisplayName>webfile</DisplayName>")) {
+			t.Fatalf("multipart listing metadata %d %s", res.StatusCode, body)
+		}
 		res = do(http.MethodGet, "/multipart-list-bdd?uploads&key-marker=wrong&upload-id-marker="+url.QueryEscape(firstID), nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
@@ -253,7 +259,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			return string(body)
 		}
 		empty := list("part-number-marker=&max-parts=")
-		if !strings.Contains(empty, "<PartNumberMarker>0</PartNumberMarker>") || !strings.Contains(empty, "<NextPartNumberMarker>0</NextPartNumberMarker>") || !strings.Contains(empty, "<MaxParts>1000</MaxParts>") || !strings.Contains(empty, "<Initiator><ID>000000000000</ID></Initiator>") || !strings.Contains(empty, "<Owner><ID>000000000000</ID></Owner>") {
+		if !strings.Contains(empty, "<PartNumberMarker>0</PartNumberMarker>") || !strings.Contains(empty, "<NextPartNumberMarker>0</NextPartNumberMarker>") || !strings.Contains(empty, "<MaxParts>1000</MaxParts>") || !strings.Contains(empty, "<Initiator>") || !strings.Contains(empty, "<DisplayName>webfile</DisplayName>") || !strings.Contains(empty, "<Owner><ID>000000000000</ID></Owner>") {
 			t.Fatalf("empty parts page %s", empty)
 		}
 		res = do(http.MethodPut, "/parts-list-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "")

@@ -4,6 +4,7 @@
     "ChecksumAlgorithm": "CRC64NVME",
     "ChecksumType": "FULL_OBJECT",
     "Initiator": {
+      "DisplayName": "webfile",
       "ID": "123456789012"
     },
     "IsTruncated": false,
@@ -23,6 +24,7 @@
     "ChecksumAlgorithm": "CRC64NVME",
     "ChecksumType": "FULL_OBJECT",
     "Initiator": {
+      "DisplayName": "webfile",
       "ID": "123456789012"
     },
     "IsTruncated": false,
@@ -42,6 +44,7 @@
     "ChecksumAlgorithm": "CRC64NVME",
     "ChecksumType": "FULL_OBJECT",
     "Initiator": {
+      "DisplayName": "webfile",
       "ID": "123456789012"
     },
     "IsTruncated": true,
@@ -69,6 +72,7 @@
     "ChecksumAlgorithm": "CRC64NVME",
     "ChecksumType": "FULL_OBJECT",
     "Initiator": {
+      "DisplayName": "webfile",
       "ID": "123456789012"
     },
     "IsTruncated": false,

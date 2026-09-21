@@ -64,6 +64,7 @@ type mpu struct {
 	precondition                      bool
 	objectMetadata                    map[string]any
 	websiteRedirectLocation           string
+	initiator                         map[string]any
 	acl                               map[string]any
 	lockDocs                          map[string][]byte
 	parts                             map[int]multipartPart
@@ -2237,7 +2238,7 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	_ = json.Unmarshal(raw, &current)
 	precondition = precondition && !truthy(current["deleteMarker"])
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, precondition: precondition, objectMetadata: requestObjectMetadata(req), websiteRedirectLocation: requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location"), acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, precondition: precondition, objectMetadata: requestObjectMetadata(req), websiteRedirectLocation: requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location"), initiator: map[string]any{"ID": req.Identity.Account, "DisplayName": "webfile"}, acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	h := http.Header{}
 	h.Set("x-amz-checksum-algorithm", algorithm)
@@ -2554,7 +2555,7 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 		"Bucket": b, "Key": key, "UploadId": id, "PartNumberMarker": marker,
 		"MaxParts": maxParts, "IsTruncated": truncated, "Parts": parts, "StorageClass": u.storageClass,
 		"ChecksumAlgorithm": u.checksumAlgorithm, "ChecksumType": u.checksumType,
-		"Initiator": identity, "Owner": identity, "NextPartNumberMarker": 0,
+		"Initiator": cloneMap(u.initiator), "Owner": identity, "NextPartNumberMarker": 0,
 	}
 	if len(numbers) > 0 {
 		out["NextPartNumberMarker"] = numbers[len(numbers)-1]
@@ -2599,12 +2600,15 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 
-	type uploadListing struct{ key, id, initiated, storageClass string }
+	type uploadListing struct {
+		key, id, initiated, storageClass, checksumAlgorithm, checksumType string
+		initiator                                                         map[string]any
+	}
 	p.mu.Lock()
 	uploads := make([]uploadListing, 0, len(p.mpu))
 	for id, upload := range p.mpu {
 		if upload.bucket == bucket && strings.HasPrefix(upload.key, prefix) {
-			uploads = append(uploads, uploadListing{upload.key, id, upload.initiated, upload.storageClass})
+			uploads = append(uploads, uploadListing{upload.key, id, upload.initiated, upload.storageClass, upload.checksumAlgorithm, upload.checksumType, cloneMap(upload.initiator)})
 		}
 	}
 	p.mu.Unlock()
@@ -2659,15 +2663,19 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 				continue
 			}
 		}
-		identity := map[string]any{"ID": req.Identity.Account}
+		owner := map[string]any{"ID": req.Identity.Account}
 		initiated := upload.initiated
 		if parsed, err := time.Parse(time.RFC3339Nano, initiated); err == nil {
 			initiated = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
-		entries = append(entries, entry{key: upload.key, uploadID: upload.id, row: map[string]any{
+		row := map[string]any{
 			"Key": upload.key, "UploadId": upload.id, "Initiated": initiated,
-			"StorageClass": upload.storageClass, "Initiator": identity, "Owner": identity,
-		}})
+			"StorageClass": upload.storageClass, "Initiator": upload.initiator, "Owner": owner,
+		}
+		if upload.checksumAlgorithm != "" {
+			row["ChecksumAlgorithm"], row["ChecksumType"] = upload.checksumAlgorithm, upload.checksumType
+		}
+		entries = append(entries, entry{key: upload.key, uploadID: upload.id, row: row})
 	}
 	truncated := len(entries) > maxUploads
 	if truncated {

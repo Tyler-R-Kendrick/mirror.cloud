@@ -37,8 +37,11 @@
     "UploadIdMarker": "",
     "Uploads": [
       {
+        "ChecksumAlgorithm": "CRC64NVME",
+        "ChecksumType": "FULL_OBJECT",
         "Initiated": "1970-01-01T00:00:00.000Z",
         "Initiator": {
+          "DisplayName": "webfile",
           "ID": "123456789012"
         },
         "Key": "folder/file1",

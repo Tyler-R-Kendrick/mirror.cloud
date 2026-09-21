@@ -1,0 +1,53 @@
+{
+  "first": {
+    "Bucket": "multipart-list-golden",
+    "CommonPrefixes": [
+      {
+        "Prefix": "folder/a/"
+      }
+    ],
+    "Delimiter": "/",
+    "IsTruncated": true,
+    "KeyMarker": "",
+    "MaxUploads": 1,
+    "NextKeyMarker": "",
+    "NextUploadIdMarker": "",
+    "Prefix": "folder/",
+    "UploadIdMarker": "",
+    "Uploads": []
+  },
+  "invalid": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "upload-id-marker",
+      "ArgumentValue": "33f6fc5d83b79b8e"
+    },
+    "message": "Invalid uploadId marker"
+  },
+  "next": {
+    "Bucket": "multipart-list-golden",
+    "CommonPrefixes": [],
+    "Delimiter": "/",
+    "IsTruncated": true,
+    "KeyMarker": "folder/a/",
+    "MaxUploads": 1,
+    "NextKeyMarker": "folder/file1",
+    "NextUploadIdMarker": "9c8e2cb00724681e",
+    "Prefix": "folder/",
+    "UploadIdMarker": "",
+    "Uploads": [
+      {
+        "Initiated": "1970-01-01T00:00:00.000Z",
+        "Initiator": {
+          "ID": "123456789012"
+        },
+        "Key": "folder/file1",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "StorageClass": "STANDARD",
+        "UploadId": "9c8e2cb00724681e"
+      }
+    ]
+  }
+}

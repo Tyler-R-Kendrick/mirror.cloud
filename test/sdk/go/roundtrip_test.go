@@ -1874,11 +1874,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create multipart copy: %v", err)
 	}
+	otherUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
+	if err != nil {
+		t.Fatalf("create second multipart copy: %v", err)
+	}
 	listedUploads, err := s3c.ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{
 		Bucket: aws.String("sdk"), Prefix: aws.String("range-"), MaxUploads: aws.Int32(1),
 	})
-	if err != nil || len(listedUploads.Uploads) != 1 || aws.ToString(listedUploads.Uploads[0].Key) != "range-copy" || aws.ToString(listedUploads.Uploads[0].UploadId) != aws.ToString(upload.UploadId) {
+	if err != nil || len(listedUploads.Uploads) != 1 || aws.ToString(listedUploads.Uploads[0].Key) != "range-copy" || aws.ToString(listedUploads.NextKeyMarker) != "range-copy" || aws.ToString(listedUploads.NextUploadIdMarker) == "" {
 		t.Fatalf("list multipart uploads: %#v %v", listedUploads, err)
+	}
+	nextUploads, err := s3c.ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{Bucket: aws.String("sdk"), Prefix: aws.String("range-"), MaxUploads: aws.Int32(1), KeyMarker: listedUploads.NextKeyMarker, UploadIdMarker: listedUploads.NextUploadIdMarker})
+	if err != nil || len(nextUploads.Uploads) != 1 || aws.ToString(nextUploads.Uploads[0].UploadId) == aws.ToString(listedUploads.Uploads[0].UploadId) || aws.ToString(nextUploads.NextKeyMarker) != "range-copy" || aws.ToString(nextUploads.NextUploadIdMarker) != aws.ToString(nextUploads.Uploads[0].UploadId) || aws.ToString(nextUploads.Uploads[0].UploadId) != aws.ToString(upload.UploadId) && aws.ToString(nextUploads.Uploads[0].UploadId) != aws.ToString(otherUpload.UploadId) {
+		t.Fatalf("next multipart uploads: %#v %v", nextUploads, err)
+	}
+	if _, err := s3c.ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{Bucket: aws.String("sdk"), KeyMarker: aws.String("wrong"), UploadIdMarker: upload.UploadId}); err == nil || !strings.Contains(err.Error(), "Invalid uploadId marker") {
+		t.Fatalf("mismatched multipart marker: %v", err)
 	}
 	if _, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
 		t.Fatalf("list parts mismatched expected owner: %v", err)

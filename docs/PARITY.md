@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 447 / 463 (96.5%) |
-| LocalStack S3 test functions not yet traced | 16 / 463 (3.5%) |
+| LocalStack S3 test functions explicitly traced | 463 / 463 (100%) |
+| LocalStack S3 test functions not yet traced | 0 / 463 (0%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -303,6 +303,22 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3SSECEncryption::test_multipart_upload_sse_c_validation` | Multipart and part-copy validation rejects missing, changed, or malformed customer-key parameters without storing a part; fuzz, chaos, snapshots, and mutants pin the faults | Mapped and race-clean |
 | `test_s3.py::TestS3SSECEncryption::test_sse_c_with_versioning` | Customer-key requirements and MD5 metadata are isolated per object version, including current and explicit-version reads | Mapped and green |
 | `test_s3.py::TestS3SSECEncryption::test_put_object_default_checksum_with_sse_c` | SSE-C uses the shared checksum path, so computed/default checksum metadata remains available only after successful customer-key validation | Mapped and green |
+| `test_s3.py::TestS3PutObjectChecksum::test_put_object_checksum` | PutObject checksum atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage validates CRC32, CRC32C, CRC64NVME, SHA1, SHA256, and XXHASH64 inputs and response metadata | Mapped and race-clean |
+| `test_s3.py::TestS3PutObjectChecksum::test_s3_get_object_checksum` | Checksum-enabled GET/HEAD and GetObjectAttributes return the persisted algorithm value while ordinary reads omit opt-in checksum fields | Mapped and race-clean |
+| `test_s3.py::TestS3PutObjectChecksum::test_s3_checksum_with_content_encoding` | Transport `aws-chunked` encoding is stripped after verification while caller content encodings and the verified checksum remain attached to the object | Mapped and race-clean |
+| `test_s3.py::TestS3PutObjectChecksum::test_s3_checksum_no_algorithm` | A supplied checksum value without a matching algorithm is validated and stored, while writes with neither field omit checksum metadata | Mapped and green |
+| `test_s3.py::TestS3PutObjectChecksum::test_s3_checksum_no_automatic_sdk_calculation` | Raw HTTP checksum coverage verifies Mirror does not depend on SDK-side default calculation and rejects malformed or mismatched caller values before storage | Mapped and green |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_complete_multipart_parts_checksum_composite` | Composite multipart coverage validates per-part checksums, ordered manifests, aggregate checksum construction, completion headers, and subsequent checksum-enabled reads | Mapped and race-clean |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_multipart_checksum_type_compatibility` | Multipart initiation and completion enforce the supported algorithm/type combinations, including CRC64NVME full-object and composite SHA/CRC modes | Mapped and green |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_multipart_checksum_type_default_for_checksum` | Explicit CRC64NVME defaults to `FULL_OBJECT`; other explicit algorithms default to `COMPOSITE`, and the selected type is exposed consistently | Mapped and green |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_multipart_upload_part_checksum_exception` | UploadPart rejects malformed, mismatched, conflicting, or wrong-algorithm checksums without persisting the part; atomic, fuzz, chaos, snapshot, and mutation checks pin exact faults | Mapped and race-clean |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_multipart_parts_checksum_exceptions_composite` | Composite completion rejects absent or incorrect part checksum declarations, bad aggregate values, and incompatible algorithms without publishing an object | Mapped and race-clean |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_complete_multipart_parts_checksum_full_object` | Full-object multipart completion combines the assembled bytes, validates the caller checksum, and returns/persists the final checksum and type | Mapped and race-clean |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_multipart_parts_checksum_exceptions_full_object` | Full-object mode rejects part or completion checksum conflicts and bad digests atomically while leaving the upload available for correction | Mapped and race-clean |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_complete_multipart_parts_checksum_default` | Multipart uploads without an initiated checksum algorithm omit checksum/type fields even when an individual part supplied one | Mapped and green |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_complete_multipart_parts_checksum_full_object_default` | CRC64NVME initiation without an explicit type follows the full-object default through list, completion, HEAD, GET, and attribute responses | Mapped and green |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_multipart_size_validation` | Completion enforces S3's minimum size for every non-final part and returns `EntityTooSmall` without replacing an existing object | Mapped and race-clean |
+| `test_s3.py::TestS3MultipartUploadChecksum::test_multipart_upload_part_copy_checksum` | UploadPartCopy calculates and returns the initiated algorithm's checksum for the selected source bytes and includes it in validated completion | Mapped and race-clean |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |

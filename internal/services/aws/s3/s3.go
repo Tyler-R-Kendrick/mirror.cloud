@@ -61,6 +61,7 @@ type mpu struct {
 	serverSideEncryption, sseKMSKeyID string
 	sseCustomerKeyMD5                 string
 	bucketKeyEnabled                  bool
+	precondition                      bool
 	acl                               map[string]any
 	lockDocs                          map[string][]byte
 	parts                             map[int]multipartPart
@@ -2229,8 +2230,12 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 	}
 	id := p.deps.Rand.Hex(16)
+	raw, precondition, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
+	var current map[string]any
+	_ = json.Unmarshal(raw, &current)
+	precondition = precondition && !truthy(current["deleteMarker"])
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, precondition: precondition, acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	h := http.Header{}
 	h.Set("x-amz-checksum-algorithm", algorithm)
@@ -2353,12 +2358,32 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	if !matchesMultipartUpload(u, req) {
 		return nil, noSuchUpload(id)
 	}
-	if match, noneMatch := requestCondition(req, "IfMatch", "If-Match"), requestCondition(req, "IfNoneMatch", "If-None-Match"); match != "" && noneMatch != "" {
+	match, noneMatch := requestCondition(req, "IfMatch", "If-Match"), requestCondition(req, "IfNoneMatch", "If-None-Match")
+	if match != "" && noneMatch != "" {
 		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-Match,If-None-Match", "additionalMessage": "Multiple conditional request headers present in the request"}}
 	} else if noneMatch != "" && noneMatch != "*" {
 		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
 	} else if match == "*" {
 		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+	}
+	if noneMatch == "*" || match != "" {
+		raw, exists, _ := p.col(req, "objects").Get(ctx, bucket+"/"+key)
+		var current map[string]any
+		_ = json.Unmarshal(raw, &current)
+		exists = exists && !truthy(current["deleteMarker"])
+		if noneMatch == "*" && exists {
+			return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match"}}
+		} else if noneMatch == "*" && u.precondition {
+			return nil, &spi.Fault{Code: "ConditionalRequestConflict", Message: "The conditional request cannot succeed due to a conflicting operation against this resource.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match", "Key": key}}
+		} else if match != "" && !exists {
+			return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"Key": key}}
+		} else if match != "" && !etagMatches(match, str(current["etag"])) {
+			return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-Match"}}
+		} else if initiated, initiatedErr := time.Parse(time.RFC3339Nano, u.initiated); match != "" && initiatedErr == nil {
+			if modified, modifiedErr := http.ParseTime(str(current["mtime"])); modifiedErr == nil && initiated.Before(modified) {
+				return nil, &spi.Fault{Code: "ConditionalRequestConflict", Message: "The conditional request cannot succeed due to a conflicting operation against this resource.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"Condition": "If-Match", "Key": key}}
+			}
+		}
 	}
 	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
 	if len(parts) == 0 {

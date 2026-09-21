@@ -1736,6 +1736,59 @@ func FuzzCompleteMultipartPreconditionFaults(f *testing.F) {
 	})
 }
 
+func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
+	for mode := uint8(0); mode < 5; mode++ {
+		f.Add([]byte("part"), mode)
+	}
+	f.Fuzz(func(t *testing.T, body []byte, mode uint8) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		mode %= 5
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		const bucket, key = "complete-conditional-fuzz", "key"
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		put := func(value []byte) string {
+			return mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, value).Headers.Get("ETag")
+		}
+		if mode == 1 || mode == 3 || mode == 4 {
+			put([]byte("old"))
+		}
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, body)
+		input := completeInput(uploadID, completedPart(1, part))
+		code, message, status, condition, conflictKey := "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, "If-Match", ""
+		switch mode {
+		case 0:
+			input["IfMatch"] = `"missing"`
+			code, message, status, condition, conflictKey = "NoSuchKey", "The specified key does not exist.", http.StatusNotFound, "", key
+		case 1:
+			input["IfMatch"] = `"wrong"`
+		case 2:
+			put([]byte("created"))
+			input["IfNoneMatch"], condition = "*", "If-None-Match"
+		case 3:
+			mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": key}, nil)
+			input["IfNoneMatch"] = "*"
+			code, message, status, condition, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, "If-None-Match", key
+		case 4:
+			_ = deps.Clock.Advance(2 * time.Second)
+			input["IfMatch"] = put([]byte("changed"))
+			code, message, status, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, key
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fault != "client" || condition != "" && fault.Fields["Condition"] != condition || conflictKey != "" && fault.Fields["Key"] != conflictKey {
+			t.Fatalf("mode %d fault = %#v", mode, fault)
+		}
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID}, nil)
+		if parts, _ := listed.Output["Parts"].([]any); len(parts) != 1 {
+			t.Fatalf("mode %d parts = %#v", mode, listed.Output["Parts"])
+		}
+	})
+}
+
 func FuzzUploadPartContentMD5(f *testing.F) {
 	f.Add([]byte("part"), "!", false)
 	f.Add([]byte("part"), "AAAAAAAAAAAAAAAAAAAAAA==", false)

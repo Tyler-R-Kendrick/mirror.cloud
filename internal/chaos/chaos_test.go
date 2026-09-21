@@ -728,6 +728,97 @@ func TestConcurrentCompleteMultipartPreconditionFaultsRemainModeled(t *testing.T
 	}
 }
 
+func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "complete-conditional-chaos"}, "")
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, mode := fmt.Sprintf("key-%d", i), i%5
+			put := func(body string) (string, error) {
+				response, err := call("PutObject", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, body)
+				if err != nil {
+					return "", err
+				}
+				return response.Headers.Get("ETag"), nil
+			}
+			if mode == 1 || mode == 3 || mode == 4 {
+				if _, err := put("old"); err != nil {
+					errs <- err
+					return
+				}
+			}
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, "part")
+			if err != nil {
+				errs <- err
+				return
+			}
+			input := map[string]any{"Bucket": "complete-conditional-chaos", "Key": key, "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}
+			code, message, status, condition, conflictKey := "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, "If-Match", ""
+			switch mode {
+			case 0:
+				input["IfMatch"] = `"missing"`
+				code, message, status, condition, conflictKey = "NoSuchKey", "The specified key does not exist.", http.StatusNotFound, "", key
+			case 1:
+				input["IfMatch"] = `"wrong"`
+			case 2:
+				_, err = put("created")
+				input["IfNoneMatch"], condition = "*", "If-None-Match"
+			case 3:
+				_, err = call("DeleteObject", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, "")
+				input["IfNoneMatch"] = "*"
+				code, message, status, condition, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, "If-None-Match", key
+			case 4:
+				_ = deps.Clock.Advance(2 * time.Second)
+				input["IfMatch"], err = put("changed")
+				code, message, status, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, key
+			}
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, err = call("CompleteMultipartUpload", input, "")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fault != "client" || condition != "" && fault.Fields["Condition"] != condition || conflictKey != "" && fault.Fields["Key"] != conflictKey {
+				errs <- fmt.Errorf("mode %d fault = %#v", mode, fault)
+				return
+			}
+			listed, err := call("ListParts", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key, "UploadId": uploadID}, "")
+			if err != nil || len(listed.Output["Parts"].([]any)) != 1 {
+				errs <- fmt.Errorf("mode %d rejected completion changed upload = %#v, err=%v", mode, listed, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentUploadPartContentMD5FaultsRemainModeled(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

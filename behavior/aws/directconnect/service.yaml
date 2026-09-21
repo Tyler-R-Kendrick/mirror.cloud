@@ -33,16 +33,7 @@ resources:
       connectionsBandwidth: "'connectionsBandwidth' in input ? string(input.connectionsBandwidth) : ''"
 
 operations:
-  CreateConnection:
-    effects:
-      - create: { resource: connection }
-    output:
-      connectionId: rec.connectionId
-      connectionName: rec.connectionName
-      bandwidth: rec.bandwidth
-      location: rec.location
-      connectionState: rec.connectionState
-
+  CreateConnection: {create: {resource: connection}}
   # Describe-one-or-describe-all: a connectionId narrows to that connection,
   # and an absent one answers with an empty list rather than a fault.
   DescribeConnections:
@@ -57,15 +48,7 @@ operations:
       - delete: { resource: connection, key: "string(input.connectionId)", missing: ignore }
     output: {}
 
-  CreateLag:
-    effects:
-      - create: { resource: lag }
-    output:
-      lagId: rec.lagId
-      lagName: rec.lagName
-      lagState: rec.lagState
-      connectionsBandwidth: rec.connectionsBandwidth
-
+  CreateLag: {create: {resource: lag}}
   DescribeLags:
     list:
       resource: lag

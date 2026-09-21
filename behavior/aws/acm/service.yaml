@@ -110,14 +110,7 @@ operations:
     output:
       CertificateArn: rec.CertificateArn
 
-  DescribeCertificate:
-    reads:
-      c: { resource: cert }
-    require:
-      - { cond: c_found, error: NotFound }
-    output:
-      Certificate: c
-
+  DescribeCertificate: {get: {resource: cert, error: NotFound, wrap: Certificate}}
   ListCertificates:
     list: { resource: cert, member: CertificateSummaryList, paginate: model }
     output:

@@ -42,20 +42,8 @@ operations:
       AudioStream: "''"
       RequestCharacters: "size(string(input.Text))"
 
-  StartSpeechSynthesisTask:
-    effects:
-      - create: { resource: task }
-    output:
-      SynthesisTask: rec
-
-  GetSpeechSynthesisTask:
-    reads:
-      rec: { resource: task }
-    require:
-      - { cond: rec_found, error: TaskNotFound }
-    output:
-      SynthesisTask: rec
-
+  StartSpeechSynthesisTask: {create: {resource: task, wrap: SynthesisTask}}
+  GetSpeechSynthesisTask: {get: {resource: task, error: TaskNotFound, wrap: SynthesisTask}}
   # SynthesisTask declares no Text member: the text a task was given is kept
   # on the record so GetSpeechSynthesisTask can be served from it, and dropped
   # from the listing, which is the only place the model has no room for it.

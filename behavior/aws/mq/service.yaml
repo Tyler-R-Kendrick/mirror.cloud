@@ -149,10 +149,7 @@ operations:
   ListConfigurations:
     list: { resource: configuration, member: Configurations, paginate: model }
 
-  DeleteConfiguration:
-    effects:
-      - delete: { resource: configuration, missing: ignore }
-
+  DeleteConfiguration: {delete: {resource: configuration, missing: ignore}}
   DescribeBrokerEngineTypes:
     output:
       BrokerEngineTypes: >

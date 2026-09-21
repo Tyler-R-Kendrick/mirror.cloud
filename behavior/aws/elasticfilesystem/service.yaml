@@ -50,16 +50,7 @@ errors:
     fault: client
 
 operations:
-  CreateFileSystem:
-    effects:
-      - create: { resource: filesystem }
-    output:
-      FileSystemId: rec.FileSystemId
-      LifeCycleState: rec.LifeCycleState
-      OwnerId: rec.OwnerId
-      FileSystemArn: rec.FileSystemArn
-      CreationToken: rec.CreationToken
-
+  CreateFileSystem: {create: {resource: filesystem}}
   # Named or not: one file system when FileSystemId is given, the page when it
   # is not, which is the shape almost every AWS Describe* has.
   DescribeFileSystems:
@@ -69,19 +60,8 @@ operations:
       key: "'FileSystemId' in input ? string(input.FileSystemId) : ''"
       paginate: model
 
-  DeleteFileSystem:
-    effects:
-      - delete: { resource: filesystem, key: "string(input.FileSystemId)", missing: ignore }
-
-  CreateMountTarget:
-    effects:
-      - create: { resource: mounttarget }
-    output:
-      MountTargetId: rec.MountTargetId
-      FileSystemId: rec.FileSystemId
-      LifeCycleState: rec.LifeCycleState
-      SubnetId: rec.SubnetId
-
+  DeleteFileSystem: {delete: {resource: filesystem, key: string(input.FileSystemId), missing: ignore}}
+  CreateMountTarget: {create: {resource: mounttarget}}
   DescribeMountTargets:
     list:
       resource: mounttarget
@@ -89,18 +69,8 @@ operations:
       key: "'MountTargetId' in input ? string(input.MountTargetId) : ''"
       paginate: model
 
-  DeleteMountTarget:
-    effects:
-      - delete: { resource: mounttarget, key: "string(input.MountTargetId)", missing: ignore }
-
-  CreateAccessPoint:
-    effects:
-      - create: { resource: accesspoint }
-    output:
-      AccessPointId: rec.AccessPointId
-      FileSystemId: rec.FileSystemId
-      LifeCycleState: rec.LifeCycleState
-
+  DeleteMountTarget: {delete: {resource: mounttarget, key: string(input.MountTargetId), missing: ignore}}
+  CreateAccessPoint: {create: {resource: accesspoint}}
   DescribeAccessPoints:
     list:
       resource: accesspoint
@@ -108,10 +78,7 @@ operations:
       key: "'AccessPointId' in input ? string(input.AccessPointId) : ''"
       paginate: model
 
-  DeleteAccessPoint:
-    effects:
-      - delete: { resource: accesspoint, key: "string(input.AccessPointId)", missing: ignore }
-
+  DeleteAccessPoint: {delete: {resource: accesspoint, key: string(input.AccessPointId), missing: ignore}}
 quirks:
   - operation: CreateFileSystem
     note: >

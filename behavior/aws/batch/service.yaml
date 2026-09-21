@@ -62,10 +62,7 @@ operations:
   DescribeComputeEnvironments:
     list: { resource: computeenv, member: computeEnvironments, paginate: model }
 
-  DeleteComputeEnvironment:
-    effects:
-      - delete: { resource: computeenv, key: "string(input.computeEnvironment)", missing: ignore }
-
+  DeleteComputeEnvironment: {delete: {resource: computeenv, key: string(input.computeEnvironment), missing: ignore}}
   CreateJobQueue:
     effects:
       - put: { resource: jobqueue }
@@ -76,25 +73,12 @@ operations:
   DescribeJobQueues:
     list: { resource: jobqueue, member: jobQueues, paginate: model }
 
-  DeleteJobQueue:
-    effects:
-      - delete: { resource: jobqueue, key: "string(input.jobQueue)", missing: ignore }
-
-  RegisterJobDefinition:
-    effects:
-      - put: { resource: jobdefinition }
-    output:
-      jobDefinitionName: rec.jobDefinitionName
-      jobDefinitionArn: rec.jobDefinitionArn
-      revision: rec.revision
-
+  DeleteJobQueue: {delete: {resource: jobqueue, key: string(input.jobQueue), missing: ignore}}
+  RegisterJobDefinition: {put: {resource: jobdefinition}}
   DescribeJobDefinitions:
     list: { resource: jobdefinition, member: jobDefinitions, paginate: model }
 
-  DeregisterJobDefinition:
-    effects:
-      - delete: { resource: jobdefinition, key: "string(input.jobDefinition)", missing: ignore }
-
+  DeregisterJobDefinition: {delete: {resource: jobdefinition, key: string(input.jobDefinition), missing: ignore}}
   SubmitJob:
     effects:
       - create: { resource: job }
@@ -120,10 +104,7 @@ operations:
 
   # Terminating deletes the job rather than moving it to FAILED, so a
   # terminated job cannot be described at all.
-  TerminateJob:
-    effects:
-      - delete: { resource: job, key: "string(input.jobId)", missing: ignore }
-
+  TerminateJob: {delete: {resource: job, key: string(input.jobId), missing: ignore}}
 quirks:
   - operation: SubmitJob
     note: >

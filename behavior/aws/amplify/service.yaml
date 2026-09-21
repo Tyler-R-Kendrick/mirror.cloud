@@ -68,21 +68,11 @@ operations:
     output:
       app: rec
 
-  GetApp:
-    reads:
-      app: { resource: app }
-    require:
-      - { cond: app_found, error: NotFound }
-    output:
-      app: app
-
+  GetApp: {get: {resource: app, error: NotFound, wrap: app}}
   ListApps:
     list: { resource: app, member: apps, paginate: model }
 
-  DeleteApp:
-    effects:
-      - delete: { resource: app, missing: ignore }
-
+  DeleteApp: {delete: {resource: app, missing: ignore}}
   CreateBranch:
     reads:
       app: { resource: app }

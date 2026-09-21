@@ -352,10 +352,7 @@ operations:
     output:
       Summaries: items
 
-  DeleteChangeSet:
-    effects:
-      - delete: { resource: changeset, missing: ignore }
-
+  DeleteChangeSet: {delete: {resource: changeset, missing: ignore}}
   SignalResource:
 
   # --- stack sets ------------------------------------------------------------
@@ -401,10 +398,7 @@ operations:
     output:
       Summaries: items
 
-  DeleteStackSet:
-    effects:
-      - delete: { resource: stackset, missing: ignore }
-
+  DeleteStackSet: {delete: {resource: stackset, missing: ignore}}
   # The four instance operations are one behavior: mint an operation id,
   # store the same record under the operation collection and the instance
   # collection, answer the id.
@@ -757,13 +751,7 @@ operations:
 
   # The pack deletes by TypeName alone: a request carrying only Type deletes
   # the empty key.
-  DeregisterType:
-    effects:
-      - delete:
-          resource: resource_type
-          key: "'TypeName' in input ? string(input.TypeName) : ''"
-          missing: ignore
-
+  DeregisterType: {delete: {resource: resource_type, key: '''TypeName'' in input ? string(input.TypeName) : ''''', missing: ignore}}
   # --- generated templates -------------------------------------------------------
 
   CreateGeneratedTemplate:
@@ -808,10 +796,7 @@ operations:
     output:
       Summaries: items
 
-  DeleteGeneratedTemplate:
-    effects:
-      - delete: { resource: generated_template, missing: ignore }
-
+  DeleteGeneratedTemplate: {delete: {resource: generated_template, missing: ignore}}
   # --- resource scans ------------------------------------------------------------
 
   StartResourceScan:

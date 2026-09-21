@@ -89,10 +89,7 @@ operations:
       ETag: d.Id
 
   # Idempotent, and the distribution's invalidations survive it.
-  DeleteDistribution:
-    effects:
-      - delete: { resource: distribution, missing: ignore }
-
+  DeleteDistribution: {delete: {resource: distribution, missing: ignore}}
   ListDistributions:
     list:
       resource: distribution

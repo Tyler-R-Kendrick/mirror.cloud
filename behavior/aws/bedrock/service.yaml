@@ -46,18 +46,7 @@ operations:
       guardrailArn: rec.guardrailArn
       version: rec.version
 
-  GetGuardrail:
-    reads:
-      gr: { resource: guardrail }
-    require:
-      - { cond: gr_found, error: NotFound }
-    output:
-      guardrailId: gr.guardrailId
-      guardrailArn: gr.guardrailArn
-      name: gr.name
-      status: gr.status
-      version: gr.version
-
+  GetGuardrail: {get: {resource: guardrail, error: NotFound}}
   # GuardrailSummary names a guardrail id and arn, not guardrailId and
   # guardrailArn, so the listed form is not the stored record.
   ListGuardrails:

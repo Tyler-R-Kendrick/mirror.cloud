@@ -62,28 +62,15 @@ operations:
       key: "'MonitorArn' in input ? string(input.MonitorArn) : ''"
       paginate: model
 
-  DeleteAnomalyMonitor:
-    effects:
-      - delete: { resource: monitor, key: "string(input.MonitorArn)", missing: ignore }
-
+  DeleteAnomalyMonitor: {delete: {resource: monitor, key: string(input.MonitorArn), missing: ignore}}
   CreateCostCategoryDefinition:
     effects:
       - put: { resource: costcategory }
     output:
       CostCategoryArn: rec.CostCategoryArn
 
-  DescribeCostCategoryDefinition:
-    reads:
-      c: { resource: costcategory, key: "string(input.CostCategoryArn)" }
-    require:
-      - { cond: c_found, error: NotFound }
-    output:
-      CostCategory: c
-
-  DeleteCostCategoryDefinition:
-    effects:
-      - delete: { resource: costcategory, key: "string(input.CostCategoryArn)", missing: ignore }
-
+  DescribeCostCategoryDefinition: {get: {resource: costcategory, error: NotFound, key: string(input.CostCategoryArn), wrap: CostCategory}}
+  DeleteCostCategoryDefinition: {delete: {resource: costcategory, key: string(input.CostCategoryArn), missing: ignore}}
   GetCostAndUsage:
     output:
       ResultsByTime: >

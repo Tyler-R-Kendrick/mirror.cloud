@@ -70,10 +70,7 @@ operations:
           : ''
       paginate: model
 
-  DeleteDirectory:
-    effects:
-      - delete: { resource: directory, key: "string(input.DirectoryId)", missing: ignore }
-
+  DeleteDirectory: {delete: {resource: directory, key: string(input.DirectoryId), missing: ignore}}
   # A patch rather than a put, so a directory keeps its name and type. The
   # pack read the record, set the alias and wrote it back; when the directory
   # did not exist it wrote a record carrying only the id and the alias, which

@@ -82,10 +82,7 @@ operations:
   ListApplications:
     list: { resource: application, member: Items, paginate: model }
 
-  DeleteApplication:
-    effects:
-      - delete: { resource: application, missing: ignore }
-
+  DeleteApplication: {delete: {resource: application, missing: ignore}}
   CreateEnvironment:
     reads:
       application: { resource: application }

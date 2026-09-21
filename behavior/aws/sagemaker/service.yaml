@@ -89,10 +89,7 @@ operations:
           'InstanceType': n.InstanceType
         })
 
-  DeleteNotebookInstance:
-    effects:
-      - delete: { resource: notebook, missing: ignore }
-
+  DeleteNotebookInstance: {delete: {resource: notebook, missing: ignore}}
   CreateModel:
     effects:
       - put: { resource: model }
@@ -115,10 +112,7 @@ operations:
     output:
       Models: "items.map(m, {'ModelName': m.ModelName})"
 
-  DeleteModel:
-    effects:
-      - delete: { resource: model, missing: ignore }
-
+  DeleteModel: {delete: {resource: model, missing: ignore}}
   CreateEndpointConfig:
     effects:
       - put: { resource: endpointconfig }
@@ -134,10 +128,7 @@ operations:
       EndpointConfigName: "c.EndpointConfigName"
       ProductionVariants: "c.ProductionVariants"
 
-  DeleteEndpointConfig:
-    effects:
-      - delete: { resource: endpointconfig, missing: ignore }
-
+  DeleteEndpointConfig: {delete: {resource: endpointconfig, missing: ignore}}
   CreateEndpoint:
     effects:
       - put: { resource: inferenceendpoint }
@@ -164,10 +155,7 @@ operations:
           'EndpointStatus': e.EndpointStatus
         })
 
-  DeleteEndpoint:
-    effects:
-      - delete: { resource: inferenceendpoint, missing: ignore }
-
+  DeleteEndpoint: {delete: {resource: inferenceendpoint, missing: ignore}}
 quirks:
   - operation: DescribeNotebookInstance
     note: >

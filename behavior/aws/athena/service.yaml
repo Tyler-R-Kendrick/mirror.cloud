@@ -75,14 +75,7 @@ operations:
       - put: { resource: workgroup }
     output: {}
 
-  GetWorkGroup:
-    reads:
-      w: { resource: workgroup }
-    require:
-      - { cond: w_found, error: InvalidRequest }
-    output:
-      WorkGroup: w
-
+  GetWorkGroup: {get: {resource: workgroup, error: InvalidRequest, wrap: WorkGroup}}
   ListWorkGroups:
     list: { resource: workgroup, member: WorkGroups, paginate: model }
 

@@ -51,33 +51,16 @@ operations:
     output:
       Container: rec
 
-  DescribeContainer:
-    reads:
-      c: { resource: container }
-    require:
-      - { cond: c_found, error: ContainerNotFound }
-    output:
-      Container: c
-
+  DescribeContainer: {get: {resource: container, error: ContainerNotFound, wrap: Container}}
   ListContainers:
     list: { resource: container, member: Containers, paginate: model }
 
-  DeleteContainer:
-    effects:
-      - delete: { resource: container, missing: ignore }
-
+  DeleteContainer: {delete: {resource: container, missing: ignore}}
   PutContainerPolicy:
     effects:
       - put: { resource: policy }
 
-  GetContainerPolicy:
-    reads:
-      p: { resource: policy }
-    require:
-      - { cond: p_found, error: PolicyNotFound }
-    output:
-      Policy: p.Policy
-
+  GetContainerPolicy: {get: {resource: policy, error: PolicyNotFound}}
 quirks:
   - operation: DescribeContainer
     note: >

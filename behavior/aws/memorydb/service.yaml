@@ -31,12 +31,7 @@ resources:
       AccessString: input.AccessString
 
 operations:
-  CreateCluster:
-    effects:
-      - create: { resource: cluster }
-    output:
-      Cluster: rec
-
+  CreateCluster: {create: {resource: cluster, wrap: Cluster}}
   DescribeClusters:
     # One cluster when named, the page when not. `key` is the engine's form of
     # the describe-one-or-all shape; an absent name yields an empty list rather
@@ -47,16 +42,8 @@ operations:
       key: "'ClusterName' in input ? string(input.ClusterName) : ''"
       paginate: model
 
-  DeleteCluster:
-    effects:
-      - delete: { resource: cluster }
-
-  CreateUser:
-    effects:
-      - create: { resource: user }
-    output:
-      User: rec
-
+  DeleteCluster: {delete: {resource: cluster}}
+  CreateUser: {create: {resource: user, wrap: User}}
   DescribeUsers:
     list:
       resource: user
@@ -64,10 +51,7 @@ operations:
       key: "'UserName' in input ? string(input.UserName) : ''"
       paginate: model
 
-  DeleteUser:
-    effects:
-      - delete: { resource: user }
-
+  DeleteUser: {delete: {resource: user}}
 quirks:
   - operation: CreateCluster
     note: >

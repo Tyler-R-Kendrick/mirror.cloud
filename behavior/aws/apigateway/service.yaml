@@ -209,10 +209,7 @@ operations:
   GetRestApis:
     list: { resource: api, member: items, paginate: model }
 
-  DeleteRestApi:
-    effects:
-      - delete: { resource: api, missing: ignore }
-
+  DeleteRestApi: {delete: {resource: api, missing: ignore}}
   # The declared update mechanism is patchOperations; the pack instead read a
   # top-level name (or Name) the request shape does not declare, and renamed
   # when it was non-empty. Transcribed, not repaired.
@@ -561,10 +558,7 @@ operations:
   GetApiKeys:
     list: { resource: api_key, member: items, paginate: model }
 
-  DeleteApiKey:
-    effects:
-      - delete: { resource: api_key, missing: ignore }
-
+  DeleteApiKey: {delete: {resource: api_key, missing: ignore}}
   CreateUsagePlan:
     effects:
       - generate: { bind: upid, kind: hex, bytes: 8 }
@@ -590,10 +584,7 @@ operations:
   GetUsagePlans:
     list: { resource: usage_plan, member: items, paginate: model }
 
-  DeleteUsagePlan:
-    effects:
-      - delete: { resource: usage_plan, missing: ignore }
-
+  DeleteUsagePlan: {delete: {resource: usage_plan, missing: ignore}}
   # --- leftover control-plane KV --------------------------------------------
   # Every operation below stores the whole request (spread), forces the kind's
   # own id member to the resolved key, and answers the record flat. Single
@@ -615,10 +606,7 @@ operations:
   GetDomainNames:
     list: { resource: domain_name, member: items, paginate: model }
 
-  DeleteDomainName:
-    effects:
-      - delete: { resource: domain_name, missing: ignore }
-
+  DeleteDomainName: {delete: {resource: domain_name, missing: ignore}}
   UpdateDomainName:
     effects:
       - create: { resource: domain_name, spread: input, record: { domainName: id } }
@@ -708,10 +696,7 @@ operations:
   GetModels:
     list: { resource: lmodel, member: items, paginate: model }
 
-  DeleteModel:
-    effects:
-      - delete: { resource: lmodel, missing: ignore }
-
+  DeleteModel: {delete: {resource: lmodel, missing: ignore}}
   UpdateModel:
     effects:
       - create: { resource: lmodel, spread: input, record: { name: id } }
@@ -747,14 +732,8 @@ operations:
   GetDocumentationVersions:
     list: { resource: doc, member: items, paginate: model }
 
-  DeleteDocumentationPart:
-    effects:
-      - delete: { resource: doc, missing: ignore }
-
-  DeleteDocumentationVersion:
-    effects:
-      - delete: { resource: doc, missing: ignore }
-
+  DeleteDocumentationPart: {delete: {resource: doc, missing: ignore}}
+  DeleteDocumentationVersion: {delete: {resource: doc, missing: ignore}}
   ImportDocumentationParts:
     effects:
       - create: { resource: doc, spread: input, record: { id: id } }
@@ -781,10 +760,7 @@ operations:
   GetRequestValidators:
     list: { resource: request_validator, member: items, paginate: model }
 
-  DeleteRequestValidator:
-    effects:
-      - delete: { resource: request_validator, missing: ignore }
-
+  DeleteRequestValidator: {delete: {resource: request_validator, missing: ignore}}
   UpdateRequestValidator:
     effects:
       - create: { resource: request_validator, spread: input, record: { id: id } }
@@ -832,10 +808,7 @@ operations:
   GetGatewayResponses:
     list: { resource: gateway_response, member: items, paginate: model }
 
-  DeleteGatewayResponse:
-    effects:
-      - delete: { resource: gateway_response, missing: ignore }
-
+  DeleteGatewayResponse: {delete: {resource: gateway_response, missing: ignore}}
   UpdateGatewayResponse:
     effects:
       - create: { resource: gateway_response, spread: input, record: { responseType: id } }
@@ -864,10 +837,7 @@ operations:
   GetClientCertificates:
     list: { resource: client_certificate, member: items, paginate: model }
 
-  DeleteClientCertificate:
-    effects:
-      - delete: { resource: client_certificate, missing: ignore }
-
+  DeleteClientCertificate: {delete: {resource: client_certificate, missing: ignore}}
   # The update replaces the record with the request, dropping the PEM body.
   UpdateClientCertificate:
     effects:
@@ -890,10 +860,7 @@ operations:
   GetBasePathMappings:
     list: { resource: base_path_mapping, member: items, paginate: model }
 
-  DeleteBasePathMapping:
-    effects:
-      - delete: { resource: base_path_mapping, missing: ignore }
-
+  DeleteBasePathMapping: {delete: {resource: base_path_mapping, missing: ignore}}
   UpdateBasePathMapping:
     effects:
       - create: { resource: base_path_mapping, spread: input, record: { basePath: id } }
@@ -905,14 +872,8 @@ operations:
   # record they name: UpdateDeployment does not update a deployment,
   # UpdateResource does not update a resource, and so on.
 
-  FlushStageAuthorizersCache:
-    effects:
-      - delete: { resource: misc, missing: ignore }
-
-  FlushStageCache:
-    effects:
-      - delete: { resource: misc, missing: ignore }
-
+  FlushStageAuthorizersCache: {delete: {resource: misc, missing: ignore}}
+  FlushStageCache: {delete: {resource: misc, missing: ignore}}
   GetAccount:
     reads:
       a: { resource: misc }

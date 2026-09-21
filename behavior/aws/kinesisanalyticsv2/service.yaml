@@ -37,21 +37,11 @@ operations:
     output:
       ApplicationDetail: rec
 
-  DescribeApplication:
-    reads:
-      app: { resource: application }
-    require:
-      - { cond: app_found, error: NotFound }
-    output:
-      ApplicationDetail: app
-
+  DescribeApplication: {get: {resource: application, error: NotFound, wrap: ApplicationDetail}}
   ListApplications:
     list: { resource: application, member: ApplicationSummaries, paginate: model }
 
-  DeleteApplication:
-    effects:
-      - delete: { resource: application, missing: ignore }
-
+  DeleteApplication: {delete: {resource: application, missing: ignore}}
   # Accepted and ignored: there is no runtime to start or stop, so the status
   # stays READY either way.
   StartApplication: {}

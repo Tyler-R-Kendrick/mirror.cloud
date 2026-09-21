@@ -59,10 +59,7 @@ operations:
         size(input.assessmentTargetArns) == 0
           || item.arn in input.assessmentTargetArns
 
-  DeleteAssessmentTarget:
-    effects:
-      - delete: { resource: target, missing: ignore }
-
+  DeleteAssessmentTarget: {delete: {resource: target, missing: ignore}}
   CreateAssessmentTemplate:
     effects:
       - generate: { bind: pid, kind: hex, bytes: 8 }
@@ -90,10 +87,7 @@ operations:
         size(input.assessmentTemplateArns) == 0
           || item.arn in input.assessmentTemplateArns
 
-  DeleteAssessmentTemplate:
-    effects:
-      - delete: { resource: template, missing: ignore }
-
+  DeleteAssessmentTemplate: {delete: {resource: template, missing: ignore}}
   StartAssessmentRun:
     effects:
       - generate: { bind: rid, kind: hex, bytes: 8 }

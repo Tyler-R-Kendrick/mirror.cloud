@@ -245,14 +245,7 @@ operations:
           missing: ignore
     output: {}
 
-  DescribeStreamConsumer:
-    reads:
-      c: { resource: consumer, key: "'ConsumerARN' in input && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : '')" }
-    require:
-      - { cond: c_found, error: NotFound }
-    output:
-      ConsumerDescription: c
-
+  DescribeStreamConsumer: {get: {resource: consumer, error: NotFound, key: '''ConsumerARN'' in input && string(input.ConsumerARN) != '''' ? string(input.ConsumerARN) : (''ConsumerArn'' in input && string(input.ConsumerArn) != '''' ? string(input.ConsumerArn) : '''')', wrap: ConsumerDescription}}
   # The pack ignores the StreamARN it is asked about: every consumer in the
   # account and region is listed, whichever stream the request names.
   ListStreamConsumers:

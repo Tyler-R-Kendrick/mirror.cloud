@@ -46,14 +46,7 @@ operations:
     output:
       ApplicationSummary: rec
 
-  DescribeApplication:
-    reads:
-      a: { resource: application }
-    require:
-      - { cond: a_found, error: NotFound }
-    output:
-      ApplicationDetail: a
-
+  DescribeApplication: {get: {resource: application, error: NotFound, wrap: ApplicationDetail}}
   ListApplications:
     list: { resource: application, member: ApplicationSummaries, paginate: model }
 
@@ -115,10 +108,7 @@ operations:
           record:
             ApplicationStatus: "'READY'"
 
-  DeleteApplication:
-    effects:
-      - delete: { resource: application, missing: ignore }
-
+  DeleteApplication: {delete: {resource: application, missing: ignore}}
 quirks:
   - operation: UpdateApplication
     note: >

@@ -51,14 +51,7 @@ operations:
           'resourceName': n,
         })
 
-  GetInstance:
-    reads:
-      inst: { resource: instance }
-    require:
-      - { cond: inst_found, error: NotFound }
-    output:
-      instance: inst
-
+  GetInstance: {get: {resource: instance, error: NotFound, wrap: instance}}
   GetInstances:
     list: { resource: instance, member: instances, paginate: model }
 
@@ -74,14 +67,7 @@ operations:
     output:
       operations: "[{'status': 'Succeeded'}]"
 
-  GetStaticIp:
-    reads:
-      ip: { resource: staticip }
-    require:
-      - { cond: ip_found, error: NotFound }
-    output:
-      staticIp: ip
-
+  GetStaticIp: {get: {resource: staticip, error: NotFound, wrap: staticIp}}
   ReleaseStaticIp:
     effects:
       - delete: { resource: staticip, missing: ignore }

@@ -52,17 +52,7 @@ operations:
       Name: rec.Name
       Arn: rec.Arn
 
-  GetDestination:
-    reads:
-      dst: { resource: destination }
-    require:
-      - { cond: dst_found, error: NotFound }
-    output:
-      Name: dst.Name
-      Arn: dst.Arn
-      Expression: dst.Expression
-      RoleArn: dst.RoleArn
-
+  GetDestination: {get: {resource: destination, error: NotFound}}
   ListDestinations:
     list: { resource: destination, member: DestinationList, paginate: model }
 
@@ -77,17 +67,7 @@ operations:
     output:
       Id: rec.Id
 
-  GetWirelessDevice:
-    reads:
-      dev: { resource: device }
-    require:
-      - { cond: dev_found, error: NotFound }
-    output:
-      Id: dev.Id
-      Name: dev.Name
-      Type: dev.Type
-      DestinationName: dev.DestinationName
-
+  GetWirelessDevice: {get: {resource: device, error: NotFound}}
 quirks:
   - operation: CreateDestination
     note: >

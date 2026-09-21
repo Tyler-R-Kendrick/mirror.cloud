@@ -69,10 +69,7 @@ operations:
   DescribeConfigurationRecorders:
     list: { resource: recorder, member: ConfigurationRecorders, paginate: model }
 
-  DeleteConfigurationRecorder:
-    effects:
-      - delete: { resource: recorder, missing: ignore }
-
+  DeleteConfigurationRecorder: {delete: {resource: recorder, missing: ignore}}
   # Starting and stopping a recorder change nothing that any caller can read --
   # see the quirk.
   StartConfigurationRecorder: {}
@@ -91,10 +88,7 @@ operations:
   DescribeDeliveryChannels:
     list: { resource: channel, member: DeliveryChannels, paginate: model }
 
-  DeleteDeliveryChannel:
-    effects:
-      - delete: { resource: channel, missing: ignore }
-
+  DeleteDeliveryChannel: {delete: {resource: channel, missing: ignore}}
   PutConfigRule:
     require:
       - cond: >
@@ -110,10 +104,7 @@ operations:
   DescribeConfigRules:
     list: { resource: rule, member: ConfigRules, paginate: model }
 
-  DeleteConfigRule:
-    effects:
-      - delete: { resource: rule, missing: ignore }
-
+  DeleteConfigRule: {delete: {resource: rule, missing: ignore}}
   # One evaluation per entry, addressed by the resource it is about, and stored
   # twice. An entry carrying no resource id is skipped rather than written to a
   # row keyed by the empty string that every such entry in the account would

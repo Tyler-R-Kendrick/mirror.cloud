@@ -35,51 +35,15 @@ errors:
     fault: client
 
 operations:
-  CreateChannel:
-    effects:
-      - put: { resource: channel }
-    output:
-      Id: rec.Id
-      Arn: rec.Arn
-
-  DescribeChannel:
-    reads:
-      ch: { resource: channel }
-    require:
-      - { cond: ch_found, error: NotFound }
-    output:
-      Id: ch.Id
-      Arn: ch.Arn
-
+  CreateChannel: {put: {resource: channel}}
+  DescribeChannel: {get: {resource: channel, error: NotFound}}
   ListChannels:
     list: { resource: channel, member: Channels, paginate: model }
 
-  DeleteChannel:
-    effects:
-      - delete: { resource: channel, missing: ignore }
-
-  CreateOriginEndpoint:
-    effects:
-      - put: { resource: origin }
-    output:
-      Id: rec.Id
-      ChannelId: rec.ChannelId
-      Url: rec.Url
-
-  DescribeOriginEndpoint:
-    reads:
-      ep: { resource: origin }
-    require:
-      - { cond: ep_found, error: NotFound }
-    output:
-      Id: ep.Id
-      ChannelId: ep.ChannelId
-      Url: ep.Url
-
-  DeleteOriginEndpoint:
-    effects:
-      - delete: { resource: origin, missing: ignore }
-
+  DeleteChannel: {delete: {resource: channel, missing: ignore}}
+  CreateOriginEndpoint: {put: {resource: origin}}
+  DescribeOriginEndpoint: {get: {resource: origin, error: NotFound}}
+  DeleteOriginEndpoint: {delete: {resource: origin, missing: ignore}}
 quirks:
   - operation: CreateChannel
     note: >

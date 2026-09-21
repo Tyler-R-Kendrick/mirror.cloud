@@ -46,39 +46,19 @@ operations:
     output:
       datasetGroupArn: rec.datasetGroupArn
 
-  DescribeDatasetGroup:
-    reads:
-      g: { resource: datasetgroup, key: "string(input.datasetGroupArn)" }
-    require:
-      - { cond: g_found, error: NotFound }
-    output:
-      datasetGroup: g
-
+  DescribeDatasetGroup: {get: {resource: datasetgroup, error: NotFound, key: string(input.datasetGroupArn), wrap: datasetGroup}}
   ListDatasetGroups:
     list: { resource: datasetgroup, member: datasetGroups, paginate: model }
 
-  DeleteDatasetGroup:
-    effects:
-      - delete: { resource: datasetgroup, key: "string(input.datasetGroupArn)", missing: ignore }
-
+  DeleteDatasetGroup: {delete: {resource: datasetgroup, key: string(input.datasetGroupArn), missing: ignore}}
   CreateSolution:
     effects:
       - put: { resource: solution }
     output:
       solutionArn: rec.solutionArn
 
-  DescribeSolution:
-    reads:
-      s: { resource: solution, key: "string(input.solutionArn)" }
-    require:
-      - { cond: s_found, error: NotFound }
-    output:
-      solution: s
-
-  DeleteSolution:
-    effects:
-      - delete: { resource: solution, key: "string(input.solutionArn)", missing: ignore }
-
+  DescribeSolution: {get: {resource: solution, error: NotFound, key: string(input.solutionArn), wrap: solution}}
+  DeleteSolution: {delete: {resource: solution, key: string(input.solutionArn), missing: ignore}}
 quirks:
   - operation: CreateDatasetGroup
     note: >

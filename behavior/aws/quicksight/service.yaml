@@ -42,14 +42,7 @@ operations:
       DataSetId: rec.DataSetId
       Status: "201"
 
-  DescribeDataSet:
-    reads:
-      d: { resource: dataset }
-    require:
-      - { cond: d_found, error: NotFound }
-    output:
-      DataSet: d
-
+  DescribeDataSet: {get: {resource: dataset, error: NotFound, wrap: DataSet}}
   ListDataSets:
     list: { resource: dataset, member: DataSetSummaries, paginate: model }
 
@@ -67,14 +60,7 @@ operations:
       DashboardId: rec.DashboardId
       Status: "202"
 
-  DescribeDashboard:
-    reads:
-      d: { resource: dashboard }
-    require:
-      - { cond: d_found, error: NotFound }
-    output:
-      Dashboard: d
-
+  DescribeDashboard: {get: {resource: dashboard, error: NotFound, wrap: Dashboard}}
   ListDashboards:
     list: { resource: dashboard, member: DashboardSummaryList, paginate: model }
 

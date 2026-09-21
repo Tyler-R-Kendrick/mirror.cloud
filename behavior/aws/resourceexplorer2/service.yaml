@@ -87,14 +87,7 @@ operations:
     output:
       View: rec
 
-  GetView:
-    reads:
-      v: { resource: view }
-    require:
-      - { cond: v_found, error: NotFound }
-    output:
-      View: v
-
+  GetView: {get: {resource: view, error: NotFound, wrap: View}}
 quirks:
   - operation: CreateIndex
     note: >

@@ -49,38 +49,13 @@ operations:
       RegistryName: rec.RegistryName
       RegistryArn: rec.RegistryArn
 
-  DescribeRegistry:
-    reads:
-      reg: { resource: registry }
-    require:
-      - { cond: reg_found, error: NotFound }
-    output:
-      RegistryName: reg.RegistryName
-      RegistryArn: reg.RegistryArn
-
+  DescribeRegistry: {get: {resource: registry, error: NotFound}}
   ListRegistries:
     list: { resource: registry, member: Registries, paginate: model }
 
-  DeleteRegistry:
-    effects:
-      - delete: { resource: registry, missing: ignore }
-
-  CreateSchema:
-    effects:
-      - put: { resource: schema }
-    output:
-      SchemaName: rec.SchemaName
-      SchemaArn: rec.SchemaArn
-
-  DescribeSchema:
-    reads:
-      sch: { resource: schema }
-    require:
-      - { cond: sch_found, error: NotFound }
-    output:
-      SchemaName: sch.SchemaName
-      SchemaArn: sch.SchemaArn
-
+  DeleteRegistry: {delete: {resource: registry, missing: ignore}}
+  CreateSchema: {put: {resource: schema}}
+  DescribeSchema: {get: {resource: schema, error: NotFound}}
 quirks:
   - operation: CreateSchema
     note: >

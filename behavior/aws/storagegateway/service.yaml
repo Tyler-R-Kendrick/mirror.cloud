@@ -46,17 +46,7 @@ operations:
     output:
       GatewayARN: rec.GatewayARN
 
-  DescribeGatewayInformation:
-    reads:
-      gw: { resource: gateway, key: "string(input.GatewayARN)" }
-    require:
-      - { cond: gw_found, error: InvalidGatewayRequest }
-    output:
-      GatewayARN: gw.GatewayARN
-      GatewayName: gw.GatewayName
-      GatewayType: gw.GatewayType
-      GatewayState: gw.GatewayState
-
+  DescribeGatewayInformation: {get: {resource: gateway, error: InvalidGatewayRequest, key: string(input.GatewayARN)}}
   # GatewayInfo declares GatewayOperationalState, not GatewayState, so the
   # listed form of a gateway is not the stored record.
   ListGateways:

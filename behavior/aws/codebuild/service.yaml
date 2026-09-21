@@ -63,10 +63,7 @@ operations:
     output:
       projects: "items.map(p, string(p.name))"
 
-  DeleteProject:
-    effects:
-      - delete: { resource: project, missing: ignore }
-
+  DeleteProject: {delete: {resource: project, missing: ignore}}
   StartBuild:
     effects:
       - generate: { bind: bid, kind: hex, bytes: 8 }

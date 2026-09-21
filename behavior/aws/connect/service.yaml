@@ -44,21 +44,11 @@ operations:
       Id: rec.Id
       Arn: rec.Arn
 
-  DescribeInstance:
-    reads:
-      inst: { resource: instance }
-    require:
-      - { cond: inst_found, error: NotFound }
-    output:
-      Instance: inst
-
+  DescribeInstance: {get: {resource: instance, error: NotFound, wrap: Instance}}
   ListInstances:
     list: { resource: instance, member: InstanceSummaryList, paginate: model }
 
-  DeleteInstance:
-    effects:
-      - delete: { resource: instance, missing: ignore }
-
+  DeleteInstance: {delete: {resource: instance, missing: ignore}}
   # The user's own id is generated, so the key it is filed under is the
   # instance id joined to it, built in the effect where both are known.
   CreateUser:
@@ -95,10 +85,7 @@ operations:
       UserSummaryList: >
         items.map(u, {'Id': u.Id, 'Username': u.Username})
 
-  DeleteUser:
-    effects:
-      - delete: { resource: user, missing: ignore }
-
+  DeleteUser: {delete: {resource: user, missing: ignore}}
 quirks:
   - operation: DescribeUser
     note: >

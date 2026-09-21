@@ -67,10 +67,7 @@ operations:
   ListApplications:
     list: { resource: application, member: Applications, paginate: model }
 
-  DeleteApplication:
-    effects:
-      - delete: { resource: application, missing: ignore }
-
+  DeleteApplication: {delete: {resource: application, missing: ignore}}
   CreateApplicationVersion:
     effects:
       - put:

@@ -79,14 +79,7 @@ operations:
               'Description' in input.DatabaseInput
                 ? string(input.DatabaseInput.Description) : ''
 
-  GetDatabase:
-    reads:
-      db: { resource: database }
-    require:
-      - { cond: db_found, error: NotFound }
-    output:
-      Database: db
-
+  GetDatabase: {get: {resource: database, error: NotFound, wrap: Database}}
   GetDatabases:
     list: { resource: database, member: DatabaseList, paginate: model }
 
@@ -106,10 +99,7 @@ operations:
                 ? string(input.DatabaseInput.Description)
                 : ('Description' in db ? db.Description : '')
 
-  DeleteDatabase:
-    effects:
-      - delete: { resource: database, missing: ignore }
-
+  DeleteDatabase: {delete: {resource: database, missing: ignore}}
   # A create rather than a put, because the pack built the record from the
   # request and stored that: a table keeps only the three members below, and
   # re-creating one does not merge onto what was there.
@@ -170,14 +160,7 @@ operations:
     output:
       Name: id
 
-  GetJob:
-    reads:
-      j: { resource: job }
-    require:
-      - { cond: j_found, error: NotFound }
-    output:
-      Job: j
-
+  GetJob: {get: {resource: job, error: NotFound, wrap: Job}}
   GetJobs:
     list: { resource: job, member: Jobs, paginate: model }
 
@@ -233,10 +216,7 @@ operations:
     output:
       Crawlers: "items.map(c, without(c, ['Tags']))"
 
-  DeleteCrawler:
-    effects:
-      - delete: { resource: crawler, missing: ignore }
-
+  DeleteCrawler: {delete: {resource: crawler, missing: ignore}}
 quirks:
   - operation: CreateTable
     note: >

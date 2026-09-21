@@ -30,12 +30,7 @@ resources:
       State: "'ACTIVE'"
 
 operations:
-  CreateCluster:
-    effects:
-      - create: { resource: cluster }
-    output:
-      Cluster: rec
-
+  CreateCluster: {create: {resource: cluster, wrap: Cluster}}
   # Describe-one-or-describe-all: a ClusterId narrows to that cluster, and an
   # absent one answers with an empty list rather than a fault.
   DescribeClusters:
@@ -50,12 +45,7 @@ operations:
       - delete: { resource: cluster, key: "string(input.ClusterId)", missing: ignore }
     output: {}
 
-  CreateHsm:
-    effects:
-      - create: { resource: hsm }
-    output:
-      Hsm: rec
-
+  CreateHsm: {create: {resource: hsm, wrap: Hsm}}
   DeleteHsm:
     effects:
       - delete: { resource: hsm, key: "'HsmId' in input ? string(input.HsmId) : ''", missing: ignore }

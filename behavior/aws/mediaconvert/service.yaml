@@ -45,48 +45,18 @@ errors:
     fault: client
 
 operations:
-  CreateQueue:
-    effects:
-      - put: { resource: queue }
-    output:
-      Queue: rec
-
-  GetQueue:
-    reads:
-      q: { resource: queue }
-    require:
-      - { cond: q_found, error: NotFound }
-    output:
-      Queue: q
-
+  CreateQueue: {put: {resource: queue, wrap: Queue}}
+  GetQueue: {get: {resource: queue, error: NotFound, wrap: Queue}}
   ListQueues:
     list: { resource: queue, member: Queues, paginate: model }
 
-  DeleteQueue:
-    effects:
-      - delete: { resource: queue, missing: ignore }
-
-  CreateJobTemplate:
-    effects:
-      - put: { resource: jobtemplate }
-    output:
-      JobTemplate: rec
-
-  GetJobTemplate:
-    reads:
-      t: { resource: jobtemplate }
-    require:
-      - { cond: t_found, error: NotFound }
-    output:
-      JobTemplate: t
-
+  DeleteQueue: {delete: {resource: queue, missing: ignore}}
+  CreateJobTemplate: {put: {resource: jobtemplate, wrap: JobTemplate}}
+  GetJobTemplate: {get: {resource: jobtemplate, error: NotFound, wrap: JobTemplate}}
   ListJobTemplates:
     list: { resource: jobtemplate, member: JobTemplates, paginate: model }
 
-  DeleteJobTemplate:
-    effects:
-      - delete: { resource: jobtemplate, missing: ignore }
-
+  DeleteJobTemplate: {delete: {resource: jobtemplate, missing: ignore}}
   CreateJob:
     effects:
       - create:
@@ -100,14 +70,7 @@ operations:
     output:
       Job: rec
 
-  GetJob:
-    reads:
-      j: { resource: job, key: "string(input.Id)" }
-    require:
-      - { cond: j_found, error: NotFound }
-    output:
-      Job: j
-
+  GetJob: {get: {resource: job, error: NotFound, key: string(input.Id), wrap: Job}}
   ListJobs:
     list: { resource: job, member: Jobs, paginate: model }
 

@@ -48,14 +48,7 @@ operations:
       DatastoreArn: rec.DatastoreArn
       DatastoreStatus: rec.DatastoreStatus
 
-  DescribeFHIRDatastore:
-    reads:
-      ds: { resource: datastore }
-    require:
-      - { cond: ds_found, error: NotFound }
-    output:
-      DatastoreProperties: ds
-
+  DescribeFHIRDatastore: {get: {resource: datastore, error: NotFound, wrap: DatastoreProperties}}
   ListFHIRDatastores:
     list: { resource: datastore, member: DatastorePropertiesList, paginate: model }
 
@@ -71,14 +64,7 @@ operations:
       JobId: rec.JobId
       JobStatus: rec.JobStatus
 
-  DescribeFHIRImportJob:
-    reads:
-      j: { resource: job }
-    require:
-      - { cond: j_found, error: NotFound }
-    output:
-      ImportJobProperties: j
-
+  DescribeFHIRImportJob: {get: {resource: job, error: NotFound, wrap: ImportJobProperties}}
 quirks:
   - operation: CreateFHIRDatastore
     note: >

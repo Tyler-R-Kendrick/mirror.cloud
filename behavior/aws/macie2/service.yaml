@@ -45,15 +45,7 @@ operations:
   # Macie answers a session that was never enabled with access denied rather
   # than not found, which is what the real service does for an account that
   # has never enabled it.
-  GetMacieSession:
-    reads:
-      s: { resource: session }
-    require:
-      - { cond: s_found, error: AccessDenied }
-    output:
-      status: s.status
-      findingPublishingFrequency: s.findingPublishingFrequency
-
+  GetMacieSession: {get: {resource: session, error: AccessDenied}}
   DisableMacie:
     effects:
       - delete: { resource: session, missing: ignore }
@@ -65,16 +57,7 @@ operations:
     output:
       jobId: rec.jobId
 
-  DescribeClassificationJob:
-    reads:
-      j: { resource: job }
-    require:
-      - { cond: j_found, error: NotFound }
-    output:
-      jobId: j.jobId
-      name: j.name
-      jobStatus: j.jobStatus
-
+  DescribeClassificationJob: {get: {resource: job, error: NotFound}}
   ListClassificationJobs:
     list: { resource: job, member: items, paginate: model }
 

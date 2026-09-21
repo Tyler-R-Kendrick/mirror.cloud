@@ -46,14 +46,7 @@ operations:
     output:
       app: rec
 
-  DescribeApp:
-    reads:
-      a: { resource: app }
-    require:
-      - { cond: a_found, error: NotFound }
-    output:
-      app: a
-
+  DescribeApp: {get: {resource: app, error: NotFound, wrap: app}}
   ListApps:
     list: { resource: app, member: appSummaries, paginate: model }
 
@@ -62,12 +55,7 @@ operations:
       - delete: { resource: app, missing: ignore }
     output: {}
 
-  CreateResiliencyPolicy:
-    effects:
-      - put: { resource: policy }
-    output:
-      policy: rec
-
+  CreateResiliencyPolicy: {put: {resource: policy, wrap: policy}}
   ListResiliencyPolicies:
     list: { resource: policy, member: resiliencyPolicies, paginate: model }
 

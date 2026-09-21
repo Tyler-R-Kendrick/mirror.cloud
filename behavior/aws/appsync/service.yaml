@@ -83,14 +83,7 @@ operations:
     output:
       graphqlApi: rec
 
-  GetGraphqlApi:
-    reads:
-      api: { resource: api }
-    require:
-      - { cond: api_found, error: NotFound }
-    output:
-      graphqlApi: api
-
+  GetGraphqlApi: {get: {resource: api, error: NotFound, wrap: graphqlApi}}
   ListGraphqlApis:
     list: { resource: api, member: graphqlApis, paginate: model }
 

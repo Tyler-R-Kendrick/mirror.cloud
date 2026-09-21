@@ -40,29 +40,14 @@ errors:
     fault: client
 
 operations:
-  CreateApp:
-    effects:
-      - create: { resource: app }
-    output:
-      ApplicationResponse: rec
-
-  GetApp:
-    reads:
-      a: { resource: app, key: "string(input.ApplicationId)" }
-    require:
-      - { cond: a_found, error: NotFound }
-    output:
-      ApplicationResponse: a
-
+  CreateApp: {create: {resource: app, wrap: ApplicationResponse}}
+  GetApp: {get: {resource: app, error: NotFound, key: string(input.ApplicationId), wrap: ApplicationResponse}}
   GetApps:
     list: { resource: app, member: ApplicationsResponse, paginate: model }
     output:
       ApplicationsResponse: "{'Item': items}"
 
-  DeleteApp:
-    effects:
-      - delete: { resource: app, key: "string(input.ApplicationId)", missing: ignore }
-
+  DeleteApp: {delete: {resource: app, key: string(input.ApplicationId), missing: ignore}}
   CreateCampaign:
     effects:
       - generate: { bind: cid, kind: hex, bytes: 8 }
@@ -79,18 +64,8 @@ operations:
     output:
       CampaignResponse: rec
 
-  GetCampaign:
-    reads:
-      c: { resource: campaign }
-    require:
-      - { cond: c_found, error: NotFound }
-    output:
-      CampaignResponse: c
-
-  DeleteCampaign:
-    effects:
-      - delete: { resource: campaign, missing: ignore }
-
+  GetCampaign: {get: {resource: campaign, error: NotFound, wrap: CampaignResponse}}
+  DeleteCampaign: {delete: {resource: campaign, missing: ignore}}
   SendMessages:
     output:
       MessageResponse: "{'ApplicationId': string(input.ApplicationId), 'Result': {}}"

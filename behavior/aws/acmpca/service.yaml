@@ -46,21 +46,11 @@ operations:
     output:
       CertificateAuthorityArn: rec.Arn
 
-  DescribeCertificateAuthority:
-    reads:
-      ca: { resource: ca }
-    require:
-      - { cond: ca_found, error: NotFound }
-    output:
-      CertificateAuthority: ca
-
+  DescribeCertificateAuthority: {get: {resource: ca, error: NotFound, wrap: CertificateAuthority}}
   ListCertificateAuthorities:
     list: { resource: ca, member: CertificateAuthorities, paginate: model }
 
-  DeleteCertificateAuthority:
-    effects:
-      - delete: { resource: ca, missing: ignore }
-
+  DeleteCertificateAuthority: {delete: {resource: ca, missing: ignore}}
   IssueCertificate:
     effects:
       - generate: { bind: certid, kind: hex, bytes: 8 }

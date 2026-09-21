@@ -51,24 +51,14 @@ operations:
     output:
       Arn: rec.Arn
 
-  GetEnvironment:
-    reads:
-      env: { resource: environment }
-    require:
-      - { cond: env_found, error: NotFound }
-    output:
-      Environment: env
-
+  GetEnvironment: {get: {resource: environment, error: NotFound, wrap: Environment}}
   ListEnvironments:
     list: { resource: environment, member: Environments, paginate: model }
     output:
       Environments: "items.map(e, e.Name)"
 
   # Deleting an environment that is not there is not an error in this service.
-  DeleteEnvironment:
-    effects:
-      - delete: { resource: environment, missing: ignore }
-
+  DeleteEnvironment: {delete: {resource: environment, missing: ignore}}
   CreateCliToken:
     effects:
       - generate: { bind: token, kind: hex, bytes: 16 }

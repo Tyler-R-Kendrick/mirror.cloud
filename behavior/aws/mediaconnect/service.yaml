@@ -44,14 +44,7 @@ operations:
     output:
       Flow: rec
 
-  DescribeFlow:
-    reads:
-      f: { resource: flow, key: "string(input.FlowArn)" }
-    require:
-      - { cond: f_found, error: NotFound }
-    output:
-      Flow: f
-
+  DescribeFlow: {get: {resource: flow, error: NotFound, key: string(input.FlowArn), wrap: Flow}}
   ListFlows:
     list: { resource: flow, member: Flows, paginate: model }
 

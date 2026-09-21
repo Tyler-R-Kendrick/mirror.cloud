@@ -41,23 +41,11 @@ operations:
       UserId: rec.UserId
       IdentityStoreId: rec.IdentityStoreId
 
-  DescribeUser:
-    reads:
-      u: { resource: user }
-    require:
-      - { cond: u_found, error: NotFound }
-    output:
-      UserId: u.UserId
-      IdentityStoreId: u.IdentityStoreId
-      UserName: u.UserName
-
+  DescribeUser: {get: {resource: user, error: NotFound}}
   ListUsers:
     list: { resource: user, member: Users, paginate: model }
 
-  DeleteUser:
-    effects:
-      - delete: { resource: user, missing: ignore }
-
+  DeleteUser: {delete: {resource: user, missing: ignore}}
   CreateGroup:
     effects:
       - create: { resource: group }
@@ -65,23 +53,11 @@ operations:
       GroupId: rec.GroupId
       IdentityStoreId: rec.IdentityStoreId
 
-  DescribeGroup:
-    reads:
-      g: { resource: group }
-    require:
-      - { cond: g_found, error: NotFound }
-    output:
-      GroupId: g.GroupId
-      IdentityStoreId: g.IdentityStoreId
-      DisplayName: g.DisplayName
-
+  DescribeGroup: {get: {resource: group, error: NotFound}}
   ListGroups:
     list: { resource: group, member: Groups, paginate: model }
 
-  DeleteGroup:
-    effects:
-      - delete: { resource: group, missing: ignore }
-
+  DeleteGroup: {delete: {resource: group, missing: ignore}}
 quirks:
   - operation: ListUsers
     note: >

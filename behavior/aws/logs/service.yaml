@@ -147,10 +147,7 @@ operations:
 
   # Deleting a group leaves its streams, events, retention, tags and KMS row
   # behind; only the group row goes.
-  DeleteLogGroup:
-    effects:
-      - delete: { resource: group, missing: ignore }
-
+  DeleteLogGroup: {delete: {resource: group, missing: ignore}}
   DescribeLogGroups:
     list: { resource: group, member: logGroups, paginate: model }
 
@@ -208,10 +205,7 @@ operations:
     effects:
       - create: { resource: retention }
 
-  DeleteRetentionPolicy:
-    effects:
-      - delete: { resource: retention, missing: ignore }
-
+  DeleteRetentionPolicy: {delete: {resource: retention, missing: ignore}}
   PutSubscriptionFilter:
     effects:
       - create: { resource: subfilter }
@@ -225,10 +219,7 @@ operations:
     output:
       subscriptionFilters: "items.map(f, {'filterName': f.filterName, 'filterPattern': f.filterPattern, 'destinationArn': f.destinationArn})"
 
-  DeleteSubscriptionFilter:
-    effects:
-      - delete: { resource: subfilter, missing: ignore }
-
+  DeleteSubscriptionFilter: {delete: {resource: subfilter, missing: ignore}}
   # The pack drops metricTransformations, which the model requires; only the
   # name and pattern are stored.
   PutMetricFilter:
@@ -244,53 +235,31 @@ operations:
     output:
       metricFilters: "items.map(f, {'filterName': f.filterName, 'filterPattern': f.filterPattern})"
 
-  DeleteMetricFilter:
-    effects:
-      - delete: { resource: metricfilter, missing: ignore }
-
+  DeleteMetricFilter: {delete: {resource: metricfilter, missing: ignore}}
   # The pack answered the flat record where the model wraps it in
   # resourcePolicy; the recording's step is superseded for that.
-  PutResourcePolicy:
-    effects:
-      - create: { resource: resourcepolicy }
-    output:
-      resourcePolicy: rec
-
+  PutResourcePolicy: {create: {resource: resourcepolicy, wrap: resourcePolicy}}
   DescribeResourcePolicies:
     list: { resource: resourcepolicy, member: resourcePolicies }
 
-  DeleteResourcePolicy:
-    effects:
-      - delete: { resource: resourcepolicy, missing: ignore }
-
+  DeleteResourcePolicy: {delete: {resource: resourcepolicy, missing: ignore}}
   TagLogGroup:
     effects:
       - create: { resource: grouptags }
 
   # Untag deletes the whole tag map; tagKeys is never read.
-  UntagLogGroup:
-    effects:
-      - delete: { resource: grouptags, missing: ignore }
-
+  UntagLogGroup: {delete: {resource: grouptags, missing: ignore}}
   ListTagsLogGroup:
     reads:
       t: { resource: grouptags }
     output:
       tags: "t_found ? t.tags : {}"
 
-  PutDestination:
-    effects:
-      - create: { resource: destination }
-    output:
-      destination: rec
-
+  PutDestination: {create: {resource: destination, wrap: destination}}
   DescribeDestinations:
     list: { resource: destination, member: destinations, paginate: model }
 
-  DeleteDestination:
-    effects:
-      - delete: { resource: destination, missing: ignore }
-
+  DeleteDestination: {delete: {resource: destination, missing: ignore}}
   PutQueryDefinition:
     let:
       asked: "coalesce('queryDefinitionId' in input ? input.queryDefinitionId : '', 'QueryDefinitionId' in input ? input.QueryDefinitionId : '')"
@@ -358,9 +327,7 @@ operations:
     effects:
       - create: { resource: kmskey }
 
-  DisassociateKmsKey:
-    effects:
-      - delete: { resource: kmskey, missing: ignore }
+  DisassociateKmsKey: {delete: {resource: kmskey, missing: ignore}}
   AssociateSourceToS3TableIntegration:
     let:
       asked: "coalesce('integrationName' in input ? input.integrationName : '', coalesce('logGroupName' in input ? input.logGroupName : '', coalesce('LogGroupName' in input ? input.LogGroupName : '', coalesce('name' in input ? input.name : '', coalesce('Name' in input ? input.Name : '', coalesce('taskId' in input ? input.taskId : '', coalesce('deliveryId' in input ? input.deliveryId : '', '')))))))"

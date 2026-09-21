@@ -69,10 +69,7 @@ operations:
       key: >
         'VpcIds' in input && size(input.VpcIds) > 0 ? string(input.VpcIds[0]) : ''
 
-  DeleteVpc:
-    effects:
-      - delete: { resource: vpc, missing: ignore }
-
+  DeleteVpc: {delete: {resource: vpc, missing: ignore}}
   CreateSubnet:
     effects:
       - create:
@@ -94,10 +91,7 @@ operations:
         'SubnetIds' in input && size(input.SubnetIds) > 0
           ? string(input.SubnetIds[0]) : ''
 
-  DeleteSubnet:
-    effects:
-      - delete: { resource: subnet, missing: ignore }
-
+  DeleteSubnet: {delete: {resource: subnet, missing: ignore}}
   # The member is Description and the wire calls it GroupDescription, which is
   # the pack's first choice and the only one a client can send. The pack also
   # read a raw `Description` form key, which no SDK produces.

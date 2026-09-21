@@ -125,33 +125,13 @@ operations:
                 ? string(input.thingTypeName)
                 : ('thingTypeName' in t ? t.thingTypeName : '')
 
-  DeleteThing:
-    effects:
-      - delete: { resource: thing, missing: ignore }
-
-  CreateThingType:
-    effects:
-      - put: { resource: thingtype }
-    output:
-      thingTypeName: rec.thingTypeName
-      thingTypeArn: rec.thingTypeArn
-
-  DescribeThingType:
-    reads:
-      tt: { resource: thingtype }
-    require:
-      - { cond: tt_found, error: NotFound }
-    output:
-      thingTypeName: tt.thingTypeName
-      thingTypeArn: tt.thingTypeArn
-
+  DeleteThing: {delete: {resource: thing, missing: ignore}}
+  CreateThingType: {put: {resource: thingtype}}
+  DescribeThingType: {get: {resource: thingtype, error: NotFound}}
   ListThingTypes:
     list: { resource: thingtype, member: thingTypes, paginate: model }
 
-  DeleteThingType:
-    effects:
-      - delete: { resource: thingtype, missing: ignore }
-
+  DeleteThingType: {delete: {resource: thingtype, missing: ignore}}
   CreatePolicy:
     effects:
       - put:
@@ -180,10 +160,7 @@ operations:
     output:
       policies: "items.map(p, {'policyName': p.policyName, 'policyArn': p.policyArn})"
 
-  DeletePolicy:
-    effects:
-      - delete: { resource: policy, missing: ignore }
-
+  DeletePolicy: {delete: {resource: policy, missing: ignore}}
   CreateTopicRule:
     effects:
       - put:
@@ -206,10 +183,7 @@ operations:
     output:
       rules: "items.map(r, {'ruleName': r.ruleName})"
 
-  DeleteTopicRule:
-    effects:
-      - delete: { resource: rule, missing: ignore }
-
+  DeleteTopicRule: {delete: {resource: rule, missing: ignore}}
   CreateJob:
     effects:
       - put:
@@ -246,10 +220,7 @@ operations:
           'status': j.status,
         })
 
-  DeleteJob:
-    effects:
-      - delete: { resource: job, missing: ignore }
-
+  DeleteJob: {delete: {resource: job, missing: ignore}}
   # The PEM and the private key are minted here and stored nowhere, so this is
   # the only call that ever sees them -- see the quirk.
   CreateKeysAndCertificate:
@@ -281,10 +252,7 @@ operations:
   ListCertificates:
     list: { resource: certificate, member: certificates, paginate: model }
 
-  DeleteCertificate:
-    effects:
-      - delete: { resource: certificate, missing: ignore }
-
+  DeleteCertificate: {delete: {resource: certificate, missing: ignore}}
   AttachThingPrincipal:
     reads:
       thing: { resource: thing }

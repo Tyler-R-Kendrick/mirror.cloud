@@ -47,21 +47,11 @@ operations:
     output:
       arn: rec.arn
 
-  GetAnalyzer:
-    reads:
-      a: { resource: analyzer }
-    require:
-      - { cond: a_found, error: NotFound }
-    output:
-      analyzer: a
-
+  GetAnalyzer: {get: {resource: analyzer, error: NotFound, wrap: analyzer}}
   ListAnalyzers:
     list: { resource: analyzer, member: analyzers, paginate: model }
 
-  DeleteAnalyzer:
-    effects:
-      - delete: { resource: analyzer, missing: ignore }
-
+  DeleteAnalyzer: {delete: {resource: analyzer, missing: ignore}}
   ListFindings:
     output:
       findings: "[]"
@@ -70,10 +60,7 @@ operations:
     effects:
       - put: { resource: rule }
 
-  DeleteArchiveRule:
-    effects:
-      - delete: { resource: rule, missing: ignore }
-
+  DeleteArchiveRule: {delete: {resource: rule, missing: ignore}}
 quirks:
   - operation: ListFindings
     note: >

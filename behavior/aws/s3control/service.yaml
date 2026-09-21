@@ -53,40 +53,17 @@ operations:
     output:
       AccessPointArn: rec.AccessPointArn
 
-  GetAccessPoint:
-    reads:
-      ap: { resource: accesspoint }
-    require:
-      - { cond: ap_found, error: NoSuchAccessPoint }
-    output:
-      Name: ap.Name
-      Bucket: ap.Bucket
-      AccessPointArn: ap.AccessPointArn
-      NetworkOrigin: ap.NetworkOrigin
-
+  GetAccessPoint: {get: {resource: accesspoint, error: NoSuchAccessPoint}}
   ListAccessPoints:
     list: { resource: accesspoint, member: AccessPointList, paginate: model }
 
-  DeleteAccessPoint:
-    effects:
-      - delete: { resource: accesspoint, missing: ignore }
-
+  DeleteAccessPoint: {delete: {resource: accesspoint, missing: ignore}}
   PutPublicAccessBlock:
     effects:
       - put: { resource: publicaccessblock }
 
-  GetPublicAccessBlock:
-    reads:
-      pab: { resource: publicaccessblock }
-    require:
-      - { cond: pab_found, error: NoSuchPublicAccessBlockConfiguration }
-    output:
-      PublicAccessBlockConfiguration: pab.PublicAccessBlockConfiguration
-
-  DeletePublicAccessBlock:
-    effects:
-      - delete: { resource: publicaccessblock, missing: ignore }
-
+  GetPublicAccessBlock: {get: {resource: publicaccessblock, error: NoSuchPublicAccessBlockConfiguration}}
+  DeletePublicAccessBlock: {delete: {resource: publicaccessblock, missing: ignore}}
 quirks:
   - operation: CreateAccessPoint
     note: >

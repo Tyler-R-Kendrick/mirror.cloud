@@ -76,23 +76,13 @@ operations:
     output:
       repositoryMetadata: rec
 
-  GetRepository:
-    reads:
-      repository: { resource: repository }
-    require:
-      - { cond: repository_found, error: RepositoryNotFound }
-    output:
-      repositoryMetadata: repository
-
+  GetRepository: {get: {resource: repository, error: RepositoryNotFound, wrap: repositoryMetadata}}
   ListRepositories:
     list: { resource: repository, member: repositories, paginate: model }
     output:
       repositories: "items.map(r, {'repositoryName': r.repositoryName})"
 
-  DeleteRepository:
-    effects:
-      - delete: { resource: repository, missing: ignore }
-
+  DeleteRepository: {delete: {resource: repository, missing: ignore}}
   CreateBranch:
     reads:
       repository: { resource: repository }

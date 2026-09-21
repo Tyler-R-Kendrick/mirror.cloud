@@ -47,14 +47,7 @@ operations:
     output:
       NetworkId: rec.Id
 
-  GetNetwork:
-    reads:
-      net: { resource: network }
-    require:
-      - { cond: net_found, error: NotFound }
-    output:
-      Network: net
-
+  GetNetwork: {get: {resource: network, error: NotFound, wrap: Network}}
   ListNetworks:
     list: { resource: network, member: Networks, paginate: model }
 
@@ -64,14 +57,7 @@ operations:
     output:
       MemberId: rec.Id
 
-  GetMember:
-    reads:
-      mem: { resource: member }
-    require:
-      - { cond: mem_found, error: NotFound }
-    output:
-      Member: mem
-
+  GetMember: {get: {resource: member, error: NotFound, wrap: Member}}
 quirks:
   - operation: CreateNetwork
     note: >

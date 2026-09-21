@@ -73,10 +73,7 @@ operations:
   ListResources:
     list: { resource: resource, member: ResourceInfoList, paginate: model }
 
-  DeregisterResource:
-    effects:
-      - delete: { resource: resource, missing: ignore }
-
+  DeregisterResource: {delete: {resource: resource, missing: ignore}}
 quirks:
   - operation: RevokePermissions
     note: >

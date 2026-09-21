@@ -2582,6 +2582,20 @@ func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
 		t.Fatalf("historical-only version delete = %#v", fault)
 	}
 	characterization["historical-only-version"] = "BucketNotEmpty"
+
+	markerBucket := map[string]any{"Bucket": "marker-only-bucket"}
+	mustInvoke(t, p, "CreateBucket", markerBucket, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "marker-only-bucket", "Status": "Enabled"}, nil)
+	created := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "marker-only-bucket", "Key": "object"}, []byte("body"))
+	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "marker-only-bucket", "Key": "object"}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "marker-only-bucket", "Key": "object", "VersionId": created.Headers.Get("x-amz-version-id")}, nil)
+	_, err = invoke(t, p, "DeleteBucket", markerBucket, nil)
+	if fault := asFault(t, err); fault.Code != "BucketNotEmpty" || fault.Message != "The bucket you tried to delete is not empty. You must delete all versions in the bucket." {
+		t.Fatalf("marker-only delete = %#v", fault)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "marker-only-bucket", "Key": "object", "VersionId": marker.Headers.Get("x-amz-version-id")}, nil)
+	mustInvoke(t, p, "DeleteBucket", markerBucket, nil)
+	characterization["marker-only-version"] = "BucketNotEmpty"
 	golden.AssertJSON(t, characterization)
 }
 
@@ -4405,8 +4419,47 @@ func TestDeleteObjectRejectsVersionOnUnversionedMissingKey(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"invalid": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}, "null": map[string]any{"status": deleted.Status, "headers": deleted.Headers}})
 }
 
+func TestGetObjectVersionErrors(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
+	_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "missing"}, nil)
+	invalid := asFault(t, err)
+	if invalid.Code != "InvalidArgument" || invalid.Message != "Invalid version id specified" || invalid.Fields["ArgumentName"] != "versionId" || invalid.Fields["ArgumentValue"] != "missing" {
+		t.Fatalf("unversioned read = %#v", invalid)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil))); body != "body" {
+		t.Fatalf("null version body = %q", body)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
+	version := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("versioned")).Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": version}, nil)
+	_, err = invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": version}, nil)
+	missing := asFault(t, err)
+	if missing.Code != "NoSuchVersion" || missing.Message != "The specified version does not exist." || missing.Fields["Key"] != "key" || missing.Fields["VersionId"] != version {
+		t.Fatalf("deleted version read = %#v", missing)
+	}
+	golden.AssertJSON(t, map[string]any{"invalid": invalid, "missing": missing})
+}
+
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unversioned", "Key": "key"}, []byte("body"))
+	wrongVersion := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "unversioned", "Objects": []any{map[string]any{"Key": "key", "VersionId": "missing"}}}, nil).Output
+	if failures := asSliceForTest(wrongVersion["Errors"]); len(failures) != 1 || asMapForTest(failures[0])["Code"] != "NoSuchVersion" || asMapForTest(failures[0])["VersionId"] != "missing" {
+		t.Fatalf("unversioned wrong version = %#v", wrongVersion)
+	}
+	bulk := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "unversioned", "Objects": []any{map[string]any{"Key": "key"}, map[string]any{"Key": "c-missing"}, map[string]any{"Key": "a-missing"}}}, nil).Output
+	deletedKeys := []string{}
+	for _, raw := range asSliceForTest(bulk["Deleted"]) {
+		deletedKeys = append(deletedKeys, asMapForTest(raw)["Key"].(string))
+	}
+	sort.Strings(deletedKeys)
+	if !reflect.DeepEqual(deletedKeys, []string{"a-missing", "c-missing", "key"}) || bulk["Errors"] != nil {
+		t.Fatalf("unversioned bulk delete = %#v", bulk)
+	}
+
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
 	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first"))
@@ -4437,7 +4490,7 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	if failure["Code"] != "NoSuchVersion" || failure["VersionId"] != "missing" {
 		t.Fatalf("failure %#v", failure)
 	}
-	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "quiet", "VersionId": quietVersion}, nil); asFault(t, err).Code != "NoSuchKey" {
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "quiet", "VersionId": quietVersion}, nil); asFault(t, err).Code != "NoSuchVersion" {
 		t.Fatalf("quiet delete did not run: %v", err)
 	}
 	_, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{}}, nil)
@@ -4760,6 +4813,24 @@ func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 		"currentMarker":    asFault(t, currentErr).Code,
 		"explicitMarker":   asFault(t, markerErr).Code,
 	})
+}
+
+func TestListObjectVersionsUnversionedOrder(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned-order"}, nil)
+	for _, key := range []string{"c", "a", "b"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unversioned-order", "Key": key}, []byte(key))
+	}
+	versions := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "unversioned-order"}, nil).Output["Versions"])
+	if len(versions) != 3 {
+		t.Fatalf("versions = %#v", versions)
+	}
+	for index, key := range []string{"a", "b", "c"} {
+		version := asMapForTest(versions[index])
+		if version["Key"] != key || version["VersionId"] != "null" || version["IsLatest"] != true {
+			t.Fatalf("version %d = %#v", index, version)
+		}
+	}
 }
 
 func TestUploadPartCopyConditionsAndRange(t *testing.T) {
@@ -5456,7 +5527,7 @@ func TestObjectByteRanges(t *testing.T) {
 			t.Fatalf("range %q checksum headers = %v", test.value, response.Headers)
 		}
 	}
-	for _, value := range []string{"2-5", "items=0-1", "bytes=bad", "bytes=5-2", "bytes=0-1,3-4"} {
+	for _, value := range []string{"2-5", "items=0-1", "bytes=bad", "bytes=5-2", "bytes=-1-", "bytes=0--1", "bytes=-", "bytes=0-1,3-4"} {
 		response, got, err := get(value)
 		if err != nil || response.Status != http.StatusOK || string(got) != string(body) || response.Headers.Get("Content-Range") != "" {
 			t.Fatalf("ignored range %q = %q %#v %v", value, got, response, err)
@@ -5465,7 +5536,7 @@ func TestObjectByteRanges(t *testing.T) {
 	for _, value := range []string{"bytes=10-", "bytes=-0"} {
 		_, _, err := get(value)
 		fault := asFault(t, err)
-		if fault.Code != "InvalidRange" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable || fault.Headers.Get("Content-Range") != "bytes */10" {
+		if fault.Code != "InvalidRange" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable || fault.Headers.Get("Content-Range") != "bytes */10" || fault.Fields["ActualObjectSize"] != "10" || fault.Fields["RangeRequested"] != value {
 			t.Fatalf("range %q fault = %#v", value, fault)
 		}
 	}

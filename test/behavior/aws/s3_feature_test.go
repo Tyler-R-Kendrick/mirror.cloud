@@ -3335,6 +3335,55 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given object versions and ranges When reads fail Then AWS error details are returned", func(t *testing.T) {
+		for _, request := range []struct {
+			method, path, body string
+		}{{http.MethodPut, "/crud-read-bdd", ""}, {http.MethodPut, "/crud-read-bdd/key", "0123456789"}} {
+			res := do(request.method, request.path, []byte(request.body), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("%s %s = %d", request.method, request.path, res.StatusCode)
+			}
+		}
+		nullRead := do(http.MethodGet, "/crud-read-bdd/key?versionId=null", nil, "")
+		nullBody, _ := io.ReadAll(nullRead.Body)
+		nullRead.Body.Close()
+		if nullRead.StatusCode != http.StatusOK || string(nullBody) != "0123456789" || nullRead.Header.Get("x-amz-version-id") != "" {
+			t.Fatalf("unversioned null read = %d %q %v", nullRead.StatusCode, nullBody, nullRead.Header)
+		}
+		invalid := do(http.MethodGet, "/crud-read-bdd/key?versionId=missing", nil, "")
+		invalidBody, _ := io.ReadAll(invalid.Body)
+		invalid.Body.Close()
+		if invalid.StatusCode != http.StatusBadRequest || !bytes.Contains(invalidBody, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(invalidBody, []byte("<ArgumentName>versionId</ArgumentName>")) || !bytes.Contains(invalidBody, []byte("<ArgumentValue>missing</ArgumentValue>")) {
+			t.Fatalf("invalid version read = %d %s", invalid.StatusCode, invalidBody)
+		}
+		rangeRequest, _ := http.NewRequest(http.MethodGet, ts.URL+"/crud-read-bdd/key", nil)
+		rangeRequest.Header.Set("Authorization", auth)
+		rangeRequest.Header.Set("Range", "bytes=-0")
+		unsatisfied, err := http.DefaultClient.Do(rangeRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unsatisfiedBody, _ := io.ReadAll(unsatisfied.Body)
+		unsatisfied.Body.Close()
+		if unsatisfied.StatusCode != http.StatusRequestedRangeNotSatisfiable || unsatisfied.Header.Get("Content-Range") != "bytes */10" || !bytes.Contains(unsatisfiedBody, []byte("<ActualObjectSize>10</ActualObjectSize>")) || !bytes.Contains(unsatisfiedBody, []byte("<RangeRequested>bytes=-0</RangeRequested>")) {
+			t.Fatalf("unsatisfied range = %d %s %v", unsatisfied.StatusCode, unsatisfiedBody, unsatisfied.Header)
+		}
+		versioning := do(http.MethodPut, "/crud-read-bdd?versioning", []byte("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"), "")
+		versioning.Body.Close()
+		versioned := do(http.MethodPut, "/crud-read-bdd/key", []byte("versioned"), "")
+		versioned.Body.Close()
+		version := versioned.Header.Get("x-amz-version-id")
+		deleted := do(http.MethodDelete, "/crud-read-bdd/key?versionId="+version, nil, "")
+		deleted.Body.Close()
+		missing := do(http.MethodGet, "/crud-read-bdd/key?versionId="+version, nil, "")
+		missingBody, _ := io.ReadAll(missing.Body)
+		missing.Body.Close()
+		if versioning.StatusCode != http.StatusOK || versioned.StatusCode != http.StatusOK || version == "" || deleted.StatusCode != http.StatusNoContent || missing.StatusCode != http.StatusNotFound || !bytes.Contains(missingBody, []byte("<Code>NoSuchVersion</Code>")) || !bytes.Contains(missingBody, []byte("<Key>key</Key>")) || !bytes.Contains(missingBody, []byte("<VersionId>"+version+"</VersionId>")) {
+			t.Fatalf("deleted version read = %d %s", missing.StatusCode, missingBody)
+		}
+	})
+
 	t.Run("Given versioned replication When an object is written Then its version is readable from the replica", func(t *testing.T) {
 		for _, bucket := range []string{"replication-source", "replication-destination"} {
 			res := do(http.MethodPut, "/"+bucket, nil, "")

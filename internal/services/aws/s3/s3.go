@@ -1634,9 +1634,16 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		return nil, err
 	}
 	wantVer := str(req.Input["VersionId"])
+	if p.versioningStatus(ctx, req, b) == "" {
+		if wantVer == "null" {
+			wantVer = ""
+		} else if wantVer != "" {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid version id specified", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "versionId", "ArgumentValue": wantVer}}
+		}
+	}
 	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
 	if !exists {
-		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
+		return nil, objectReadNotFound(key, wantVer)
 	}
 	if truthy(meta["deleteMarker"]) {
 		return nil, deleteMarkerReadFault(meta, wantVer != "")
@@ -1658,7 +1665,7 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	rc, info, err := p.deps.Blobs.Get(ctx, bk)
 	if err != nil {
-		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
+		return nil, objectReadNotFound(key, wantVer)
 	}
 	h := http.Header{}
 	etag := objectETag(meta, info.MD5)
@@ -5734,6 +5741,13 @@ func (p *Pack) restoreCurrentVersion(ctx context.Context, req *spi.Request, buck
 	return nil
 }
 
+func objectReadNotFound(key, version string) *spi.Fault {
+	if version != "" {
+		return &spi.Fault{Code: "NoSuchVersion", Message: "The specified version does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"Key": key, "VersionId": version}}
+	}
+	return &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"Key": key}}
+}
+
 func deleteMarkerReadFault(meta map[string]any, explicit bool) *spi.Fault {
 	headers := http.Header{}
 	headers.Set("x-amz-delete-marker", "true")
@@ -6186,7 +6200,7 @@ func objectByteRange(value string, size int64) (start, length int64, requested b
 	invalid := func() (int64, int64, bool, error) {
 		h := http.Header{}
 		h.Set("Content-Range", fmt.Sprintf("bytes */%d", size))
-		return 0, 0, true, &spi.Fault{Code: "InvalidRange", Message: "The requested range is not satisfiable", HTTPStatus: http.StatusRequestedRangeNotSatisfiable, Fault: "client", Headers: h}
+		return 0, 0, true, &spi.Fault{Code: "InvalidRange", Message: "The requested range is not satisfiable", HTTPStatus: http.StatusRequestedRangeNotSatisfiable, Fault: "client", Fields: map[string]any{"ActualObjectSize": strconv.FormatInt(size, 10), "RangeRequested": value}, Headers: h}
 	}
 	if first == "" {
 		suffix, parseErr := strconv.ParseInt(last, 10, 64)

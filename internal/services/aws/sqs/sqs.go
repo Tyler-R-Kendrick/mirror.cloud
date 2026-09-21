@@ -272,11 +272,12 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	id := p.deps.Rand.Hex(16)
 	rh := p.deps.Rand.Hex(64)
 	seq := p.nextSeq(ctx, req, name)
+	trace := str(asMap(asMap(req.Input["MessageSystemAttributes"])["AWSTraceHeader"])["StringValue"])
 	msg := map[string]any{
 		"id": id, "body": body, "handle": rh, "md5": md5hex,
 		"group": group, "seq": seq,
 		"visibleAt": now.Add(time.Duration(delay) * time.Second).UnixNano(), "receiveCount": 0,
-		"attrs": req.Input["MessageAttributes"],
+		"attrs": req.Input["MessageAttributes"], "trace": trace,
 	}
 	raw, _ := json.Marshal(msg)
 	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
@@ -315,7 +316,11 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 			out := make([]any, 0, len(msgs))
 			for _, m := range msgs {
 				p.afterReceive(ctx, req, name, m, vis)
-				wire := map[string]any{"MessageId": m["id"], "ReceiptHandle": m["handle"], "Body": m["body"], "Attributes": map[string]any{"ApproximateReceiveCount": fmt.Sprintf("%v", m["receiveCount"])}}
+				attributes := map[string]any{"ApproximateReceiveCount": fmt.Sprintf("%v", m["receiveCount"])}
+				if req.Input["AttributeNames"] != nil && str(m["trace"]) != "" {
+					attributes["AWSTraceHeader"] = m["trace"]
+				}
+				wire := map[string]any{"MessageId": m["id"], "ReceiptHandle": m["handle"], "Body": m["body"], "Attributes": attributes}
 				if want := req.Input["MessageAttributeNames"]; want != nil && m["attrs"] != nil {
 					wire["MessageAttributes"] = filterMsgAttrs(m["attrs"], want)
 				}

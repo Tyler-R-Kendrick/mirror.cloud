@@ -1960,7 +1960,8 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 }
 
 func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
+	b := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
 	if req.HTTP != nil {
@@ -1996,6 +1997,7 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 	}
 	var deleted []any
 	var failures []any
+	versioningStatus := p.versioningStatus(ctx, req, b)
 	for _, o := range objs {
 		m, _ := o.(map[string]any)
 		key := str(m["Key"])
@@ -2011,6 +2013,7 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 		} else {
 			delete(child.Input, "VersionId")
 		}
+		_, existed, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
 		resp, err := p.deleteObject(ctx, &child)
 		if err != nil {
 			fault, ok := err.(*spi.Fault)
@@ -2027,6 +2030,9 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 			}
 			failures = append(failures, item)
 			continue
+		}
+		if !existed && versionID == "" && versioningStatus == "" {
+			p.notify(ctx, &child, b, key, "ObjectRemoved:Delete")
 		}
 		if quiet {
 			continue
@@ -5337,9 +5343,13 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 			name = arn[i+1:]
 		}
 		if str(m["QueueArn"]) != "" || str(m["Queue"]) != "" || strings.Contains(arn, ":sqs:") {
+			input := map[string]any{"QueueName": name, "MessageBody": string(payload)}
+			if req.HTTP != nil && req.HTTP.Header.Get("X-Amzn-Trace-Id") != "" {
+				input["MessageSystemAttributes"] = map[string]any{"AWSTraceHeader": map[string]any{"DataType": "String", "StringValue": req.HTTP.Header.Get("X-Amzn-Trace-Id")}}
+			}
 			_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{
 				Identity: notificationTargetIdentity(req.Identity, arn), Operation: "SendMessage",
-				Input: map[string]any{"QueueName": name, "MessageBody": string(payload)},
+				Input: input,
 			})
 			continue
 		}

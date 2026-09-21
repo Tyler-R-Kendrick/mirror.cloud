@@ -1192,6 +1192,18 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || !strings.Contains(aws.ToString(headExpiring.Expiration), `rule-id="expire-images"`) {
 		t.Fatalf("head lifecycle expiration: %#v %v", headExpiring, err)
 	}
+	expiringUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("images/multipart.txt"), Tagging: aws.String("class=temporary")})
+	if err != nil {
+		t.Fatalf("create expiring multipart upload: %v", err)
+	}
+	expiringPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("images/multipart.txt"), UploadId: expiringUpload.UploadId, PartNumber: aws.Int32(1), Body: strings.NewReader("photo")})
+	if err != nil {
+		t.Fatalf("upload expiring part: %v", err)
+	}
+	completedExpiring, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("images/multipart.txt"), UploadId: expiringUpload.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: expiringPart.ETag}}}})
+	if err != nil || !strings.Contains(aws.ToString(completedExpiring.Expiration), `rule-id="expire-images"`) {
+		t.Fatalf("complete lifecycle expiration: %#v %v", completedExpiring, err)
+	}
 	invalidLifecycle := &s3types.BucketLifecycleConfiguration{Rules: []s3types.LifecycleRule{{ID: aws.String("invalid"), Status: s3types.ExpirationStatusEnabled, Filter: &s3types.LifecycleRuleFilter{Prefix: aws.String("a"), Tag: &s3types.Tag{Key: aws.String("k"), Value: aws.String("v")}}}}}
 	if _, err := s3c.PutBucketLifecycleConfiguration(context.Background(), &s3.PutBucketLifecycleConfigurationInput{Bucket: aws.String("sdk"), LifecycleConfiguration: invalidLifecycle}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
 		t.Fatalf("invalid bucket lifecycle: %v", err)

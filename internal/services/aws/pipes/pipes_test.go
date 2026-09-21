@@ -862,6 +862,10 @@ func TestPipesLambdaPartialBatchResponse(t *testing.T) {
 		return len(messages) == 1 && messages[0]["body"] == "retry" && messages[0]["receiveCount"] == float64(1)
 	})
 	invoke(t, p, id, "StopPipe", map[string]any{"Name": "partial"})
+	// The rest drives the batch by hand: keep the loop out of the source so a
+	// drain that listed the pipe as RUNNING cannot take the message first.
+	p.draining.Lock()
+	defer p.draining.Unlock()
 	pipe := invoke(t, p, id, "DescribePipe", map[string]any{"Name": "partial"}).Output
 
 	invalid := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': 'unknown'}]}\n"

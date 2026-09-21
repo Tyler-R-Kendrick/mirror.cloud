@@ -5519,7 +5519,12 @@ var mutants = []mutant{
 		}
 		rec[k] = v
 	}`,
-		new: `	if !patch || !found {
+		new: `	// Resource schema fills creates, puts, and patches that mint a missing
+	// row. A patch on an existing row only overlays the effect's fields -
+	// re-running schema against the current input would replace create-time
+	// attributes with whatever the updating operation carried (SQS
+	// SetQueueAttributes wiping DelaySeconds).
+	if !patch || !found {
 		for _, k := range sortedKeysAny(res.Record) {
 			v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
 			if err != nil {

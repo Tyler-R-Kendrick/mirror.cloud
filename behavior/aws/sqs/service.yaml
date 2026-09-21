@@ -1276,16 +1276,32 @@ operations:
     reads:
       # Decode the handle in the key expressions: reads run before let, and
       # Cancel's SourceArn check needs the queue named inside the token.
+      #
+      # The absence guard comes first, because reads run before any require
+      # can reject the request, and `string()` of an absent member has no
+      # overload -- the whole operation then fails with a 500 instead of the
+      # fault it declares, which is what the equivalence gate caught.
+      #
+      # Both halves are needed and this file already says so everywhere else:
+      # a member can be missing from the map OR present and null, and only
+      # `'X' in input && input.X != null` covers both. `has()` alone does not.
       srcq:
         resource: queue
         key: >
-          b64decode(string(input.TaskHandle)) == '' ? '' :
+          !('TaskHandle' in input) || input.TaskHandle == null ? '' :
+          (b64decode(string(input.TaskHandle)) == '' ? '' :
             (parseJSON(b64decode(string(input.TaskHandle))) != null &&
              'sourceArn' in parseJSON(b64decode(string(input.TaskHandle)))
-              ? queueFromArn(string(parseJSON(b64decode(string(input.TaskHandle))).sourceArn)) : '')
+              ? queueFromArn(string(parseJSON(b64decode(string(input.TaskHandle))).sourceArn)) : ''))
     let:
+      # `handle` is the guard, once, so nothing below repeats it. An absent or
+      # null TaskHandle becomes the empty string, which every expression here
+      # already handles: it decodes to nothing, parses to null, and the first
+      # require answers InvalidParameterValue -- which is the fault the pack
+      # gave and the fault a caller should see.
+      handle: "'TaskHandle' in input && input.TaskHandle != null ? string(input.TaskHandle) : ''"
       handleDoc: >
-        b64decode(string(input.TaskHandle)) == '' ? null : parseJSON(b64decode(string(input.TaskHandle)))
+        b64decode(handle) == '' ? null : parseJSON(b64decode(handle))
       handleValid: >
         handleDoc != null && 'taskId' in handleDoc && string(handleDoc.taskId) != '' &&
         'sourceArn' in handleDoc && string(handleDoc.sourceArn) != ''
@@ -1305,12 +1321,12 @@ operations:
     select:
       binding: matched
       resource: movetask
-      filter: "string(item.TaskHandle) == string(input.TaskHandle)"
+      filter: "string(item.TaskHandle) == handle"
       limit: "1"
     effects:
       - patch:
           resource: movetask
-          where: "string(item.TaskHandle) == string(input.TaskHandle)"
+          where: "string(item.TaskHandle) == handle"
           record:
             Status: "'CANCELLED'"
       - delete:

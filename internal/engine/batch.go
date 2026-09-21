@@ -54,7 +54,7 @@ func (e *Engine) runBatch(ctx context.Context, req *spi.Request, op bir.Operatio
 			}
 		}
 	}
-		if b.MaxBytes > 0 {
+	if b.MaxBytes > 0 {
 		total := 0
 		for _, raw := range entries {
 			entry, _ := raw.(map[string]any)
@@ -72,7 +72,7 @@ func (e *Engine) runBatch(ctx context.Context, req *spi.Request, op bir.Operatio
 			return nil, e.fault(errName, msg)
 		}
 	}
-if b.InvalidIDError != "" {
+	if b.InvalidIDError != "" {
 		for _, raw := range entries {
 			entry, _ := raw.(map[string]any)
 			if entry == nil {

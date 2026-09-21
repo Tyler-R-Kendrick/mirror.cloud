@@ -2642,6 +2642,32 @@ func FuzzMultipartWithoutChecksum(f *testing.F) {
 	})
 }
 
+func FuzzCompositeMultipartPartChecksumRequired(f *testing.F) {
+	f.Add("plain", false)
+	f.Add("alternate", true)
+	f.Fuzz(func(t *testing.T, body string, alternate bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-composite-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-composite-fuzz", "Key": "object", "ChecksumAlgorithm": "CRC32"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-composite-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		completed := completedPart(1, part).(map[string]any)
+		wantCode := "InvalidRequest"
+		wantMessage := "The upload was created using a crc32 checksum. The complete request must include the checksum for each part. It was missing for part 1 in the request."
+		if alternate {
+			completed["ChecksumSHA256"] = "AA=="
+			wantCode, wantMessage = "BadDigest", "The sha256 you specified for part 1 did not match what we received."
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completed), nil)
+		if fault := asFault(t, err); fault.Code != wantCode || fault.Message != wantMessage || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("alternate=%t fault=%#v", alternate, fault)
+		}
+	})
+}
+
 func FuzzMultipartSSECustomerKey(f *testing.F) {
 	f.Add(uint8(0), []byte("key"), "body")
 	f.Add(uint8(1), []byte("digest-only"), "md5")

@@ -2433,7 +2433,16 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		if hasChecksum {
 			partChecksum := part.checksums[checksum.header]
-			if supplied := str(item[checksum.input]); supplied != "" && supplied != partChecksum {
+			supplied := str(item[checksum.input])
+			if supplied == "" && u.checksumType == "COMPOSITE" {
+				for _, candidate := range checksums {
+					if str(item[candidate.input]) != "" {
+						return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified for part %d did not match what we received.", strings.ToLower(candidate.algorithm), number), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+				}
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using a %s checksum. The complete request must include the checksum for each part. It was missing for part %d in the request.", strings.ToLower(u.checksumAlgorithm), number), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if supplied != "" && supplied != partChecksum {
 				return nil, invalidMultipartPart(id, etag, number)
 			}
 			decoded, _ := base64.StdEncoding.DecodeString(partChecksum)

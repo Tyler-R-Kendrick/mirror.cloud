@@ -458,6 +458,29 @@ func TestS3MultipartWithoutChecksumContract(t *testing.T) {
 	if string(got) != "plain" {
 		t.Fatalf("body = %q", got)
 	}
+	request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-contract/composite?uploads", nil)
+	request.Header.Set("x-amz-checksum-algorithm", "CRC32")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initiated, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || xml.Unmarshal(initiated, &upload) != nil {
+		t.Fatalf("initiate composite: %d %s", response.StatusCode, initiated)
+	}
+	part, _ = do(http.MethodPut, "/multipart-contract/composite?partNumber=1&uploadId="+url.QueryEscape(upload.UploadID), "checked")
+	manifest = "<CompleteMultipartUpload><Part><ETag>" + part.Header.Get("ETag") + "</ETag><PartNumber>1</PartNumber></Part></CompleteMultipartUpload>"
+	request, _ = http.NewRequest(http.MethodPost, ts.URL+"/multipart-contract/composite?uploadId="+url.QueryEscape(upload.UploadID), strings.NewReader(manifest))
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fault, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(fault, []byte("missing for part 1")) {
+		t.Fatalf("missing composite checksum: %d %s", response.StatusCode, fault)
+	}
 }
 
 func TestAWSChunkedFramingContract(t *testing.T) {

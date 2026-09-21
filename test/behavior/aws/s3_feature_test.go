@@ -2389,9 +2389,17 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("create public-access-block bucket %d", res.StatusCode)
 		}
+		res = do(http.MethodGet, "/public-access-block?publicAccessBlock", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<BlockPublicAcls>true</BlockPublicAcls>")) ||
+			!bytes.Contains(body, []byte("<BlockPublicPolicy>true</BlockPublicPolicy>")) || !bytes.Contains(body, []byte("<IgnorePublicAcls>true</IgnorePublicAcls>")) ||
+			!bytes.Contains(body, []byte("<RestrictPublicBuckets>true</RestrictPublicBuckets>")) {
+			t.Fatalf("default public access block = %d %s", res.StatusCode, body)
+		}
 		valid := []byte(`<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls></PublicAccessBlockConfiguration>`)
 		res = do(http.MethodPut, "/public-access-block?publicAccessBlock", valid, "")
-		body, _ := io.ReadAll(res.Body)
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || len(body) != 0 {
 			t.Fatalf("put public access block %d %s", res.StatusCode, body)
@@ -2426,7 +2434,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/public-access-block?publicAccessBlock", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchPublicAccessBlockConfiguration")) {
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchPublicAccessBlockConfiguration")) || !bytes.Contains(body, []byte("<BucketName>public-access-block</BucketName>")) {
 			t.Fatalf("get deleted public access block %d %s", res.StatusCode, body)
 		}
 	})

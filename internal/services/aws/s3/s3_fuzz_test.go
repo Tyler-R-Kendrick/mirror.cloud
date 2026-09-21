@@ -274,6 +274,12 @@ func FuzzPublicAccessBlock(f *testing.F) {
 	f.Fuzz(func(t *testing.T, mode uint8, flag bool, text string) {
 		p := s3.New(spitest.Deps(t))
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block-fuzz"}, nil)
+		defaults := asMapForTest(mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-fuzz"}, nil).Output["PublicAccessBlockConfiguration"])
+		for _, field := range []string{"BlockPublicAcls", "BlockPublicPolicy", "IgnorePublicAcls", "RestrictPublicBuckets"} {
+			if defaults[field] != true {
+				t.Fatalf("default %s = %#v", field, defaults[field])
+			}
+		}
 		baseline := map[string]any{"BlockPublicPolicy": true}
 		mustInvoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-fuzz", "PublicAccessBlockConfiguration": baseline}, nil)
 		var configuration any

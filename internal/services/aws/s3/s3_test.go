@@ -999,15 +999,19 @@ func TestBucketOwnershipControls(t *testing.T) {
 func TestPublicAccessBlock(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block"}, nil)
+	defaultConfiguration := map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": true, "IgnorePublicAcls": true, "RestrictPublicBuckets": true}
+	if got := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil).Output["PublicAccessBlockConfiguration"]; !reflect.DeepEqual(got, defaultConfiguration) {
+		t.Fatalf("default configuration = %#v", got)
+	}
 	put := func(configuration any) error {
 		_, err := invoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block", "PublicAccessBlockConfiguration": configuration}, nil)
 		return err
 	}
-	if err := put(map[string]any{"BlockPublicAcls": true}); err != nil {
+	if err := put(map[string]any{"BlockPublicAcls": false, "BlockPublicPolicy": false, "IgnorePublicAcls": false}); err != nil {
 		t.Fatal(err)
 	}
 	response := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
-	want := map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
+	want := map[string]any{"BlockPublicAcls": false, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
 	if got := response.Output["PublicAccessBlockConfiguration"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("configuration = %#v", got)
 	}
@@ -1020,10 +1024,17 @@ func TestPublicAccessBlock(t *testing.T) {
 	if got := response.Output["PublicAccessBlockConfiguration"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("invalid put replaced configuration = %#v", got)
 	}
-	mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
-	mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
-	if _, err := invoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil); asFault(t, err).Code != "NoSuchPublicAccessBlockConfiguration" {
-		t.Fatalf("get deleted configuration: %v", err)
+	if response := mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil); response.Status != http.StatusNoContent {
+		t.Fatalf("delete status = %d", response.Status)
+	}
+	if response := mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil); response.Status != http.StatusNoContent {
+		t.Fatalf("idempotent delete status = %d", response.Status)
+	}
+	_, err := invoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
+	missing := asFault(t, err)
+	if missing.Code != "NoSuchPublicAccessBlockConfiguration" || missing.Message != "The public access block configuration was not found" ||
+		missing.HTTPStatus != http.StatusNotFound || missing.Fields["BucketName"] != "public-access-block" {
+		t.Fatalf("get deleted configuration: %#v", missing)
 	}
 }
 
@@ -2234,6 +2245,7 @@ func TestBucketRequestPaymentCharacterization(t *testing.T) {
 func TestPublicAccessBlockCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
+	defaultConfiguration := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
 	put := mustInvoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization", "PublicAccessBlockConfiguration": map[string]any{"IgnorePublicAcls": true}}, nil)
 	get := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
 	_, invalidErr := invoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization", "PublicAccessBlockConfiguration": map[string]any{"Unknown": true}}, nil)
@@ -2242,10 +2254,10 @@ func TestPublicAccessBlockCharacterization(t *testing.T) {
 	_, missingErr := invoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
 	missing := asFault(t, missingErr)
 	golden.AssertJSON(t, map[string]any{
-		"put": put.Output, "get": get.Output,
+		"default": defaultConfiguration.Output, "put": put.Output, "get": get.Output,
 		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus},
 		"delete":  deleted.Status,
-		"missing": map[string]any{"code": missing.Code, "status": missing.HTTPStatus},
+		"missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus, "bucket": missing.Fields["BucketName"]},
 	})
 }
 

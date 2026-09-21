@@ -224,6 +224,20 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	if req.HTTP != nil && req.Operation != "" {
 		req.Operation = p.route(req)
 	}
+	if req.HTTP != nil && req.HTTP.Method == http.MethodOptions {
+		return p.corsPreflight(ctx, req)
+	}
+	resp, err := p.invoke(ctx, req)
+	if err == nil && resp != nil {
+		if resp.Headers == nil {
+			resp.Headers = http.Header{}
+		}
+		p.applyCORS(ctx, req, resp.Headers)
+	}
+	return resp, err
+}
+
+func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	switch req.Operation {
 	case "CreateBucket":
 		return p.createBucket(ctx, req)
@@ -324,6 +338,161 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	default:
 		return nil, spi.NotImplemented("aws.s3", req.Operation, "emulate")
 	}
+}
+
+func (p *Pack) corsPreflight(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	origin := req.HTTP.Header.Get("Origin")
+	if origin == "" {
+		return nil, &spi.Fault{Code: "BadRequest", Message: "Insufficient information. Origin request header needed.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	method := req.HTTP.Header.Get("Access-Control-Request-Method")
+	if method == "" {
+		method = http.MethodOptions
+	}
+	headers, configured := p.corsHeaders(ctx, req, origin, method, req.HTTP.Header.Get("Access-Control-Request-Headers"))
+	if headers != nil {
+		return &spi.Response{Status: http.StatusOK, Headers: headers}, nil
+	}
+	message := "CORSResponse: This CORS request is not allowed. This is usually because the evalution of Origin, request method / Access-Control-Request-Method or Access-Control-Request-Headers are not whitelisted by the resource's CORS spec."
+	if !configured {
+		message = "CORSResponse: CORS is not enabled for this bucket."
+	}
+	resourceType := "BUCKET"
+	if str(req.Input["Key"]) != "" {
+		resourceType = "OBJECT"
+	}
+	return nil, &spi.Fault{Code: "AccessForbidden", Message: message, HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"Method": method, "ResourceType": resourceType}}
+}
+
+func (p *Pack) applyCORS(ctx context.Context, req *spi.Request, headers http.Header) {
+	if req.HTTP == nil || req.HTTP.Header.Get("Origin") == "" {
+		return
+	}
+	method := req.HTTP.Header.Get("Access-Control-Request-Method")
+	if method == "" {
+		method = req.HTTP.Method
+	}
+	matched, _ := p.corsHeaders(ctx, req, req.HTTP.Header.Get("Origin"), method, req.HTTP.Header.Get("Access-Control-Request-Headers"))
+	for key, values := range matched {
+		for _, value := range values {
+			headers.Add(key, value)
+		}
+	}
+}
+
+func (p *Pack) corsHeaders(ctx context.Context, req *spi.Request, origin, method, requested string) (http.Header, bool) {
+	configuration, ok := p.corsConfiguration(ctx, req)
+	if !ok {
+		return nil, false
+	}
+	requestedHeaders := splitCORSHeaders(requested)
+	for _, value := range asSlice(configuration["CORSRules"]) {
+		rule := asMap(value)
+		allowedOrigin := ""
+		for _, candidate := range asSlice(rule["AllowedOrigins"]) {
+			pattern := str(candidate)
+			if corsPatternMatch(pattern, origin, false) {
+				allowedOrigin = pattern
+				break
+			}
+		}
+		if allowedOrigin == "" || !containsString(asSlice(rule["AllowedMethods"]), method, false) || !corsHeadersAllowed(asSlice(rule["AllowedHeaders"]), requestedHeaders) {
+			continue
+		}
+		headers := http.Header{}
+		headers.Set("Access-Control-Allow-Origin", allowedOrigin)
+		if allowedOrigin != "*" {
+			headers.Set("Access-Control-Allow-Origin", origin)
+			headers.Set("Access-Control-Allow-Credentials", "true")
+		}
+		headers.Set("Access-Control-Allow-Methods", joinStrings(asSlice(rule["AllowedMethods"])))
+		if len(requestedHeaders) > 0 {
+			headers.Set("Access-Control-Allow-Headers", strings.Join(requestedHeaders, ", "))
+		}
+		if exposed := joinStrings(asSlice(rule["ExposeHeaders"])); exposed != "" {
+			headers.Set("Access-Control-Expose-Headers", exposed)
+		}
+		if age, exists := rule["MaxAgeSeconds"]; exists {
+			headers.Set("Access-Control-Max-Age", fmt.Sprint(age))
+		}
+		headers.Set("Vary", "Origin, Access-Control-Request-Headers, Access-Control-Request-Method")
+		return headers, true
+	}
+	return nil, true
+}
+
+func (p *Pack) corsConfiguration(ctx context.Context, req *spi.Request) (map[string]any, bool) {
+	bucket := str(req.Input["Bucket"])
+	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/cors")
+	if !ok {
+		location, exists, _ := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, bucket)
+		if exists {
+			var owner struct {
+				Account string `json:"account"`
+				Region  string `json:"region"`
+			}
+			if json.Unmarshal(location, &owner) == nil && owner.Account == req.Identity.Account && owner.Region != "" {
+				req.Identity.Region = owner.Region
+				raw, ok, _ = p.col(req, "bktcfg").Get(ctx, bucket+"/cors")
+			}
+		}
+	}
+	if !ok {
+		return nil, false
+	}
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return nil, false
+	}
+	return asMap(doc["CORSConfiguration"]), true
+}
+
+func splitCORSHeaders(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
+func corsHeadersAllowed(allowed []any, requested []string) bool {
+	for _, header := range requested {
+		if !containsString(allowed, header, true) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsString(values []any, target string, fold bool) bool {
+	for _, value := range values {
+		if corsPatternMatch(str(value), target, fold) {
+			return true
+		}
+	}
+	return false
+}
+
+func corsPatternMatch(pattern, value string, fold bool) bool {
+	if fold {
+		pattern, value = strings.ToLower(pattern), strings.ToLower(value)
+	}
+	prefix, suffix, wildcard := strings.Cut(pattern, "*")
+	if !wildcard {
+		return pattern == value
+	}
+	return len(value) >= len(prefix)+len(suffix) && strings.HasPrefix(value, prefix) && strings.HasSuffix(value, suffix)
+}
+
+func joinStrings(values []any) string {
+	stringsOut := make([]string, 0, len(values))
+	for _, value := range values {
+		stringsOut = append(stringsOut, str(value))
+	}
+	return strings.Join(stringsOut, ", ")
 }
 
 func (p *Pack) route(req *spi.Request) string {

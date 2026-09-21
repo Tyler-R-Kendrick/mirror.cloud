@@ -36,6 +36,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if name == "" {
 		name = RouteName(r)
 	}
+	if name == "" && svc.ID == "aws.s3" && r.Method == http.MethodOptions && svc.OperationByName("GetObject") != nil {
+		name = "GetObject"
+	}
 	if name != "" {
 		if op := svc.OperationByName(name); op != nil {
 			return op, nil

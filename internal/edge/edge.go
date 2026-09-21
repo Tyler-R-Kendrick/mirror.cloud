@@ -83,11 +83,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	awsChunkedDecoded := false
 	awsChunkedInvalid := false
 	if r.Method == http.MethodOptions {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "*")
-		w.WriteHeader(204)
-		return
+		if svc := s.demux(r); svc == nil || svc.ID != "aws.s3" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "*")
+			w.WriteHeader(204)
+			return
+		}
 	}
 	if r.Header.Get("Expect") == "100-continue" {
 		w.WriteHeader(http.StatusContinue)
@@ -164,7 +166,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Request has expired", http.StatusForbidden)
 		return
 	}
-	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures {
+	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures && r.Method != http.MethodOptions {
 		secret := "test"
 		if id.AccessKeyID != "test" {
 			secret = s.deps.Rand.Derive(id.AccessKeyID).Hex(40)
@@ -264,7 +266,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.deps.Authorizer != nil && svc.ID != "aws.sts" && svc.ID != "aws.iam" {
+	if s.deps.Authorizer != nil && svc.ID != "aws.sts" && svc.ID != "aws.iam" && r.Method != http.MethodOptions {
 		for _, check := range authorizationChecks(req) {
 			var authErr error
 			if authorizer, ok := s.deps.Authorizer.(spi.RequestAuthorizer); ok {

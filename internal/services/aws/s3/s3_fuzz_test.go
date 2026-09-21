@@ -459,6 +459,55 @@ func FuzzBucketCors(f *testing.F) {
 	})
 }
 
+func FuzzBucketCorsHTTP(f *testing.F) {
+	for _, seed := range []struct{ origin, method, headers string }{
+		{"https://app.example.test", "GET", ""},
+		{"https://app.example.test", "GET", "x-amz-request-payer,x-AMZ-meta-team"},
+		{"https://wrong.test", "GET", ""},
+		{"https://app.example.test/", "GET", ""},
+		{"https://app.example.test", "DELETE", ""},
+		{"https://app.example.test", "GET", "content-type"},
+		{"", "GET", ""},
+	} {
+		f.Add(seed.origin, seed.method, seed.headers)
+	}
+	f.Fuzz(func(t *testing.T, origin, method, requested string) {
+		if !utf8.ValidString(origin) || !utf8.ValidString(method) || !utf8.ValidString(requested) || len(origin)+len(method)+len(requested) > 512 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "cors-http-fuzz"}, nil)
+		rules := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"https://*.example.test"}, "AllowedHeaders": []any{"x-amz-*"}}}
+		mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "cors-http-fuzz", "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
+		request := httptest.NewRequest(http.MethodOptions, "https://cors-http-fuzz.s3.us-east-1.amazonaws.com/key", nil)
+		request.Header.Set("Origin", origin)
+		request.Header.Set("Access-Control-Request-Method", method)
+		request.Header.Set("Access-Control-Request-Headers", requested)
+		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+		if origin == "" {
+			if fault := asFault(t, err); fault.Code != "BadRequest" {
+				t.Fatalf("missing origin = %#v", fault)
+			}
+			return
+		}
+		originMatches := strings.HasPrefix(origin, "https://") && strings.HasSuffix(origin, ".example.test") && len(origin) >= len("https://")+len(".example.test")
+		headersMatch := true
+		for _, header := range strings.Split(requested, ",") {
+			header = strings.TrimSpace(header)
+			if header != "" && !strings.HasPrefix(strings.ToLower(header), "x-amz-") {
+				headersMatch = false
+			}
+		}
+		if originMatches && method == http.MethodGet && headersMatch {
+			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != origin {
+				t.Fatalf("matching request = %#v, %v", response, err)
+			}
+		} else if fault := asFault(t, err); fault.Code != "AccessForbidden" {
+			t.Fatalf("rejected request = %#v", fault)
+		}
+	})
+}
+
 func FuzzBucketWebsite(f *testing.F) {
 	for _, seed := range []struct {
 		mode     uint8

@@ -5361,6 +5361,40 @@ var mutants = []mutant{
 		run:  "TestDeleteWhereRemovesEveryMatch",
 	},
 	{
+		// The shorthand is only safe because it expands to exactly the long
+		// form. A get that forgets its require reads the record and answers
+		// nulls for a missing one instead of the fault it named -- and every
+		// bundle rewritten to the shorthand would inherit that silently.
+		name: "bir-get-shorthand-drops-its-require",
+		file: filepath.Join("internal", "bir", "crud.go"),
+		old:  `			op.Require = []Require{{Cond: "rec_found", Error: spec.Error}}`,
+		new:  `			op.Require = nil`,
+		pkg:  "./internal/bir",
+		run:  "TestShorthandExpandsToExactlyTheLongForm",
+	},
+	{
+		// `missing: ignore` is the difference between a delete that tolerates
+		// an absent record and one that faults on it. A shorthand that drops
+		// it turns every idempotent delete in the tree into a NotFound.
+		name: "bir-delete-shorthand-drops-missing",
+		file: filepath.Join("internal", "bir", "crud.go"),
+		old:  `			op.Effects = []Effect{{Delete: &DeleteEffect{Resource: spec.Resource, Key: spec.Key, Missing: spec.Missing}}}`,
+		new:  `			op.Effects = []Effect{{Delete: &DeleteEffect{Resource: spec.Resource, Key: spec.Key}}}`,
+		pkg:  "./internal/bir",
+		run:  "TestShorthandExpandsToExactlyTheLongForm",
+	},
+	{
+		// Wrap places the record under one member; dropping it answers the
+		// record's members at the top level, which no SDK reading the
+		// declared output shape can find.
+		name: "bir-shorthand-ignores-wrap",
+		file: filepath.Join("internal", "bir", "crud.go"),
+		old:  `		if spec.Wrap != "" {`,
+		new:  `		if false {`,
+		pkg:  "./internal/bir",
+		run:  "TestShorthandExpandsToExactlyTheLongForm",
+	},
+	{
 		// A check that stops reading derive expressions passes `workspaces`
 		// and every future bundle that spells the same lookup that way -- the
 		// spelling that reads as more deliberate is the one it would stop

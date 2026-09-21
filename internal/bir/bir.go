@@ -287,8 +287,18 @@ type Operation struct {
 	Wait    *Wait             `yaml:"wait,omitempty"`
 	Effects []Effect          `yaml:"effects,omitempty"`
 	List    *ListSpec         `yaml:"list,omitempty"`
-	Batch   *BatchSpec        `yaml:"batch,omitempty"`
-	Output  map[string]string `yaml:"output,omitempty"`
+	// Get, Create, Put and Delete are the shorthand for the shapes that recur
+	// most across the bundles -- read a record and fault when it is absent,
+	// write one, or remove one -- answering with the record's own members
+	// where there is an answer. They
+	// are expanded into reads/require/effects/output at load, so nothing
+	// past the loader knows they exist; see expandCrud.
+	Get    *CrudSpec         `yaml:"get,omitempty"`
+	Create *CrudSpec         `yaml:"create,omitempty"`
+	Put    *CrudSpec         `yaml:"put,omitempty"`
+	Delete *CrudSpec         `yaml:"delete,omitempty"`
+	Batch  *BatchSpec        `yaml:"batch,omitempty"`
+	Output map[string]string `yaml:"output,omitempty"`
 
 	// OmitNull names output members the answer drops when they project null.
 	// A record that lacks a member answers without it -- OpenSearch answers
@@ -320,6 +330,26 @@ type Operation struct {
 // Read binds a stored record for the operation. Reads are declared rather than
 // expressed so the engine resolves them before any CEL runs, which is what
 // keeps expressions pure. Each binding x also binds x_found.
+// CrudSpec is the whole of a get, create, put or delete shorthand operation.
+//
+// The record is bound as `rec` in every case, and the answer is every member
+// the resource's record declares, projected by name -- or, with Wrap, the
+// record itself under one output member, which is how most AWS Describe and
+// Create responses are shaped. Anything else is the long form.
+type CrudSpec struct {
+	Resource string `yaml:"resource"`
+	// Error is the fault a get answers when the record is absent. Required
+	// on a get and refused elsewhere: a create or put has nothing to find.
+	Error string `yaml:"error,omitempty"`
+	// Wrap names the single output member the record is placed under.
+	Wrap string `yaml:"wrap,omitempty"`
+	// Key is passed through to the read or write it expands into.
+	Key string `yaml:"key,omitempty"`
+	// Missing is a delete's policy for an absent record, passed through to
+	// the delete effect; refused on anything else.
+	Missing string `yaml:"missing,omitempty"`
+}
+
 type Read struct {
 	Resource string `yaml:"resource"`
 	Key      string `yaml:"key,omitempty"`

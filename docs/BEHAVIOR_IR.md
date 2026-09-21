@@ -99,6 +99,29 @@ list:
 
 `filter` is a predicate over each candidate record, bound as `item`.
 
+### `get`, `create`, `put`, `delete` — the shorthand
+
+Four operation shapes recur more than every other combined: read one record and fault when it is absent, write one record, or remove one, answering with the record's own members where there is an answer. Fingerprinting every operation in the tree by structure found 2,469 operations in 222 shapes, with those at the top, so they have a shorthand — expanded at load into exactly the long form, the same way `list:` exists because it was the same eight lines in a hundred packs.
+
+```yaml
+GetVocabulary:         { get: { resource: vocabulary, error: NotFound } }
+CreateVocabulary:      { put: { resource: vocabulary } }
+GetTranscriptionJob:   { get: { resource: job, error: NotFound, wrap: TranscriptionJob } }
+StartTranscriptionJob: { put: { resource: job, wrap: TranscriptionJob } }
+DeleteVocabulary:      { delete: { resource: vocabulary, missing: ignore } }
+```
+
+Each stands for a full operation with the record bound as `rec`:
+
+```yaml
+GetVocabulary:
+  reads: { rec: { resource: vocabulary } }
+  require: [ { cond: rec_found, error: NotFound } ]
+  output: { VocabularyName: rec.VocabularyName, LanguageCode: rec.LanguageCode, VocabularyState: rec.VocabularyState }
+```
+
+Without `wrap` the answer is every member the resource's `record` declares, projected by name; with it, the record itself under that one output member, which is how most Describe and Create responses are shaped. `key` passes through to the read or write; `missing` passes through to a delete, which answers nothing. A `get` must name its `error`; nothing else may have one; none may sit beside a long-form key. **The long form is not deprecated** — it is what every operation that is not exactly this shape uses, and the loader refuses the shorthand rather than guess whenever it would mean anything else. Nothing past the loader knows the shorthand exists, which is what lets a bundle be rewritten from long to short with its recorded trace proving nothing changed.
+
 ### Values an expression can name
 
 Beyond `input`, `identity` and `now`, the bindings depend on where the expression sits, and the loader rejects anything out of scope:

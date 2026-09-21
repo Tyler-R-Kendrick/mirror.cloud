@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -23,6 +24,7 @@ import (
 // directly, because a bundle is served from the generated model and `edge.New`
 // falls back to the hand-authored catalog when none is supplied.
 func TestVercelProjectDeployKVBehavior(t *testing.T) {
+	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()
 	// Two services, because the pack's one registration carried two products
 	// on two hosts: the REST API on api.vercel.com and the KV data plane on
@@ -85,10 +87,17 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("dup %d %#v", code, body)
 		}
 	})
-	t.Run("Given a project When deployed Then readyState is READY", func(t *testing.T) {
+	t.Run("Given a project When deployed Then readyState is QUEUED until the clock advances", func(t *testing.T) {
 		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-app","project":"bdd-app"}`, "")
-		if code != 200 || dpl["readyState"] != "READY" || dpl["url"] == nil {
+		if code != 200 || dpl["readyState"] != "QUEUED" || dpl["url"] == nil {
 			t.Fatalf("deploy %d %#v", code, dpl)
+		}
+		if err := rt.Deps.Clock.Advance(2 * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		code, got, _ := call(http.MethodGet, "/v13/deployments/"+dpl["id"].(string), "", "")
+		if code != 200 || got["readyState"] != "READY" {
+			t.Fatalf("get after advance %d %#v", code, got)
 		}
 	})
 	t.Run("Given an undeclared version When a path is fetched Then it is not served", func(t *testing.T) {
@@ -265,12 +274,25 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("patch team %d %#v", code, body)
 		}
 	})
+	t.Run("Given a QUEUED deployment When canceled before the clock advances Then it is CANCELED", func(t *testing.T) {
+		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-cancel","project":"bdd-app2"}`, "")
+		if code != 200 || dpl["readyState"] != "QUEUED" {
+			t.Fatalf("deploy %d %#v", code, dpl)
+		}
+		code, canceled, _ := call(http.MethodPatch, "/v12/deployments/"+dpl["id"].(string)+"/cancel", "", "")
+		if code != 200 || canceled["readyState"] != "CANCELED" {
+			t.Fatalf("cancel while QUEUED %d %#v", code, canceled)
+		}
+	})
 	t.Run("Given a deployment with a file When its sub-resources are read Then they answer", func(t *testing.T) {
 		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-sub","project":"bdd-app2","files":[{"file":"index.html","sha":"aa11bb22","size":42}]}`, "")
 		if code != 200 {
 			t.Fatalf("deploy %d %#v", code, dpl)
 		}
 		id := dpl["id"].(string)
+		if err := rt.Deps.Clock.Advance(2 * time.Second); err != nil {
+			t.Fatal(err)
+		}
 		code, aliases, _ := call(http.MethodGet, "/v2/deployments/"+id+"/aliases", "", "")
 		if code != 200 || len(aliases["aliases"].([]any)) != 1 {
 			t.Fatalf("aliases %d %#v", code, aliases)
@@ -285,10 +307,8 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		if code != 200 || root["type"] != "directory" || len(root["children"].([]any)) != 1 {
 			t.Fatalf("files %d %#v", code, files)
 		}
-		// The vendor's emulator refuses to cancel a READY deployment, and so
-		// does mirror: the QUEUED/BUILDING guard can never fire when every
-		// deployment is born READY. The loosened guard answered 200 here until
-		// the differential corpus caught it.
+		// After the clock advances the chart is READY, so cancel refuses with
+		// 400 the way emulate does for every cancel (emulate births READY).
 		code, canceled, _ := call(http.MethodPatch, "/v12/deployments/"+id+"/cancel", "", "")
 		if code != 400 {
 			t.Fatalf("cancel of a READY deployment %d %#v", code, canceled)

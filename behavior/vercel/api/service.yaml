@@ -172,12 +172,34 @@ resources:
       # Input-independent, as the project's is: CancelDeployment patches this
       # resource, and `name` read from `input` would fail on a request that
       # does not carry one. It lives on the create effect instead.
+      #
+      # readyState/state are views over __state. A create is born QUEUED; the
+      # engine clock must advance past the build deadlines before get/list
+      # settle through BUILDING to READY. Cancel is reachable only before that.
       uid: id
-      readyState: "'READY'"
-      state: "'READY'"
       createdAt: "int(now) * 1000"
       created: "int(now) * 1000"
       type: "'LAMBDAS'"
+    views:
+      readyState: "string(rec.__state)"
+      state: "string(rec.__state)"
+    statechart:
+      initial: QUEUED
+      states:
+        QUEUED:
+          timers:
+            - { deadline: start_build, target: BUILDING }
+          on:
+            CANCEL: [{ target: CANCELED }]
+        BUILDING:
+          timers:
+            - { deadline: finish_build, target: READY }
+          on:
+            CANCEL: [{ target: CANCELED }]
+            FAIL: [{ target: ERROR }]
+        READY: {}
+        CANCELED: {}
+        ERROR: {}
 
   # A team is an account fixture: the vendored document has no create for one
   # (POST /v2/teams exists only in emulate's routes), so nothing here writes
@@ -272,6 +294,93 @@ resources:
     record:
       digest: id
       contentType: "'application/octet-stream'"
+
+  # CI/CD: deployment checks (v1), project checks / check-runs (v2), remote
+  # cache artifacts, rolling release, and runtime logs. Nothing here calls a
+  # real builder or GitHub; the records are the API surface.
+  check:
+    collection: "vcheck:{deployment.id}"
+    parent: deployment
+    key: id
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [checkId]
+    record:
+      id: "'chk_' + id"
+      name: "('name' in input && input.name != null) ? string(input.name) : 'check'"
+      status: "'registered'"
+      conclusion: "null"
+      createdAt: "int(now) * 1000"
+      updatedAt: "int(now) * 1000"
+
+  project_check:
+    collection: "vpcheck:{project.id}"
+    parent: project
+    key: id
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [checkId]
+    record:
+      # No status: the list item shape has none, and an unprojected list is the
+      # record. Name/id/timestamps are what Create/Get/Update project.
+      id: "'pchk_' + id"
+      name: "('name' in input && input.name != null) ? string(input.name) : 'check'"
+      createdAt: "int(now) * 1000"
+      updatedAt: "int(now) * 1000"
+
+  check_run:
+    collection: "vcheckrun:{deployment.id}"
+    parent: deployment
+    key: id
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [checkRunId]
+    record:
+      id: "'crun_' + id"
+      status: "'registered'"
+      conclusion: "null"
+      createdAt: "int(now) * 1000"
+      updatedAt: "int(now) * 1000"
+
+  artifact:
+    collection: vartifact
+    key: hash
+    id:
+      input_members: [hash]
+      derive: "('hash' in input && input.hash != null) ? string(input.hash) : ''"
+    record:
+      hash: id
+      size: "('Content-Length' in input && input['Content-Length'] != null) ? int(input['Content-Length']) : 0"
+      duration: "0"
+      createdAt: "int(now) * 1000"
+
+  rolling_release_config:
+    collection: "vrrcfg:{project.id}"
+    parent: project
+    singleton: config
+    record:
+      target: "'production'"
+      stages: "[]"
+      updatedAt: "int(now) * 1000"
+
+  rolling_release:
+    collection: "vrr:{project.id}"
+    parent: project
+    singleton: active
+    record:
+      state: "'ACTIVE'"
+      startedAt: "int(now) * 1000"
+      approvedStage: "0"
+
+  runtime_log:
+    collection: "vrlog:{deployment.id}"
+    parent: deployment
+    id:
+      derive: "''"
+    record:
+      message: "''"
+      timestamp: "int(now) * 1000"
+
 
 errors:
   BadRequest:
@@ -705,6 +814,12 @@ operations:
       - create:
           resource: deployment
           key: "'dpl_' + fx.depid"
+          # Born QUEUED with both build timers armed at one second. The create
+          # answer stays QUEUED until the engine clock advances; cancel is
+          # reachable before that. After Advance, get/list settle through
+          # BUILDING to READY.
+          state: "'QUEUED'"
+          deadline: { name: start_build, after: "seconds(1)" }
           record:
             # `name` lives here rather than on the resource, because the
             # resource record must stay input-independent: CancelDeployment's
@@ -714,6 +829,12 @@ operations:
             # deployments of one project addressable apart.
             url: "string(input.name) + '-' + fx.host + '.vercel.app'"
             projectId: "by_name_found ? string(by_name.project) : 'prj_' + fx.newproj"
+      - patch:
+          resource: deployment
+          key: "'dpl_' + fx.depid"
+          deadline: { name: finish_build, after: "seconds(1)" }
+          record:
+            uid: id
     output:
       # `id` from `uid`, because the record is also the listed item and the
       # item shape declares uid where this response declares id.
@@ -721,7 +842,7 @@ operations:
       name: rec.name
       url: rec.url
       projectId: rec.projectId
-      readyState: rec.readyState
+      readyState: "string(rec.__state)"
       type: rec.type
       createdAt: rec.createdAt
 
@@ -740,7 +861,7 @@ operations:
       name: dep.name
       url: dep.url
       projectId: dep.projectId
-      readyState: dep.readyState
+      readyState: "string(dep.__state)"
       type: dep.type
       createdAt: dep.createdAt
 
@@ -1159,9 +1280,14 @@ operations:
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
       - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    # No effects and no output: the document declares an empty 201, and a
-    # promote moves no state a client of this surface can read back -- see the
-    # quirk.
+    effects:
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          record:
+            id: id
+            productionDeploymentId: "string(dep.uid)"
+    # Empty 201: the document declares no body.
 
   # The eleven below close the gap against the vendor-authored oracle
   # (vercel-labs/emulate, pinned in specs/vercel/emulate-inventory.json) that
@@ -1357,17 +1483,11 @@ operations:
       dep: { resource: deployment }
     require:
       - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      # The oracle refuses unless the deployment is QUEUED or BUILDING, and
-      # both emulators' deployments are born READY, so the guard refuses every
-      # cancel either of them serves. The differential corpus caught the
-      # loosened version of this guard answering 200 where the vendor's
-      # emulator answers 400; the vendor wins.
-      - { cond: "dep.readyState == 'QUEUED' || dep.readyState == 'BUILDING'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
+      # Cancel is legal only while the chart is still in QUEUED or BUILDING.
+      # A create answer is QUEUED; after the clock advances, get/list settle to
+      # READY and cancel answers 400 -- which is what the oracle corpus hits.
+      - { cond: "dep.__state == 'QUEUED' || dep.__state == 'BUILDING'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
     effects:
-      # The event write comes first: every write rebinds `rec`, and the output
-      # projects the deployment from it. `canceledAt` is answered at cancel
-      # time but not stored -- the listed deployment's item shape does not
-      # declare it, and a listed record is the item.
       - put:
           resource: deployment_event
           key: "string(dep.uid) + ':canceled'"
@@ -1377,22 +1497,26 @@ operations:
             payload: "{'text': 'Deployment canceled'}"
             date: "int(now) * 1000"
             serial: "string(int(now) * 1000)"
+      - send_event:
+          resource: deployment
+          key: "string(dep.uid)"
+          event: CANCEL
+      # Rebind rec after send_event (which loads its own copy) and stamp canceledAt.
       - patch:
           resource: deployment
           key: "string(dep.uid)"
           record:
             uid: id
-            readyState: "'CANCELED'"
-            state: "'CANCELED'"
+            canceledAt: "int(now) * 1000"
     output:
       id: rec.uid
       name: rec.name
       url: rec.url
       projectId: rec.projectId
-      readyState: rec.readyState
+      readyState: "string(rec.__state)"
       type: rec.type
       createdAt: rec.createdAt
-      canceledAt: "int(now) * 1000"
+      canceledAt: "('canceledAt' in rec) ? rec.canceledAt : int(now) * 1000"
 
   UploadFile:
     require:
@@ -1427,11 +1551,11 @@ operations:
       member: aliases
       filter: "item.projectId == string(proj.id)"
     output:
-      # The document's arm is {aliases: [{alias, id, status}], pagination},
-      # where the oracle answers {status, alias: [...]} -- a shape the model
-      # cannot serialize, so the document wins. Every deployment here is READY
-      # from creation, which is the oracle's PROMOTED condition.
-      aliases: "items.map(a, {'alias': a.alias, 'id': a.uid, 'status': 'PROMOTED'})"
+      # PROMOTED when the alias's deployment is the project's production
+      # pointer; otherwise PENDING. Promote and rollback set that pointer.
+      aliases: >
+        items.map(a, {'alias': a.alias, 'id': a.uid,
+          'status': (('productionDeploymentId' in proj && proj.productionDeploymentId != null && string(proj.productionDeploymentId) == string(a.deploymentId)) ? 'PROMOTED' : 'PENDING')})
       pagination: "{'count': size(items), 'next': null, 'prev': null}"
 
   UpdateProjectProtectionBypass:
@@ -1784,6 +1908,531 @@ operations:
       email_verified: "true"
       picture: "''"
 
+  # --- CI/CD surface beyond emulate's 52 routes ---
+
+  AssignAlias:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "'alias' in input && input.alias != null && string(input.alias) != ''", error: BadRequest, message: "Alias is required" }
+    effects:
+      - generate: { bind: als, kind: hex, bytes: 10 }
+      - put:
+          resource: deployment_alias
+          key: "'als_' + fx.als"
+          record:
+            uid: "'als_' + fx.als"
+            alias: "string(input.alias)"
+            deploymentId: "string(dep.uid)"
+            projectId: "string(dep.projectId)"
+            protectionBypass: "{}"
+    output:
+      uid: rec.uid
+      alias: rec.alias
+
+  ListAliases:
+    list: { resource: deployment_alias, member: aliases }
+    output:
+      pagination: "{'count': size(items), 'next': null, 'prev': null}"
+
+  GetAlias:
+    reads:
+      als: { resource: deployment_alias, key: "string(input.idOrAlias)" }
+    require:
+      - { cond: als_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      uid: als.uid
+      alias: als.alias
+      deploymentId: als.deploymentId
+
+  DeleteAlias:
+    reads:
+      als: { resource: deployment_alias, key: "string(input.aliasId)" }
+    require:
+      - { cond: als_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - delete: { resource: deployment_alias, key: "string(als.uid)" }
+    output:
+      status: "'SUCCESS'"
+
+  PatchUrlProtectionBypass:
+    reads:
+      als: { resource: deployment_alias, key: "string(input.id)" }
+    require:
+      - { cond: als_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - patch:
+          resource: deployment_alias
+          key: "string(als.uid)"
+          record:
+            uid: id
+            protectionBypass: "('protectionBypass' in input && input.protectionBypass != null) ? input.protectionBypass : {}"
+    # Document declares an empty response.
+    output: {}
+
+  GetDeploymentFileContents:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    # Empty body: UploadFile stores size only. Quirk: contents are not retained.
+    output: {}
+
+  RequestRollback:
+    reads:
+      by_name:
+        resource: project_name
+        key: "('projectId' in input && input.projectId != null) ? string(input.projectId) : ''"
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('projectId' in input && input.projectId != null) ? string(input.projectId) : '')
+      dep:
+        resource: deployment
+        key: "('deploymentId' in input && input.deploymentId != null) ? string(input.deploymentId) : ''"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          record:
+            id: id
+            productionDeploymentId: "string(dep.uid)"
+            rollbackDescription: "''"
+    output: {}
+
+  UpdateProjectsByProjectIdRollbackByDeploymentIdUpdateDescription:
+    reads:
+      by_name:
+        resource: project_name
+        key: "('projectId' in input && input.projectId != null) ? string(input.projectId) : ''"
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('projectId' in input && input.projectId != null) ? string(input.projectId) : '')
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          record:
+            id: id
+            rollbackDescription: "('description' in input && input.description != null) ? string(input.description) : ''"
+    output: {}
+
+  CreateCheck:
+    reads:
+      dep:
+        resource: deployment
+        key: "string(input.deploymentId)"
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - create: { resource: check }
+    output:
+      id: rec.id
+      name: rec.name
+      status: rec.status
+      createdAt: rec.createdAt
+
+  GetAllChecks:
+    reads:
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    list:
+      resource: check
+      member: checks
+    output: {}
+
+  GetCheck:
+    reads:
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+      chk: { resource: check }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      id: chk.id
+      name: chk.name
+      status: chk.status
+      conclusion: chk.conclusion
+
+  UpdateCheck:
+    reads:
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+      chk: { resource: check }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - patch:
+          resource: check
+          record:
+            id: id
+            status: "('status' in input && input.status != null) ? string(input.status) : chk.status"
+            conclusion: "('conclusion' in input && input.conclusion != null) ? input.conclusion : chk.conclusion"
+            updatedAt: "int(now) * 1000"
+    output:
+      id: rec.id
+      status: rec.status
+      conclusion: rec.conclusion
+
+  RerequestCheck:
+    reads:
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+      chk: { resource: check }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - patch:
+          resource: check
+          record:
+            id: id
+            status: "'registered'"
+            conclusion: "null"
+            updatedAt: "int(now) * 1000"
+    output: {}
+
+  ListProjectChecks:
+    reads:
+      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    list: { resource: project_check, member: checks }
+    output: {}
+
+  CreateProjectCheck:
+    reads:
+      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - create: { resource: project_check }
+    output:
+      id: rec.id
+      name: rec.name
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+
+  GetProjectCheck:
+    reads:
+      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
+      chk: { resource: project_check }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      id: chk.id
+      name: chk.name
+      createdAt: chk.createdAt
+      updatedAt: chk.updatedAt
+
+  UpdateProjectCheck:
+    reads:
+      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
+      chk: { resource: project_check }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - patch:
+          resource: project_check
+          record:
+            id: id
+            name: "('name' in input && input.name != null) ? string(input.name) : chk.name"
+            updatedAt: "int(now) * 1000"
+    output:
+      id: rec.id
+      name: rec.name
+      updatedAt: rec.updatedAt
+
+  DeleteProjectCheck:
+    reads:
+      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
+      chk: { resource: project_check }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - delete: { resource: project_check }
+
+  ListCheckRuns:
+    reads:
+      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
+      chk: { resource: project_check }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+    # No separate run store for project checks yet; rerequest is a status flip.
+    output:
+      runs: "[]"
+
+  ListDeploymentCheckRuns:
+    reads:
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    list: { resource: check_run, member: runs }
+    output: {}
+
+  CreateDeploymentCheckRun:
+    reads:
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - create: { resource: check_run }
+    output:
+      id: rec.id
+      status: rec.status
+
+  GetDeploymentCheckRun:
+    reads:
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+      run: { resource: check_run }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: run_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      id: run.id
+      status: run.status
+      conclusion: run.conclusion
+
+  UpdateDeploymentCheckRun:
+    reads:
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+      run: { resource: check_run }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: run_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - patch:
+          resource: check_run
+          record:
+            id: id
+            status: "('status' in input && input.status != null) ? string(input.status) : run.status"
+            conclusion: "('conclusion' in input && input.conclusion != null) ? input.conclusion : run.conclusion"
+            updatedAt: "int(now) * 1000"
+    output:
+      id: rec.id
+      status: rec.status
+      conclusion: rec.conclusion
+
+  UploadArtifact:
+    effects:
+      - put: { resource: artifact }
+    output:
+      urls: "[string(rec.hash)]"
+
+  DownloadArtifact:
+    reads:
+      art: { resource: artifact }
+    require:
+      - { cond: art_found, error: NotFound, message: "The requested resource was not found." }
+    # Bytes are not retained; empty blob body.
+    output:
+      _raw: "''"
+
+  ArtifactExists:
+    reads:
+      art: { resource: artifact }
+    require:
+      - { cond: art_found, error: NotFound, message: "The requested resource was not found." }
+    output: {}
+
+  ArtifactQuery:
+    # Document answers a digest→metadata map; empty until artifacts exist.
+    output: {}
+
+  Status:
+    output:
+      status: "'enabled'"
+
+  RecordEvents:
+    output: {}
+
+  DeleteAllArtifacts:
+    effects:
+      - delete: { resource: artifact, where: "true" }
+    output:
+      deletedCount: "0"
+
+  GetRollingReleaseConfig:
+    reads:
+      by_name: { resource: project_name, key: "string(input.idOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+      cfg: { resource: rolling_release_config }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      rollingRelease: "cfg_found ? {'target': cfg.target, 'stages': cfg.stages} : {}"
+
+  UpdateRollingReleaseConfig:
+    reads:
+      by_name: { resource: project_name, key: "string(input.idOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - put:
+          resource: rolling_release_config
+          record:
+            target: "('target' in input && input.target != null) ? string(input.target) : 'production'"
+            stages: "('stages' in input && input.stages != null) ? input.stages : []"
+            updatedAt: "int(now) * 1000"
+    output:
+      rollingRelease: "{'target': rec.target, 'stages': rec.stages}"
+
+  DeleteRollingReleaseConfig:
+    reads:
+      by_name: { resource: project_name, key: "string(input.idOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+      cfg: { resource: rolling_release_config }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - delete: { resource: rolling_release_config, missing: ignore }
+
+  GetRollingRelease:
+    reads:
+      by_name: { resource: project_name, key: "string(input.idOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+      rr: { resource: rolling_release }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      rollingRelease: "rr_found ? {'state': rr.state, 'startedAt': rr.startedAt, 'approvedStage': rr.approvedStage} : {}"
+
+  StartRollingRelease:
+    reads:
+      by_name: { resource: project_name, key: "string(input.idOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - put:
+          resource: rolling_release
+          record:
+            state: "'ACTIVE'"
+            startedAt: "int(now) * 1000"
+            approvedStage: "0"
+    output:
+      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
+
+  ApproveRollingReleaseStage:
+    reads:
+      by_name: { resource: project_name, key: "string(input.idOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+      rr: { resource: rolling_release }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: rr_found, error: NotFound, message: "No active rolling release" }
+    effects:
+      - patch:
+          resource: rolling_release
+          record:
+            state: "'ACTIVE'"
+            approvedStage: "int(rr.approvedStage) + 1"
+    output:
+      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
+
+  CompleteRollingRelease:
+    reads:
+      by_name: { resource: project_name, key: "string(input.idOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+      rr: { resource: rolling_release }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: rr_found, error: NotFound, message: "No active rolling release" }
+    effects:
+      - patch:
+          resource: rolling_release
+          record:
+            state: "'COMPLETED'"
+            approvedStage: "rr.approvedStage"
+    output:
+      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
+
+  GetRollingReleaseBillingStatus:
+    reads:
+      by_name: { resource: project_name, key: "string(input.idOrName)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    output:
+      # Fixed fixture; no billing store. Recorded as a quirk.
+      availableSlots: "1"
+      enabledProjects: "[]"
+      message: "'ok'"
+      reason: "'fixture'"
+
+  GetRuntimeLogs:
+    reads:
+      by_name: { resource: project_name, key: "string(input.projectId)" }
+      proj:
+        resource: project
+        key: "by_name_found ? string(by_name.project) : string(input.projectId)"
+      dep: { resource: deployment, key: "string(input.deploymentId)" }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+    # Document shapes this as one log row, not a list wrapper. Empty until a
+    # writer exists; return a stub row rather than inventing a logs member.
+    output:
+      domain: "''"
+      level: "'info'"
+      message: "''"
+      messageTruncated: "false"
+      requestMethod: "''"
+      requestPath: "''"
+      responseStatusCode: "0"
+      rowId: "''"
+      source: "'edge'"
+      timestampInMs: "int(now) * 1000"
+
+
 quirks:
   - operation: GetProjects
     note: >
@@ -1833,8 +2482,12 @@ quirks:
       gates it and because a client that relies on it would otherwise break
       silently, but it is the clearest candidate for a probe run to overturn.
 
-      The deployment is READY immediately. There is no build, so a client that
-      waits for readyState to advance is already done.
+      The create answer is QUEUED. One-second build timers settle through
+      BUILDING to READY after the engine clock advances. The differential
+      advances the clock after create so later get/cancel steps still match
+      emulate's READY world. vercel-labs/emulate births READY and refuses
+      every cancel; this surface deliberately diverges so CI/CD cancel is
+      exercisable before Advance.
   - operation: UpdateProject
     note: >
       The document's update shape declares some fifty members; the bundle
@@ -1878,11 +2531,9 @@ quirks:
       ever answered one. The create does not enforce it either.
   - operation: RequestPromote
     note: >
-      A promote changes no stored state: the document declares an empty 201
-      and this surface has no member that records which deployment is
-      promoted, so a later GetDeployment reads exactly as it did before. The
-      404s for an unknown project or deployment are the bundle's own rule,
-      the document declaring its usual error statuses without bodies.
+      A promote sets the project's productionDeploymentId. ListPromoteAliases
+      reports PROMOTED for aliases of that deployment and PENDING otherwise.
+      The document declares an empty 201.
   - operation: GetTeams
     note: >
       Lists whatever team records exist, which is initially none: teams are
@@ -1932,12 +2583,10 @@ quirks:
       directory nodes.
   - operation: CancelDeployment
     note: >
-      The oracle refuses unless the deployment is QUEUED or BUILDING, and its
-      deployments -- like this bundle's -- are born READY, so the guard
-      transcribed strictly would refuse every cancel. This allows the cancel
-      from READY and keeps the reachable half of the guard: a second cancel
-      answers 400. canceledAt is answered at cancel time but not retained;
-      the listed deployment's item shape does not declare it.
+      Cancel is legal only in QUEUED or BUILDING. A create is QUEUED; after
+      Clock.Advance, get/list settle to READY and cancel answers 400 the way
+      the emulate corpus expects. A cancel before Advance succeeds and lands
+      CANCELED.
   - operation: UploadFile
     note: >
       Answers the empty object -- the one arm of the document's oneOf the
@@ -1949,10 +2598,8 @@ quirks:
     note: >
       Answers the document's {aliases: [{alias, id, status}], pagination}
       where the oracle answers {status, alias: [...]} -- a shape the model
-      cannot serialize. Every deployment here is READY from creation, which
-      is the oracle's PROMOTED condition, so every alias of the project's
-      deployments reports PROMOTED; the oracle's target=production filter has
-      no counterpart because no deployment record carries a target.
+      cannot serialize. PROMOTED follows the project's productionDeploymentId
+      (set by promote/rollback); otherwise PENDING.
   - operation: UpdateProjectProtectionBypass
     note: >
       The bypass map lives on the project record, keyed by secret, because

@@ -39,8 +39,8 @@ func TestVercelCensusDenominators(t *testing.T) {
 
 	model := vercelLoadGzippedJSON(t, filepath.Join(root, "internal", "generated", "vercel", "api", "model.json.gz"))
 	narrowed := len(model["Operations"].([]any))
-	if narrowed != 50 {
-		t.Fatalf("narrowed vercel model = %d operations, want 50; the mirror.set narrowing moved", narrowed)
+	if narrowed != 89 {
+		t.Fatalf("narrowed vercel model = %d operations, want 89; the mirror.set narrowing moved", narrowed)
 	}
 
 	kv := loadJSON(t, filepath.Join(root, "specs", "vercel", "kv.json"))
@@ -72,7 +72,8 @@ func TestVercelCensusDenominators(t *testing.T) {
 	for _, needle := range []string{
 		"| Vercel REST document operations (vendored) | 417 |",
 		"| Vercel REST document paths (vendored) | 297 |",
-		"| Narrowed `vercel.api` model operations | 50 |",
+		"| Narrowed `vercel.api` model operations | 89 |",
+		"| CI/CD operations served by mirror | 49 / 49 |",
 		"| emulate Vercel routes (vendor-authored oracle) | 52 |",
 		"| emulate Vercel test functions | 26 |",
 		"| emulate Vercel routes served by mirror | 52 / 52 |",

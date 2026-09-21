@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -28,6 +29,7 @@ import (
 // (the two implementations must stay in lockstep): ephemeral ids and tokens,
 // timestamps, and absolute URLs are replaced before comparison.
 func TestVercelOracleDifferential(t *testing.T) {
+	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()
 	cfg.Services = []string{"vercel.api", "vercel.kv", "vercel.blob"}
 	cfg.Seed = "vercel-oracle"
@@ -104,6 +106,15 @@ func TestVercelOracleDifferential(t *testing.T) {
 			} else {
 				decoded = string(raw)
 				got[name] = decoded
+			}
+			// Mirror births deployments QUEUED; emulate births READY. Advance
+			// past the one-second build deadlines so later get/list/cancel
+			// steps match the oracle's READY world, while the deploy step
+			// itself still compared QUEUED.
+			if name == "deploy" {
+				if err := rt.Deps.Clock.Advance(2 * time.Second); err != nil {
+					t.Fatal(err)
+				}
 			}
 			switch step.Compare {
 			case "status":

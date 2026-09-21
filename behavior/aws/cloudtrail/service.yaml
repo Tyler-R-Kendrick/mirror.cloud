@@ -107,10 +107,7 @@ operations:
       S3BucketName: rec.S3BucketName
       IsMultiRegionTrail: rec.IsMultiRegionTrail
 
-  DeleteTrail:
-    effects:
-      - delete: { resource: trail, missing: ignore }
-
+  DeleteTrail: {delete: {resource: trail, missing: ignore}}
   # Starting and stopping write only when the trail exists, and answer nothing
   # either way -- so a caller cannot tell that it started a trail that is not
   # there.

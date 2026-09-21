@@ -38,26 +38,11 @@ errors:
     fault: client
 
 operations:
-  CreateChannel:
-    effects:
-      - create: { resource: channel }
-    output:
-      Channel: rec
-
+  CreateChannel: {create: {resource: channel, wrap: Channel}}
   # DescribeChannel answers with the channel's members at the top of the
   # response, not wrapped in a Channel: the wrapper the pack used is a member
   # this operation does not declare.
-  DescribeChannel:
-    reads:
-      ch: { resource: channel }
-    require:
-      - { cond: ch_found, error: NotFound }
-    output:
-      Id: ch.Id
-      Arn: ch.Arn
-      Name: ch.Name
-      State: ch.State
-
+  DescribeChannel: {get: {resource: channel, error: NotFound}}
   ListChannels:
     list: { resource: channel, member: Channels, paginate: model }
 
@@ -66,24 +51,8 @@ operations:
       - delete: { resource: channel, missing: ignore }
     output: {}
 
-  CreateInput:
-    effects:
-      - create: { resource: mediainput }
-    output:
-      Input: rec
-
-  DescribeInput:
-    reads:
-      # `in` is a CEL operator, so the binding cannot be called that.
-      inp: { resource: mediainput }
-    require:
-      - { cond: inp_found, error: NotFound }
-    output:
-      Id: inp.Id
-      Name: inp.Name
-      Type: inp.Type
-      State: inp.State
-
+  CreateInput: {create: {resource: mediainput, wrap: Input}}
+  DescribeInput: {get: {resource: mediainput, error: NotFound}}
   DeleteInput:
     effects:
       - delete: { resource: mediainput, missing: ignore }

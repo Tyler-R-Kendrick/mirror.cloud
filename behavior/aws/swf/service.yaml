@@ -63,14 +63,7 @@ operations:
       - put: { resource: domain }
     output: {}
 
-  DescribeDomain:
-    reads:
-      d: { resource: domain }
-    require:
-      - { cond: d_found, error: Unknown }
-    output:
-      domainInfo: d
-
+  DescribeDomain: {get: {resource: domain, error: Unknown, wrap: domainInfo}}
   ListDomains:
     list: { resource: domain, member: domainInfos, paginate: model }
 
@@ -135,14 +128,7 @@ operations:
     output:
       runId: rec.runId
 
-  DescribeWorkflowExecution:
-    reads:
-      e: { resource: execution, key: "string(input.domain) + '/' + string(input.execution.workflowId)" }
-    require:
-      - { cond: e_found, error: Unknown }
-    output:
-      executionInfo: e
-
+  DescribeWorkflowExecution: {get: {resource: execution, error: Unknown, key: string(input.domain) + '/' + string(input.execution.workflowId), wrap: executionInfo}}
   # Terminating deletes the execution, so a terminated execution reads as
   # unknown rather than CLOSED.
   TerminateWorkflowExecution:

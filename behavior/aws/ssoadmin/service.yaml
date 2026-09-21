@@ -66,10 +66,7 @@ operations:
     output:
       PermissionSets: "items.map(p, string(p.PermissionSetArn))"
 
-  DeletePermissionSet:
-    effects:
-      - delete: { resource: permissionset, key: "string(input.PermissionSetArn)", missing: ignore }
-
+  DeletePermissionSet: {delete: {resource: permissionset, key: string(input.PermissionSetArn), missing: ignore}}
   CreateAccountAssignment:
     effects:
       - create: { resource: assignment }

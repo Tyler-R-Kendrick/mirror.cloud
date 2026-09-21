@@ -46,17 +46,7 @@ operations:
     output:
       DatasetArn: rec.DatasetArn
 
-  DescribeDataset:
-    reads:
-      d: { resource: dataset, key: "string(input.DatasetArn)" }
-    require:
-      - { cond: d_found, error: NotFound }
-    output:
-      DatasetName: d.DatasetName
-      DatasetArn: d.DatasetArn
-      Status: d.Status
-      Domain: d.Domain
-
+  DescribeDataset: {get: {resource: dataset, error: NotFound, key: string(input.DatasetArn)}}
   # DatasetSummary declares no Status, so the listed form of a dataset is not
   # the stored record.
   ListDatasets:
@@ -69,30 +59,15 @@ operations:
           'Domain': d.Domain
         })
 
-  DeleteDataset:
-    effects:
-      - delete: { resource: dataset, key: "string(input.DatasetArn)", missing: ignore }
-
+  DeleteDataset: {delete: {resource: dataset, key: string(input.DatasetArn), missing: ignore}}
   CreatePredictor:
     effects:
       - put: { resource: predictor }
     output:
       PredictorArn: rec.PredictorArn
 
-  DescribePredictor:
-    reads:
-      p: { resource: predictor, key: "string(input.PredictorArn)" }
-    require:
-      - { cond: p_found, error: NotFound }
-    output:
-      PredictorName: p.PredictorName
-      PredictorArn: p.PredictorArn
-      Status: p.Status
-
-  DeletePredictor:
-    effects:
-      - delete: { resource: predictor, key: "string(input.PredictorArn)", missing: ignore }
-
+  DescribePredictor: {get: {resource: predictor, error: NotFound, key: string(input.PredictorArn)}}
+  DeletePredictor: {delete: {resource: predictor, key: string(input.PredictorArn), missing: ignore}}
 quirks:
   - operation: ListDatasets
     note: >

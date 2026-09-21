@@ -95,14 +95,7 @@ operations:
     output:
       Group: rec
 
-  GetGroup:
-    reads:
-      g: { resource: group }
-    require:
-      - { cond: g_found, error: InvalidRequest }
-    output:
-      Group: g
-
+  GetGroup: {get: {resource: group, error: InvalidRequest, wrap: Group}}
   GetGroups:
     list: { resource: group, member: Groups, paginate: model }
 

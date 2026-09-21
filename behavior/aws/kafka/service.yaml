@@ -65,14 +65,7 @@ operations:
       ClusterName: rec.ClusterName
       State: rec.State
 
-  DescribeCluster:
-    reads:
-      c: { resource: cluster }
-    require:
-      - { cond: c_found, error: NotFound }
-    output:
-      ClusterInfo: c
-
+  DescribeCluster: {get: {resource: cluster, error: NotFound, wrap: ClusterInfo}}
   ListClusters:
     list: { resource: cluster, member: ClusterInfoList, paginate: model }
 

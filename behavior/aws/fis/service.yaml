@@ -36,20 +36,8 @@ errors:
     fault: client
 
 operations:
-  CreateExperimentTemplate:
-    effects:
-      - create: { resource: template }
-    output:
-      experimentTemplate: rec
-
-  GetExperimentTemplate:
-    reads:
-      tpl: { resource: template }
-    require:
-      - { cond: tpl_found, error: NotFound }
-    output:
-      experimentTemplate: tpl
-
+  CreateExperimentTemplate: {create: {resource: template, wrap: experimentTemplate}}
+  GetExperimentTemplate: {get: {resource: template, error: NotFound, wrap: experimentTemplate}}
   # ExperimentTemplateSummary declares no roleArn, so the listed form is not
   # the stored record; GetExperimentTemplate answers with the role.
   ListExperimentTemplates:
@@ -67,20 +55,8 @@ operations:
       - delete: { resource: template, missing: ignore }
     output: {}
 
-  StartExperiment:
-    effects:
-      - create: { resource: experiment }
-    output:
-      experiment: rec
-
-  GetExperiment:
-    reads:
-      exp: { resource: experiment }
-    require:
-      - { cond: exp_found, error: NotFound }
-    output:
-      experiment: exp
-
+  StartExperiment: {create: {resource: experiment, wrap: experiment}}
+  GetExperiment: {get: {resource: experiment, error: NotFound, wrap: experiment}}
 quirks:
   - operation: CreateExperimentTemplate
     note: >

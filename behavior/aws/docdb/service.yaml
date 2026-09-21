@@ -73,14 +73,7 @@ operations:
   # its one modifiable member is read with a string accessor and
   # BackupRetentionPeriod is declared an integer, so the branch never fired.
   # See the quirk -- a modify here modifies nothing.
-  ModifyDBCluster:
-    reads:
-      cluster: { resource: cluster }
-    require:
-      - { cond: cluster_found, error: ClusterNotFound }
-    output:
-      DBCluster: cluster
-
+  ModifyDBCluster: {get: {resource: cluster, error: ClusterNotFound, wrap: DBCluster}}
   DeleteDBCluster:
     reads:
       cluster: { resource: cluster }
@@ -97,14 +90,7 @@ operations:
 
   # A failover reads the cluster and answers it unchanged: there is no writer
   # to move, and no instance is promoted.
-  FailoverDBCluster:
-    reads:
-      cluster: { resource: cluster }
-    require:
-      - { cond: cluster_found, error: ClusterNotFound }
-    output:
-      DBCluster: cluster
-
+  FailoverDBCluster: {get: {resource: cluster, error: ClusterNotFound, wrap: DBCluster}}
   CreateDBInstance:
     effects:
       - create:
@@ -164,10 +150,7 @@ operations:
       key: >
         'DBSubnetGroupName' in input ? string(input.DBSubnetGroupName) : ''
 
-  DeleteDBSubnetGroup:
-    effects:
-      - delete: { resource: subnetgroup, missing: ignore }
-
+  DeleteDBSubnetGroup: {delete: {resource: subnetgroup, missing: ignore}}
   CreateDBClusterSnapshot:
     effects:
       - create:
@@ -188,10 +171,7 @@ operations:
         'DBClusterSnapshotIdentifier' in input
           ? string(input.DBClusterSnapshotIdentifier) : ''
 
-  DeleteDBClusterSnapshot:
-    effects:
-      - delete: { resource: snapshot, missing: ignore }
-
+  DeleteDBClusterSnapshot: {delete: {resource: snapshot, missing: ignore}}
 quirks:
   - operation: ModifyDBCluster
     note: >

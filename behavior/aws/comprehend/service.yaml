@@ -75,21 +75,11 @@ operations:
     output:
       EndpointArn: rec.EndpointArn
 
-  DescribeEndpoint:
-    reads:
-      ep: { resource: modelendpoint }
-    require:
-      - { cond: ep_found, error: NotFound }
-    output:
-      EndpointProperties: ep
-
+  DescribeEndpoint: {get: {resource: modelendpoint, error: NotFound, wrap: EndpointProperties}}
   ListEndpoints:
     list: { resource: modelendpoint, member: EndpointPropertiesList, paginate: model }
 
-  DeleteEndpoint:
-    effects:
-      - delete: { resource: modelendpoint, missing: ignore }
-
+  DeleteEndpoint: {delete: {resource: modelendpoint, missing: ignore}}
   # A create rather than a put: the job id is drawn when the job starts, and
   # only a create draws one.
   StartDocumentClassificationJob:
@@ -99,14 +89,7 @@ operations:
       JobId: rec.JobId
       JobStatus: rec.JobStatus
 
-  DescribeDocumentClassificationJob:
-    reads:
-      job: { resource: job }
-    require:
-      - { cond: job_found, error: NotFound }
-    output:
-      DocumentClassificationJobProperties: job
-
+  DescribeDocumentClassificationJob: {get: {resource: job, error: NotFound, wrap: DocumentClassificationJobProperties}}
   ListDocumentClassificationJobs:
     list:
       resource: job

@@ -60,23 +60,13 @@ operations:
     output:
       applicationId: rec.applicationId
 
-  GetApplication:
-    reads:
-      application: { resource: application }
-    require:
-      - { cond: application_found, error: ApplicationNotFound }
-    output:
-      application: application
-
+  GetApplication: {get: {resource: application, error: ApplicationNotFound, wrap: application}}
   ListApplications:
     list: { resource: application, member: applications, paginate: model }
     output:
       applications: "items.map(a, string(a.applicationName))"
 
-  DeleteApplication:
-    effects:
-      - delete: { resource: application, missing: ignore }
-
+  DeleteApplication: {delete: {resource: application, missing: ignore}}
   CreateDeploymentGroup:
     reads:
       application: { resource: application }
@@ -126,14 +116,7 @@ operations:
     output:
       deploymentId: rec.deploymentId
 
-  GetDeployment:
-    reads:
-      deployment: { resource: deployment }
-    require:
-      - { cond: deployment_found, error: DeploymentNotFound }
-    output:
-      deploymentInfo: deployment
-
+  GetDeployment: {get: {resource: deployment, error: DeploymentNotFound, wrap: deploymentInfo}}
   ListDeployments:
     list: { resource: deployment, member: deployments, paginate: model }
     output:

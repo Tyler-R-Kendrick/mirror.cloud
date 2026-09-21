@@ -98,10 +98,7 @@ operations:
       ProtocolType: api.ProtocolType
       ApiEndpoint: api.ApiEndpoint
 
-  DeleteApi:
-    effects:
-      - delete: { resource: api, missing: ignore }
-
+  DeleteApi: {delete: {resource: api, missing: ignore}}
   CreateRoute:
     reads:
       api: { resource: api }

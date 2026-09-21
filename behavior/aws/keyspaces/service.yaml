@@ -53,22 +53,11 @@ operations:
     output:
       resourceArn: rec.resourceArn
 
-  GetKeyspace:
-    reads:
-      ks: { resource: keyspace }
-    require:
-      - { cond: ks_found, error: NotFound }
-    output:
-      keyspaceName: ks.keyspaceName
-      resourceArn: ks.resourceArn
-
+  GetKeyspace: {get: {resource: keyspace, error: NotFound}}
   ListKeyspaces:
     list: { resource: keyspace, member: keyspaces, paginate: model }
 
-  DeleteKeyspace:
-    effects:
-      - delete: { resource: keyspace, missing: ignore }
-
+  DeleteKeyspace: {delete: {resource: keyspace, missing: ignore}}
   CreateTable:
     require:
       - { cond: "string(input.keyspaceName) != ''", error: Validation }
@@ -78,17 +67,7 @@ operations:
     output:
       resourceArn: rec.resourceArn
 
-  GetTable:
-    reads:
-      t: { resource: table }
-    require:
-      - { cond: t_found, error: NotFound }
-    output:
-      keyspaceName: t.keyspaceName
-      tableName: t.tableName
-      resourceArn: t.resourceArn
-      status: t.status
-
+  GetTable: {get: {resource: table, error: NotFound}}
   # A listed table declares keyspaceName, resourceArn and tableName, and no
   # status. The filter is what keeps one keyspace's tables out of another's
   # listing, which is what the pack got from a per-keyspace collection.
@@ -106,10 +85,7 @@ operations:
           'resourceArn': t.resourceArn
         })
 
-  DeleteTable:
-    effects:
-      - delete: { resource: table, missing: ignore }
-
+  DeleteTable: {delete: {resource: table, missing: ignore}}
 quirks:
   - operation: ListTables
     note: >

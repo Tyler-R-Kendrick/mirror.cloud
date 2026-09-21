@@ -43,21 +43,11 @@ operations:
       SourceLanguageCode: "string(input.SourceLanguageCode)"
       TargetLanguageCode: "string(input.TargetLanguageCode)"
 
-  GetTerminology:
-    reads:
-      t: { resource: terminology }
-    require:
-      - { cond: t_found, error: NotFound }
-    output:
-      TerminologyProperties: t
-
+  GetTerminology: {get: {resource: terminology, error: NotFound, wrap: TerminologyProperties}}
   ListTerminologies:
     list: { resource: terminology, member: TerminologyPropertiesList, paginate: model }
 
-  DeleteTerminology:
-    effects:
-      - delete: { resource: terminology, missing: ignore }
-
+  DeleteTerminology: {delete: {resource: terminology, missing: ignore}}
   StartTextTranslationJob:
     effects:
       - create:
@@ -70,14 +60,7 @@ operations:
       JobId: rec.JobId
       JobStatus: rec.JobStatus
 
-  DescribeTextTranslationJob:
-    reads:
-      j: { resource: job, key: "string(input.JobId)" }
-    require:
-      - { cond: j_found, error: NotFound }
-    output:
-      TextTranslationJobProperties: j
-
+  DescribeTextTranslationJob: {get: {resource: job, error: NotFound, key: string(input.JobId), wrap: TextTranslationJobProperties}}
   ListTextTranslationJobs:
     list: { resource: job, member: TextTranslationJobPropertiesList, paginate: model }
 

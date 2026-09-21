@@ -43,12 +43,7 @@ resources:
       Status: "'RESERVED'"
 
 operations:
-  CreateFleet:
-    effects:
-      - create: { resource: fleet }
-    output:
-      FleetAttributes: rec
-
+  CreateFleet: {create: {resource: fleet, wrap: FleetAttributes}}
   # Describe-one-or-describe-all: a FleetId narrows to that fleet, and an
   # absent one answers with an empty list rather than a fault.
   DescribeFleetAttributes:
@@ -64,16 +59,8 @@ operations:
     output:
       FleetIds: "items.map(f, string(f.FleetId))"
 
-  DeleteFleet:
-    effects:
-      - delete: { resource: fleet, key: "string(input.FleetId)", missing: ignore }
-
-  CreateGameSession:
-    effects:
-      - create: { resource: gamesession }
-    output:
-      GameSession: rec
-
+  DeleteFleet: {delete: {resource: fleet, key: string(input.FleetId), missing: ignore}}
+  CreateGameSession: {create: {resource: gamesession, wrap: GameSession}}
   DescribeGameSessions:
     list:
       resource: gamesession
@@ -81,12 +68,7 @@ operations:
       paginate: model
       key: "'GameSessionId' in input ? string(input.GameSessionId) : ''"
 
-  CreatePlayerSession:
-    effects:
-      - create: { resource: playersession }
-    output:
-      PlayerSession: rec
-
+  CreatePlayerSession: {create: {resource: playersession, wrap: PlayerSession}}
 quirks:
   - operation: CreateGameSession
     note: >

@@ -53,12 +53,7 @@ operations:
       - delete: { resource: cluster, missing: ignore }
     output: {}
 
-  CreateParameterGroup:
-    effects:
-      - put: { resource: parametergroup }
-    output:
-      ParameterGroup: rec
-
+  CreateParameterGroup: {put: {resource: parametergroup, wrap: ParameterGroup}}
   DescribeParameterGroups:
     list:
       resource: parametergroup

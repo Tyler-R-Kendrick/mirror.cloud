@@ -33,20 +33,8 @@ errors:
     fault: client
 
 operations:
-  CreateWebACL:
-    effects:
-      - create: { resource: webacl }
-    output:
-      WebACL: rec
-
-  GetWebACL:
-    reads:
-      acl: { resource: webacl }
-    require:
-      - { cond: acl_found, error: NonexistentItem }
-    output:
-      WebACL: acl
-
+  CreateWebACL: {create: {resource: webacl, wrap: WebACL}}
+  GetWebACL: {get: {resource: webacl, error: NonexistentItem, wrap: WebACL}}
   # WebACLSummary declares Name and WebACLId only, so the listed form is not
   # the stored record: an ACL's DefaultAction is answered by GetWebACL.
   ListWebACLs:
@@ -59,20 +47,8 @@ operations:
       - delete: { resource: webacl, missing: ignore }
     output: {}
 
-  CreateIPSet:
-    effects:
-      - create: { resource: ipset }
-    output:
-      IPSet: rec
-
-  GetIPSet:
-    reads:
-      ips: { resource: ipset }
-    require:
-      - { cond: ips_found, error: NonexistentItem }
-    output:
-      IPSet: ips
-
+  CreateIPSet: {create: {resource: ipset, wrap: IPSet}}
+  GetIPSet: {get: {resource: ipset, error: NonexistentItem, wrap: IPSet}}
   ListIPSets:
     list: { resource: ipset, member: IPSets }
 

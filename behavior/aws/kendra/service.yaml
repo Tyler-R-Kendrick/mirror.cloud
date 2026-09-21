@@ -42,23 +42,11 @@ operations:
     output:
       Id: rec.Id
 
-  DescribeIndex:
-    reads:
-      ix: { resource: index }
-    require:
-      - { cond: ix_found, error: NotFound }
-    output:
-      Id: ix.Id
-      Name: ix.Name
-      Status: ix.Status
-
+  DescribeIndex: {get: {resource: index, error: NotFound}}
   ListIndices:
     list: { resource: index, member: IndexConfigurationSummaryItems, paginate: model }
 
-  DeleteIndex:
-    effects:
-      - delete: { resource: index, missing: ignore }
-
+  DeleteIndex: {delete: {resource: index, missing: ignore}}
   Query:
     output:
       ResultItems: "[]"
@@ -70,22 +58,8 @@ operations:
     output:
       Id: rec.Id
 
-  DescribeDataSource:
-    reads:
-      ds: { resource: datasource }
-    require:
-      - { cond: ds_found, error: NotFound }
-    output:
-      Id: ds.Id
-      Name: ds.Name
-      IndexId: ds.IndexId
-      Type: ds.Type
-      Status: ds.Status
-
-  DeleteDataSource:
-    effects:
-      - delete: { resource: datasource, missing: ignore }
-
+  DescribeDataSource: {get: {resource: datasource, error: NotFound}}
+  DeleteDataSource: {delete: {resource: datasource, missing: ignore}}
 quirks:
   - operation: Query
     note: >

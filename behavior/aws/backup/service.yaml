@@ -49,29 +49,12 @@ errors:
     fault: client
 
 operations:
-  CreateBackupVault:
-    effects:
-      - put: { resource: vault }
-    output:
-      BackupVaultName: rec.BackupVaultName
-      BackupVaultArn: rec.BackupVaultArn
-
-  DescribeBackupVault:
-    reads:
-      v: { resource: vault }
-    require:
-      - { cond: v_found, error: NotFound }
-    output:
-      BackupVaultName: v.BackupVaultName
-      BackupVaultArn: v.BackupVaultArn
-
+  CreateBackupVault: {put: {resource: vault}}
+  DescribeBackupVault: {get: {resource: vault, error: NotFound}}
   ListBackupVaults:
     list: { resource: vault, member: BackupVaultList, paginate: model }
 
-  DeleteBackupVault:
-    effects:
-      - delete: { resource: vault, missing: ignore }
-
+  DeleteBackupVault: {delete: {resource: vault, missing: ignore}}
   CreateBackupPlan:
     effects:
       - create: { resource: plan }
@@ -103,27 +86,14 @@ operations:
           'BackupPlanName': p.BackupPlanName
         })
 
-  DeleteBackupPlan:
-    effects:
-      - delete: { resource: plan, key: "string(input.BackupPlanId)", missing: ignore }
-
+  DeleteBackupPlan: {delete: {resource: plan, key: string(input.BackupPlanId), missing: ignore}}
   StartBackupJob:
     effects:
       - create: { resource: job }
     output:
       BackupJobId: rec.BackupJobId
 
-  DescribeBackupJob:
-    reads:
-      j: { resource: job, key: "string(input.BackupJobId)" }
-    require:
-      - { cond: j_found, error: NotFound }
-    output:
-      BackupJobId: j.BackupJobId
-      State: j.State
-      BackupVaultName: j.BackupVaultName
-      ResourceArn: j.ResourceArn
-
+  DescribeBackupJob: {get: {resource: job, error: NotFound, key: string(input.BackupJobId)}}
   ListBackupJobs:
     list: { resource: job, member: BackupJobs, paginate: model }
 

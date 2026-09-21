@@ -59,24 +59,11 @@ operations:
     output:
       location: "'/vaults/' + string(input.vaultName)"
 
-  DescribeVault:
-    reads:
-      v: { resource: vault }
-    require:
-      - { cond: v_found, error: NotFound }
-    output:
-      VaultName: v.VaultName
-      VaultARN: v.VaultARN
-      NumberOfArchives: v.NumberOfArchives
-      SizeInBytes: v.SizeInBytes
-
+  DescribeVault: {get: {resource: vault, error: NotFound}}
   ListVaults:
     list: { resource: vault, member: VaultList, paginate: model }
 
-  DeleteVault:
-    effects:
-      - delete: { resource: vault, missing: ignore }
-
+  DeleteVault: {delete: {resource: vault, missing: ignore}}
   UploadArchive:
     effects:
       - create: { resource: archive }
@@ -84,10 +71,7 @@ operations:
       archiveId: rec.ArchiveId
       location: "'/vaults/' + string(input.vaultName) + '/archives/' + id"
 
-  DeleteArchive:
-    effects:
-      - delete: { resource: archive, key: "string(input.archiveId)", missing: ignore }
-
+  DeleteArchive: {delete: {resource: archive, key: string(input.archiveId), missing: ignore}}
   InitiateJob:
     effects:
       - create: { resource: job }

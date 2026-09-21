@@ -45,24 +45,8 @@ operations:
     output:
       JobId: id
 
-  GetDocumentTextDetection:
-    reads:
-      rec: { resource: job }
-    require:
-      - { cond: rec_found, error: InvalidJobId }
-    output:
-      JobStatus: rec.JobStatus
-      Blocks: rec.Blocks
-
-  GetDocumentAnalysis:
-    reads:
-      rec: { resource: job }
-    require:
-      - { cond: rec_found, error: InvalidJobId }
-    output:
-      JobStatus: rec.JobStatus
-      Blocks: rec.Blocks
-
+  GetDocumentTextDetection: {get: {resource: job, error: InvalidJobId}}
+  GetDocumentAnalysis: {get: {resource: job, error: InvalidJobId}}
 quirks:
   - note: >
       Every document produces the same single canned LINE block. This is a

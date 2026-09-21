@@ -44,18 +44,8 @@ errors:
 operations:
   # Create and update are one write: both replace the whole record, so an
   # update that omits the description blanks it.
-  CreateApplication:
-    effects:
-      - put: { resource: application }
-    output:
-      Application: rec
-
-  UpdateApplication:
-    effects:
-      - put: { resource: application }
-    output:
-      Application: rec
-
+  CreateApplication: {put: {resource: application, wrap: Application}}
+  UpdateApplication: {put: {resource: application, wrap: Application}}
   # Named or not: one application when ApplicationNames names one, the page
   # when it does not.
   DescribeApplications:
@@ -65,16 +55,8 @@ operations:
       key: "'ApplicationName' in input ? string(input.ApplicationName) : ''"
       paginate: model
 
-  DeleteApplication:
-    effects:
-      - delete: { resource: application, missing: ignore }
-
-  CreateApplicationVersion:
-    effects:
-      - put: { resource: version }
-    output:
-      ApplicationVersion: rec
-
+  DeleteApplication: {delete: {resource: application, missing: ignore}}
+  CreateApplicationVersion: {put: {resource: version, wrap: ApplicationVersion}}
   DescribeApplicationVersions:
     list:
       resource: version
@@ -86,10 +68,7 @@ operations:
       filter: "string(item.ApplicationName) == string(input.ApplicationName)"
       paginate: model
 
-  DeleteApplicationVersion:
-    effects:
-      - delete: { resource: version, missing: ignore }
-
+  DeleteApplicationVersion: {delete: {resource: version, missing: ignore}}
   # Create and update are one write here too, and both mint a fresh
   # EnvironmentId -- so updating an environment changes its identifier.
   CreateEnvironment:

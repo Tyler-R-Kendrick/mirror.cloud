@@ -97,10 +97,7 @@ operations:
               'Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL'
             DefaultAction: "'DefaultAction' in input ? input.DefaultAction : null"
 
-  DeleteWebACL:
-    effects:
-      - delete: { resource: webacl, key: "string(input.Id)", missing: ignore }
-
+  DeleteWebACL: {delete: {resource: webacl, key: string(input.Id), missing: ignore}}
   CreateIPSet:
     effects:
       - create:
@@ -136,10 +133,7 @@ operations:
         ('Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL')
       paginate: model
 
-  DeleteIPSet:
-    effects:
-      - delete: { resource: ipset, key: "string(input.Id)", missing: ignore }
-
+  DeleteIPSet: {delete: {resource: ipset, key: string(input.Id), missing: ignore}}
   CreateRuleGroup:
     effects:
       - create:
@@ -176,10 +170,7 @@ operations:
         ('Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL')
       paginate: model
 
-  DeleteRuleGroup:
-    effects:
-      - delete: { resource: rulegroup, key: "string(input.Id)", missing: ignore }
-
+  DeleteRuleGroup: {delete: {resource: rulegroup, key: string(input.Id), missing: ignore}}
 quirks:
   - operation: CreateWebACL
     note: >

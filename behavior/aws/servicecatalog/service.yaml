@@ -59,50 +59,19 @@ operations:
     output:
       ProductViewDetail: "{'ProductViewSummary': rec}"
 
-  DescribeProduct:
-    reads:
-      # Id is optional on DescribeProduct -- a caller may name the product
-      # by Name instead -- so the key has to tolerate its absence. Reading
-      # it unguarded made a legal request answer a 500.
-      p: { resource: product, key: "'Id' in input ? string(input.Id) : ''" }
-    require:
-      - { cond: p_found, error: NotFound }
-    output:
-      ProductViewSummary: p
-
-  DeleteProduct:
-    effects:
-      - delete: { resource: product, key: "string(input.Id)", missing: ignore }
-
-  CreatePortfolio:
-    effects:
-      - create: { resource: portfolio }
-    output:
-      PortfolioDetail: rec
-
-  DescribePortfolio:
-    reads:
-      f: { resource: portfolio, key: "string(input.Id)" }
-    require:
-      - { cond: f_found, error: NotFound }
-    output:
-      PortfolioDetail: f
-
+  DescribeProduct: {get: {resource: product, error: NotFound, key: '''Id'' in input ? string(input.Id) : ''''', wrap: ProductViewSummary}}
+  DeleteProduct: {delete: {resource: product, key: string(input.Id), missing: ignore}}
+  CreatePortfolio: {create: {resource: portfolio, wrap: PortfolioDetail}}
+  DescribePortfolio: {get: {resource: portfolio, error: NotFound, key: string(input.Id), wrap: PortfolioDetail}}
   ListPortfolios:
     list: { resource: portfolio, member: PortfolioDetails, paginate: model }
 
-  DeletePortfolio:
-    effects:
-      - delete: { resource: portfolio, key: "string(input.Id)", missing: ignore }
-
+  DeletePortfolio: {delete: {resource: portfolio, key: string(input.Id), missing: ignore}}
   AssociateProductWithPortfolio:
     effects:
       - put: { resource: association }
 
-  DisassociateProductFromPortfolio:
-    effects:
-      - delete: { resource: association, missing: ignore }
-
+  DisassociateProductFromPortfolio: {delete: {resource: association, missing: ignore}}
 quirks:
   - operation: CreateProduct
     note: >

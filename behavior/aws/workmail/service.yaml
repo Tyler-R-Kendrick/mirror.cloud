@@ -49,16 +49,7 @@ operations:
     output:
       OrganizationId: rec.OrganizationId
 
-  DescribeOrganization:
-    reads:
-      org: { resource: organization }
-    require:
-      - { cond: org_found, error: OrganizationNotFound }
-    output:
-      OrganizationId: org.OrganizationId
-      Alias: org.Alias
-      State: org.State
-
+  DescribeOrganization: {get: {resource: organization, error: OrganizationNotFound}}
   ListOrganizations:
     list: { resource: organization, member: OrganizationSummaries, paginate: model }
 
@@ -110,10 +101,7 @@ operations:
           'State': u.State
         })
 
-  DeleteUser:
-    effects:
-      - delete: { resource: user, missing: ignore }
-
+  DeleteUser: {delete: {resource: user, missing: ignore}}
 quirks:
   - operation: DescribeUser
     note: >

@@ -40,16 +40,7 @@ operations:
       IndexName: rec.IndexName
       IndexArn: rec.IndexArn
 
-  DescribePlaceIndex:
-    reads:
-      ix: { resource: index }
-    require:
-      - { cond: ix_found, error: NotFound }
-    output:
-      IndexName: ix.IndexName
-      IndexArn: ix.IndexArn
-      DataSource: ix.DataSource
-
+  DescribePlaceIndex: {get: {resource: index, error: NotFound}}
   # A listed entry declares no IndexArn, so the listed form is not the stored
   # record; DescribePlaceIndex answers with the ARN.
   ListPlaceIndexes:
@@ -61,10 +52,7 @@ operations:
           'DataSource': e.DataSource
         })
 
-  DeletePlaceIndex:
-    effects:
-      - delete: { resource: index, missing: ignore }
-
+  DeletePlaceIndex: {delete: {resource: index, missing: ignore}}
   # The search answers with the text it was given, at a point in Seattle,
   # whatever was asked for and whether or not the index exists.
   SearchPlaceIndexForText:
@@ -75,26 +63,9 @@ operations:
           'Geometry': {'Point': [-122.3, 47.6]}
         }}]
 
-  CreateGeofenceCollection:
-    effects:
-      - put: { resource: collection }
-    output:
-      CollectionName: rec.CollectionName
-      CollectionArn: rec.CollectionArn
-
-  DescribeGeofenceCollection:
-    reads:
-      gc: { resource: collection }
-    require:
-      - { cond: gc_found, error: NotFound }
-    output:
-      CollectionName: gc.CollectionName
-      CollectionArn: gc.CollectionArn
-
-  DeleteGeofenceCollection:
-    effects:
-      - delete: { resource: collection, missing: ignore }
-
+  CreateGeofenceCollection: {put: {resource: collection}}
+  DescribeGeofenceCollection: {get: {resource: collection, error: NotFound}}
+  DeleteGeofenceCollection: {delete: {resource: collection, missing: ignore}}
 quirks:
   - operation: SearchPlaceIndexForText
     note: >

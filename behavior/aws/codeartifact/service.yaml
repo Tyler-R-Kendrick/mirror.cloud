@@ -50,14 +50,7 @@ operations:
     output:
       domain: rec
 
-  DescribeDomain:
-    reads:
-      d: { resource: domain }
-    require:
-      - { cond: d_found, error: NotFound }
-    output:
-      domain: d
-
+  DescribeDomain: {get: {resource: domain, error: NotFound, wrap: domain}}
   ListDomains:
     list: { resource: domain, member: domains, paginate: model }
 
@@ -66,20 +59,8 @@ operations:
       - delete: { resource: domain, missing: ignore }
     output: {}
 
-  CreateRepository:
-    effects:
-      - put: { resource: repository }
-    output:
-      repository: rec
-
-  DescribeRepository:
-    reads:
-      r: { resource: repository }
-    require:
-      - { cond: r_found, error: NotFound }
-    output:
-      repository: r
-
+  CreateRepository: {put: {resource: repository, wrap: repository}}
+  DescribeRepository: {get: {resource: repository, error: NotFound, wrap: repository}}
   DeleteRepository:
     effects:
       - delete: { resource: repository, missing: ignore }

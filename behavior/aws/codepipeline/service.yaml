@@ -55,26 +55,9 @@ errors:
 operations:
   # Create and update are one write: both replace the whole record, so an
   # update that omits a stage list empties it.
-  CreatePipeline:
-    effects:
-      - put: { resource: pipeline }
-    output:
-      pipeline: rec
-
-  UpdatePipeline:
-    effects:
-      - put: { resource: pipeline }
-    output:
-      pipeline: rec
-
-  GetPipeline:
-    reads:
-      p: { resource: pipeline, key: "string(input.name)" }
-    require:
-      - { cond: p_found, error: PipelineNotFound }
-    output:
-      pipeline: p
-
+  CreatePipeline: {put: {resource: pipeline, wrap: pipeline}}
+  UpdatePipeline: {put: {resource: pipeline, wrap: pipeline}}
+  GetPipeline: {get: {resource: pipeline, error: PipelineNotFound, key: string(input.name), wrap: pipeline}}
   # A pipeline has no stage states, so nothing reports what a stage did.
   GetPipelineState:
     reads:
@@ -90,10 +73,7 @@ operations:
     output:
       pipelines: "items.map(p, {'name': p.name})"
 
-  DeletePipeline:
-    effects:
-      - delete: { resource: pipeline, key: "string(input.name)", missing: ignore }
-
+  DeletePipeline: {delete: {resource: pipeline, key: string(input.name), missing: ignore}}
   StartPipelineExecution:
     effects:
       - generate: { bind: run, kind: hex, bytes: 8 }
@@ -107,14 +87,7 @@ operations:
     output:
       pipelineExecutionId: rec.pipelineExecutionId
 
-  GetPipelineExecution:
-    reads:
-      e: { resource: execution, key: "string(input.pipelineExecutionId)" }
-    require:
-      - { cond: e_found, error: ExecutionNotFound }
-    output:
-      pipelineExecution: e
-
+  GetPipelineExecution: {get: {resource: execution, error: ExecutionNotFound, key: string(input.pipelineExecutionId), wrap: pipelineExecution}}
   ListPipelineExecutions:
     list: { resource: execution, member: pipelineExecutionSummaries, paginate: model }
 

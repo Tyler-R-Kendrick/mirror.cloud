@@ -118,14 +118,7 @@ operations:
     output:
       cluster: rec
 
-  DescribeCluster:
-    reads:
-      c: { resource: cluster }
-    require:
-      - { cond: c_found, error: NotFound }
-    output:
-      cluster: c
-
+  DescribeCluster: {get: {resource: cluster, error: NotFound, wrap: cluster}}
   ListClusters:
     list: { resource: cluster, member: clusters, paginate: model }
     output:
@@ -213,14 +206,7 @@ operations:
     output:
       nodegroup: rec
 
-  DescribeNodegroup:
-    reads:
-      n: { resource: nodegroup }
-    require:
-      - { cond: n_found, error: NotFound }
-    output:
-      nodegroup: n
-
+  DescribeNodegroup: {get: {resource: nodegroup, error: NotFound, wrap: nodegroup}}
   ListNodegroups:
     list:
       resource: nodegroup
@@ -280,14 +266,7 @@ operations:
     output:
       fargateProfile: rec
 
-  DescribeFargateProfile:
-    reads:
-      f: { resource: fargate }
-    require:
-      - { cond: f_found, error: NotFound }
-    output:
-      fargateProfile: f
-
+  DescribeFargateProfile: {get: {resource: fargate, error: NotFound, wrap: fargateProfile}}
   ListFargateProfiles:
     list:
       resource: fargate

@@ -52,18 +52,8 @@ operations:
     effects:
       - put: { resource: contact }
 
-  GetAlternateContact:
-    reads:
-      rec: { resource: contact }
-    require:
-      - { cond: rec_found, error: NotFound }
-    output:
-      AlternateContact: rec
-
-  DeleteAlternateContact:
-    effects:
-      - delete: { resource: contact }
-
+  GetAlternateContact: {get: {resource: contact, error: NotFound, wrap: AlternateContact}}
+  DeleteAlternateContact: {delete: {resource: contact}}
 quirks:
   - operation: ListRegions
     note: >

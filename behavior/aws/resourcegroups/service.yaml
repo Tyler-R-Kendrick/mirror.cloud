@@ -37,14 +37,7 @@ operations:
     output:
       Group: rec
 
-  GetGroup:
-    reads:
-      group: { resource: group }
-    require:
-      - { cond: group_found, error: NotFound }
-    output:
-      Group: group
-
+  GetGroup: {get: {resource: group, error: NotFound, wrap: Group}}
   # GroupIdentifier names a group GroupName, not Name. The record keeps Name
   # because that is what CreateGroup's own Group answer declares, so the two
   # spellings are both the model's and the listing carries the one it asks for.
@@ -58,10 +51,7 @@ operations:
           'Description': g.Description
         })
 
-  DeleteGroup:
-    effects:
-      - delete: { resource: group, missing: ignore }
-
+  DeleteGroup: {delete: {resource: group, missing: ignore}}
   # Membership is echoed rather than recorded: every ARN offered comes back as
   # succeeded and none of them is stored, which is why ListGroupResources can
   # only ever answer empty.

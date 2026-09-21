@@ -89,24 +89,10 @@ operations:
     output:
       DomainStatus: rec
 
-  DescribeDomain:
-    reads:
-      d: { resource: domain }
-    require:
-      - { cond: d_found, error: NotFound }
-    output:
-      DomainStatus: d
-
+  DescribeDomain: {get: {resource: domain, error: NotFound, wrap: DomainStatus}}
   # The config read and the status read are the same record under two
   # members, which is what the pack answered.
-  DescribeDomainConfig:
-    reads:
-      d: { resource: domain }
-    require:
-      - { cond: d_found, error: NotFound }
-    output:
-      DomainConfig: d
-
+  DescribeDomainConfig: {get: {resource: domain, error: NotFound, wrap: DomainConfig}}
   # Named domains that match nothing are skipped rather than faulting; the
   # filter gives that for free. The pack walked the request's names in
   # request order where this answers in store order -- the recorded

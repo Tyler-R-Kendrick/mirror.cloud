@@ -79,22 +79,10 @@ errors:
     fault: client
 
 operations:
-  CreateUserPool:
-    effects:
-      - create: { resource: pool }
-    output:
-      UserPool: rec
-
+  CreateUserPool: {create: {resource: pool, wrap: UserPool}}
   # The pack strips everything through the last underscore off UserPoolId, so
   # both the bare id and the region_id form address the same pool.
-  DescribeUserPool:
-    reads:
-      p: { resource: pool, key: "lastSegment(string(input.UserPoolId), '_')" }
-    require:
-      - { cond: p_found, error: NotFound }
-    output:
-      UserPool: p
-
+  DescribeUserPool: {get: {resource: pool, error: NotFound, key: 'lastSegment(string(input.UserPoolId), ''_'')', wrap: UserPool}}
   # UserPoolDescriptionType declares Id and Name and no Arn; the pack listed
   # the whole record, Arn included. The declared shape outranks it.
   ListUserPools:
@@ -169,22 +157,10 @@ operations:
             UserStatus: "'CONFIRMED'"
     output: {}
 
-  CreateUserPoolClient:
-    effects:
-      - create: { resource: client }
-    output:
-      UserPoolClient: rec
-
+  CreateUserPoolClient: {create: {resource: client, wrap: UserPoolClient}}
   # The pack looks the client up by ClientId alone; the UserPoolId the model
   # requires is never consulted, so the wrong pool answers the same.
-  DescribeUserPoolClient:
-    reads:
-      c: { resource: client }
-    require:
-      - { cond: c_found, error: NotFound }
-    output:
-      UserPoolClient: c
-
+  DescribeUserPoolClient: {get: {resource: client, error: NotFound, wrap: UserPoolClient}}
   ListUserPoolClients:
     list:
       resource: client

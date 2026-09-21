@@ -40,29 +40,14 @@ operations:
     output:
       ProtectionId: id
 
-  DescribeProtection:
-    reads:
-      rec: { resource: protection }
-    require:
-      - { cond: rec_found, error: NotFound }
-    output:
-      Protection: rec
-
+  DescribeProtection: {get: {resource: protection, error: NotFound, wrap: Protection}}
   ListProtections:
     # paginate: model binds tokens and page caps from the model's pagination
     # trait, which is how list operations that were previously unbounded get
     # pagination without per-service code.
     list: { resource: protection, member: Protections, paginate: model }
 
-  DeleteProtection:
-    # Deleting a protection that does not exist succeeds silently. Real Shield
-    # returns ResourceNotFoundException here, but the pack this was extracted
-    # from does not, and equivalence gates the migration: behavior changes on
-    # corpus evidence, deliberately and cited, not as a side effect of
-    # translation. See the quirk below.
-    effects:
-      - delete: { resource: protection }
-
+  DeleteProtection: {delete: {resource: protection}}
   CreateSubscription:
     effects:
       - put:

@@ -68,10 +68,7 @@ operations:
         'arn:aws:application-autoscaling:' + identity.region + ':' + identity.account
         + ':scalable-target/' + fx.tid
 
-  DeregisterScalableTarget:
-    effects:
-      - delete: { resource: target, missing: ignore }
-
+  DeregisterScalableTarget: {delete: {resource: target, missing: ignore}}
   DescribeScalableTargets:
     list: { resource: target, member: ScalableTargets, paginate: model }
 
@@ -81,10 +78,7 @@ operations:
     output:
       PolicyARN: rec.PolicyARN
 
-  DeleteScalingPolicy:
-    effects:
-      - delete: { resource: policy, missing: ignore }
-
+  DeleteScalingPolicy: {delete: {resource: policy, missing: ignore}}
   DescribeScalingPolicies:
     list: { resource: policy, member: ScalingPolicies, paginate: model }
 
@@ -92,10 +86,7 @@ operations:
     effects:
       - put: { resource: scheduledaction }
 
-  DeleteScheduledAction:
-    effects:
-      - delete: { resource: scheduledaction, missing: ignore }
-
+  DeleteScheduledAction: {delete: {resource: scheduledaction, missing: ignore}}
   DescribeScheduledActions:
     list: { resource: scheduledaction, member: ScheduledActions, paginate: model }
 
@@ -120,10 +111,7 @@ operations:
     output:
       Tags: "t_found ? t.Tags : {}"
 
-  UntagResource:
-    effects:
-      - delete: { resource: tagset, missing: ignore }
-
+  UntagResource: {delete: {resource: tagset, missing: ignore}}
 quirks:
   - operation: DescribeScalableTargets
     note: >

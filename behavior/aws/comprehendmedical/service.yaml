@@ -48,14 +48,7 @@ operations:
     output:
       JobId: rec.JobId
 
-  DescribeEntitiesDetectionV2Job:
-    reads:
-      job: { resource: job, key: "string(input.JobId)" }
-    require:
-      - { cond: job_found, error: NotFound }
-    output:
-      ComprehendMedicalAsyncJobProperties: job
-
+  DescribeEntitiesDetectionV2Job: {get: {resource: job, error: NotFound, key: string(input.JobId), wrap: ComprehendMedicalAsyncJobProperties}}
   ListEntitiesDetectionV2Jobs:
     list: { resource: job, member: ComprehendMedicalAsyncJobPropertiesList }
 

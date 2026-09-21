@@ -37,26 +37,8 @@ errors:
     fault: client
 
 operations:
-  PutBot:
-    effects:
-      - put: { resource: bot }
-    output:
-      name: rec.name
-      status: rec.status
-      locale: rec.locale
-      checksum: rec.checksum
-
-  GetBot:
-    reads:
-      bot: { resource: bot }
-    require:
-      - { cond: bot_found, error: NotFound }
-    output:
-      name: bot.name
-      status: bot.status
-      locale: bot.locale
-      checksum: bot.checksum
-
+  PutBot: {put: {resource: bot}}
+  GetBot: {get: {resource: bot, error: NotFound}}
   # The stored record carries locale and checksum, which BotMetadata does not
   # declare, so the listed item is projected down to what the shape carries.
   GetBots:
@@ -64,30 +46,10 @@ operations:
     output:
       bots: "items.map(b, {'name': b.name, 'status': b.status})"
 
-  DeleteBot:
-    effects:
-      - delete: { resource: bot, missing: ignore }
-
-  PutIntent:
-    effects:
-      - put: { resource: intent }
-    output:
-      name: rec.name
-      checksum: rec.checksum
-
-  GetIntent:
-    reads:
-      intent: { resource: intent }
-    require:
-      - { cond: intent_found, error: NotFound }
-    output:
-      name: intent.name
-      checksum: intent.checksum
-
-  DeleteIntent:
-    effects:
-      - delete: { resource: intent, missing: ignore }
-
+  DeleteBot: {delete: {resource: bot, missing: ignore}}
+  PutIntent: {put: {resource: intent}}
+  GetIntent: {get: {resource: intent, error: NotFound}}
+  DeleteIntent: {delete: {resource: intent, missing: ignore}}
 quirks:
   - operation: GetBot
     note: >

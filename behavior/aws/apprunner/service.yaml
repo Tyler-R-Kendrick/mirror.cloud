@@ -43,14 +43,7 @@ operations:
     output:
       Service: rec
 
-  DescribeService:
-    reads:
-      svc: { resource: service, key: "string(input.ServiceArn)" }
-    require:
-      - { cond: svc_found, error: NotFound }
-    output:
-      Service: svc
-
+  DescribeService: {get: {resource: service, error: NotFound, key: string(input.ServiceArn), wrap: Service}}
   ListServices:
     list: { resource: service, member: ServiceSummaryList, paginate: model }
 

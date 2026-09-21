@@ -57,21 +57,11 @@ operations:
     output:
       ConnectionArn: rec.ConnectionArn
 
-  GetConnection:
-    reads:
-      c: { resource: connection }
-    require:
-      - { cond: c_found, error: NotFound }
-    output:
-      Connection: c
-
+  GetConnection: {get: {resource: connection, error: NotFound, wrap: Connection}}
   ListConnections:
     list: { resource: connection, member: Connections, paginate: model }
 
-  DeleteConnection:
-    effects:
-      - delete: { resource: connection, missing: ignore }
-
+  DeleteConnection: {delete: {resource: connection, missing: ignore}}
   CreateHost:
     effects:
       - put:

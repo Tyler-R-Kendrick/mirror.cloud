@@ -275,14 +275,7 @@ operations:
             AssumeRolePolicyDocument: "'AssumeRolePolicyDocument' in input ? input.AssumeRolePolicyDocument : null"
     output: {}
 
-  GetRole:
-    reads:
-      r: { resource: role }
-    require:
-      - { cond: r_found, error: NoSuchEntity }
-    output:
-      Role: r
-
+  GetRole: {get: {resource: role, error: NoSuchEntity, wrap: Role}}
   DeleteRole:
     effects:
       - delete: { resource: role, missing: ignore }
@@ -384,14 +377,7 @@ operations:
     output:
       Policy: rec
 
-  GetPolicy:
-    reads:
-      p: { resource: policy }
-    require:
-      - { cond: p_found, error: NoSuchEntity }
-    output:
-      Policy: p
-
+  GetPolicy: {get: {resource: policy, error: NoSuchEntity, wrap: Policy}}
   # Deleting a policy orphans its versions; the pack never touched them.
   DeletePolicy:
     effects:
@@ -478,14 +464,7 @@ operations:
     output:
       User: rec
 
-  GetUser:
-    reads:
-      u: { resource: user }
-    require:
-      - { cond: u_found, error: NoSuchEntity }
-    output:
-      User: u
-
+  GetUser: {get: {resource: user, error: NoSuchEntity, wrap: User}}
   # A rename deletes the old record and writes the same record under the new
   # name. UpdateUser's output is the unit shape; the User the pack answered
   # is recorded as superseded.
@@ -624,14 +603,7 @@ operations:
     output:
       LoginProfile: rec
 
-  GetLoginProfile:
-    reads:
-      l: { resource: login }
-    require:
-      - { cond: l_found, error: NoSuchEntity }
-    output:
-      LoginProfile: l
-
+  GetLoginProfile: {get: {resource: login, error: NoSuchEntity, wrap: LoginProfile}}
   # Updating a profile that was never created conjures one holding only the
   # user name; the pack did the same.
   UpdateLoginProfile:
@@ -795,14 +767,7 @@ operations:
     output:
       InstanceProfile: rec
 
-  GetInstanceProfile:
-    reads:
-      p: { resource: ip }
-    require:
-      - { cond: p_found, error: NoSuchEntity }
-    output:
-      InstanceProfile: p
-
+  GetInstanceProfile: {get: {resource: ip, error: NoSuchEntity, wrap: InstanceProfile}}
   DeleteInstanceProfile:
     effects:
       - delete: { resource: ip, missing: ignore }
@@ -911,14 +876,7 @@ operations:
       - put: { resource: pwpolicy, spread: input }
     output: {}
 
-  GetAccountPasswordPolicy:
-    reads:
-      p: { resource: pwpolicy }
-    require:
-      - { cond: p_found, error: NoSuchEntity }
-    output:
-      PasswordPolicy: p
-
+  GetAccountPasswordPolicy: {get: {resource: pwpolicy, error: NoSuchEntity, wrap: PasswordPolicy}}
   DeleteAccountPasswordPolicy:
     effects:
       - delete: { resource: pwpolicy, missing: ignore }

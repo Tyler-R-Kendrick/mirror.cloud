@@ -46,10 +46,7 @@ operations:
     output:
       payload: rec.payload
 
-  DeleteThingShadow:
-    effects:
-      - delete: { resource: shadow }
-
+  DeleteThingShadow: {delete: {resource: shadow}}
   ListNamedShadowsForThing:
     output:
       results: "[]"

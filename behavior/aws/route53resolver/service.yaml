@@ -49,48 +49,18 @@ errors:
     fault: client
 
 operations:
-  CreateResolverEndpoint:
-    effects:
-      - create: { resource: resolverendpoint }
-    output:
-      ResolverEndpoint: rec
-
-  GetResolverEndpoint:
-    reads:
-      e: { resource: resolverendpoint, key: "string(input.ResolverEndpointId)" }
-    require:
-      - { cond: e_found, error: NotFound }
-    output:
-      ResolverEndpoint: e
-
+  CreateResolverEndpoint: {create: {resource: resolverendpoint, wrap: ResolverEndpoint}}
+  GetResolverEndpoint: {get: {resource: resolverendpoint, error: NotFound, key: string(input.ResolverEndpointId), wrap: ResolverEndpoint}}
   ListResolverEndpoints:
     list: { resource: resolverendpoint, member: ResolverEndpoints, paginate: model }
 
-  DeleteResolverEndpoint:
-    effects:
-      - delete: { resource: resolverendpoint, key: "string(input.ResolverEndpointId)", missing: ignore }
-
-  CreateResolverRule:
-    effects:
-      - create: { resource: rule }
-    output:
-      ResolverRule: rec
-
-  GetResolverRule:
-    reads:
-      r: { resource: rule, key: "string(input.ResolverRuleId)" }
-    require:
-      - { cond: r_found, error: NotFound }
-    output:
-      ResolverRule: r
-
+  DeleteResolverEndpoint: {delete: {resource: resolverendpoint, key: string(input.ResolverEndpointId), missing: ignore}}
+  CreateResolverRule: {create: {resource: rule, wrap: ResolverRule}}
+  GetResolverRule: {get: {resource: rule, error: NotFound, key: string(input.ResolverRuleId), wrap: ResolverRule}}
   ListResolverRules:
     list: { resource: rule, member: ResolverRules, paginate: model }
 
-  DeleteResolverRule:
-    effects:
-      - delete: { resource: rule, key: "string(input.ResolverRuleId)", missing: ignore }
-
+  DeleteResolverRule: {delete: {resource: rule, key: string(input.ResolverRuleId), missing: ignore}}
 quirks:
   - operation: CreateResolverEndpoint
     note: >

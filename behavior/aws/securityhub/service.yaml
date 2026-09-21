@@ -51,19 +51,8 @@ operations:
     effects:
       - put: { resource: hub }
 
-  DescribeHub:
-    reads:
-      hub: { resource: hub }
-    require:
-      - { cond: hub_found, error: InvalidAccess }
-    output:
-      HubArn: hub.HubArn
-      SubscribedAt: hub.SubscribedAt
-
-  DisableSecurityHub:
-    effects:
-      - delete: { resource: hub, missing: ignore }
-
+  DescribeHub: {get: {resource: hub, error: InvalidAccess}}
+  DisableSecurityHub: {delete: {resource: hub, missing: ignore}}
   # One finding per entry, addressed by the id the entry carries. A finding
   # without one is skipped rather than written to a row keyed by the empty
   # string that every such finding would share; AwsSecurityFinding declares Id

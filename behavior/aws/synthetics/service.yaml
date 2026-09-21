@@ -37,24 +37,14 @@ operations:
     output:
       Canary: rec
 
-  GetCanary:
-    reads:
-      canary: { resource: canary }
-    require:
-      - { cond: canary_found, error: NotFound }
-    output:
-      Canary: canary
-
+  GetCanary: {get: {resource: canary, error: NotFound, wrap: Canary}}
   # The pack served this as `ListCanaries`, which is not an operation of this
   # service -- see quirks. DescribeCanaries is the one the model declares and
   # the one an SDK calls.
   DescribeCanaries:
     list: { resource: canary, member: Canaries, paginate: model }
 
-  DeleteCanary:
-    effects:
-      - delete: { resource: canary, missing: ignore }
-
+  DeleteCanary: {delete: {resource: canary, missing: ignore}}
   # Starting and stopping are accepted and do nothing, because there is nothing
   # to start. Expressed rather than omitted so a caller's start does not fail
   # outright, which is what the pack chose.

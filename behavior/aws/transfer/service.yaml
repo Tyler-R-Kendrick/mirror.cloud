@@ -68,21 +68,11 @@ operations:
     output:
       ServerId: rec.ServerId
 
-  DescribeServer:
-    reads:
-      server: { resource: server }
-    require:
-      - { cond: server_found, error: NotFound }
-    output:
-      Server: server
-
+  DescribeServer: {get: {resource: server, error: NotFound, wrap: Server}}
   ListServers:
     list: { resource: server, member: Servers, paginate: model }
 
-  DeleteServer:
-    effects:
-      - delete: { resource: server, missing: ignore }
-
+  DeleteServer: {delete: {resource: server, missing: ignore}}
   # Starting and stopping move the state and answer nothing, so a caller learns
   # the server stopped only by describing it again.
   StartServer:

@@ -84,10 +84,7 @@ operations:
     output:
       FileSystem: rec
 
-  DeleteFileSystem:
-    effects:
-      - delete: { resource: filesystem, key: "string(input.FileSystemId)", missing: ignore }
-
+  DeleteFileSystem: {delete: {resource: filesystem, key: string(input.FileSystemId), missing: ignore}}
   CreateBackup:
     effects:
       - create:
@@ -108,10 +105,7 @@ operations:
           : ''
       paginate: model
 
-  DeleteBackup:
-    effects:
-      - delete: { resource: backup, key: "string(input.BackupId)", missing: ignore }
-
+  DeleteBackup: {delete: {resource: backup, key: string(input.BackupId), missing: ignore}}
 quirks:
   - operation: CreateFileSystem
     note: >

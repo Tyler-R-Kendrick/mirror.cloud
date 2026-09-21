@@ -113,16 +113,8 @@ operations:
           'IdentityPoolName': p.IdentityPoolName
         })
 
-  DeleteIdentityPool:
-    effects:
-      - delete: { resource: pool, key: "string(input.IdentityPoolId)", missing: ignore }
-
-  GetId:
-    effects:
-      - create: { resource: poolidentity }
-    output:
-      IdentityId: rec.IdentityId
-
+  DeleteIdentityPool: {delete: {resource: pool, key: string(input.IdentityPoolId), missing: ignore}}
+  GetId: {create: {resource: poolidentity}}
   GetCredentialsForIdentity:
     effects:
       - generate: { bind: ak, kind: hex, bytes: 8 }

@@ -70,14 +70,7 @@ operations:
     output:
       Database: rec
 
-  DescribeDatabase:
-    reads:
-      d: { resource: database }
-    require:
-      - { cond: d_found, error: NotFound }
-    output:
-      Database: d
-
+  DescribeDatabase: {get: {resource: database, error: NotFound, wrap: Database}}
   ListDatabases:
     list: { resource: database, member: Databases, paginate: model }
 
@@ -104,14 +97,7 @@ operations:
     output:
       Table: rec
 
-  DescribeTable:
-    reads:
-      t: { resource: table }
-    require:
-      - { cond: t_found, error: NotFound }
-    output:
-      Table: t
-
+  DescribeTable: {get: {resource: table, error: NotFound, wrap: Table}}
   ListTables:
     list:
       resource: table

@@ -77,20 +77,8 @@ operations:
       - delete: { resource: mesh, missing: ignore }
     output: {}
 
-  CreateVirtualNode:
-    effects:
-      - put: { resource: virtualnode }
-    output:
-      virtualNode: rec
-
-  DescribeVirtualNode:
-    reads:
-      vn: { resource: virtualnode }
-    require:
-      - { cond: vn_found, error: NotFound }
-    output:
-      virtualNode: vn
-
+  CreateVirtualNode: {put: {resource: virtualnode, wrap: virtualNode}}
+  DescribeVirtualNode: {get: {resource: virtualnode, error: NotFound, wrap: virtualNode}}
   DeleteVirtualNode:
     effects:
       - delete: { resource: virtualnode, missing: ignore }

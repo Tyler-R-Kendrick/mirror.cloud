@@ -48,14 +48,7 @@ operations:
     output:
       environment: rec
 
-  GetEnvironment:
-    reads:
-      env: { resource: environment }
-    require:
-      - { cond: env_found, error: NotFound }
-    output:
-      environment: env
-
+  GetEnvironment: {get: {resource: environment, error: NotFound, wrap: environment}}
   ListEnvironments:
     list: { resource: environment, member: environments, paginate: model }
 
@@ -65,20 +58,8 @@ operations:
       - delete: { resource: environment, missing: ignore }
     output: {}
 
-  CreateService:
-    effects:
-      - put: { resource: service }
-    output:
-      service: rec
-
-  GetService:
-    reads:
-      svc: { resource: service }
-    require:
-      - { cond: svc_found, error: NotFound }
-    output:
-      service: svc
-
+  CreateService: {put: {resource: service, wrap: service}}
+  GetService: {get: {resource: service, error: NotFound, wrap: service}}
 quirks:
   - operation: CreateEnvironment
     note: >

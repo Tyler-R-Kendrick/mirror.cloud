@@ -67,14 +67,7 @@ operations:
     output:
       OperationId: rec.Id
 
-  GetNamespace:
-    reads:
-      n: { resource: namespace, key: "string(input.Id)" }
-    require:
-      - { cond: n_found, error: NamespaceNotFound }
-    output:
-      Namespace: n
-
+  GetNamespace: {get: {resource: namespace, error: NamespaceNotFound, key: string(input.Id), wrap: Namespace}}
   ListNamespaces:
     list: { resource: namespace, member: Namespaces, paginate: model }
 
@@ -98,21 +91,11 @@ operations:
     output:
       Service: rec
 
-  GetService:
-    reads:
-      s: { resource: service, key: "string(input.Id)" }
-    require:
-      - { cond: s_found, error: ServiceNotFound }
-    output:
-      Service: s
-
+  GetService: {get: {resource: service, error: ServiceNotFound, key: string(input.Id), wrap: Service}}
   ListServices:
     list: { resource: service, member: Services, paginate: model }
 
-  DeleteService:
-    effects:
-      - delete: { resource: service, key: "string(input.Id)", missing: ignore }
-
+  DeleteService: {delete: {resource: service, key: string(input.Id), missing: ignore}}
   # The pack generated an instance id when the request carried none.
   # InstanceId is required, so that branch was never reachable through the
   # wire and is not expressed -- expressing it would draw from the
@@ -128,14 +111,7 @@ operations:
     output:
       OperationId: rec.Id
 
-  GetInstance:
-    reads:
-      i: { resource: instance }
-    require:
-      - { cond: i_found, error: InstanceNotFound }
-    output:
-      Instance: i
-
+  GetInstance: {get: {resource: instance, error: InstanceNotFound, wrap: Instance}}
   # Every instance in the account and region, not the service's own: the pack
   # listed the whole collection and the required ServiceId narrows nothing.
   ListInstances:

@@ -43,23 +43,11 @@ operations:
       policyStoreId: rec.policyStoreId
       arn: rec.arn
 
-  GetPolicyStore:
-    reads:
-      ps: { resource: policystore }
-    require:
-      - { cond: ps_found, error: NotFound }
-    output:
-      policyStoreId: ps.policyStoreId
-      arn: ps.arn
-      description: ps.description
-
+  GetPolicyStore: {get: {resource: policystore, error: NotFound}}
   ListPolicyStores:
     list: { resource: policystore, member: policyStores, paginate: model }
 
-  DeletePolicyStore:
-    effects:
-      - delete: { resource: policystore, missing: ignore }
-
+  DeletePolicyStore: {delete: {resource: policystore, missing: ignore}}
   # The policy's own id is generated, so the key it is filed under is the
   # store id joined to it, built in the effect where both are known.
   CreatePolicy:
@@ -84,10 +72,7 @@ operations:
       policyId: pol.policyId
       policyStoreId: pol.policyStoreId
 
-  DeletePolicy:
-    effects:
-      - delete: { resource: policy, missing: ignore }
-
+  DeletePolicy: {delete: {resource: policy, missing: ignore}}
 quirks:
   - operation: CreatePolicyStore
     note: >

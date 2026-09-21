@@ -35,21 +35,11 @@ operations:
     output:
       Id: rec.Id
 
-  GetAppMonitor:
-    reads:
-      monitor: { resource: monitor }
-    require:
-      - { cond: monitor_found, error: NotFound }
-    output:
-      AppMonitor: monitor
-
+  GetAppMonitor: {get: {resource: monitor, error: NotFound, wrap: AppMonitor}}
   ListAppMonitors:
     list: { resource: monitor, member: AppMonitorSummaries, paginate: model }
 
-  DeleteAppMonitor:
-    effects:
-      - delete: { resource: monitor, missing: ignore }
-
+  DeleteAppMonitor: {delete: {resource: monitor, missing: ignore}}
   # Events are accepted and dropped. Storing them would be storing something
   # nothing can read back, since GetAppMonitorData answers empty either way.
   PutRumEvents: {}

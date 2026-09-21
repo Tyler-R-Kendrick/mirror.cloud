@@ -47,14 +47,7 @@ operations:
     output:
       JobFlowId: id
 
-  DescribeCluster:
-    reads:
-      c: { resource: cluster }
-    require:
-      - { cond: c_found, error: InvalidRequest }
-    output:
-      Cluster: c
-
+  DescribeCluster: {get: {resource: cluster, error: InvalidRequest, wrap: Cluster}}
   ListClusters:
     list: { resource: cluster, member: Clusters, paginate: model }
 

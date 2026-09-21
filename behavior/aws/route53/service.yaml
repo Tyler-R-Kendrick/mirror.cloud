@@ -114,14 +114,7 @@ operations:
       HostedZone: rec
       ChangeInfo: "{'Id': '/change/' + id, 'Status': 'INSYNC'}"
 
-  GetHostedZone:
-    reads:
-      z: { resource: zone }
-    require:
-      - { cond: z_found, error: NoSuchHostedZone }
-    output:
-      HostedZone: z
-
+  GetHostedZone: {get: {resource: zone, error: NoSuchHostedZone, wrap: HostedZone}}
   ListHostedZones:
     list: { resource: zone, member: HostedZones, paginate: model }
 

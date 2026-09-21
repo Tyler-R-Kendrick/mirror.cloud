@@ -30,6 +30,22 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "edge-reject-terminal-chunk-header-only",
+			file: filepath.Join("internal", "edge", "chunked.go"),
+			old:  "trailers := http.Header{}\n\tif len(rest) == 0 {",
+			new:  "trailers := http.Header{}\n\tif false {",
+			pkg:  "./internal/edge",
+			run:  "TestDeframeAWSChunkedStoresPayloadNotFraming",
+		},
+		{
+			name: "edge-return-signature-error-for-malformed-upload-part",
+			file: filepath.Join("internal", "edge", "edge.go"),
+			old:  `if r.Method == http.MethodPut && r.URL.Query().Get("partNumber") != "" && r.URL.Query().Get("uploadId") != "" {`,
+			new:  `if false {`,
+			pkg:  "./internal/edge",
+			run:  "TestS3AWSChunkedUploadPartRetryCharacterization",
+		},
+		{
 			name: "s3-ignore-select-object-body-read-error",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3_extra.go"),
 			old:  "raw, err := io.ReadAll(rc)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\texpr := str(req.Input[\"Expression\"])",

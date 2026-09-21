@@ -1,0 +1,11 @@
+{
+  "invalid": {
+    "code": "InternalError",
+    "status": 500
+  },
+  "retry": {
+    "etag": "\"eadf20fc2decc2100701e89eb1677146\"",
+    "parts": 1,
+    "status": 200
+  }
+}

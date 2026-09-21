@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -419,6 +420,42 @@ func TestAWSChunkedFramingContract(t *testing.T) {
 		if response.StatusCode != http.StatusOK || string(body) != "hello" || response.Header.Get("Content-Encoding") != tc.want {
 			t.Fatalf("%s: %d encoding=%q body=%q", name, response.StatusCode, response.Header.Get("Content-Encoding"), body)
 		}
+	}
+	request, _ = http.NewRequest(http.MethodPost, ts.URL+"/chunk-errors/part?uploads", nil)
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var upload struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if err := xml.NewDecoder(response.Body).Decode(&upload); err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	partURL := ts.URL + "/chunk-errors/part?partNumber=1&uploadId=" + url.QueryEscape(upload.UploadID)
+	putPart := func(body string) *http.Response {
+		request, _ := http.NewRequest(http.MethodPut, partURL, strings.NewReader(body))
+		request.Header.Set("Content-Encoding", "aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "10")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	response = putPart("\r\nHello Blob\r\n0;chunk-signature=invalid\r\n")
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusInternalServerError || !bytes.Contains(body, []byte("<Code>InternalError</Code>")) {
+		t.Fatalf("invalid part: %d %s", response.StatusCode, body)
+	}
+	response = putPart("a;chunk-signature=first\r\nHello Blob\r\n0;chunk-signature=last\r\n")
+	response.Body.Close()
+	sum := md5.Sum([]byte("Hello Blob"))
+	if response.StatusCode != http.StatusOK || response.Header.Get("ETag") != `"`+hex.EncodeToString(sum[:])+`"` {
+		t.Fatalf("valid retry: %d etag=%q", response.StatusCode, response.Header.Get("ETag"))
 	}
 }
 

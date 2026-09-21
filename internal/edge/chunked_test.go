@@ -21,6 +21,11 @@ func TestDeframeAWSChunkedStoresPayloadNotFraming(t *testing.T) {
 			in:   "b\r\nhello world\r\n0\r\n\r\n",
 			want: "hello world",
 		},
+		{
+			name: "terminal header only",
+			in:   "b\r\nhello world\r\n0\r\n",
+			want: "hello world",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

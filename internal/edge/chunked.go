@@ -81,6 +81,9 @@ func parseAWSChunked(r io.Reader) ([]byte, [][]byte, []string, http.Header, erro
 
 func parseAWSChunkedTrailers(rest []byte) (http.Header, error) {
 	trailers := http.Header{}
+	if len(rest) == 0 {
+		return trailers, nil
+	}
 	for {
 		nl := bytes.Index(rest, []byte("\r\n"))
 		if nl < 0 {

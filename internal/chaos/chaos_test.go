@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -333,6 +334,62 @@ func TestConcurrentAWSChunkedContentEncodingsDoNotCrossContaminate(t *testing.T)
 	close(errs)
 	for err := range errs {
 		t.Error(err)
+	}
+}
+
+func TestConcurrentCancelledChunkedPartsDoNotCrossContaminate(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-parts", nil))
+	started := httptest.NewRecorder()
+	handler.ServeHTTP(started, httptest.NewRequest(http.MethodPost, "/chunk-parts/object?uploads", nil))
+	var upload struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if created.Code != http.StatusOK || started.Code != http.StatusOK || xml.Unmarshal(started.Body.Bytes(), &upload) != nil || upload.UploadID == "" {
+		t.Fatalf("setup: bucket=%d upload=%d %s", created.Code, started.Code, started.Body.String())
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			raw, want := "a;chunk-signature=first\r\nHello Blob\r\n0;chunk-signature=last\r\n", http.StatusOK
+			if i%2 != 0 {
+				raw, want = "\r\nHello Blob\r\n0;chunk-signature=invalid\r\n", http.StatusInternalServerError
+			}
+			path := fmt.Sprintf("/chunk-parts/object?partNumber=%d&uploadId=%s", i+1, upload.UploadID)
+			request := httptest.NewRequest(http.MethodPut, path, strings.NewReader(raw))
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "10")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != want {
+				errs <- fmt.Errorf("part %d: %d, want %d", i+1, recorder.Code, want)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	listed := httptest.NewRecorder()
+	handler.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/chunk-parts/object?uploadId="+upload.UploadID, nil))
+	var parts struct {
+		Parts []struct{} `xml:"Part"`
+	}
+	if listed.Code != http.StatusOK || xml.Unmarshal(listed.Body.Bytes(), &parts) != nil || len(parts.Parts) != 32 {
+		t.Fatalf("parts: %d count=%d body=%s", listed.Code, len(parts.Parts), listed.Body.String())
 	}
 }
 

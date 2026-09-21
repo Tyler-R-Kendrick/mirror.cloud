@@ -73,3 +73,25 @@ func FuzzDynamoDBBinaryValues(f *testing.F) {
 		}
 	})
 }
+
+func FuzzDynamoDBTableClass(f *testing.F) {
+	f.Add(false)
+	f.Fuzz(func(t *testing.T, infrequent bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		_, createErr := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "TableClass": "STANDARD"})
+		class := "STANDARD"
+		if infrequent {
+			class = "STANDARD_INFREQUENT_ACCESS"
+		}
+		updated, updateErr := call("UpdateTable", map[string]any{"TableName": "T", "TableClass": class})
+		described, describeErr := call("DescribeTable", map[string]any{"TableName": "T"})
+		if createErr != nil || updateErr != nil || describeErr != nil || str(asMap(asMap(updated.Output["TableDescription"])["TableClassSummary"])["TableClass"]) != class || str(asMap(asMap(described.Output["Table"])["TableClassSummary"])["TableClass"]) != class {
+			t.Fatal("table class did not persist")
+		}
+	})
+}

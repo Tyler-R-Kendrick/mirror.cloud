@@ -3181,6 +3181,18 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("get binary %s: %#v", sk, got)
 		}
 	}
+	createdClass, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("TableClass"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}, TableClass: ddbtypes.TableClassStandard})
+	if err != nil || createdClass.TableDescription == nil || createdClass.TableDescription.TableClassSummary == nil || createdClass.TableDescription.TableClassSummary.TableClass != ddbtypes.TableClassStandard {
+		t.Fatalf("create table class: %#v %v", createdClass, err)
+	}
+	updatedClass, err := ddb.UpdateTable(context.Background(), &dynamodb.UpdateTableInput{TableName: aws.String("TableClass"), TableClass: ddbtypes.TableClassStandardInfrequentAccess})
+	if err != nil || updatedClass.TableDescription == nil || updatedClass.TableDescription.TableClassSummary == nil || updatedClass.TableDescription.TableClassSummary.TableClass != ddbtypes.TableClassStandardInfrequentAccess {
+		t.Fatalf("update table class: %#v %v", updatedClass, err)
+	}
+	describedClass, err := ddb.DescribeTable(context.Background(), &dynamodb.DescribeTableInput{TableName: aws.String("TableClass")})
+	if err != nil || describedClass.Table == nil || describedClass.Table.TableClassSummary == nil || describedClass.Table.TableClassSummary.TableClass != ddbtypes.TableClassStandardInfrequentAccess {
+		t.Fatalf("describe table class: %#v %v", describedClass, err)
+	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)
 	}

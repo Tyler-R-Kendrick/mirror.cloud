@@ -69,3 +69,28 @@ func sqsQueueEndpointAction(svc *model.Service, action string) error {
 		Fault:      "client",
 	}
 }
+
+// sqsBindQueueURL fills QueueUrl from the request path when a client addresses
+// a queue URL directly (the query endpoint's per-queue form) and did not name
+// QueueUrl in the body. The pack used to read the path inside queueName; the
+// engine only sees input members, so the bind has to happen at the edge.
+func sqsBindQueueURL(req *spi.Request, r *http.Request) {
+	if req == nil || r == nil || r.URL == nil || !sqsQueuePath(r.URL.Path) {
+		return
+	}
+	if req.Input == nil {
+		req.Input = map[string]any{}
+	}
+	if _, ok := req.Input["QueueUrl"]; ok {
+		return
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	if host == "" {
+		host = r.URL.Host
+	}
+	req.Input["QueueUrl"] = scheme + "://" + host + r.URL.Path
+}

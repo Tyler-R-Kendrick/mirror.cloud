@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -24,7 +24,7 @@ import (
 
 func TestPutEventsDeliversOnlyMatchingRules(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, sp, np := New(deps), sqs.New(deps), sns.New(deps)
+	p, sp, np := New(deps), bundled.Handler("aws.sqs", deps), sns.New(deps)
 	defer p.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
@@ -157,7 +157,7 @@ func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 	deps.Clock = observed
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	call := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
@@ -306,7 +306,7 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invoke := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
@@ -419,7 +419,7 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 func TestSchedulerUsesAbsoluteDeadline(t *testing.T) {
 	deps := spitest.Deps(t)
 	setup := New(deps)
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	call := func(pack spi.BehaviorPack, operation string, input map[string]any) {
@@ -839,7 +839,7 @@ func TestAPIDestinationRateLimit(t *testing.T) {
 
 func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, sp := New(deps), sqs.New(deps)
+	p, sp := New(deps), bundled.Handler("aws.sqs", deps)
 	defer p.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
@@ -896,7 +896,7 @@ func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 
 func TestTargetInputTransformations(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, sp := New(deps), sqs.New(deps)
+	p, sp := New(deps), bundled.Handler("aws.sqs", deps)
 	defer p.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}

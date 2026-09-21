@@ -29,12 +29,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/identity"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/zeebo/xxh3"
 )
@@ -4572,7 +4572,7 @@ func (p *Pack) verifyNotificationDestination(ctx context.Context, req *spi.Reque
 		"Bucket": str(req.Input["Bucket"]), "RequestId": "mirror", "HostId": "eftixk72aD6Ap51TnqcoF8eFidJG9Z/2",
 	})
 	if service == "sqs" {
-		_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": string(payload)}})
+		_, err := bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": string(payload)}})
 		return err
 	}
 	_, err := sns.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload), "Subject": "Amazon S3 Notification"}})
@@ -5508,7 +5508,7 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 			if req.HTTP != nil && req.HTTP.Header.Get("X-Amzn-Trace-Id") != "" {
 				input["MessageSystemAttributes"] = map[string]any{"AWSTraceHeader": map[string]any{"DataType": "String", "StringValue": req.HTTP.Header.Get("X-Amzn-Trace-Id")}}
 			}
-			_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{
+			_, _ = bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{
 				Identity: notificationTargetIdentity(req.Identity, arn), Operation: "SendMessage",
 				Input: input,
 			})

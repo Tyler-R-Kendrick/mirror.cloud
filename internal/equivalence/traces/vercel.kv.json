@@ -2,7 +2,7 @@
   "schema": "trace/1",
   "service": "vercel.kv",
   "source": "pack:internal/services/vercel/api",
-  "note": "Recorded from the KV half of the hand-written vercel.api pack, in the commit that deleted it. Vercel KV is Upstash Redis on kv.vercel-storage.com, a second product the one registration was carrying, and it is its own service here.\n\nEvery step is `Command`, which the pack called `KvCommand`, and the command array moved from the pack's invented `_redis` input member to `body` -- the operation's payload, which the document declares as a list of strings. That member is why the REST/JSON codec grew a rule for a list-shaped payload: it had one for a scalar body and otherwise unmarshalled into a map, which fails on an array and discarded the error.\n\nThe subset is SET, GET and DEL, which is what the pack implemented and therefore all there is evidence for. INCR is recorded answering 501, because an unimplemented verb answering 501 rather than a Redis error is itself behaviour a client can see.",
+  "note": "Recorded from the KV half of the hand-written vercel.api pack, then extended for Mirror Cloud's LocalStack-class string surface. Vercel KV is Upstash Redis on kv.vercel-storage.com, a second product the one registration was carrying, and it is its own service here.\n\nEvery step is `Command`, which the pack called `KvCommand`, and the command array moved from the pack's invented `_redis` input member to `body` -- the operation's payload, which the document declares as a list of strings. That member is why the REST/JSON codec grew a rule for a list-shaped payload: it had one for a scalar body and otherwise unmarshalled into a map, which fails on an array and discarded the error.\n\nSET, GET and DEL come from the pack recording. INCR is authored against the bundle (counter starts at 1 on a missing key). HSET answers 501, because an unimplemented verb answering 501 rather than a Redis error is itself behaviour a client can see.",
   "steps": [
     {
       "operation": "Command",
@@ -233,7 +233,29 @@
       "input": {
         "body": [
           "INCR",
-          "k"
+          "n"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "result": 1
+      },
+      "recorded_as": "KvCommand"
+    },
+    {
+      "operation": "Command",
+      "input": {
+        "body": [
+          "HSET",
+          "h",
+          "f",
+          "v"
         ]
       },
       "identity": {

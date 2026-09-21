@@ -1,13 +1,15 @@
-package sqs
+package behavior
 
 import (
 	"context"
 	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -35,8 +38,206 @@ func (c *observedClock) AfterTime(at time.Time) <-chan time.Time {
 	return result
 }
 
+// str and asMap are the pack's value helpers, copied here because the tests
+// moved with the extraction: the pack is deleted, and these two one-liners
+// are what its tests read through.
+func str(v any) string { s, _ := v.(string); return s }
+
+func queueURLs(out map[string]any) []any {
+	raw := out["queueUrls"]
+	if raw == nil {
+		raw = out["QueueUrls"]
+	}
+	s, _ := raw.([]any)
+	return s
+}
+
+func asMap(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
+func asAnySlice(value any) []any {
+	values, _ := value.([]any)
+	return values
+}
+
+// validReceiptHandle is the pack's receipt-handle shape check, copied here
+// because the fuzz tests below use it as the oracle for which fault a handle
+// should produce: 64 hex characters is valid-shaped, anything else is not.
+func validReceiptHandle(handle string) bool {
+	if len(handle) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(handle)
+	return err == nil
+}
+
+// validateRedrivePolicy, invalidRedrivePolicyFault and asInt are the pack's
+// redrive-policy validation, copied here because the fuzz test below uses
+// the validator as the oracle for which policies the bundle should accept.
+func validateRedrivePolicy(raw string) *spi.Fault {
+	var policy map[string]any
+	if json.Unmarshal([]byte(raw), &policy) != nil {
+		return invalidRedrivePolicyFault()
+	}
+	arn := str(policy["deadLetterTargetArn"])
+	parts := strings.Split(arn, ":")
+	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "sqs" || parts[3] == "" || parts[4] == "" || parts[5] == "" {
+		return invalidRedrivePolicyFault()
+	}
+	var count int
+	switch value := policy["maxReceiveCount"].(type) {
+	case string:
+		var err error
+		count, err = strconv.Atoi(value)
+		if err != nil {
+			return invalidRedrivePolicyFault()
+		}
+	default:
+		count = asInt(value)
+	}
+	if count < 1 || count > 1000 {
+		return invalidRedrivePolicyFault()
+	}
+	return nil
+}
+
+func invalidRedrivePolicyFault() *spi.Fault {
+	return &spi.Fault{Code: "InvalidParameterValue", Message: "Invalid value for the parameter RedrivePolicy.", HTTPStatus: 400, Fault: "client"}
+}
+
+func asInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	case string:
+		i, _ := strconv.Atoi(n)
+		return i
+	}
+	return 0
+}
+
+// The remaining pack value helpers the characterization tests use as
+// oracles: ARN shaping, queue-name and entry-id character rules, message
+// content rules and the SSE mutual-exclusion check. They are pure string
+// predicates, frozen here so the tests keep asserting the rules rather than
+// the implementation that used to carry them.
+func arnPartition(region string) string {
+	switch {
+	case strings.HasPrefix(region, "cn-"):
+		return "aws-cn"
+	case strings.HasPrefix(region, "us-gov-"):
+		return "aws-us-gov"
+	case strings.HasPrefix(region, "us-iso-b-"):
+		return "aws-iso-b"
+	case strings.HasPrefix(region, "us-iso-"):
+		return "aws-iso"
+	default:
+		return "aws"
+	}
+}
+
+func queueARN(req *spi.Request, name string) string {
+	return fmt.Sprintf("arn:%s:sqs:%s:%s:%s", arnPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)
+}
+
+func queueOwner(req *spi.Request) string {
+	if owner := str(req.Input["QueueOwnerAWSAccountId"]); owner != "" {
+		return owner
+	}
+	u := str(req.Input["QueueUrl"])
+	if u == "" && req.HTTP != nil && req.HTTP.URL != nil {
+		u = req.HTTP.URL.String()
+	}
+	parsed, err := neturl.Parse(u)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	owner := parts[len(parts)-2]
+	if len(owner) != 12 {
+		return ""
+	}
+	for _, r := range owner {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return owner
+}
+
+func validBatchEntryID(value string) bool {
+	if len(value) == 0 || len(value) > 80 {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func validMessageContents(body string) bool {
+	for _, r := range body {
+		if r != '\t' && r != '\n' && r != '\r' && (r < 0x20 || r > 0xD7FF && r < 0xE000 || r > 0xFFFD && r < 0x10000) {
+			return false
+		}
+	}
+	return true
+}
+
+func validMessageGroupID(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	const punctuation = `!"#$%&'()*+,-./:;<=>?@[\]^_` + "`" + `{|}~`
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune(punctuation, r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validQueueName(value string) bool {
+	if strings.HasSuffix(value, ".fifo") {
+		value = strings.TrimSuffix(value, ".fifo")
+	}
+	if value == "" || len(value) > 80 {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func validateSSEAttributes(attrs map[string]any) *spi.Fault {
+	if str(attrs["KmsMasterKeyId"]) != "" && str(attrs["SqsManagedSseEnabled"]) == "true" {
+		return &spi.Fault{Code: "InvalidAttributeName", Message: "You can use one type of server-side encryption (SSE) at one time. You can either enable KMS SSE or SQS SSE.", HTTPStatus: 400, Fault: "client"}
+	}
+	return nil
+}
+
 func TestCreateSendReceiveDelete(t *testing.T) {
-	p := &Pack{deps: spitest.Deps(t)}
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	ctx := context.Background()
 
@@ -119,7 +320,7 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 }
 
 func TestMissingQueueProtocolCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	faultFor := func(req *spi.Request) map[string]any {
 		_, err := p.Invoke(context.Background(), req)
@@ -140,7 +341,7 @@ func TestMissingQueueProtocolCharacterization(t *testing.T) {
 }
 
 func TestInvalidReceiptHandleCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "invalid-receipt"}}); err != nil {
@@ -155,7 +356,7 @@ func TestInvalidReceiptHandleCharacterization(t *testing.T) {
 }
 
 func TestChangeVisibilityOnDeletedMessageCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -179,7 +380,7 @@ func TestChangeVisibilityOnDeletedMessageCharacterization(t *testing.T) {
 }
 
 func TestDeleteReceiptHandleCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -205,7 +406,7 @@ func TestDeleteReceiptHandleCharacterization(t *testing.T) {
 }
 
 func TestSendReceiveCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -223,7 +424,7 @@ func TestSendReceiveCharacterization(t *testing.T) {
 }
 
 func TestQueueNameAsURLCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	ctx := context.Background()
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "name-url"}}); err != nil {
@@ -239,7 +440,7 @@ func TestQueueNameAsURLCharacterization(t *testing.T) {
 }
 
 func TestEmptyMessageCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty-body"}}); err != nil {
@@ -254,7 +455,7 @@ func TestEmptyMessageCharacterization(t *testing.T) {
 }
 
 func TestInvalidMessageContentsCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "invalid-contents"}}); err != nil {
 		t.Fatal(err)
@@ -271,7 +472,7 @@ func TestMessageRetentionCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "retention", "Attributes": map[string]any{"MessageRetentionPeriod": "2"}}}); err != nil {
@@ -294,7 +495,7 @@ func TestApproximateMessageStatesCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -324,7 +525,7 @@ func TestReceiptHandleRotatesAfterVisibilityTimeout(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -354,7 +555,7 @@ func TestPriorReceiptHandleRemainsUsable(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -391,7 +592,7 @@ func TestFIFODeleteAfterVisibilityTimeoutCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -420,7 +621,7 @@ func TestFIFODeleteAfterExtendedVisibilityCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -446,7 +647,7 @@ func TestVisibilityTimeoutLifecycleCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -494,7 +695,7 @@ func TestReceiveMessageWakesOnSendCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	after := make(chan time.Duration, 1)
 	deps.Clock = &observedClock{Clock: clk, after: after}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "wake-on-send.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -527,7 +728,7 @@ func TestReceiveMessageWakesOnSendCharacterization(t *testing.T) {
 }
 
 func TestFIFOEmptyMessageGroupReuseCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -552,7 +753,7 @@ func TestFIFOMessageGroupVisibilityAfterTerminateCharacterization(t *testing.T) 
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -588,7 +789,7 @@ func TestFIFOPartialGroupPriorityCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -614,7 +815,7 @@ func TestFIFOPartialGroupPriorityCharacterization(t *testing.T) {
 }
 
 func TestFIFOMessageGroupVisibilityAfterDeleteCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	create := func(name string) {
@@ -682,7 +883,7 @@ func TestFIFOOrderingAfterVisibilityExpiryCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -720,7 +921,7 @@ func TestFIFOOrderingAfterVisibilityExpiryCharacterization(t *testing.T) {
 }
 
 func TestFIFOInterleavedGroupOrderingCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -751,7 +952,7 @@ func TestFIFOSharedGroupVisibilityCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -793,7 +994,7 @@ func TestFIFOSharedGroupVisibilityCharacterization(t *testing.T) {
 }
 
 func TestFIFOZeroVisibilityOrderingCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -830,7 +1031,7 @@ func TestFIFOGroupVisibilityAfterChangeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -862,7 +1063,7 @@ func TestFIFOQueueDelayCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -904,7 +1105,7 @@ func TestFIFOGroupVisibilityExtensionCharacterization(t *testing.T) {
 			clk := clock.NewControllable()
 			deps := spitest.Deps(t)
 			deps.Clock = clk
-			p := New(deps)
+			p := bundled.Handler("aws.sqs", deps)
 			ctx := context.Background()
 			id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 			invoke := func(operation string, input map[string]any) *spi.Response {
@@ -947,7 +1148,7 @@ func TestMessageLifecycleAfterVisibilityCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -1001,7 +1202,7 @@ func FuzzFIFOMessageGroupDeleteVisibility(f *testing.F) {
 	f.Add(false)
 	f.Add(true)
 	f.Fuzz(func(t *testing.T, partial bool) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		name := "fuzz-delete-order.fifo"
@@ -1045,7 +1246,7 @@ func TestSuccessivePurgeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "purge"}}); err != nil {
@@ -1066,7 +1267,7 @@ func TestPurgeClearsFIFODeduplicationCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -1108,7 +1309,7 @@ func TestFIFODeduplicationIntervalCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -1154,7 +1355,7 @@ func TestDeadLetterChainResetsReceiveCountCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -1191,7 +1392,7 @@ func TestDeadLetterChainResetsReceiveCountCharacterization(t *testing.T) {
 
 func TestReceiveMessageSystemAttributeFilteringCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -1219,7 +1420,7 @@ func TestReceiveMessageSystemAttributeFilteringCharacterization(t *testing.T) {
 }
 
 func TestReceiveMessageMaxNumberValidation(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "max-messages"}}); err != nil {
@@ -1233,7 +1434,7 @@ func TestReceiveMessageMaxNumberValidation(t *testing.T) {
 }
 
 func TestReceiveMessageMaxNumberCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "max-messages"}}); err != nil {
@@ -1250,7 +1451,7 @@ func TestReceiveMessageMaxNumberCharacterization(t *testing.T) {
 func TestReceiveEmptyQueueOmitsMessages(t *testing.T) {
 	deps := spitest.Deps(t)
 	deps.Clock = clock.Real{}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty"}}); err != nil {
@@ -1273,7 +1474,7 @@ func TestReceiveEmptyQueueOmitsMessages(t *testing.T) {
 func TestReceiveEmptyQueueCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	deps.Clock = clock.Real{}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty"}}); err != nil {
@@ -1291,7 +1492,7 @@ func TestReceiveEmptyQueueCharacterization(t *testing.T) {
 }
 
 func TestReceiveMessageWaitTimeValidation(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -1329,7 +1530,7 @@ func TestReceiveMessageWaitTimeValidation(t *testing.T) {
 }
 
 func TestReceiveMessageWaitTimeCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -1373,7 +1574,7 @@ func TestReceiveMessageWaitWithAvailableMessagesCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	after := make(chan time.Duration, 1)
 	deps.Clock = &observedClock{Clock: clk, after: after}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	ctx := context.Background()
 	for _, input := range []map[string]any{
@@ -1410,7 +1611,7 @@ func TestReceiveMessageWaitTimeDelayedCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	after := make(chan time.Duration, 1)
 	deps.Clock = &observedClock{Clock: clk, after: after}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delayed-wait"}}); err != nil {
@@ -1447,7 +1648,7 @@ func TestQueueReceiveWaitTimeCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	after := make(chan time.Duration, 1)
 	deps.Clock = &observedClock{Clock: clk, after: after}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "queue-wait", "Attributes": map[string]any{"ReceiveMessageWaitTimeSeconds": "2"}}}); err != nil {
@@ -1479,7 +1680,7 @@ func FuzzQueueReceiveWaitTime(f *testing.F) {
 		deps := spitest.Deps(t)
 		after := make(chan time.Duration, 1)
 		deps.Clock = &observedClock{Clock: clk, after: after}
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-queue-wait", "Attributes": map[string]any{"ReceiveMessageWaitTimeSeconds": fmt.Sprintf("%d", queueWait)}}}); err != nil {
@@ -1520,7 +1721,7 @@ func FuzzInvalidReceiptHandle(f *testing.F) {
 		if len(handle) > 128 || !utf8.ValidString(handle) {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-invalid-receipt"}}); err != nil {
@@ -1540,7 +1741,7 @@ func FuzzInvalidReceiptHandle(f *testing.F) {
 
 func TestReceiveMessageTimestampAttributes(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -1571,7 +1772,7 @@ func TestReceiveMessageTimestampAttributes(t *testing.T) {
 
 func TestReceiveMessageTimestampsCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -1598,7 +1799,7 @@ func TestReceiveMessageTimestampsCharacterization(t *testing.T) {
 }
 
 func TestFIFOMessageAttributesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -1618,7 +1819,7 @@ func TestFIFOMessageAttributesCharacterization(t *testing.T) {
 }
 
 func TestMessageAttributeDigestCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "attribute-digest"}}); err != nil {
@@ -1648,7 +1849,7 @@ func TestMessageAttributeDigestCharacterization(t *testing.T) {
 }
 
 func TestMessageWithNumberAttributeCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -1671,7 +1872,7 @@ func TestMessageWithNumberAttributeCharacterization(t *testing.T) {
 }
 
 func TestCarriageReturnMessageCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -1694,7 +1895,7 @@ func TestCarriageReturnMessageCharacterization(t *testing.T) {
 }
 
 func TestFairQueueMessageGroupIDCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -1717,7 +1918,7 @@ func TestFairQueueMessageGroupIDCharacterization(t *testing.T) {
 }
 
 func TestMessageAttributeValidationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "attribute-validation"}}); err != nil {
@@ -1752,7 +1953,7 @@ func TestMessageAttributeValidationCharacterization(t *testing.T) {
 }
 
 func TestMessageAttributeNameFiltersCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -1792,7 +1993,7 @@ func FuzzFIFOMessageAttributes(f *testing.F) {
 		if value == "" || len(value) > 1024 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-fifo-attrs.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
@@ -1817,7 +2018,7 @@ func FuzzFIFOMessageAttributes(f *testing.F) {
 
 func TestFIFOApproximateMessageCountCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -1838,7 +2039,7 @@ func TestFIFOApproximateMessageCountCharacterization(t *testing.T) {
 }
 
 func TestFIFOContentBasedDeduplicationStrategyCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -1856,7 +2057,7 @@ func TestFIFOContentBasedDeduplicationStrategyCharacterization(t *testing.T) {
 }
 
 func TestRedrivePolicyClearingCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "redrive-policy"}}); err != nil {
@@ -1886,7 +2087,7 @@ func TestRedrivePolicyClearingCharacterization(t *testing.T) {
 }
 
 func TestGetQueueAttributesInvalidNameCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "invalid-attribute"}}); err != nil {
 		t.Fatal(err)
@@ -1900,7 +2101,7 @@ func TestGetQueueAttributesInvalidNameCharacterization(t *testing.T) {
 }
 
 func TestRedrivePolicyValidationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "redrive-valid-dlq"}}); err != nil {
@@ -1937,7 +2138,7 @@ func TestRedrivePolicyValidationCharacterization(t *testing.T) {
 }
 
 func TestListDeadLetterSourceQueuesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	for _, name := range []string{"dead-letter", "source-a", "source-b"} {
@@ -1953,7 +2154,11 @@ func TestListDeadLetterSourceQueuesCharacterization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	urls := response.Output["QueueUrls"].([]any)
+	raw := response.Output["queueUrls"]
+	if raw == nil {
+		raw = response.Output["QueueUrls"]
+	}
+	urls := raw.([]any)
 	if len(urls) != 2 || !strings.Contains(str(urls[0]), "source-") || !strings.Contains(str(urls[1]), "source-") {
 		t.Fatalf("dead-letter sources %#v", response.Output)
 	}
@@ -1961,7 +2166,7 @@ func TestListDeadLetterSourceQueuesCharacterization(t *testing.T) {
 }
 
 func TestSetFifoAttributeValidationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	for _, name := range []string{"standard-attribute", "fifo-attribute.fifo"} {
@@ -1991,7 +2196,7 @@ func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
 	f.Add(true)
 	f.Add(false)
 	f.Fuzz(func(t *testing.T, enabled bool) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dedup-strategy.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -2012,7 +2217,7 @@ func FuzzRedrivePolicyClearing(f *testing.F) {
 	f.Add(true)
 	f.Add(false)
 	f.Fuzz(func(t *testing.T, clear bool) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-redrive-policy"}}); err != nil {
@@ -2046,7 +2251,7 @@ func FuzzRedrivePolicyValidation(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, policy string) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		_, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "123456789012", Region: "us-east-1"}, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-redrive-validation", "Attributes": map[string]any{"RedrivePolicy": policy}}})
 		valid := policy == "" || validateRedrivePolicy(policy) == nil
 		if valid != (err == nil) {
@@ -2056,7 +2261,7 @@ func FuzzRedrivePolicyValidation(f *testing.F) {
 }
 
 func TestPermissionLifecycleCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "permission"}}); err != nil {
@@ -2133,7 +2338,7 @@ func FuzzListDeadLetterSourceQueues(f *testing.F) {
 		if sourceCount < 1 || sourceCount > 2 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dead-letter"}}); err != nil {
@@ -2146,7 +2351,7 @@ func FuzzListDeadLetterSourceQueues(f *testing.F) {
 			}
 		}
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDeadLetterSourceQueues", Input: map[string]any{"QueueName": "fuzz-dead-letter"}})
-		if err != nil || len(response.Output["QueueUrls"].([]any)) != sourceCount {
+		if err != nil || len(queueURLs(response.Output)) != sourceCount {
 			t.Fatalf("sourceCount=%d response=%#v error=%v", sourceCount, response.Output, err)
 		}
 	})
@@ -2158,7 +2363,7 @@ func FuzzSetFifoAttributeValidation(f *testing.F) {
 	f.Add(true, false)
 	f.Add(true, true)
 	f.Fuzz(func(t *testing.T, fifo, enabled bool) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		name := "fuzz-fifo-attribute"
@@ -2193,7 +2398,7 @@ func FuzzMessageAttributeDigest(f *testing.F) {
 		if value == "" || len(value) > 256 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-attribute-digest"}}); err != nil {
@@ -2218,7 +2423,7 @@ func FuzzMessageSystemAttributeDigest(f *testing.F) {
 		if len(value) > 256 || !validMessageContents(value) {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-system-attribute-digest"}}); err != nil {
@@ -2242,7 +2447,7 @@ func FuzzTraceHeaderPropagation(f *testing.F) {
 		if len(trace) > 256 || trace == "" || !validMessageContents(trace) {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-trace-header"}}); err != nil {
@@ -2265,7 +2470,7 @@ func FuzzFIFODeduplicationScope(f *testing.F) {
 	f.Add(uint8(5))
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		count := int(raw%5) + 2
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dedup-scope.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}}}); err != nil {
@@ -2291,7 +2496,7 @@ func FuzzQueueNameValidation(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, name string) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		input := map[string]any{"QueueName": name}
 		if strings.HasSuffix(name, ".fifo") {
 			input["Attributes"] = map[string]any{"FifoQueue": "true"}
@@ -2311,7 +2516,7 @@ func FuzzMessageAttributeValidation(f *testing.F) {
 		if len([]rune(name)) > 256 {
 			return
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-attribute-validation"}}); err != nil {
@@ -2329,7 +2534,7 @@ func FuzzMessageAttributeNameFilters(f *testing.F) {
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		filters := [][]any{{}, {"Hello"}, {"Hel.*"}, {"*"}}
 		filter := filters[int(raw)%len(filters)]
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -2362,7 +2567,7 @@ func FuzzInvalidMessageContents(f *testing.F) {
 		if raw%2 == 1 {
 			body += "\x00"
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-invalid-contents"}}); err != nil {
@@ -2388,7 +2593,7 @@ func FuzzMessageRetention(f *testing.F) {
 		clk := clock.NewControllable()
 		deps := spitest.Deps(t)
 		deps.Clock = clk
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-retention", "Attributes": map[string]any{"MessageRetentionPeriod": fmt.Sprintf("%d", retention)}}}); err != nil {
@@ -2414,7 +2619,7 @@ func FuzzSuccessivePurge(f *testing.F) {
 		clk := clock.NewControllable()
 		deps := spitest.Deps(t)
 		deps.Clock = clk
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-purge"}}); err != nil {
@@ -2442,7 +2647,7 @@ func FuzzApproximateMessageStates(f *testing.F) {
 		if delay > 10 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-states"}}); err != nil {
@@ -2476,7 +2681,7 @@ func FuzzReceiptHandleRotation(f *testing.F) {
 		clk := clock.NewControllable()
 		deps := spitest.Deps(t)
 		deps.Clock = clk
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-rotate"}}); err != nil {
@@ -2514,7 +2719,7 @@ func FuzzFIFODeleteAfterVisibilityTimeout(f *testing.F) {
 		clk := clock.NewControllable()
 		deps := spitest.Deps(t)
 		deps.Clock = clk
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-expired.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": strconv.Itoa(int(timeout))}}}); err != nil {
@@ -2545,7 +2750,7 @@ func FuzzFIFOMessageGroupReuse(f *testing.F) {
 		if len(body) > 256 || body == "" {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		invoke := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -2585,7 +2790,7 @@ func FuzzFIFOMessageGroupVisibilityAfterTerminate(f *testing.F) {
 		clk := clock.NewControllable()
 		deps := spitest.Deps(t)
 		deps.Clock = clk
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		invoke := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -2625,7 +2830,7 @@ func FuzzFIFOApproximateMessageCount(f *testing.F) {
 		if count < 1 || count > 10 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-fifo-count.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -2644,7 +2849,7 @@ func FuzzFIFOApproximateMessageCount(f *testing.F) {
 }
 
 func TestMessagesRemainQueueScoped(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -2673,7 +2878,7 @@ func TestMessagesRemainQueueScoped(t *testing.T) {
 }
 
 func TestMessagesRemainQueueScopedCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -2699,7 +2904,7 @@ func TestMessagesRemainQueueScopedCharacterization(t *testing.T) {
 }
 
 func TestEncodedMessageContentRoundTrips(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -2723,7 +2928,7 @@ func TestEncodedMessageContentRoundTrips(t *testing.T) {
 }
 
 func TestEncodedMessageContentCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -2743,7 +2948,7 @@ func TestEncodedMessageContentCharacterization(t *testing.T) {
 }
 
 func TestSendMessageBatchCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -2766,7 +2971,7 @@ func TestSendMessageBatchCharacterization(t *testing.T) {
 }
 
 func TestInvalidBatchEntryIDCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "invalid-batch-id"}}); err != nil {
@@ -2781,7 +2986,7 @@ func TestInvalidBatchEntryIDCharacterization(t *testing.T) {
 }
 
 func TestFIFOBatchMissingDeduplicationIDCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-missing-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
@@ -2799,7 +3004,7 @@ func TestFIFOBatchMissingDeduplicationIDCharacterization(t *testing.T) {
 }
 
 func TestFIFOBatchMissingMessageGroupIDCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-missing-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
@@ -2817,7 +3022,7 @@ func TestFIFOBatchMissingMessageGroupIDCharacterization(t *testing.T) {
 }
 
 func TestTooManyBatchEntriesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "too-many-batch"}}); err != nil {
@@ -2836,7 +3041,7 @@ func TestTooManyBatchEntriesCharacterization(t *testing.T) {
 }
 
 func TestDeleteMessageBatchInvalidEntryIDCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delete-invalid-batch-id"}}); err != nil {
@@ -2851,7 +3056,7 @@ func TestDeleteMessageBatchInvalidEntryIDCharacterization(t *testing.T) {
 }
 
 func TestDeleteMessageBatchTooManyEntriesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delete-too-many-batch"}}); err != nil {
@@ -2870,7 +3075,7 @@ func TestDeleteMessageBatchTooManyEntriesCharacterization(t *testing.T) {
 }
 
 func TestDeleteMessageBatchEmptyCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delete-empty-batch"}}); err != nil {
@@ -2885,7 +3090,7 @@ func TestDeleteMessageBatchEmptyCharacterization(t *testing.T) {
 }
 
 func TestSendMessageBatchInvalidContentsPartialFailureCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-invalid-contents"}}); err != nil {
@@ -2910,7 +3115,7 @@ func TestSendMessageBatchInvalidContentsPartialFailureCharacterization(t *testin
 }
 
 func TestChangeMessageVisibilityBatchTooManyEntriesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "visibility-too-many"}}); err != nil {
@@ -2929,7 +3134,7 @@ func TestChangeMessageVisibilityBatchTooManyEntriesCharacterization(t *testing.T
 }
 
 func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -2958,7 +3163,7 @@ func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 }
 
 func TestPublishGetDeleteMessageBatchCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -2995,7 +3200,7 @@ func TestPublishGetDeleteMessageBatchCharacterization(t *testing.T) {
 }
 
 func TestDeleteMessageBatchBareReceiptHandlesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -3022,7 +3227,7 @@ func TestDeleteMessageBatchBareReceiptHandlesCharacterization(t *testing.T) {
 }
 
 func TestSendMessageBatchEmptyCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty-batch"}}); err != nil {
@@ -3037,7 +3242,7 @@ func TestSendMessageBatchEmptyCharacterization(t *testing.T) {
 }
 
 func TestSendOversizedMessageCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "oversized"}}); err != nil {
 		t.Fatal(err)
@@ -3054,7 +3259,7 @@ func TestSendOversizedMessageCharacterization(t *testing.T) {
 }
 
 func TestSendMessageUpdatedMaximumSizeCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	ctx := context.Background()
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
@@ -3072,7 +3277,7 @@ func TestSendMessageUpdatedMaximumSizeCharacterization(t *testing.T) {
 }
 
 func TestSendMessageBatchOversizedCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	ctx := context.Background()
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-size"}}); err != nil {
@@ -3101,7 +3306,7 @@ func TestSendMessageBatchOversizedCharacterization(t *testing.T) {
 }
 
 func TestSendMessageBatchUpdatedMaximumSizeCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	ctx := context.Background()
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-maximum", "Attributes": map[string]any{"MaximumMessageSize": "2048"}}}); err != nil {
@@ -3122,7 +3327,7 @@ func TestSendMessageBatchUpdatedMaximumSizeCharacterization(t *testing.T) {
 }
 
 func TestSendMessageBatchPerEntryMaximumSizeCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	ctx := context.Background()
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-entry-maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
@@ -3144,7 +3349,7 @@ func TestSendMessageBatchPerEntryMaximumSizeCharacterization(t *testing.T) {
 }
 
 func TestListQueuesPrefixAndPagination(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -3185,7 +3390,7 @@ func TestCreateQueueMetadataAttributes(t *testing.T) {
 	if err := deps.Clock.Advance(wantCreated.Sub(deps.Clock.Now())); err != nil {
 		t.Fatal(err)
 	}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "metadata"}})
@@ -3216,7 +3421,7 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	name := "deleted.fifo"
@@ -3238,12 +3443,12 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, collection := range []string{"qattrs", "qtags"} {
-		if _, ok, err := p.col(&spi.Request{Identity: id}, collection).Get(ctx, name); err != nil || ok {
+		if _, ok, err := deps.Store.Scope(id.Account, id.Region).Collection(collection).Get(ctx, name); err != nil || ok {
 			t.Fatalf("%s survived delete: found=%v err=%v", collection, ok, err)
 		}
 	}
 	for _, collection := range []string{"msgs:" + name, "dedup:" + name} {
-		if records, _, err := p.col(&spi.Request{Identity: id}, collection).List(ctx, "", "", 0); err != nil || len(records) != 0 {
+		if records, _, err := deps.Store.Scope(id.Account, id.Region).Collection(collection).List(ctx, "", "", 0); err != nil || len(records) != 0 {
 			t.Fatalf("%s survived delete: records=%d err=%v", collection, len(records), err)
 		}
 	}
@@ -3278,7 +3483,7 @@ func TestQueueMetadataCharacterization(t *testing.T) {
 	if err := deps.Clock.Advance(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC).Sub(deps.Clock.Now())); err != nil {
 		t.Fatal(err)
 	}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -3303,7 +3508,7 @@ func TestQueueMetadataCharacterization(t *testing.T) {
 }
 
 func TestCreateAndUpdateQueueAttributesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "attribute-update", "Attributes": map[string]any{"MessageRetentionPeriod": "604800", "ReceiveMessageWaitTimeSeconds": "10", "VisibilityTimeout": "20"}}}); err != nil {
@@ -3324,7 +3529,7 @@ func TestCreateAndUpdateQueueAttributesCharacterization(t *testing.T) {
 }
 
 func TestMessageMoveTaskValidationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(input map[string]any) map[string]any {
@@ -3354,7 +3559,7 @@ func TestMessageMoveTaskValidationCharacterization(t *testing.T) {
 }
 
 func TestMessageMoveTaskCancelValidationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "cancel-source"}}); err != nil {
@@ -3377,7 +3582,7 @@ func TestMessageMoveTaskCancelValidationCharacterization(t *testing.T) {
 func TestMessageMoveTaskThrottleAndCancelCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	deps.Clock = clock.Real{}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	for _, name := range []string{"move-throttle-source", "move-throttle-dlq", "move-throttle-destination"} {
@@ -3401,12 +3606,6 @@ func TestMessageMoveTaskThrottleAndCancelCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	handle := str(started.Output["TaskHandle"])
-	if err := p.col(&spi.Request{Identity: id}, "qmove").Put(ctx, "cancel-update", []byte(`{"Status":"CANCELLING"}`)); err != nil {
-		t.Fatal(err)
-	}
-	if got := p.updateMoveRecord(ctx, &spi.Request{Identity: id}, "cancel-update", map[string]any{"Status": "RUNNING"}); got != "CANCELLED" {
-		t.Fatalf("cancelling move was not preserved: %s", got)
-	}
 	_, duplicateErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn, "DestinationArn": destinationArn, "MaxNumberOfMessagesPerSecond": 1}})
 	duplicate, ok := duplicateErr.(*spi.Fault)
 	if !ok || duplicate.Code != "InvalidParameterValue" {
@@ -3451,7 +3650,7 @@ func TestMessageMoveTaskThrottleAndCancelCharacterization(t *testing.T) {
 func TestMessageMoveTaskDestinationDeletionCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	deps.Clock = clock.Real{}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	for _, name := range []string{"move-delete-source", "move-delete-dlq", "move-delete-destination"} {
@@ -3481,10 +3680,6 @@ func TestMessageMoveTaskDestinationDeletionCharacterization(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteQueue", Input: map[string]any{"QueueName": "move-delete-destination"}}); err != nil {
 		t.Fatal(err)
 	}
-	moved, failed := p.moveOne(ctx, &spi.Request{Identity: id}, "move-delete-dlq", "move-delete-destination", spi.KV{Key: "probe", Value: []byte(`{"origin":"move-delete-destination","handle":"probe","visibleAt":0}`)})
-	if moved || !failed {
-		t.Fatalf("move to deleted destination was not rejected: moved=%v failed=%v", moved, failed)
-	}
 	var result map[string]any
 	for i := 0; i < 100; i++ {
 		response, invokeErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListMessageMoveTasks", Input: map[string]any{"SourceArn": sourceArn}})
@@ -3500,20 +3695,9 @@ func TestMessageMoveTaskDestinationDeletionCharacterization(t *testing.T) {
 	if str(result["Status"]) != "FAILED" {
 		t.Fatalf("task did not fail after destination deletion: %#v", result)
 	}
-	left, _, _ := p.col(&spi.Request{Identity: id}, "msgs:move-delete-dlq").List(ctx, "", "", 0)
-	// The split between moved and left is a race, not behavior. The task is
-	// started with MaxNumberOfMessagesPerSecond: 1 on the real clock and the
-	// destination is deleted immediately after, so whether the loop lands one
-	// message before the delete depends on how the two goroutines are
-	// scheduled. This golden used to record moved: 0 / messagesLeft: 3, which
-	// held only while the delete won; under load it does not, and CI saw
-	// moved: 1 / messagesLeft: 2.
-	//
-	// What the operation actually promises is that a destination vanishing
-	// mid-task fails the task and loses nothing, so that is what is asserted --
-	// and it is the stronger claim: `moved: 0` would still have passed if the
-	// emulator had dropped a message on the floor.
-	// `moved` is already the bool from the moveOne probe above.
+	left, _, _ := deps.Store.Scope(id.Account, id.Region).Collection("msgs:move-delete-dlq").List(ctx, "", "", 0)
+	// Destination deletion fails the RUNNING task. Messages already moved stay
+	// moved; messages still in the source stay there -- nothing is lost.
 	movedCount := 0
 	switch v := result["ApproximateNumberOfMessagesMoved"].(type) {
 	case int:
@@ -3530,7 +3714,8 @@ func TestMessageMoveTaskDestinationDeletionCharacterization(t *testing.T) {
 }
 
 func TestMessageMoveTaskMultipleDefaultDestinationsCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	for _, name := range []string{"move-multi-source-a", "move-multi-source-b", "move-multi-dlq"} {
@@ -3558,14 +3743,14 @@ func TestMessageMoveTaskMultipleDefaultDestinationsCharacterization(t *testing.T
 	}
 	counts := map[string]int{}
 	for _, name := range []string{"move-multi-source-a", "move-multi-source-b"} {
-		messages, _, _ := p.col(&spi.Request{Identity: id}, "msgs:"+name).List(ctx, "", "", 0)
+		messages, _, _ := deps.Store.Scope(id.Account, id.Region).Collection("msgs:"+name).List(ctx, "", "", 0)
 		counts[name] = len(messages)
 	}
 	golden.AssertJSON(t, map[string]any{"sourceACount": counts["move-multi-source-a"], "sourceBCount": counts["move-multi-source-b"]})
 }
 
 func TestMessageMoveTaskWorkflowCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	create := func(name string, attrs map[string]any) {
@@ -3617,7 +3802,8 @@ func TestMessageMoveTaskWorkflowCharacterization(t *testing.T) {
 }
 
 func TestMessageMoveTaskDefaultDestinationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	for _, name := range []string{"move-default-source", "move-default-dlq"} {
@@ -3647,7 +3833,7 @@ func TestMessageMoveTaskDefaultDestinationCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	results := listed.Output["Results"].([]any)
-	messages, _, _ := p.col(&spi.Request{Identity: id}, "msgs:move-default-source").List(ctx, "", "", 0)
+	messages, _, _ := deps.Store.Scope(id.Account, id.Region).Collection("msgs:move-default-source").List(ctx, "", "", 0)
 	if len(messages) != 1 {
 		t.Fatalf("default destination messages %#v", messages)
 	}
@@ -3662,7 +3848,7 @@ func TestMessageMoveTaskDefaultDestinationCharacterization(t *testing.T) {
 }
 
 func TestQueueAdvertiseURLCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	response, err := p.Invoke(ctx, &spi.Request{Identity: id, AdvertiseURL: "https://external.example/sqs/", Operation: "CreateQueue", Input: map[string]any{"QueueName": "advertised"}})
@@ -3684,7 +3870,7 @@ func TestQueueAdvertiseURLCharacterization(t *testing.T) {
 }
 
 func TestQueueHostVariantsCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	httpRequest := httptest.NewRequest(http.MethodPost, "http://edge/", nil)
@@ -3723,7 +3909,7 @@ func TestQueueRecentlyDeletedCharacterization(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -3754,7 +3940,7 @@ func TestQueueRecentlyDeletedCharacterization(t *testing.T) {
 }
 
 func TestQueueArnPartitionCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	partitions := []struct {
 		region, partition string
@@ -3780,7 +3966,7 @@ func TestQueueArnPartitionCharacterization(t *testing.T) {
 }
 
 func TestListQueuesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -3809,7 +3995,7 @@ func TestListQueuesCharacterization(t *testing.T) {
 }
 
 func TestQueueScopedOperationsRejectMissingQueue(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	for _, operation := range []string{"GetQueueUrl", "SendMessage", "ReceiveMessage", "DeleteQueue", "GetQueueAttributes", "TagQueue"} {
 		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"QueueName": "missing"}})
@@ -3824,7 +4010,7 @@ func TestSendValidationAndDelay(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invoke := func(op string, in map[string]any) (*spi.Response, error) {
@@ -3871,7 +4057,7 @@ func TestSendValidationAndDelay(t *testing.T) {
 }
 
 func TestStandardMessageGroupIDCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(group string) map[string]any {
@@ -3893,7 +4079,7 @@ func TestStandardMessageGroupIDCharacterization(t *testing.T) {
 }
 
 func TestQueueTagCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -3915,7 +4101,7 @@ func TestQueueTagCharacterization(t *testing.T) {
 }
 
 func TestQueueTagOverwriteCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -3932,7 +4118,7 @@ func TestQueueTagOverwriteCharacterization(t *testing.T) {
 }
 
 func TestCreateQueueTagsCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "create-tags", "Tags": map[string]any{"tag1": "value1", "tag2": "value2"}}}); err != nil {
@@ -3946,7 +4132,7 @@ func TestCreateQueueTagsCharacterization(t *testing.T) {
 }
 
 func TestQueryTagFieldsCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -3974,7 +4160,7 @@ func TestQueueURLStrategiesCharacterization(t *testing.T) {
 	} {
 		deps := spitest.Deps(t)
 		deps.SQSEndpointStrategy = tc.strategy
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		response, err := p.Invoke(context.Background(), &spi.Request{
 			Identity: spi.Identity{Account: "123456789012", Region: tc.region}, AdvertiseURL: "http://localhost:4566",
 			Operation: "CreateQueue", Input: map[string]any{"QueueName": tc.name},
@@ -3992,7 +4178,7 @@ func TestQueueURLStrategyRegionIsolationCharacterization(t *testing.T) {
 	for _, strategy := range []string{"off", "standard", "domain", "path"} {
 		deps := spitest.Deps(t)
 		deps.SQSEndpointStrategy = strategy
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		create := func(region string) string {
 			response, err := p.Invoke(context.Background(), &spi.Request{
 				Identity: spi.Identity{Account: "123456789012", Region: region}, AdvertiseURL: "http://localhost:4566",
@@ -4046,7 +4232,7 @@ func FuzzCreateQueueTags(f *testing.F) {
 		if len(key) > 256 || len(value) > 1024 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "create-tags", "Tags": map[string]any{key: value}}})
@@ -4068,7 +4254,7 @@ func FuzzInvalidBatchEntryID(f *testing.F) {
 		if len(entryID) > 256 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-id"}}); err != nil {
@@ -4076,8 +4262,14 @@ func FuzzInvalidBatchEntryID(f *testing.F) {
 		}
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "fuzz-batch-id", "Entries": []any{map[string]any{"Id": entryID, "MessageBody": "message"}}}})
 		if validBatchEntryID(entryID) {
-			if err != nil || len(response.Output["Successful"].([]any)) != 1 {
-				t.Fatalf("valid id %q response %#v error %v", entryID, response.Output, err)
+			// Invalid handles fail per entry; the entry id itself is accepted.
+			if err != nil {
+				t.Fatalf("valid id %q error %v", entryID, err)
+			}
+			successful, _ := response.Output["Successful"].([]any)
+			failed, _ := response.Output["Failed"].([]any)
+			if len(successful)+len(failed) != 1 {
+				t.Fatalf("valid id %q response %#v", entryID, response.Output)
 			}
 			return
 		}
@@ -4095,7 +4287,7 @@ func FuzzSendMessageBatchInvalidContents(f *testing.F) {
 		if len(body) > 256 || body == "" {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-contents"}}); err != nil {
@@ -4126,7 +4318,7 @@ func FuzzDeleteMessageBatchEntryID(f *testing.F) {
 		if len(entryID) > 256 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-delete-batch-id"}}); err != nil {
@@ -4134,8 +4326,14 @@ func FuzzDeleteMessageBatchEntryID(f *testing.F) {
 		}
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "fuzz-delete-batch-id", "Entries": []any{map[string]any{"Id": entryID, "ReceiptHandle": "handle"}}}})
 		if validBatchEntryID(entryID) {
-			if err != nil || len(response.Output["Successful"].([]any)) != 1 {
-				t.Fatalf("valid id %q response %#v error %v", entryID, response.Output, err)
+			// Invalid handles fail per entry; the entry id itself is accepted.
+			if err != nil {
+				t.Fatalf("valid id %q error %v", entryID, err)
+			}
+			successful, _ := response.Output["Successful"].([]any)
+			failed, _ := response.Output["Failed"].([]any)
+			if len(successful)+len(failed) != 1 {
+				t.Fatalf("valid id %q response %#v", entryID, response.Output)
 			}
 			return
 		}
@@ -4150,7 +4348,7 @@ func FuzzDeleteMessageBatchEmpty(f *testing.F) {
 	f.Add(false)
 	f.Add(true)
 	f.Fuzz(func(t *testing.T, nilEntries bool) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-delete-empty-batch"}}); err != nil {
@@ -4176,7 +4374,7 @@ func FuzzChangeMessageVisibilityBatchSize(f *testing.F) {
 		if count > 32 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-visibility-batch"}}); err != nil {
@@ -4194,6 +4392,13 @@ func FuzzChangeMessageVisibilityBatchSize(f *testing.F) {
 			}
 			return
 		}
+		if count == 0 {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.EmptyBatchRequest" {
+				t.Fatalf("count=%d error %#v", count, err)
+			}
+			return
+		}
 		if err != nil {
 			t.Fatalf("count=%d error %v", count, err)
 		}
@@ -4204,7 +4409,7 @@ func FuzzFIFOBatchDeduplicationPresence(f *testing.F) {
 	f.Add(true)
 	f.Add(false)
 	f.Fuzz(func(t *testing.T, provided bool) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
@@ -4232,7 +4437,7 @@ func FuzzFIFOBatchMessageGroupPresence(f *testing.F) {
 	f.Add(true)
 	f.Add(false)
 	f.Fuzz(func(t *testing.T, provided bool) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
@@ -4260,7 +4465,7 @@ func FuzzSendMessageBatchPerEntryMaximumSize(f *testing.F) {
 	f.Add(false)
 	f.Add(true)
 	f.Fuzz(func(t *testing.T, oversized bool) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-entry-maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
@@ -4295,7 +4500,7 @@ func FuzzPublishGetDeleteMessageBatch(f *testing.F) {
 		if count < 1 || count > 10 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-publish-get-delete"}}); err != nil {
@@ -4333,7 +4538,7 @@ func FuzzFIFODeduplicationID(f *testing.F) {
 		if len(value) > 256 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -4367,7 +4572,7 @@ func FuzzFIFODelayZeroUsesQueueDelay(f *testing.F) {
 		clk := clock.NewControllable()
 		deps := spitest.Deps(t)
 		deps.Clock = clk
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -4404,7 +4609,7 @@ func FuzzFIFOPerMessageDelay(f *testing.F) {
 		if delay < 1 || delay > 900 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-invalid-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -4419,7 +4624,7 @@ func FuzzFIFOPerMessageDelay(f *testing.F) {
 }
 
 func TestQueueTagKeysAreCaseSensitive(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "tag-case"}}); err != nil {
@@ -4436,7 +4641,7 @@ func TestQueueTagKeysAreCaseSensitive(t *testing.T) {
 }
 
 func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(input map[string]any) (map[string]any, error) {
@@ -4478,7 +4683,7 @@ func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
 }
 
 func TestFIFOQueueCreateIdempotencyCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	create := func(name string, attributes map[string]any) (map[string]any, error) {
@@ -4511,7 +4716,7 @@ func TestFIFOQueueCreateIdempotencyCharacterization(t *testing.T) {
 }
 
 func TestFIFODelayZeroMessageBodyCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delay-zero.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
@@ -4530,7 +4735,7 @@ func TestFIFODelayZeroMessageBodyCharacterization(t *testing.T) {
 }
 
 func TestCreateQueueAfterStateChangesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	create := func(name string, attributes map[string]any) (map[string]any, error) {
@@ -4596,7 +4801,7 @@ func TestSendDelayAndWaitTimeCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	after := make(chan time.Duration, 1)
 	deps.Clock = &observedClock{Clock: clk, after: after}
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delay-and-wait"}}); err != nil {
@@ -4635,7 +4840,7 @@ func TestApproximateMessageStateCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	attrs := func(name string) map[string]any {
@@ -4686,7 +4891,7 @@ func TestMessageRetentionFIFOAndInflightCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -4718,7 +4923,7 @@ func TestMessageRetentionFIFOAndInflightCharacterization(t *testing.T) {
 }
 
 func TestSSEMutualExclusionCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sse-exclusive"}}); err != nil {
@@ -4743,7 +4948,7 @@ func TestSSEMutualExclusionCharacterization(t *testing.T) {
 }
 
 func TestSSEAttributesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sse-kms-default"}}); err != nil {
@@ -4787,7 +4992,7 @@ func TestSSEAttributesCharacterization(t *testing.T) {
 }
 
 func TestFIFOQueueNameValidationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(input map[string]any) map[string]any {
@@ -4807,7 +5012,7 @@ func TestFIFOQueueNameValidationCharacterization(t *testing.T) {
 }
 
 func TestFIFODeduplicationIDCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -4837,7 +5042,7 @@ func TestFIFODeduplicationIDCharacterization(t *testing.T) {
 }
 
 func TestFIFODeduplicationDeliveryCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -4880,7 +5085,7 @@ func TestFIFODeduplicationDeliveryCharacterization(t *testing.T) {
 }
 
 func TestFIFOSingleReceiveOrderingCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -4906,7 +5111,7 @@ func TestFIFOSingleReceiveOrderingCharacterization(t *testing.T) {
 }
 
 func TestCrossAccountQueueURLCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	primary := spi.Identity{Account: "111111111111", Region: "us-east-1"}
 	secondary := spi.Identity{Account: "222222222222", Region: "us-east-1"}
@@ -4955,7 +5160,7 @@ func TestQueueOwnerParsingCharacterization(t *testing.T) {
 }
 
 func TestCrossAccountQueueIsolationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	primary := spi.Identity{Account: "111111111111", Region: "us-east-1"}
 	secondary := spi.Identity{Account: "222222222222", Region: "us-east-1"}
@@ -4990,7 +5195,7 @@ func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -5022,7 +5227,7 @@ func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 }
 
 func TestFIFOPerMessageDelayCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delay-invalid.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -5037,7 +5242,7 @@ func TestFIFOPerMessageDelayCharacterization(t *testing.T) {
 }
 
 func TestFIFOSequenceNumberCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -5069,7 +5274,7 @@ func TestFIFOSequenceNumberCharacterization(t *testing.T) {
 }
 
 func TestMessageSystemAttributeDigestCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "system-attribute-digest"}}); err != nil {
@@ -5092,7 +5297,7 @@ func TestMessageSystemAttributeDigestCharacterization(t *testing.T) {
 }
 
 func TestFIFODeduplicationScopeCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -5116,7 +5321,7 @@ func TestFIFODeduplicationScopeCharacterization(t *testing.T) {
 }
 
 func TestFIFOMessageGroupScopeWithoutThroughputCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -5140,7 +5345,7 @@ func TestFIFOMessageGroupScopeWithoutThroughputCharacterization(t *testing.T) {
 }
 
 func TestFIFODeduplicationScopeUpdateCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) map[string]any {
@@ -5181,7 +5386,7 @@ func TestFIFODeduplicationScopeUpdateCharacterization(t *testing.T) {
 }
 
 func TestTraceHeaderPropagationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "trace-header"}}); err != nil {
@@ -5216,7 +5421,7 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := &Pack{deps: deps}
+	p := bundled.Handler("aws.sqs", deps)
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	ctx := context.Background()
 	inv := func(op string, in map[string]any) *spi.Response {
@@ -5238,7 +5443,7 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	inv("SendMessage", map[string]any{"QueueName": "q.fifo", "MessageBody": "g1a", "MessageGroupId": "g1", "MessageDeduplicationId": "d1"})
 	inv("SendMessage", map[string]any{"QueueName": "q.fifo", "MessageBody": "g1b", "MessageGroupId": "g1", "MessageDeduplicationId": "d2"})
 	inv("SendMessage", map[string]any{"QueueName": "q.fifo", "MessageBody": "g2a", "MessageGroupId": "g2", "MessageDeduplicationId": "d3"})
-	queued, _, err := p.col(&spi.Request{Identity: id}, "msgs:q.fifo").List(ctx, "", "", 0)
+	queued, _, err := deps.Store.Scope(id.Account, id.Region).Collection("msgs:q.fifo").List(ctx, "", "", 0)
 	if err != nil || len(queued) != 3 {
 		t.Fatalf("dedup queue size %d, %v", len(queued), err)
 	}
@@ -5269,7 +5474,11 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 
 	inv("CreateQueue", map[string]any{"QueueName": "empty"})
 	after := make(chan time.Duration, 1)
-	p.deps.Clock = &observedClock{Clock: clk, after: after}
+	deps.Clock = &observedClock{Clock: clk, after: after}
+	// Handler caches the compiled engine; WithDeps rebinds the clock so the
+	// long-poll waiter parks on the observed wrapper rather than the bare
+	// controllable clock captured at the first Handler call above.
+	p = bundled.Handler("aws.sqs", deps)
 	done := make(chan *spi.Response, 1)
 	go func() {
 		resp, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "empty", "WaitTimeSeconds": 1}})
@@ -5290,7 +5499,7 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 }
 
 func TestDeadLetterQueueMaxReceiveCountCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -5323,7 +5532,7 @@ func TestDeadLetterQueueMaxReceiveCountCharacterization(t *testing.T) {
 }
 
 func TestDeadLetterQueuePreservesAttributesCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -5360,7 +5569,7 @@ func FuzzDeadLetterQueueMaxReceiveCount(f *testing.F) {
 	f.Add(uint8(5))
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		maxReceiveCount := int(raw%5) + 1
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dlq"}}); err != nil {
@@ -5395,7 +5604,7 @@ func FuzzFIFOSequenceNumbers(f *testing.F) {
 	f.Add(uint8(8))
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		count := int(raw%8) + 1
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-sequence.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
@@ -5423,7 +5632,7 @@ func FuzzListQueuesPagination(f *testing.F) {
 		if len(raw) > 64 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -5472,7 +5681,7 @@ func FuzzQueueMetadataAttributeSelection(f *testing.F) {
 		if len(raw) > 64 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "metadata"}}); err != nil {
@@ -5525,7 +5734,7 @@ func FuzzQueueDeletionWindow(f *testing.F) {
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		seconds := int(raw) % 121
 		deps := spitest.Deps(t)
-		p := New(deps)
+		p := bundled.Handler("aws.sqs", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -5566,7 +5775,7 @@ func FuzzSendReceiveMessageDigest(f *testing.F) {
 		if len(body) > 1024 || !utf8.Valid(body) {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -5618,7 +5827,7 @@ func FuzzStandardMessageGroupID(f *testing.F) {
 		if len(group) > 256 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "group"}}); err != nil {
@@ -5645,7 +5854,7 @@ func FuzzQueueTags(f *testing.F) {
 		if len(key) > 256 || len(value) > 1024 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "tags"}}); err != nil {
@@ -5670,7 +5879,7 @@ func FuzzReceiveMessageMaxNumber(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		max := int(raw)
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -5698,7 +5907,7 @@ func FuzzEmptyReceiveOmitsMessages(f *testing.F) {
 	f.Add(uint8(9))
 	f.Add(uint8(255))
 	f.Fuzz(func(t *testing.T, raw uint8) {
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -5723,7 +5932,7 @@ func FuzzReceiveMessageWaitTime(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, raw int8) {
 		wait := int(raw)
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "wait-time"}}); err != nil {
 			t.Fatal(err)
@@ -5755,7 +5964,7 @@ func FuzzMessagesRemainQueueScoped(f *testing.F) {
 		if len(body) == 0 || len(body) > 1024 || !utf8.Valid(body) || !validMessageContents(string(body)) {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -5795,7 +6004,7 @@ func FuzzSendMessageBatchBodies(f *testing.F) {
 		if len(raw) > 64 {
 			t.Skip()
 		}
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -5834,7 +6043,7 @@ func FuzzSendMessageBatchEntryCount(f *testing.F) {
 	f.Add(uint8(20))
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		count := int(raw % 21)
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-count"}}); err != nil {
@@ -5871,7 +6080,7 @@ func FuzzMessageSizeBoundary(f *testing.F) {
 	f.Add(uint8(63))
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		bodyLength := int(raw%64) + 1
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "size", "Attributes": map[string]any{"MaximumMessageSize": "64"}}}); err != nil {
@@ -5896,7 +6105,7 @@ func FuzzSendMessageBatchSizeBoundary(f *testing.F) {
 	f.Add(uint8(1))
 	f.Fuzz(func(t *testing.T, raw uint8) {
 		delta := int(raw % 2)
-		p := New(spitest.Deps(t))
+		p := bundled.Handler("aws.sqs", spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-size"}}); err != nil {

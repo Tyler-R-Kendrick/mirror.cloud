@@ -23,7 +23,7 @@ import (
 	mcfg "github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestAWSSDKSQSListQueuesContract(t *testing.T) {

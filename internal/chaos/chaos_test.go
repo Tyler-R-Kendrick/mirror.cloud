@@ -32,7 +32,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -306,7 +305,7 @@ func TestConcurrentDynamoDBGlobalTableKeepsEveryItem(t *testing.T) {
 }
 
 func TestConcurrentSQSQueueListingsKeepEveryQueue(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -358,7 +357,7 @@ func TestConcurrentSQSQueueListingsKeepEveryQueue(t *testing.T) {
 }
 
 func TestConcurrentSQSQueueMetadataRemainsIsolated(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -397,7 +396,7 @@ func TestConcurrentSQSQueueMetadataRemainsIsolated(t *testing.T) {
 }
 
 func TestConcurrentSQSAdvertiseURLsRemainConsistent(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errs := make(chan error, 8)
@@ -422,7 +421,7 @@ func TestConcurrentSQSAdvertiseURLsRemainConsistent(t *testing.T) {
 
 func TestConcurrentSQSQueueRecreationCannotBypassDeletionWindow(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -465,7 +464,7 @@ func TestConcurrentSQSQueueRecreationCannotBypassDeletionWindow(t *testing.T) {
 }
 
 func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -529,7 +528,7 @@ func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
 }
 
 func TestConcurrentSQSEmptyMessagesAreRejected(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -583,7 +582,7 @@ func TestConcurrentSQSEmptyMessagesAreRejected(t *testing.T) {
 }
 
 func TestConcurrentSQSReceiveBatchLimitsAreStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -627,7 +626,7 @@ func TestConcurrentSQSReceiveBatchLimitsAreStable(t *testing.T) {
 func TestConcurrentSQSEmptyReceivesOmitMessages(t *testing.T) {
 	deps := spitest.Deps(t)
 	deps.Clock = clock.Real{}
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -661,7 +660,7 @@ func TestConcurrentSQSEmptyReceivesOmitMessages(t *testing.T) {
 }
 
 func TestConcurrentSQSReceiveWaitTimeLimitsAreStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -708,7 +707,7 @@ func TestConcurrentSQSQueueReceiveWaitAttributeIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
 	after := make(chan time.Duration, 16)
 	deps.Clock = &observedChaosClock{Clock: clk, after: after}
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-queue-wait", "Attributes": map[string]any{"ReceiveMessageWaitTimeSeconds": "1"}}}); err != nil {
@@ -742,7 +741,7 @@ func TestConcurrentSQSQueueReceiveWaitAttributeIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSMessagesRemainQueueScoped(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -788,7 +787,7 @@ func TestConcurrentSQSMessagesRemainQueueScoped(t *testing.T) {
 }
 
 func TestConcurrentSQSSendMessageBatchesRemainAtomic(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch"}}); err != nil {
@@ -834,7 +833,7 @@ func TestConcurrentSQSSendMessageBatchesRemainAtomic(t *testing.T) {
 }
 
 func TestConcurrentSQSEmptyMessageBatchesAreRejected(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty-batch"}}); err != nil {
@@ -861,7 +860,7 @@ func TestConcurrentSQSEmptyMessageBatchesAreRejected(t *testing.T) {
 }
 
 func TestConcurrentSQSMessageSizeLimitsRemainStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
@@ -888,7 +887,7 @@ func TestConcurrentSQSMessageSizeLimitsRemainStable(t *testing.T) {
 }
 
 func TestConcurrentSQSBatchSizeLimitsRemainStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-size"}}); err != nil {
@@ -919,7 +918,7 @@ func TestConcurrentSQSBatchSizeLimitsRemainStable(t *testing.T) {
 }
 
 func TestConcurrentSQSBatchPerEntrySizeLimitsRemainStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-entry-maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
@@ -955,7 +954,7 @@ func TestConcurrentSQSBatchPerEntrySizeLimitsRemainStable(t *testing.T) {
 }
 
 func TestConcurrentSQSPublishGetDeleteMessageBatchesRemainConsistent(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errs := make(chan error, 8)
@@ -1016,7 +1015,7 @@ func TestConcurrentSQSPublishGetDeleteMessageBatchesRemainConsistent(t *testing.
 }
 
 func TestConcurrentSQSRedrivePolicyClearingIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-redrive-policy"}}); err != nil {
@@ -1057,7 +1056,7 @@ func TestConcurrentSQSRedrivePolicyClearingIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSRedrivePolicyValidationIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	policies := []string{`not-json`, `{"maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"dummy","maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:dlq","maxReceiveCount":"invalid"}`}
@@ -1084,7 +1083,7 @@ func TestConcurrentSQSRedrivePolicyValidationIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSListDeadLetterSourceQueuesIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dead-letter"}}); err != nil {
@@ -1103,7 +1102,11 @@ func TestConcurrentSQSListDeadLetterSourceQueuesIsStable(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDeadLetterSourceQueues", Input: map[string]any{"QueueName": "chaos-dead-letter"}})
-			if err != nil || len(response.Output["QueueUrls"].([]any)) != 2 {
+			urls, _ := response.Output["queueUrls"].([]any)
+			if urls == nil {
+				urls, _ = response.Output["QueueUrls"].([]any)
+			}
+			if err != nil || len(urls) != 2 {
 				errs <- fmt.Errorf("dead-letter sources %#v error %v", response, err)
 			}
 		}()
@@ -1116,7 +1119,7 @@ func TestConcurrentSQSListDeadLetterSourceQueuesIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSDeadLetterMaxReceiveCountIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-max-receive-dlq"}}); err != nil {
@@ -1168,7 +1171,7 @@ func TestConcurrentSQSDeadLetterMaxReceiveCountIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSFIFOSequenceNumbersAreStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-sequence.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
@@ -1213,7 +1216,7 @@ func TestConcurrentSQSFIFOSequenceNumbersAreStable(t *testing.T) {
 }
 
 func TestConcurrentSQSFIFODeduplicationScopeIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dedup-scope.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}}}); err != nil {
@@ -1246,7 +1249,7 @@ func TestConcurrentSQSFIFODeduplicationScopeIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSSetFifoAttributeValidationIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-standard-attribute"}}); err != nil {
@@ -1288,7 +1291,7 @@ func TestConcurrentSQSSetFifoAttributeValidationIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSMessageAttributeDigestsRemainStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errs := make(chan error, 16)
@@ -1339,7 +1342,7 @@ func TestConcurrentSQSMessageAttributeDigestsRemainStable(t *testing.T) {
 }
 
 func TestConcurrentSQSMessageAttributeValidationIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-attribute-validation"}}); err != nil {
@@ -1374,7 +1377,7 @@ func TestConcurrentSQSMessageAttributeValidationIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "group"}}); err != nil {
@@ -1408,7 +1411,7 @@ func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSQueueTagUpdatesRemainReadable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "tags"}}); err != nil {
@@ -6356,7 +6359,7 @@ func TestBusSubscriberPanicIsolated(t *testing.T) {
 
 func TestConcurrentSQSFIFODeduplicationValidationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -6394,7 +6397,7 @@ func TestConcurrentSQSFIFODeduplicationValidationIsStable(t *testing.T) {
 
 func TestConcurrentSQSInvalidBatchEntryIDsAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-batch-id"}}); err != nil {
@@ -6422,7 +6425,7 @@ func TestConcurrentSQSInvalidBatchEntryIDsAreStable(t *testing.T) {
 
 func TestConcurrentSQSInvalidReceiptHandlesAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-receipt"}}); err != nil {
@@ -6450,7 +6453,7 @@ func TestConcurrentSQSInvalidReceiptHandlesAreStable(t *testing.T) {
 
 func TestConcurrentSQSTooManyBatchEntriesIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-too-many-batch"}}); err != nil {
@@ -6482,7 +6485,7 @@ func TestConcurrentSQSTooManyBatchEntriesIsStable(t *testing.T) {
 
 func TestConcurrentSQSDeleteMessageBatchInvalidEntryIDsAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-delete-invalid-batch-id"}}); err != nil {
@@ -6510,7 +6513,7 @@ func TestConcurrentSQSDeleteMessageBatchInvalidEntryIDsAreStable(t *testing.T) {
 
 func TestConcurrentSQSDeleteMessageBatchTooManyEntriesIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-delete-too-many-batch"}}); err != nil {
@@ -6542,7 +6545,7 @@ func TestConcurrentSQSDeleteMessageBatchTooManyEntriesIsStable(t *testing.T) {
 
 func TestConcurrentSQSMessageAttributeFiltersAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-attribute-filters", "Attributes": map[string]any{"VisibilityTimeout": "0"}}}); err != nil {
@@ -6581,7 +6584,7 @@ func TestConcurrentSQSMessageAttributeFiltersAreStable(t *testing.T) {
 
 func TestConcurrentSQSInvalidMessageContentsAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-contents"}}); err != nil {
@@ -6609,7 +6612,7 @@ func TestConcurrentSQSInvalidMessageContentsAreStable(t *testing.T) {
 
 func TestConcurrentSQSSendMessageBatchInvalidContentsAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-invalid-contents"}}); err != nil {
@@ -6646,7 +6649,7 @@ func TestConcurrentSQSMessageRetentionIsStable(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-retention", "Attributes": map[string]any{"MessageRetentionPeriod": "1"}}}); err != nil {
@@ -6679,7 +6682,7 @@ func TestConcurrentSQSMessageRetentionIsStable(t *testing.T) {
 
 func TestConcurrentSQSSuccessivePurgesAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-purge"}}); err != nil {
@@ -6710,7 +6713,7 @@ func TestConcurrentSQSSuccessivePurgesAreStable(t *testing.T) {
 
 func TestConcurrentSQSMessageStateMetricsAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -6749,7 +6752,7 @@ func TestConcurrentSQSMessageStateMetricsAreStable(t *testing.T) {
 
 func TestConcurrentSQSReceiptsRemainValid(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	for index := range 16 {
@@ -6792,7 +6795,7 @@ func TestConcurrentSQSReceiptsRemainValid(t *testing.T) {
 
 func TestConcurrentSQSFIFOExpiredDeletesAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	handles := make([]string, 16)
@@ -6832,7 +6835,7 @@ func TestConcurrentSQSFIFOExpiredDeletesAreStable(t *testing.T) {
 
 func TestConcurrentSQSFIFOMessageGroupReuseIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -6874,7 +6877,7 @@ func TestConcurrentSQSFIFOMessageGroupReuseIsStable(t *testing.T) {
 
 func TestConcurrentSQSFIFOPartialGroupVisibilityIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errs := make(chan error, 8)
@@ -6924,7 +6927,7 @@ func TestConcurrentSQSFIFOPartialGroupVisibilityIsStable(t *testing.T) {
 
 func TestConcurrentSQSFIFOPerMessageDelaysAreRejected(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -6952,7 +6955,7 @@ func TestConcurrentSQSFIFOPerMessageDelaysAreRejected(t *testing.T) {
 
 func TestConcurrentSQSChangeMessageVisibilityBatchTooManyEntriesIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-visibility-too-many"}}); err != nil {
@@ -6984,7 +6987,7 @@ func TestConcurrentSQSChangeMessageVisibilityBatchTooManyEntriesIsStable(t *test
 
 func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-missing-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
@@ -7012,7 +7015,7 @@ func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 
 func TestConcurrentSQSFIFOBatchMissingMessageGroupIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-missing-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
@@ -7046,7 +7049,7 @@ func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
 	deps.Clock = clk
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -7091,7 +7094,7 @@ func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
 
 func TestConcurrentSQSFIFOMessageAttributesAreRetained(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
@@ -7130,7 +7133,7 @@ func TestConcurrentSQSFIFOMessageAttributesAreRetained(t *testing.T) {
 
 func TestConcurrentSQSFIFOApproximateCountExcludesInFlight(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -7156,7 +7159,7 @@ func TestConcurrentSQSFIFOApproximateCountExcludesInFlight(t *testing.T) {
 
 func TestConcurrentSQSFIFOContentBasedDeduplicationStrategyIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "Attributes": map[string]any{"FifoQueue": "true", "SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
@@ -7179,7 +7182,7 @@ func TestConcurrentSQSFIFOContentBasedDeduplicationStrategyIsStable(t *testing.T
 
 func TestConcurrentSQSFIFOQueueNameValidationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	cases := []struct {
@@ -7218,7 +7221,7 @@ func TestConcurrentSQSFIFOQueueNameValidationIsStable(t *testing.T) {
 
 func TestConcurrentSQSFIFOGroupDeletionOrderingIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	name := "chaos-delete-order.fifo"
@@ -7260,7 +7263,7 @@ func TestConcurrentSQSFIFOGroupDeletionOrderingIsStable(t *testing.T) {
 
 func TestConcurrentSQSDeleteMessageBatchEmptyIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := sqs.New(deps)
+	p := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-delete-empty-batch"}}); err != nil {
@@ -7287,7 +7290,7 @@ func TestConcurrentSQSDeleteMessageBatchEmptyIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSSSEMutualExclusionIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	name := "chaos-sse-exclusive"
@@ -7326,7 +7329,7 @@ func TestConcurrentSQSSSEMutualExclusionIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSQueueArnPartitionsAreStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	regions := []string{"us-east-1", "us-gov-west-1", "cn-north-1"}
 	errs := make(chan error, len(regions)*8)
@@ -7364,7 +7367,7 @@ func TestConcurrentSQSQueueArnPartitionsAreStable(t *testing.T) {
 }
 
 func TestConcurrentSQSQueueAttributeUpdatesAreStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	name := "chaos-attribute-update"
@@ -7401,7 +7404,7 @@ func TestConcurrentSQSQueueAttributeUpdatesAreStable(t *testing.T) {
 }
 
 func TestConcurrentSQSMessageMoveTaskValidationIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	for _, name := range []string{"chaos-move-plain", "chaos-move-destination", "chaos-move-dlq", "chaos-move-source"} {
@@ -7442,7 +7445,7 @@ func TestConcurrentSQSMessageMoveTaskValidationIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSMessageMoveTaskWorkflowIsStable(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	for _, name := range []string{"chaos-workflow-source", "chaos-workflow-dlq", "chaos-workflow-destination"} {
@@ -7485,7 +7488,7 @@ func TestConcurrentSQSMessageMoveTaskWorkflowIsStable(t *testing.T) {
 }
 
 func TestConcurrentSQSMessageMoveTaskStartsAllowOneActiveTask(t *testing.T) {
-	p := sqs.New(spitest.Deps(t))
+	p := bundled.Handler("aws.sqs", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	for _, name := range []string{"chaos-start-source", "chaos-start-dlq", "chaos-start-destination"} {

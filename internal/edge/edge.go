@@ -291,6 +291,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Identity = id
 	req.HTTP = r
+	if svc.ID == "aws.sqs" {
+		sqsBindQueueURL(req, r)
+	}
 	req.S3ValidateSignatures = svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures
 	// The configured advertise URL reaches packs here, which is the one place
 	// every decoded request passes through. It used to reach the Server struct

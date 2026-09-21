@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
@@ -23,7 +24,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -324,7 +324,7 @@ func (p *Pack) drain(ctx context.Context) bool {
 func (p *Pack) drainSQS(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
 	queue := source[strings.LastIndex(source, ":")+1:]
 	batchSize := sourceBatchSize(pipe)
-	response, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{
+	response, err := bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{
 		"QueueName": queue, "MaxNumberOfMessages": batchSize, "MessageAttributeNames": []any{"All"},
 	}})
 	if err != nil {
@@ -862,7 +862,7 @@ func insideJSONString(value string, end int) bool {
 }
 
 func (p *Pack) deleteMessage(ctx context.Context, identity spi.Identity, queue, handle string) {
-	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteMessage", Input: map[string]any{"QueueName": queue, "ReceiptHandle": handle}})
+	_, _ = bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteMessage", Input: map[string]any{"QueueName": queue, "ReceiptHandle": handle}})
 }
 
 func sqsRecord(message map[string]any, source, region string) map[string]any {

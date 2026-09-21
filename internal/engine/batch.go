@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"unicode"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -28,7 +30,61 @@ func (e *Engine) runBatch(ctx context.Context, req *spi.Request, op bir.Operatio
 			req.Operation, b.Of)
 	}
 
-	entries, _ := req.Input[b.Entries].([]any)
+	rawEntries, _ := req.Input[b.Entries].([]any)
+	if b.EmptyError != "" && len(rawEntries) == 0 {
+		return nil, e.fault(b.EmptyError, "")
+	}
+	if b.MaxEntries > 0 && len(rawEntries) > b.MaxEntries {
+		msg := fmt.Sprintf("Maximum number of entries per request are %d. You have sent %d.",
+			b.MaxEntries, len(rawEntries))
+		errName := b.TooManyError
+		if errName == "" {
+			errName = "TooManyEntriesInBatchRequest"
+		}
+		f := e.fault(errName, msg)
+		return nil, f
+	}
+
+	entries := make([]any, len(rawEntries))
+	copy(entries, rawEntries)
+	if b.BareField != "" {
+		for i, entry := range entries {
+			if s, ok := entry.(string); ok && s != "" {
+				entries[i] = map[string]any{b.ID: strconv.Itoa(i), b.BareField: s}
+			}
+		}
+	}
+		if b.MaxBytes > 0 {
+		total := 0
+		for _, raw := range entries {
+			entry, _ := raw.(map[string]any)
+			if entry == nil {
+				continue
+			}
+			total += messageByteSize(fmt.Sprint(entry["MessageBody"]), entry["MessageAttributes"])
+		}
+		if total > b.MaxBytes {
+			errName := b.TooLongError
+			if errName == "" {
+				errName = "BatchRequestTooLong"
+			}
+			msg := fmt.Sprintf("Batch requests cannot be longer than %d bytes. You have sent %d bytes.", b.MaxBytes, total)
+			return nil, e.fault(errName, msg)
+		}
+	}
+if b.InvalidIDError != "" {
+		for _, raw := range entries {
+			entry, _ := raw.(map[string]any)
+			if entry == nil {
+				continue
+			}
+			if !validBatchEntryID(fmt.Sprint(entry[b.ID])) {
+				return nil, e.fault(b.InvalidIDError,
+					"A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long.")
+			}
+		}
+	}
+
 	successful := []any{}
 	failed := []any{}
 
@@ -46,8 +102,6 @@ func (e *Engine) runBatch(ctx context.Context, req *spi.Request, op bir.Operatio
 			HTTP:      req.HTTP,
 			Input:     map[string]any{},
 		}
-		// What the batch addresses as a whole -- the queue every entry goes to
-		// -- travels with each delegated request.
 		for _, member := range b.Carry {
 			if v, ok := req.Input[member]; ok {
 				sub.Input[member] = v
@@ -89,8 +143,41 @@ func (e *Engine) runBatch(ctx context.Context, req *spi.Request, op bir.Operatio
 	if b.Successful != "" {
 		out[b.Successful] = successful
 	}
-	if b.Failed != "" {
+	if b.Failed != "" && len(failed) > 0 {
 		out[b.Failed] = failed
 	}
 	return &spi.Response{Output: out}, nil
+}
+
+func validBatchEntryID(id string) bool {
+	if id == "" || len(id) > 80 {
+		return false
+	}
+	for _, r := range id {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func messageByteSize(body string, attrs any) int {
+	size := len([]byte(body))
+	m, _ := attrs.(map[string]any)
+	for name, raw := range m {
+		attribute, _ := raw.(map[string]any)
+		if attribute == nil {
+			continue
+		}
+		size += len(name) + len(anyString(attribute["DataType"])) +
+			len(anyString(attribute["StringValue"])) + len(anyString(attribute["BinaryValue"]))
+	}
+	return size
+}
+
+func anyString(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprint(v)
 }

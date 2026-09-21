@@ -24,7 +24,10 @@ func baseVars() []cel.EnvOption {
 		cel.Variable("input", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("identity", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("now", cel.TimestampType),
+		cel.Variable("now_ms", cel.IntType),
 		cel.Variable("endpoint", cel.StringType),
+		cel.Variable("headers", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("has_http", cel.BoolType),
 	}
 }
 
@@ -69,11 +72,35 @@ func celFuncs() []cel.EnvOption {
 	return []cel.EnvOption{
 		// Digests and identifiers.
 		unaryDyn("md5hex", str, str),
+		binaryDyn("messageSize", str, dyn, cel.IntType),
+		unaryDyn("md5MessageAttributes", dyn, str),
 		unaryDyn("sha256hex", str, str),
 		// b64urlhex decodes a hex string and base64url-encodes it without
 		// padding. PKCE's S256 is base64url(sha256(verifier)), so the
 		// challenge check is b64urlhex(sha256hex(verifier)) == challenge.
 		unaryDyn("b64urlhex", str, str),
+		// b64 / b64decode are std encoding, for wire tokens that are JSON in
+		// base64 (SQS move-task handles) rather than hex digests.
+		unaryDyn("b64", str, str),
+		unaryDyn("b64decode", str, str),
+		// SQS receipt handles are 64 hex chars; message bodies reject most
+		// control characters. Named rather than inlined so require rules stay readable.
+		unaryDyn("validReceiptHandle", str, cel.BoolType),
+		unaryDyn("validMessageContents", str, cel.BoolType),
+		unaryDyn("validMessageGroupID", str, cel.BoolType),
+		unaryDyn("knownQueueAttribute", str, cel.BoolType),
+		unaryDyn("validQueueName", str, cel.BoolType),
+		unaryDyn("validRedrivePolicy", str, cel.BoolType),
+		unaryDyn("sseConflict", dyn, cel.BoolType),
+		unaryDyn("validMessageAttributes", dyn, cel.BoolType),
+		unaryDyn("partition", str, str),
+		binaryDyn("sqsIAMPrincipals", dyn, str, dyn),
+		unaryDyn("sqsSQSActions", dyn, dyn),
+		binaryDyn("sqsQueueAttrConflict", dyn, dyn, str),
+		binaryDyn("sqsMergeQueueAttrs", dyn, dyn, dyn),
+		unaryDyn("sqsTags", dyn, dyn),
+		unaryDyn("sqsTagKeys", dyn, dyn),
+		unaryDyn("validMessageAttributes", dyn, cel.BoolType),
 		// trim is strings.TrimSpace: the oracle trims a team slug before it
 		// stores it, and CEL has no whitespace handling at all.
 		unaryDyn("trim", str, str),

@@ -30,7 +30,7 @@ test-snapshot:
 	$(GO) test ./internal/catalog ./internal/edge ./internal/identity ./internal/mock ./internal/proto/aws/restxml ./internal/runtime ./internal/specdiff -count=1
 	$(GO) test ./internal/services/aws/s3 -run 'Characterization$$|TestNamedBucketConfigurations$$|TestUploadPartCopyConditionsAndRange$$' -count=1
 	$(GO) test ./internal/services/aws/dynamodb -run 'Characterization$$' -count=1
-	$(GO) test ./internal/services/aws/sqs -run 'Characterization$$' -count=1
+	$(GO) test ./test/behavior/aws -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/aws/states -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/gcp/gcs -run 'Characterization$$' -count=1
 	$(GO) test ./internal/bundled -run 'TestAzureBlobCharacterization$$' -count=1
@@ -42,7 +42,7 @@ test-bdd:
 	$(GO) test ./test/behavior/... ./test/terraform -count=1
 
 test-fuzz-seeds:
-	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/sqs ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql -count=1
+	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./test/behavior/aws ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql -count=1
 
 test-fuzz:
 	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzDeframeAWSChunked$$' -fuzztime=10000x -parallel=4
@@ -82,18 +82,18 @@ test-fuzz:
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBKinesisDestination$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBGlobalTable$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBTransactions$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzListQueuesPagination$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzQueueMetadataAttributeSelection$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzQueueDeletionWindow$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzSendReceiveMessageDigest$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzReceiveMessageMaxNumber$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzEmptyReceiveOmitsMessages$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzReceiveMessageWaitTime$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzMessagesRemainQueueScoped$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzSendMessageBatchBodies$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzSendMessageBatchEntryCount$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzMessageSizeBoundary$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzSendMessageBatchSizeBoundary$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzListQueuesPagination$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzQueueMetadataAttributeSelection$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzQueueDeletionWindow$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzSendReceiveMessageDigest$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzReceiveMessageMaxNumber$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzEmptyReceiveOmitsMessages$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzReceiveMessageWaitTime$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzMessagesRemainQueueScoped$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzSendMessageBatchBodies$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzSendMessageBatchEntryCount$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzMessageSizeBoundary$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzSendMessageBatchSizeBoundary$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/firehose -run '^$$' -fuzz '^FuzzKPLDeaggregation$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzArchiveRestore$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzStorageClassValidation$$' -fuzztime=10000x -parallel=4

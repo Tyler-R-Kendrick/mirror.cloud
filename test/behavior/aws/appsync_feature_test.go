@@ -1,4 +1,4 @@
-package appsync
+package behavior
 
 import (
 	"encoding/json"
@@ -10,16 +10,13 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
-func TestAppSyncHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 15 {
-		t.Fatalf("appsync Operations() %d want 15", n)
-	}
-}
-
+// TestBootedServerAppSyncApiAndQuery drives the AppSync control plane and the
+// GraphQL query echo over HTTP. It boots the runtime rather than the pack:
+// the pack is deleted, and this is the test that proves the bundle answers
+// the endpoint the pack used to serve, including the query operation no AWS
+// model declares.
 func TestBootedServerAppSyncApiAndQuery(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.appsync"}

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -100,7 +100,7 @@ func TestSQSEventSourceMappingInvokesAndDeletes(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	function := New(deps)
 	ctx := context.Background()
 	if _, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateQueue", Input: map[string]any{"QueueName": "source"}}); err != nil {
@@ -148,7 +148,7 @@ func TestSQSEventSourceMappingPreservesPartialFailures(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	function := New(deps)
 	ctx := context.Background()
 	if _, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateQueue", Input: map[string]any{"QueueName": "partial"}}); err != nil {
@@ -187,7 +187,7 @@ func TestSQSEventSourceMappingRedrivesFailedMessage(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	function := New(deps)
 	ctx := context.Background()
 	create := func(name string, attrs map[string]any) {

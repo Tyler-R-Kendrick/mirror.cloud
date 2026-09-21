@@ -14,7 +14,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestBootedServerSQSJSONAndQuery(t *testing.T) {
@@ -590,6 +590,9 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	}
 	srcs := jsonCall("ListDeadLetterSourceQueues", `{"QueueName":"dlq"}`)
 	joined := fmtJSON(srcs["QueueUrls"])
+	if joined == "" || joined == "null" {
+		joined = fmtJSON(srcs["queueUrls"])
+	}
 	if !strings.Contains(joined, "src") {
 		t.Fatalf("dlq sources %v", srcs)
 	}

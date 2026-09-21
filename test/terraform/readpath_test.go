@@ -12,7 +12,7 @@ import (
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestReadPathOpsAreImplemented(t *testing.T) {

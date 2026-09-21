@@ -24,14 +24,13 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -640,7 +639,7 @@ func TestFirehoseConsumesMSKMessages(t *testing.T) {
 func TestFirehoseOpenSearchDestination(t *testing.T) {
 	deps := spitest.Deps(t)
 	firehose := New(deps)
-	search := opensearch.New(deps)
+	search := bundled.Handler("aws.es", deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
 		t.Helper()
@@ -664,7 +663,8 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	})
 	recordID := first(put.Output, "RecordId")
 	result := invoke(search, "Search", map[string]any{"DomainName": "logs", "Index": "events-1970-01-01", "query": map[string]any{"match": map[string]any{"city": "austin"}}})
-	hits := result.Output["hits"].(map[string]any)["hits"].([]any)
+	outer, _ := result.Output["hits"].(map[string]any)
+	hits, _ := outer["hits"].([]any)
 	if len(hits) != 1 || first(hits[0].(map[string]any), "_id") != recordID {
 		t.Fatalf("OpenSearch hits %#v", hits)
 	}
@@ -690,7 +690,7 @@ func TestFirehoseAmazonOpenSearchServiceDestination(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	search := opensearch.New(deps)
+	search := bundled.Handler("aws.es", deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
 		t.Helper()
@@ -742,7 +742,7 @@ func TestFirehoseAmazonOpenSearchServiceDestination(t *testing.T) {
 func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	search := opensearch.New(deps)
+	search := bundled.Handler("aws.es", deps)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
 	call := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
@@ -812,7 +812,12 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	}
 	wait("persisted OpenSearch buffer did not flush", func() bool {
 		result := call(search, "Search", map[string]any{"DomainName": "buffered", "Index": "events-1970-01-01", "query": map[string]any{"match_all": map[string]any{}}})
-		return len(result.Output["hits"].(map[string]any)["hits"].([]any)) == 1
+		outer, _ := result.Output["hits"].(map[string]any)
+		if outer == nil {
+			return false
+		}
+		hits, _ := outer["hits"].([]any)
+		return len(hits) == 1
 	})
 	result := call(search, "GetDocument", map[string]any{"DomainName": "buffered", "Index": "events-1970-01-01", "Id": validID})
 	if result.Output["found"] != true {
@@ -913,7 +918,9 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	}
 	wait("OpenSearch size threshold did not flush", func() bool {
 		result := call(search, "Search", map[string]any{"DomainName": "sized", "Index": "events-1970-01-01", "query": map[string]any{"match_all": map[string]any{}}})
-		return len(result.Output["hits"].(map[string]any)["hits"].([]any)) == 2
+		outer, _ := result.Output["hits"].(map[string]any)
+	hits, _ := outer["hits"].([]any)
+		return len(hits) == 2
 	})
 
 	create("deleted", destination("deleted", 900, 4))
@@ -1015,7 +1022,7 @@ func TestFirehoseOpenSearchServerlessDestination(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	search := opensearch.New(deps)
+	search := bundled.Handler("aws.es", deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	destination := testOpenSearchServerlessDestination()
 	destination["BufferingHints"] = map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 5}
@@ -1038,7 +1045,8 @@ func TestFirehoseOpenSearchServerlessDestination(t *testing.T) {
 	var hits []any
 	for deadline := time.After(pollBudget); polling(deadline); {
 		result := call(search, "Search", map[string]any{"Index": "collection/events", "query": map[string]any{"match_all": map[string]any{}}})
-		hits = result.Output["hits"].(map[string]any)["hits"].([]any)
+		outer, _ := result.Output["hits"].(map[string]any)
+		hits, _ = outer["hits"].([]any)
 		if len(hits) == 1 {
 			break
 		}
@@ -1124,11 +1132,18 @@ func TestFirehoseOpenSearchServerlessPersistentBuffer(t *testing.T) {
 	if err := deps.Clock.Advance(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	search := opensearch.New(deps)
+	search := bundled.Handler("aws.es", deps)
 	for deadline := time.After(pollBudget); polling(deadline); {
 		result, err := search.Invoke(ctx, &spi.Request{Identity: id, Operation: "Search", Input: map[string]any{"Index": "collection/events", "query": map[string]any{"match_all": map[string]any{}}}})
-		if err == nil && len(result.Output["hits"].(map[string]any)["hits"].([]any)) == 1 {
-			return
+		// An empty search answers hits as null, not an empty list, so the
+		// assertion must tolerate it: a null hits list is zero hits, still
+		// polling, not a panic.
+		if err == nil {
+			if outer, _ := result.Output["hits"].(map[string]any); outer != nil {
+				if hits, _ := outer["hits"].([]any); len(hits) == 1 {
+					return
+				}
+			}
 		}
 		time.Sleep(time.Millisecond)
 	}

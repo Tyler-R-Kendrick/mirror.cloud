@@ -3,8 +3,8 @@ package spine
 import (
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -41,7 +41,7 @@ func TestHTTPProvenOpsMatchPackOperations(t *testing.T) {
 	}
 
 	assertSame(t, "dynamodb", dynamodb.New(spitest.Deps(t)).Operations(), ddbHTTP)
-	assertSame(t, "sqs", sqs.New(spitest.Deps(t)).Operations(), sqsHTTP)
+	assertSame(t, "sqs", bundled.Handler("aws.sqs", spitest.Deps(t)).Operations(), sqsHTTP)
 }
 
 func assertSame(t *testing.T, label string, got, want []string) {

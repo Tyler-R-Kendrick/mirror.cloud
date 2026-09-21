@@ -173,7 +173,11 @@ hetzner.v1 emulate
 fly.machines emulate
 cloudflare.api emulate paths=/client/v4/accounts/{account_id}/storage/kv
 digitalocean.v2 emulate paths=/v2/droplets,/v2/domains
-vercel.api emulate paths=/v2/user,/v9/projects,/v10/projects,/v11/projects,/v7/deployments,/v13/deployments,/v1/projects,/v2/teams,/v2/files,/v2/deployments,/v3/deployments,/v6/deployments,/v12/deployments,/v1/api-keys,/registration,/oauth,/login
+# fields= keeps exactly the bundle-served ops. A paths= prefix under
+# /v1/projects or /v2/deployments also pulled in feature-flags, rolling-release,
+# check-runs and friends as mock-tier leftovers; Mirror Cloud does not advertise
+# those on the served surface.
+vercel.api emulate fields=AddProjectDomain,CancelDeployment,CreateApiKey,CreateCustomEnvironment,CreateDeployment,CreateProject,CreateProjectEnv,CreateTeam,DeleteApiKey,DeleteDeployment,DeleteProject,EditProjectEnv,FilterProjectEnvs,GetAuthUser,GetCustomEnvironment,GetDeployment,GetDeploymentEvents,GetDeployments,GetDeploymentsV6,GetProject,GetProjectDomain,GetProjectDomains,GetProjectEnv,GetProjects,GetProjectsByIdOrNameCustomEnvironments,GetRegistration,GetTeam,GetTeams,InviteUserToTeam,ListApiKeys,ListDeploymentAliases,ListDeploymentFiles,ListPromoteAliases,ListTeamMembers,OauthAuthorize,OauthAuthorizeCallback,OauthToken,OauthUserinfo,PatchTeam,RemoveCustomEnvironment,RemoveProjectDomain,RemoveProjectEnv,RequestPromote,UpdateAuthUser,UpdateCustomEnvironment,UpdateProject,UpdateProjectDomain,UpdateProjectProtectionBypass,UploadFile,VerifyProjectDomain
 vercel.kv emulate
 vercel.blob emulate
 stripe.api emulate

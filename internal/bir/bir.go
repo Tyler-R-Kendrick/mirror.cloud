@@ -90,6 +90,14 @@ type Service struct {
 	// bundle that knows better says so here.
 	MissingInput string `yaml:"missing_input_error,omitempty"`
 
+	// MissingInputMessages maps a required member name to the wording the
+	// service uses for its absence. Left unset, the member name is the
+	// message — SQS's MessageGroupId, Label, SourceArn. MessageBody is the
+	// exception: AWS answers with a full sentence, and the require rule for
+	// an empty body uses the same words, so the model-level absence check
+	// has to say them too.
+	MissingInputMessages map[string]string `yaml:"missing_input_messages,omitempty"`
+
 	// Compiled holds programs prepared at load time. Nil until Load runs.
 	Compiled *Compiled `yaml:"-"`
 }
@@ -114,6 +122,11 @@ type Resource struct {
 	Singleton string `yaml:"singleton,omitempty"`
 	// Key is the record member used as the store key, when it is not the ID.
 	Key string `yaml:"key,omitempty"`
+	// KeyAliases is a collection that maps a previous key to the current one
+	// when the key member changes. SQS receipt handles regenerate on
+	// re-receive; callers still hold the old handle, and this collection is
+	// how those calls resolve without the pack growing a second index by hand.
+	KeyAliases string `yaml:"key_aliases,omitempty"`
 
 	ID  Identity `yaml:"id,omitempty"`
 	ARN string   `yaml:"arn,omitempty"`
@@ -137,6 +150,32 @@ type Identity struct {
 	// Derive is a CEL expression producing the ID when neither of the above
 	// applies (for example, extracting a name from a queue URL).
 	Derive string `yaml:"derive,omitempty"`
+}
+
+// AddressMembers answers every request member that can address the resource:
+// its input members plus the members its derive reads. The model may require
+// one spelling while callers carry another -- SQS requires QueueUrl on the
+// wire while the emulator's own delivery paths address queues by QueueName --
+// and the required check is satisfied by any one of them, so an internal
+// caller is not rejected for a member only a wire client can send.
+func (r Resource) AddressMembers() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range r.ID.InputMembers {
+		if !seen[m] {
+			seen[m] = true
+			out = append(out, m)
+		}
+	}
+	if r.ID.Derive != "" {
+		for _, m := range inputRefs(r.ID.Derive) {
+			if !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+	}
+	return out
 }
 
 // Generate describes deterministic ID generation. Randomness is an effect, not
@@ -185,7 +224,7 @@ type Timer struct {
 // Action is one step of a transition. Exactly one field is set.
 type Action struct {
 	// Set assigns record members from CEL expressions.
-	Set map[string]string `yaml:"set,omitempty"`
+	Set map[string]any `yaml:"set,omitempty"`
 	// Deadline arms a named timer.
 	Deadline *DeadlineAction `yaml:"deadline,omitempty"`
 	// Move re-parents a record, optionally with fresh members.
@@ -251,6 +290,13 @@ type Operation struct {
 	Batch   *BatchSpec        `yaml:"batch,omitempty"`
 	Output  map[string]string `yaml:"output,omitempty"`
 
+	// OmitNull names output members the answer drops when they project null.
+	// A record that lacks a member answers without it -- OpenSearch answers
+	// a missed get with no _source member at all -- and answering null
+	// instead would be a member the service never sends. Without this the
+	// only honest transcription would be two operations for the two shapes.
+	OmitNull []string `yaml:"omit_null,omitempty"`
+
 	// Addressing exempts named resources from the check that an operation
 	// which resolves a resource's key from the request declares at least one
 	// of the members that resource is addressed by. The value is the reason,
@@ -314,6 +360,12 @@ type Group struct {
 	When              string `yaml:"when,omitempty"`
 	By                string `yaml:"by"`
 	ExclusiveInFlight string `yaml:"exclusive_in_flight,omitempty"`
+	// Drain, when set, takes every leading selectable message from a group
+	// rather than one. SQS FIFO delivers consecutive visible messages from the
+	// same group up to MaxNumberOfMessages; exclusive_in_flight alone would
+	// under-deliver. Groups that still have an in-flight member sort after
+	// complete ones (pack: partial deprioritization).
+	Drain bool `yaml:"drain,omitempty"`
 }
 
 // Wait is long-polling as an engine capability rather than service code: park
@@ -349,6 +401,18 @@ type ListSpec struct {
 	// Filter is a predicate over each candidate record, which is bound as
 	// `item`. Records that do not satisfy it are omitted.
 	Filter string `yaml:"filter,omitempty"`
+	// Prefix narrows the page to store keys beneath it. This is not a filter:
+	// the store applies the page size before anything the engine can see, so
+	// filtering afterwards pages over the wrong candidates and reports the
+	// wrong "there is more".
+	Prefix string `yaml:"prefix,omitempty"`
+	// After turns the request's pagination token into the store key to resume
+	// from, and Token turns the last record of a page into the token that
+	// resumes after it -- with the record bound as `item`. Without them the
+	// token is the store key itself, which is the right answer only for a
+	// service that publishes its keys.
+	After string `yaml:"after,omitempty"`
+	Token string `yaml:"token,omitempty"`
 	// Reads are companion records loaded once per candidate, keyed off the
 	// candidate itself, and bound for the filter exactly as an operation's
 	// reads are bound for its requires: each binding x also binds x_found.
@@ -596,4 +660,19 @@ type BatchSpec struct {
 	// Result names the members of each delegated answer to copy into its
 	// Successful row, alongside the id.
 	Result []string `yaml:"result,omitempty"`
+	// MaxEntries caps the batch; 0 means no cap. SQS uses 10.
+	MaxEntries int `yaml:"max_entries,omitempty"`
+	// EmptyError is the error-table name answered when Entries is missing or empty.
+	EmptyError string `yaml:"empty_error,omitempty"`
+	// TooManyError is answered when len(Entries) exceeds MaxEntries.
+	TooManyError string `yaml:"too_many_error,omitempty"`
+	// InvalidIDError is answered when an entry Id fails the alphanumeric/-/_/≤80 rule.
+	InvalidIDError string `yaml:"invalid_id_error,omitempty"`
+	// BareStrings, when set, lifts a bare string entry into {id: i, <field>: s}
+	// so DeleteMessageBatch can take a list of receipt handles.
+	BareField string `yaml:"bare_field,omitempty"`
+	// MaxBytes caps the sum of entry bodies+attrs; SQS SendMessageBatch uses 1<<20.
+	MaxBytes int `yaml:"max_bytes,omitempty"`
+	// TooLongError is answered when MaxBytes is exceeded.
+	TooLongError string `yaml:"too_long_error,omitempty"`
 }

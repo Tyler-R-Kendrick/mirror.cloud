@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -166,15 +167,44 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		}
 	}
 
-	if fault := e.validateInput(modelOp, req); fault != nil {
-		return nil, fault
+	normalizeSQSQueryTags(req)
+
+	// A missing required member is the model's objection, and the operation's
+	// own rules outrank it: SQS answers a send naming a queue that does not
+	// exist with NonExistentQueue whether or not MessageBody came with it. So
+	// the fault is held until the requires have had their say, and nothing
+	// between here and there writes.
+	inputFault := e.validateInput(modelOp, req)
+	if inputFault != nil && len(op.Require) == 0 {
+		return nil, inputFault
 	}
+
+	// QueueOwnerAWSAccountId / QueueUrl account segment address another
+	// account's queue; rewrite Identity so scope() hits the right store.
+	req = rewriteQueueOwner(req)
 
 	// A batch operation is its singular sibling, run once per entry, and it
 	// delegates through Invoke -- so it must not hold the lock the delegated
 	// calls take. Each entry is serialized on its own, which is what a pack
 	// with a non-reentrant mutex did too.
 	if op.Batch != nil {
+		// Batch-level require/lets (FIFO missing-id prechecks, NonExistentQueue)
+		// run before entry delegation — pack faults the whole batch, not one row.
+		if len(op.Reads) > 0 || len(op.Let) > 0 || len(op.Require) > 0 {
+			ev := e.newEval(req, op)
+			if err := ev.resolveReads(ctx, op); err != nil {
+				return nil, firstOf(inputFault, err)
+			}
+			if err := ev.evalLets(op); err != nil {
+				return nil, firstOf(inputFault, err)
+			}
+			if fault := ev.checkRequires(op, false); fault != nil {
+				return nil, fault
+			}
+		}
+		if inputFault != nil {
+			return nil, inputFault
+		}
 		return e.runBatch(ctx, req, op)
 	}
 
@@ -182,20 +212,33 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	// what it is waiting for, so holding the lock across it would guarantee
 	// that change never arrives. SQS ReceiveMessage is the only one, and its
 	// visibility bookkeeping is exactly as concurrent as it was before this.
+	ev := e.newEval(req, op)
 	if op.Wait == nil {
 		e.mu.Lock()
-		defer e.mu.Unlock()
+		defer func() {
+			e.mu.Unlock()
+			ev.flushSQSWakes()
+		}()
+	} else {
+		defer ev.flushSQSWakes()
 	}
-
-	ev := e.newEval(req, op)
 	if err := ev.resolveReads(ctx, op); err != nil {
-		return nil, err
+		return nil, firstOf(inputFault, err)
 	}
-	if err := ev.evalLets(op); err != nil {
-		return nil, err
-	}
+	// A let that reaches into a record the requires are about to reject cannot
+	// evaluate, and the rejection is the answer the caller should get: SQS's
+	// SendMessage derives its delay from the queue's merged settings, and a
+	// queue that does not exist has none. So the failure waits for the
+	// requires too, and is only reported if every one of them passed.
+	letErr := ev.evalLets(op)
 	if fault := ev.checkRequires(op, false); fault != nil {
 		return nil, fault
+	}
+	if letErr != nil {
+		return nil, firstOf(inputFault, letErr)
+	}
+	if inputFault != nil {
+		return nil, inputFault
 	}
 	// Select is the observation point: expired deadlines fire here, so what an
 	// operation acts on is a function of the clock reading rather than of when
@@ -227,7 +270,18 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	}
 	if err := ev.runEffects(ctx, op); err != nil {
 		if errors.Is(err, errShortCircuit) {
-			return &spi.Response{Output: ev.shortOutput}, nil
+			out := ev.shortOutput
+			if len(op.OmitNull) > 0 && out != nil {
+				trimmed := make(map[string]any, len(out))
+				for k, v := range out {
+					if v == nil && slices.Contains(op.OmitNull, k) {
+						continue
+					}
+					trimmed[k] = v
+				}
+				out = trimmed
+			}
+			return &spi.Response{Output: out}, nil
 		}
 		return nil, err
 	}
@@ -256,6 +310,16 @@ func (e *Engine) splatPayload(m model.Member) bool {
 		return false
 	}
 	return e.model.Shapes[m.Shape].Kind != model.KindList
+}
+
+// firstOf answers with a held input fault when there is one. An expression
+// that trips over a member the caller never sent is reporting the missing
+// member, not a bundle bug.
+func firstOf(fault *spi.Fault, err error) error {
+	if fault != nil {
+		return fault
+	}
+	return err
 }
 
 // validateInput enforces the model's required members and constraints. This is
@@ -303,9 +367,23 @@ func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault 
 		if m.Required && !present && e.splatPayload(m) {
 			continue
 		}
+		if m.Required && !present && e.addressedOtherwise(req, name) {
+			// A resource the operation addresses declares every member that
+			// can address it, and the required check is satisfied by any one
+			// of them: SQS requires QueueUrl on the wire while the
+			// emulator's own delivery paths address queues by QueueName,
+			// which no wire client sends and no model declares required.
+			continue
+		}
 		if m.Required && !present {
 			if ref := e.ir.MissingInput; ref != "" {
-				return e.fault(ref, name)
+				msg := name
+				if e.ir.MissingInputMessages != nil {
+					if custom, ok := e.ir.MissingInputMessages[name]; ok {
+						msg = custom
+					}
+				}
+				return e.fault(ref, msg)
 			}
 			return &spi.Fault{
 				Code:       "ValidationException",
@@ -374,6 +452,64 @@ func toFloat(v any) (float64, bool) {
 	return 0, false
 }
 
+// addressedOtherwise reports whether a required member the request omits is
+// a derive-only spelling of a resource address the request already carries
+// under an input_members name. The model requires QueueUrl on SendMessage;
+// emulator delivery paths address the same queue by QueueName, which is in
+// input_members. The reverse is not true: GetQueueUrl requires QueueName on
+// the wire, and a caller that sent only QueueUrl has not addressed it.
+func (e *Engine) addressedOtherwise(req *spi.Request, name string) bool {
+	birOp, ok := e.ir.Operations[req.Operation]
+	if !ok {
+		return false
+	}
+	resources := map[string]bool{}
+	for _, r := range birOp.Reads {
+		resources[r.Resource] = true
+	}
+	if birOp.Select != nil {
+		resources[birOp.Select.Resource] = true
+	}
+	if birOp.List != nil {
+		resources[birOp.List.Resource] = true
+	}
+	for res := range resources {
+		r, ok := e.ir.Resources[res]
+		if !ok {
+			continue
+		}
+		primaries := r.ID.InputMembers
+		for _, m := range primaries {
+			if m == name {
+				// Primary form: no alternate spelling substitutes.
+				return false
+			}
+		}
+		members := r.AddressMembers()
+		if len(members) < 2 {
+			continue
+		}
+		addresses := false
+		for _, m := range members {
+			if m == name {
+				addresses = true
+				break
+			}
+		}
+		if !addresses {
+			continue
+		}
+		for _, m := range members {
+			if m != name {
+				if _, present := req.Input[m]; present {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // fault renders one row of the bundle's error table.
 func (e *Engine) fault(ref, message string) *spi.Fault {
 	def, ok := e.ir.Errors[ref]
@@ -412,6 +548,7 @@ func (ev *eval) collection(res bir.Resource) (spi.Collection, error) {
 	if err != nil {
 		return nil, err
 	}
+	ev.lastCol = name
 	return ev.e.scope(ev.req).Collection(name), nil
 }
 

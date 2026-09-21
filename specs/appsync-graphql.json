@@ -1,0 +1,50 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AWS AppSync data-plane supplement",
+    "version": "authored-1",
+    "description": "The one operation the AWS smithy model does not declare but the mirror serves: the GraphQL query endpoint, answered over the AWSJSON11 target AWSAppSync.GraphQL. It rides X-Amz-Target dispatch like every other AppSync operation, so the path item is the service root. Fused into aws.appsync by x-mirror-service; the smithy document keeps every other operation, its protocol and its shapes."
+  },
+  "x-mirror-service": "aws.appsync",
+  "paths": {
+    "/": {
+      "post": {
+        "operationId": "GraphQL",
+        "summary": "Run a GraphQL query against an API (emulator echo semantics)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apiId": { "type": "string" },
+                  "query": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The query answer under data.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GraphQLResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "GraphQLResponse": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "object" }
+        }
+      }
+    }
+  }
+}

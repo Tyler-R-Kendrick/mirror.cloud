@@ -15,7 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 // moveTaskPolls bounds the wait for a throttled message-move task to reach a

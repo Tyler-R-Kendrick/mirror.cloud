@@ -17,7 +17,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestTemplateURLLoadsFromS3(t *testing.T) {

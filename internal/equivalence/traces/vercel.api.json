@@ -180,10 +180,6 @@
         "code": "not_found",
         "http_status": 404,
         "fault": "client"
-      },
-      "superseded_members": {
-        "fault.code": "Invoked with no `idOrName` at all, which is a shape no HTTP request has: the label is part of the URI, so a request missing it does not route to this operation. Reached directly, the document marks the label required and the engine's model check answers first, with this service's name for that failure -- 400 bad_request, where the pack's own lookup fell through to 404. The step is kept because it still gates that the engine refuses rather than serving a project keyed on the empty string, which is what the pack's fallthrough was one branch away from.",
-        "fault.status": "Invoked with no `idOrName` at all, which is a shape no HTTP request has: the label is part of the URI, so a request missing it does not route to this operation. Reached directly, the document marks the label required and the engine's model check answers first, with this service's name for that failure -- 400 bad_request, where the pack's own lookup fell through to 404. The step is kept because it still gates that the engine refuses rather than serving a project keyed on the empty string, which is what the pack's fallthrough was one branch away from."
       }
     },
     {

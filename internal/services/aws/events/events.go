@@ -14,13 +14,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -636,7 +636,7 @@ func (p *Pack) deadLetter(ctx context.Context, identity spi.Identity, rec, targe
 	if len(parts) > 4 {
 		dlqIdentity = spi.Identity{Region: parts[3], Account: parts[4]}
 	}
-	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: dlqIdentity, Operation: "SendMessage", Input: map[string]any{
+	_, _ = bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: dlqIdentity, Operation: "SendMessage", Input: map[string]any{
 		"QueueName": arn[lastColon(arn)+1:], "MessageBody": string(payload), "MessageAttributes": attributes,
 	}})
 }
@@ -866,7 +866,7 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 		if params, ok := target["SqsParameters"].(map[string]any); ok {
 			in["MessageGroupId"] = params["MessageGroupId"]
 		}
-		_, err := sqs.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: in})
+		_, err := bundled.Handler("aws.sqs", deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: in})
 		return err
 	case strings.Contains(arn, ":sns:"):
 		_, err := sns.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload)}})

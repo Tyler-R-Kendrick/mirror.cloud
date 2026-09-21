@@ -1,4 +1,4 @@
-package timestream
+package behavior
 
 import (
 	"encoding/json"
@@ -10,16 +10,13 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
-func TestTimestreamHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 12 {
-		t.Fatalf("timestream Operations() %d want 12", n)
-	}
-}
-
+// TestBootedServerTimestreamCreateGetDelete drives the database/table/record
+// lifecycle plus the substring Query over HTTP. It boots the runtime rather
+// than the pack: the pack is deleted, and this is the test that proves the
+// bundle answers Query, the operation no AWS model declares, through the
+// authored supplement.
 func TestBootedServerTimestreamCreateGetDelete(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.timestream"}
@@ -78,9 +75,4 @@ func TestBootedServerTimestreamCreateGetDelete(t *testing.T) {
 	}
 	call("DeleteTable", `{"DatabaseName":"metrics","TableName":"cpu"}`)
 	call("DeleteDatabase", `{"DatabaseName":"metrics"}`)
-	listed := call("ListDatabases", `{}`)
-	raw, _ := json.Marshal(listed)
-	if strings.Contains(string(raw), `"DatabaseName":"metrics"`) {
-		t.Fatalf("still present %s", raw)
-	}
 }

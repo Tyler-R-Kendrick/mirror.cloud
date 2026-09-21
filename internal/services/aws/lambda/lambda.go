@@ -16,9 +16,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -482,7 +482,7 @@ func (p *Pack) processSQSMapping(ctx context.Context, identity spi.Identity, que
 			function = function[:i]
 		}
 	}
-	queuePack := sqs.New(p.deps)
+	queuePack := bundled.Handler("aws.sqs", p.deps)
 	// A failed invocation is retried immediately with zero visibility. This
 	// keeps local event delivery deterministic and lets SQS redrive after the
 	// configured receive count without a second scheduler.

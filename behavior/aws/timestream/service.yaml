@@ -3,25 +3,13 @@ service: aws.timestream
 
 # Transcribed from the hand-written pack, not established against the real
 # service. Nothing here is a time-series engine: a database or a table is a
-# name plus an ARN, a written record set is stored verbatim and never read by
-# any operation the bundle can express, and Query is a substring match, not
-# SQL.
+# name plus an ARN, a written record set is stored verbatim, and Query is a
+# substring match, not SQL.
 provenance: authored
 
-# Query is served from the hand-authored catalog with no input or output
-# shape (the vendored specification for aws.timestream covers only the
-# timestream-write namespace), so a bundle cannot declare the Rows and
-# ColumnInfo members the pack answers with: the loader requires every output
-# member to resolve against the generated model, and there is no output shape
-# to resolve against. The pack keeps serving until the model carries the
-# query shapes or the engine gains an escape; the recording's Query steps are
-# superseded with this reason.
-shadow: >
-  Query's output is not expressible: the served model carries the operation
-  from the catalog with empty input and output shapes, and the loader forbids
-  output members an output shape does not declare, so the bundle can answer
-  Query with nothing but an empty body where the pack answered Rows and
-  ColumnInfo. Every other operation is transcribed and gated.
+# Query rides an authored supplement (specs/timestream-query.json): the
+# vendored model covers only the timestream-write namespace, so the supplement
+# declares the Query input and output shapes the bundle answers with.
 
 # The pack answered an absent or empty DatabaseName on the create/update paths
 # with ValidationException; that is also the service's vocabulary for the
@@ -52,15 +40,16 @@ resources:
 
   # The pack stored the request's Records array verbatim under the database
   # and table name, overwriting whatever a previous WriteRecords put there.
-  # Only Query ever read it, and Query's output is the unexpressible one, so
-  # in this bundle the write is state nothing reads -- kept because it is what
-  # the pack does, and so the day Query is expressible the data is there.
+  # The row also carries the coordinates Query matches on, because a select
+  # binds records and never store keys.
   records:
     collection: tsrec
     id:
       derive: "string(input.DatabaseName) + '/' + string(input.TableName)"
     record:
       Records: "input.Records"
+      db: "string(input.DatabaseName)"
+      tbl: "string(input.TableName)"
 
 errors:
   Validation:
@@ -141,11 +130,24 @@ operations:
     output:
       RecordsIngested: "{'Total': size(input.Records)}"
 
-  # See the shadow note: the pack's answer (a ColumnInfo header and one row
-  # per stored record whose database or table name is a substring of
-  # QueryString) cannot be declared against a shapeless catalog operation.
+  # Not SQL: a stored batch answers when QueryString is absent or any
+  # nonempty part of its database/table key is a substring of it, and each
+  # row is one stored record JSON-marshalled into a single ScalarValue. The
+  # rows build as a JSON string because CEL has no list flatten; an empty
+  # match answers Rows null, as the pack did.
   Query:
-    output: {}
+    let:
+      q: "('QueryString' in input && type(input.QueryString) == string) ? string(input.QueryString) : ''"
+    select:
+      binding: batches
+      resource: records
+      filter: "q == '' || split(string(item.db) + '/' + string(item.tbl), '/').exists(part, part != '' && q.contains(part))"
+    output:
+      ColumnInfo: "[{'Name': 'measure', 'Type': 'VARCHAR'}]"
+      Rows: >
+        sum(batches.map(b, size(type(b.Records) == list ? b.Records : []))) == 0 ? dyn(null)
+          : dyn(parseJSON('[' + join(batches
+            .map(b, join((type(b.Records) == list ? b.Records : []).map(r, toJSON({'Data': [{'ScalarValue': type(r) == string ? string(r) : toJSON(r)}]})), ',')), ',') + ']'))
 
   DescribeEndpoints:
     output:
@@ -198,15 +200,13 @@ quirks:
       RecordsIngested.Total is the request's record count, nothing measured.
   - operation: Query
     note: >
-      Not SQL: a stored batch is answered when any nonempty part of its
-      database/table storage key is a substring of QueryString, so
+      Not SQL: a stored batch answers when QueryString is absent or any
+      nonempty part of its database/table key is a substring of it, so
       "SELECT * FROM metrics" answers every table whose database name happens
-      to appear in the string, and an absent QueryString matches everything.
-      Each row is one stored record, JSON-marshalled into a single ScalarValue
-      under a fixed one-column header. None of this is transcribed: the
-      catalog carries the operation with no output shape, the loader forbids
-      output members a shape does not declare, and that is why the bundle is
-      shadowed.
+      to appear in the string. Each row is one stored record, JSON-marshalled
+      into a single ScalarValue under a fixed one-column header; an empty
+      match answers Rows null, as the pack did. The rows build as a JSON
+      string because CEL has no list flatten.
   - operation: DescribeEndpoints
     note: >
       The endpoint is a constant: 127.0.0.1 with a sixty-minute cache period,

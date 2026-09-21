@@ -20,7 +20,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/parquet-go/parquet-go"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -31,7 +31,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -978,7 +977,7 @@ func TestStatesJSONataBehavior(t *testing.T) {
 		}
 		return response.Output
 	}
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "jsonata"})["QueueUrl"].(string)
 	scope := jsonataScope{input: map[string]any{"values": []any{1.0, 2.0, 3.0}, "encoded": `{"n":3}`}, context: map[string]any{}, variables: map[string]any{}, random: deps.Rand}
 	for _, expression := range []string{
@@ -1112,7 +1111,7 @@ func TestStatesJSONPathVariables(t *testing.T) {
 		}
 		return response.Output
 	}
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "jsonpath-variables"})["QueueUrl"].(string)
 	definition, _ := json.Marshal(map[string]any{
 		"StartAt": "Seed", "States": map[string]any{
@@ -1255,7 +1254,7 @@ func TestStatesPayloadLimits(t *testing.T) {
 		t.Fatalf("oversized Map %#v", mapped)
 	}
 
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	queueResponse, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "payload-limit"}})
 	if err != nil {
 		t.Fatal(err)
@@ -1507,7 +1506,7 @@ func TestStatesRetryScheduling(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invoke := func(handler spi.Handler, operation string, input map[string]any) map[string]any {
@@ -2364,7 +2363,7 @@ func TestStatesTaskTimeoutAndHeartbeat(t *testing.T) {
 		t.Fatalf("task timeout was not caught %#v", timeoutResult)
 	}
 
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	queueResponse, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "callback-timeout"}})
 	if err != nil {
 		t.Fatal(err)
@@ -2386,7 +2385,7 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	storage := s3.New(deps)
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invoke := func(handler spi.Handler, operation string, input map[string]any, body ...[]byte) map[string]any {
@@ -2693,7 +2692,7 @@ func TestStatesServiceIntegrations(t *testing.T) {
 		return response.Output
 	}
 
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "workflow"})["QueueUrl"].(string)
 	topicARN := invoke(sns.New(deps), "CreateTopic", map[string]any{"Name": "workflow"})["TopicArn"].(string)
 	table := dynamodb.New(deps)
@@ -2727,7 +2726,7 @@ func TestStatesServiceIntegrations(t *testing.T) {
 func TestStatesCallbackServiceIntegration(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	call := func(handler spi.Handler, operation string, input map[string]any) (*spi.Response, error) {
@@ -2906,7 +2905,7 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 func TestStatesTaskCredentials(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	queue := sqs.New(deps)
+	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	owner := spi.Identity{Account: "2", Region: "us-east-1"}
 	caller := spi.Identity{Account: "1", Region: "us-east-1"}

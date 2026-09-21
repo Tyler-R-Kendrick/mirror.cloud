@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/logging"
@@ -40,7 +41,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -580,7 +580,7 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 	if !found {
 		t.Fatalf("notification messages = %#v", messages)
 	}
-	received, err := sqs.New(deps).Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "queue", "MaxNumberOfMessages": 10, "AttributeNames": []any{"AWSTraceHeader"}, "VisibilityTimeout": 0}})
+	received, err := bundled.Handler("aws.sqs", deps).Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "queue", "MaxNumberOfMessages": 10, "AttributeNames": []any{"AWSTraceHeader"}, "VisibilityTimeout": 0}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +717,7 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 
 func TestBucketNotificationTopicDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	topicPack, queuePack := sns.New(deps), sqs.New(deps)
+	topicPack, queuePack := sns.New(deps), bundled.Handler("aws.sqs", deps)
 	ctx, id := context.Background(), ident()
 	invokePack := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
 		t.Helper()
@@ -781,7 +781,7 @@ func TestBucketNotificationTopicDelivery(t *testing.T) {
 
 func TestBucketNotificationEventBridgeDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	eventPack, queuePack := events.New(deps), sqs.New(deps)
+	eventPack, queuePack := events.New(deps), bundled.Handler("aws.sqs", deps)
 	defer eventPack.Close()
 	ctx, id := context.Background(), ident()
 	invokePack := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {

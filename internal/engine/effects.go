@@ -183,15 +183,63 @@ func (ev *eval) runSendEvent(ctx context.Context, path string, e bir.SendEvent) 
 		if err != nil {
 			return err
 		}
-		for _, s := range ev.selection {
-			changed, moved, err := ev.sendEvent(ctx, sel.Resource, res, s.rec, e.Event, evtCtx)
-			if err != nil {
-				return err
+		// A transition that redrives (or otherwise finals) a selected record
+		// must not consume the caller's limit: the pack skips that delivery
+		// and keeps looking. Refill from a fresh select until the original
+		// limit is met or the queue has nothing left to hand out.
+		want := len(ev.selection)
+		var kept []selected
+		seen := map[string]bool{}
+		for len(kept) < want {
+			if len(ev.selection) == 0 {
+				if err := ev.runSelect(ctx, ev.op); err != nil {
+					return err
+				}
+				filtered := ev.selection[:0]
+				for _, s := range ev.selection {
+					if !seen[s.key] {
+						filtered = append(filtered, s)
+					}
+				}
+				ev.selection = filtered
+				if need := want - len(kept); len(ev.selection) > need {
+					ev.selection = ev.selection[:need]
+				}
+				if len(ev.selection) == 0 {
+					break
+				}
 			}
-			if err := ev.settleWrite(ctx, col, s.key, res, s.rec, changed, moved); err != nil {
-				return err
+			batch := append([]selected(nil), ev.selection...)
+			ev.selection = nil
+			for _, s := range batch {
+				if seen[s.key] {
+					continue
+				}
+				seen[s.key] = true
+				changed, moved, err := ev.sendEvent(ctx, sel.Resource, res, s.rec, e.Event, evtCtx)
+				if err != nil {
+					return err
+				}
+				if err := ev.settleWrite(ctx, col, s.key, res, s.rec, changed, moved); err != nil {
+					return err
+				}
+				// Redrive is a receive that the caller must not see: skip it and
+				// look for another message. A MOVE that leaves the collection is
+				// still a successful selection — message-move counters read it.
+				if res.Statechart != nil && stateOf(s.rec, res.Statechart) == "redriven" {
+					continue
+				}
+				newKey := ev.recordKey(res, s.rec)
+				if newKey == "" {
+					newKey = s.key
+				}
+				kept = append(kept, selected{key: newKey, rec: s.rec})
+				if len(kept) >= want {
+					break
+				}
 			}
 		}
+		ev.setSelection(e.ForEach, kept)
 		return nil
 	}
 
@@ -252,10 +300,26 @@ func (ev *eval) settleWrite(ctx context.Context, col spi.Collection, key string,
 	}
 	newKey := ev.recordKey(res, rec)
 	if newKey != "" && newKey != key {
+		if err := ev.putKeyAlias(ctx, res, key, newKey); err != nil {
+			return err
+		}
 		if err := col.Delete(ctx, key); err != nil {
 			return err
 		}
 		key = newKey
 	}
 	return ev.putRecord(ctx, col, key, rec)
+}
+
+// putKeyAlias records old→new when a resource's store key changes, so a
+// caller holding the previous key still resolves. No-op without KeyAliases.
+func (ev *eval) putKeyAlias(ctx context.Context, res bir.Resource, oldKey, newKey string) error {
+	if res.KeyAliases == "" || oldKey == "" || newKey == "" || oldKey == newKey {
+		return nil
+	}
+	name, err := ev.interpolate(res.KeyAliases)
+	if err != nil {
+		return err
+	}
+	return ev.e.scope(ev.req).Collection(name).Put(ctx, oldKey, []byte(newKey))
 }

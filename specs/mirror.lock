@@ -10,6 +10,18 @@
       "source": "https://storage.googleapis.com/$discovery/rest?version=v1",
       "ref": "2026-08-28T18:51:00Z"
     },
+    "aws.es": {
+      "source": "authored",
+      "ref": "2026-09-20T13:31:20Z"
+    },
+    "aws.appsync": {
+      "source": "authored",
+      "ref": "2026-09-20T13:23:03Z"
+    },
+    "aws.timestream": {
+      "source": "authored",
+      "ref": "2026-09-20T13:51:57Z"
+    },
     "hostinger.api": {
       "source": "https://raw.githubusercontent.com/hostinger/api/main/openapi.json",
       "ref": "2026-09-11T00:55:54Z"
@@ -64,6 +76,14 @@
     }
   },
   "files": [
+    {
+      "serviceId": "aws.appsync",
+      "source": "authored",
+      "ref": "2026-09-20T13:23:03Z",
+      "path": "appsync-graphql.json",
+      "sha256": "9f9c230ae93f9b160917952e03059b267c150a1a06a3d4f66c047d41045a58ad",
+      "ingested": "2026-09-20T13:23:03Z"
+    },
     {
       "serviceId": "aws.access-analyzer",
       "source": "https://github.com/aws/api-models-aws",
@@ -1289,6 +1309,14 @@
       "ingested": "2026-09-11T10:32:02Z"
     },
     {
+      "serviceId": "aws.es",
+      "source": "authored",
+      "ref": "2026-09-20T13:31:20Z",
+      "path": "es-dataplane.json",
+      "sha256": "6290c6b3b73438a5cd2198e6ed1eeb4d9cdd79978905f68715a778e59454e534",
+      "ingested": "2026-09-20T13:31:21Z"
+    },
+    {
       "serviceId": "fly.machines",
       "source": "https://docs.machines.dev/spec/openapi3.json",
       "ref": "2026-09-11T06:04:02Z",
@@ -1337,6 +1365,14 @@
       "ingested": "2026-09-20T01:42:55Z"
     },
     {
+      "serviceId": "aws.timestream",
+      "source": "authored",
+      "ref": "2026-09-20T13:51:57Z",
+      "path": "timestream-query.json",
+      "sha256": "95a2616348d218275d41d8aaf0c8648b0a1b3cff8af5a8fc4ee0c72ea071f907",
+      "ingested": "2026-09-20T13:51:57Z"
+    },
+    {
       "serviceId": "vercel.api",
       "source": "authored",
       "ref": "2026-09-18T18:20:01Z",
@@ -1373,7 +1409,7 @@
       "source": "authored",
       "ref": "2026-09-11T22:29:30Z",
       "path": "vercel/kv.json",
-      "sha256": "723f1ca621f2f9f01915afd108c37380e81afe27c173bf3beb5c02749bd07c81",
+      "sha256": "e89cc2568ee998feec37e5d98c2ac8fdda0ceee15ed8ae10a2e9f5e6b4abe25a",
       "ingested": "2026-09-11T22:29:30Z"
     }
   ]

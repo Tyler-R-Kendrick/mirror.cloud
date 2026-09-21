@@ -504,6 +504,16 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 			in["RowKey"] = ent["RowKey"]
 		}
 	}
+	if (svc.ID == "aws.opensearch" || svc.ID == "aws.es") && op != nil {
+		// The document plane is addressed by path segments, not members: a
+		// PUT to /cities/_doc/1 names the index and the id the way the
+		// pack's fill() read them, because no SDK spelling exists for them.
+		// Members the request already carries win over the path.
+		switch op.Name {
+		case "IndexDocument", "GetDocument", "DeleteDocument", "Search":
+			fillOpenSearchPath(in, r.URL.Path)
+		}
+	}
 	for k, vs := range r.URL.Query() {
 		if _, ok := in[k]; !ok {
 			// A member the model declares as a list collects every repeated
@@ -882,6 +892,34 @@ func rawBody(resp *spi.Response) (string, bool) {
 
 // isListMember reports whether the operation's input shape declares this
 // member with a list shape.
+// fillOpenSearchPath reads document coordinates off an Elasticsearch-style
+// path the way the pack's fill did: the segment before _doc or _search is
+// the index, the one after _doc is the id, and a domain/opensearch/_aws
+// prefix names the domain. The pack guarded only the domain/opensearch
+// prefix form; the index, id and _aws forms overwrite what the request
+// carried, and so does this.
+func fillOpenSearchPath(in map[string]any, path string) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for i, part := range parts {
+		if (part == "domain" || part == "opensearch") && i+1 < len(parts) && parts[i+1] != "domain" && parts[i+1] != "list" {
+			if _, ok := in["DomainName"]; !ok {
+				in["DomainName"] = parts[i+1]
+			}
+		}
+		if part == "_doc" || part == "_search" {
+			if i > 0 {
+				in["Index"] = parts[i-1]
+			}
+			if part == "_doc" && i+1 < len(parts) {
+				in["Id"] = parts[i+1]
+			}
+		}
+		if part == "_aws" && i+2 < len(parts) && parts[i+1] == "opensearch" {
+			in["DomainName"] = parts[i+2]
+		}
+	}
+}
+
 func isListMember(svc *model.Service, op *model.Operation, name string) bool {
 	if op.Input == "" {
 		return false

@@ -13,6 +13,8 @@ provenance: authored
 # service calls their absence is the service's own vocabulary, so it is stated
 # here rather than assumed by the engine.
 missing_input_error: MissingParameter
+missing_input_messages:
+  MessageBody: "The request must contain the parameter MessageBody."
 
 # Every operation the pack serves is now expressed here, including the six that
 # were missing, and all of them are gated against the pack's recording on every
@@ -38,13 +40,6 @@ missing_input_error: MissingParameter
 # means letting a resource declare the members that address it -- so the
 # required check is satisfied by any one of them -- which is a change to input
 # validation for every service and wants its own evidence.
-shadow: >
-  Complete and gated, but not yet serving: SQS requires QueueUrl on the wire
-  and the engine enforces that from the model, while the emulator's internal
-  delivery paths (events, scheduler, sns, pipes) address queues by QueueName
-  because no endpoint is available to them. Serving from this bundle needs
-  resource-declared addressing members in input validation.
-
 resources:
   queue:
     collection: queues
@@ -62,15 +57,21 @@ resources:
       # The URL has to echo the endpoint the caller actually reached: a client
       # handed a link to somewhere it cannot reach is worse than an error.
       url: "endpoint + '/' + identity.account + '/' + id"
-      attrs: >
-        id.endsWith('.fifo')
-          ? merge('Attributes' in input ? input.Attributes : {}, {'FifoQueue': 'true'})
-          : ('Attributes' in input ? input.Attributes : {})
+      # Only what every write of this record can re-derive from the request in
+      # hand lives here: a patch evaluates these members again, so a member
+      # that reads the caller's Attributes would be rewritten by every later
+      # SetQueueAttributes and PurgeQueue. The creation stamps -- attrs,
+      # createdAt, dedupScope -- are written by CreateQueue's own effect.
+
     views:
-      fifo: "string(rec.name).endsWith('.fifo')"
+      # A queue record another service planted directly in the store carries
+      # only what that service knew to write -- S3's notification target is
+      # literally `{}` -- so a view reads what is there rather than assuming
+      # this bundle wrote the row.
+      fifo: "'name' in rec && string(rec.name).endsWith('.fifo')"
       # Stored attributes over the documented defaults, so a bundle reads one
       # merged map rather than repeating the fallbacks at every site.
-      settings: "merge({'VisibilityTimeout': '30', 'DelaySeconds': '0'}, rec.attrs)"
+      settings: "merge({'VisibilityTimeout': '30', 'DelaySeconds': '0'}, 'attrs' in rec ? rec.attrs : {})"
 
   # Queue attributes set after creation live apart from the queue record, as
   # they do in the pack: SetQueueAttributes replaces this wholesale while
@@ -81,7 +82,9 @@ resources:
       input_members: [QueueName]
       derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
     record:
-      attrs: "'Attributes' in input ? input.Attributes : {}"
+      # SetQueueAttributes supplies attrs via the effect; resource-level copy of
+      # input.Attributes would overwrite the merged/cleared map with empties.
+      attrs: {}
 
   tags:
     collection: qtags
@@ -89,20 +92,65 @@ resources:
       input_members: [QueueName]
       derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
     record:
-      tags: "'Tags' in input ? input.Tags : {}"
+      tags: "size(sqsTags(input)) > 0 ? sqsTags(input) : ('Tags' in input ? input.Tags : {})"
 
-  # A message move task. The pack completes a move synchronously and records
-  # the task as already COMPLETED, so this record is a receipt rather than a
-  # job: nothing later advances its status. Real SQS runs the move in the
-  # background and the task passes through RUNNING, which is why
-  # CancelMessageMoveTask can never succeed here -- see quirks.
+  # A message move task. Without MaxNumberOfMessagesPerSecond the move runs
+  # to completion in the Start call and the record is filed COMPLETED. With a
+  # positive rate the first message moves synchronously and the task stays
+  # RUNNING so Cancel and a duplicate Start have a window to observe -- the
+  # pack's background worker is approximated, not reproduced.
   movetask:
     collection: qmove
-    id: { generate: { kind: hex, bytes: 16 } }
+    id: { generate: { kind: uuid } }
     record:
-      TaskHandle: id
+      TaskHandle: >
+        b64('{"taskId":"' + string(id) + '","sourceArn":"' +
+        ('SourceArn' in input && input.SourceArn != null ? string(input.SourceArn) : '') + '"}')
       Status: "'COMPLETED'"
       StartedTimestamp: "int(now)"
+
+  # Presence of a RedrivePolicy targeting this queue. StartMessageMoveTask
+  # requires the source to be someone's dead-letter target; scanning every
+  # queue's settings from a require is not expressible, so SetQueueAttributes
+  # (and CreateQueue when Attributes carry a policy) maintain this mark.
+  dlqmark:
+    collection: dlqmark
+    id:
+      input_members: [QueueName]
+      derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
+    record:
+      dlq: id
+
+  # One RUNNING move task per source queue. Duplicate Start with a positive
+  # MaxNumberOfMessagesPerSecond faults while this exists.
+  moverunning:
+    collection: qmoverun
+    id:
+      derive: >
+        'SourceArn' in input && input.SourceArn != null
+          ? queueFromArn(string(input.SourceArn)) : ''
+    record:
+      source: id
+      dest: >
+        'DestinationArn' in input && input.DestinationArn != null
+          ? queueFromArn(string(input.DestinationArn)) : ''
+
+  # Dedup and prior-handle indexes are plain collections the pack cleared on
+  # purge; naming them as resources lets PurgeQueue delete-where them.
+  dedup:
+    collection: "dedup:{queue.id}"
+    parent: queue
+  rhandle:
+    collection: "rhandles:{queue.id}"
+    parent: queue
+
+  deleted:
+    collection: qdeleted
+    id:
+      input_members: [QueueName]
+      derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
+    record:
+      at: "int(now)"
 
   message:
     # Parent-scoped: each queue's messages are their own collection, named for
@@ -112,6 +160,9 @@ resources:
     id: { generate: { kind: hex, bytes: 16 } }
     # Addressed by receipt handle, which is what a caller holds.
     key: handle
+    # Re-receive regenerates the handle; callers holding the prior one still
+    # resolve through this alias collection (pack: rhandles:<queue>).
+    key_aliases: "rhandles:{queue.id}"
     record:
       id: id
       handle: { generate: { kind: hex, bytes: 64 } }
@@ -119,8 +170,18 @@ resources:
       md5: "md5hex(string(input.MessageBody))"
       group: "'MessageGroupId' in input ? string(input.MessageGroupId) : ''"
       attrs: "'MessageAttributes' in input ? input.MessageAttributes : {}"
+      md5Attrs: >
+        'MessageAttributes' in input && size(input.MessageAttributes) > 0
+          ? md5MessageAttributes(input.MessageAttributes) : ''
       seq: { counter: "seq:{queue.id}" }
       receiveCount: "0"
+      # Unix millis; retention compares against MessageRetentionPeriod seconds.
+      sentAt: "now_ms"
+      trace: >
+        'MessageSystemAttributes' in input && input.MessageSystemAttributes != null
+          && 'AWSTraceHeader' in input.MessageSystemAttributes
+          ? string(input.MessageSystemAttributes.AWSTraceHeader.StringValue)
+          : (has_http && 'X-Amzn-Trace-Id' in headers ? string(headers['X-Amzn-Trace-Id']) : '')
 
     statechart:
       initial: visible
@@ -133,7 +194,7 @@ resources:
               # policy's count, which is what the pack does and what makes the
               # count observable.
               - guard: >
-                  has(event.maxReceiveCount) && event.maxReceiveCount > 0 &&
+                  'maxReceiveCount' in event && event.maxReceiveCount > 0 &&
                   int(rec.receiveCount) + 1 > event.maxReceiveCount &&
                   event.deadLetter != '' && event.deadLetter != event.queue
                 target: redriven
@@ -147,11 +208,27 @@ resources:
                       to: { queue: event.deadLetter }
                       set:
                         handle: { generate: { kind: hex, bytes: 64 } }
-                        origin: "has(rec.origin) && rec.origin != '' ? rec.origin : event.queue"
+                        origin: >
+                          'origin' in rec && rec.origin != ''
+                            ? rec.origin : event.queue
+                        receiveCount: "0"
+                        firstReceiveAt: "0"
                       state: visible
-              - target: invisible
+              # First delivery keeps the create-time handle; later deliveries
+              # mint a new one (and key_aliases records the prior→current map).
+              - guard: "int(rec.receiveCount) == 0"
+                target: invisible
                 actions:
-                  - set: { receiveCount: "int(rec.receiveCount) + 1" }
+                  - set:
+                      receiveCount: "1"
+                      firstReceiveAt: "now_ms"
+                  - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
+              - guard: "int(rec.receiveCount) > 0"
+                target: invisible
+                actions:
+                  - set:
+                      receiveCount: "int(rec.receiveCount) + 1"
+                      handle: { generate: { kind: hex, bytes: 64 } }
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             PURGE: [{ target: deleted }]
@@ -169,6 +246,7 @@ resources:
                           event.dest != '' ? event.dest : string(rec.origin)
                       set:
                         handle: { generate: { kind: hex, bytes: 64 } }
+                        receiveCount: "0"
                       state: visible
             CHANGE_VISIBILITY:
               - target: invisible
@@ -210,35 +288,224 @@ errors:
     fault: client
   ResourceNotFound:
     code: ResourceNotFoundException
+    http: 404
+    fault: client
+  InvalidMessageContents:
+    code: InvalidMessageContents
+    http: 400
+    fault: client
+    message: The message contains characters outside the allowed set.
+  ReceiptHandleIsInvalid:
+    code: ReceiptHandleIsInvalid
+    http: 400
+    fault: client
+  PurgeQueueInProgress:
+    code: AWS.SimpleQueueService.PurgeQueueInProgress
+    http: 403
+    fault: client
+  EmptyBatchRequest:
+    code: AWS.SimpleQueueService.EmptyBatchRequest
+    http: 400
+    fault: client
+    message: There should be at least one SendMessageBatchRequestEntry in the request.
+  EmptyDeleteBatchRequest:
+    code: AWS.SimpleQueueService.EmptyBatchRequest
+    http: 400
+    fault: client
+    message: There should be at least one DeleteMessageBatchRequestEntry in the request.
+  EmptyChangeVisibilityBatchRequest:
+    code: AWS.SimpleQueueService.EmptyBatchRequest
+    http: 400
+    fault: client
+    message: There should be at least one ChangeMessageVisibilityBatchRequestEntry in the request.
+  TooManyEntriesInBatchRequest:
+    code: AWS.SimpleQueueService.TooManyEntriesInBatchRequest
+    http: 400
+    fault: client
+  InvalidBatchEntryId:
+    code: AWS.SimpleQueueService.InvalidBatchEntryId
+    http: 400
+    fault: client
+  BatchRequestTooLong:
+    code: AWS.SimpleQueueService.BatchRequestTooLong
+    http: 400
+    fault: client
+  InvalidAttributeName:
+    code: InvalidAttributeName
+    http: 400
+    fault: client
+  QueueAlreadyExists:
+    code: QueueAlreadyExists
+    http: 400
+    fault: client
+  QueueDeletedRecently:
+    code: AWS.SimpleQueueService.QueueDeletedRecently
+    http: 400
+    fault: client
+    message: You must wait 60 seconds after deleting a queue before you can create another with the same name.
+  InvalidAddress:
+    code: InvalidAddress
     http: 400
     fault: client
 
 operations:
   CreateQueue:
+    reads:
+      gone: { resource: deleted }
+      q: { resource: queue }
+      s: { resource: settings }
+    let:
+      attrs: "'Attributes' in input && input.Attributes != null ? input.Attributes : {}"
+      name: "string(input.QueueName)"
+      tagsIn: "sqsTags(input)"
+      effective: "merge(q_found ? q.attrs : {}, s_found ? s.attrs : {})"
+      conflict: "q_found ? sqsQueueAttrConflict(effective, attrs) : ''"
+      redrive: >
+        'RedrivePolicy' in attrs && string(attrs.RedrivePolicy) != ''
+          ? parseJSON(string(attrs.RedrivePolicy)) : null
+      dlq: >
+        redrive != null && 'deadLetterTargetArn' in redrive
+          ? queueFromArn(string(redrive.deadLetterTargetArn)) : ''
+    require:
+      - cond: "validQueueName(name)"
+        error: InvalidParameterValue
+        message: Queue name must be 1 to 80 characters of alphanumeric characters, hyphens, underscores, and an optional .fifo suffix.
+      # The window outranks everything about the attributes: a name inside it
+      # cannot be created however well-formed the request is, and the pack
+      # checked it the moment the name validated.
+      - cond: "!gone_found || int(now) - int(gone.at) >= 60"
+        error: QueueDeletedRecently
+      - cond: >
+          !name.endsWith('.fifo')
+            || ('FifoQueue' in attrs && string(attrs.FifoQueue) == 'true')
+        error: InvalidParameterValue
+        message: FifoQueue must be specified as true for FIFO queues.
+      - cond: >
+          name.endsWith('.fifo') || !('FifoQueue' in attrs) || string(attrs.FifoQueue) != 'true'
+        error: InvalidParameterValue
+        message: Queue name must end in .fifo for FIFO queues
+      - cond: >
+          name.endsWith('.fifo')
+            || (!('ContentBasedDeduplication' in attrs)
+                && !('DeduplicationScope' in attrs)
+                && !('FifoThroughputLimit' in attrs)
+                && !('FifoQueue' in attrs))
+        error: InvalidAttributeName
+        message_expr: >
+          'FifoQueue' in attrs ? 'Unknown Attribute FifoQueue.'
+            : ('ContentBasedDeduplication' in attrs ? 'Unknown Attribute ContentBasedDeduplication.'
+              : ('DeduplicationScope' in attrs
+                  ? 'You can specify the DeduplicationScope only when FifoQueue is set to true.'
+                  : 'You can specify the FifoThroughputLimit only when FifoQueue is set to true.'))
+      - cond: >
+          !('RedrivePolicy' in attrs) || string(attrs.RedrivePolicy) == ''
+            || validRedrivePolicy(string(attrs.RedrivePolicy))
+        error: InvalidParameterValue
+        message: Invalid value for the parameter RedrivePolicy.
+      - cond: "!sseConflict(attrs)"
+        error: InvalidAttributeName
+        message: You can use one type of server-side encryption (SSE) at one time. You can either enable KMS SSE or SQS SSE.
+      - cond: "conflict == ''"
+        error: QueueAlreadyExists
+        message_expr: >
+          "A queue already exists with the same name and a different value for attribute " + conflict
     effects:
-      - create: { resource: queue }
+      - delete: { resource: deleted, when: "gone_found" }
+      - create:
+          resource: dlqmark
+          when: "!q_found && dlq != ''"
+          key: dlq
+          record:
+            dlq: dlq
+      - put:
+          resource: tags
+          when: "!q_found && size(tagsIn) > 0"
+          record:
+            tags: tagsIn
+      - create:
+          resource: queue
+          when: "!q_found"
+          record:
+            attrs: >
+              name.endsWith('.fifo')
+                ? merge(attrs, {'FifoQueue': 'true'})
+                : attrs
+            createdAt: "int(now)"
+            # The pack freezes DeduplicationScope at creation, so a later
+            # SetQueueAttributes moves the attribute a caller reads back
+            # without moving which key a send deduplicates on.
+            dedupScope: "'DeduplicationScope' in attrs ? string(attrs.DeduplicationScope) : ''"
     output:
-      QueueUrl: rec.url
+      QueueUrl: "q_found ? q.url : rec.url"
 
   GetQueueUrl:
     reads:
       q: { resource: queue }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.' 
     output:
       QueueUrl: q.url
 
   ListQueues:
-    list: { resource: queue, member: QueueUrls, paginate: model }
+    require:
+      - cond: >
+          !('NextToken' in input) || string(input.NextToken) == ''
+            || b64decode(string(input.NextToken)) != ''
+        error: InvalidAddress
+        message_expr: '"The address " + string(input.NextToken) + " is not valid for this endpoint."'
+    list:
+      resource: queue
+      member: QueueUrls
+      paginate: model
+      prefix: "'QueueNamePrefix' in input ? string(input.QueueNamePrefix) : ''"
+      after: "lastSegment(b64decode(string(input.NextToken)), '/')"
+      token: "b64(string(item.url))"
+    omit_null: [QueueUrls]
     output:
-      QueueUrls: "items.map(q, q.url)"
+      QueueUrls: "items.size() == 0 ? dyn(null) : items.map(q, q.url)"
 
   DeleteQueue:
     reads:
       q: { resource: queue }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.' 
     effects:
+      # A RUNNING move whose destination vanishes fails the task. The pack's
+      # async worker discovers this on the next tick; here DeleteQueue is the
+      # observation that does it.
+      - patch:
+          resource: movetask
+          where: >
+            string(item.Status) == 'RUNNING' &&
+            'DestinationArn' in item && item.DestinationArn != null &&
+            queueFromArn(string(item.DestinationArn)) == string(q.name)
+          record:
+            Status: "'FAILED'"
+            FailureReason: "'The destination queue does not exist.'"
+      - delete:
+          resource: moverunning
+          where: >
+            'dest' in item && item.dest != null && string(item.dest) == string(q.name)
+      # Everything filed under the name goes with it, so a queue recreated
+      # after the window is a new queue: the pack cleared each of these, and a
+      # survivor would be a tag, an attribute or a deduplication entry the
+      # caller never set on the queue it has.
+      - delete: { resource: settings }
+      - delete: { resource: tags }
+      - delete: { resource: message, where: "true" }
+      - delete: { resource: dedup, where: "true" }
+      - delete: { resource: rhandle, where: "true" }
+      - put: { resource: deleted }
       - delete: { resource: queue }
 
   GetQueueAttributes:
@@ -246,60 +513,152 @@ operations:
       q: { resource: queue }
       s: { resource: settings }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+      - cond: >
+          !('AttributeNames' in input) ||
+          input.AttributeNames.all(a, string(a) == 'All' || knownQueueAttribute(string(a)))
+        error: InvalidAttributeName
+        message_expr: >
+          "Unknown Attribute " + string(input.AttributeNames.filter(a, string(a) != 'All' && !knownQueueAttribute(string(a)))[0]) + "."
     # Counting the messages is an observation like any other, so expired
     # visibility timeouts settle here too.
     select: { binding: msgs, resource: message }
     output:
+      # A caller is handed the attributes it named and no others; naming none
+      # is how a request asks for none, which is what filterAttrs already
+      # means everywhere else it is used.
       Attributes: >
-        merge(
-          merge({'ApproximateNumberOfMessages': string(msgs.size()), 'VisibilityTimeout': '30'},
-                q.attrs),
-          s_found ? s.attrs : {})
+        filterAttrs(merge(merge({
+          'ApproximateNumberOfMessages': string(msgs.filter(m, !has(m.__state) || string(m.__state) == 'visible').size()),
+          'ApproximateNumberOfMessagesNotVisible': string(msgs.filter(m, string(m.__state) == 'invisible' && int(m.receiveCount) > 0).size()),
+          'ApproximateNumberOfMessagesDelayed': string(msgs.filter(m, string(m.__state) == 'invisible' && int(m.receiveCount) == 0).size()),
+          'VisibilityTimeout': '30',
+          'DelaySeconds': '0',
+          'MaximumMessageSize': '1048576',
+          'MessageRetentionPeriod': '345600',
+          'ReceiveMessageWaitTimeSeconds': '0',
+          'SqsManagedSseEnabled': 'true',
+          'CreatedTimestamp': string(int(q.createdAt)),
+          'LastModifiedTimestamp': string(int(q.createdAt)),
+          'QueueArn': arn(partition(identity.region), ['sqs', identity.region, identity.account, string(q.name)])
+        }, q.attrs), s_found ? s.attrs : {}),
+        'AttributeNames' in input ? input.AttributeNames : [])
 
   SetQueueAttributes:
     reads:
       q: { resource: queue }
+      s: { resource: settings }
+    let:
+      redrive: >
+        'Attributes' in input && input.Attributes != null &&
+        'RedrivePolicy' in input.Attributes && string(input.Attributes.RedrivePolicy) != ''
+          ? parseJSON(string(input.Attributes.RedrivePolicy)) : null
+      dlq: >
+        redrive != null && 'deadLetterTargetArn' in redrive
+          ? queueFromArn(string(redrive.deadLetterTargetArn)) : ''
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+      - cond: >
+          !('Attributes' in input) || !('RedrivePolicy' in input.Attributes)
+            || string(input.Attributes.RedrivePolicy) == ''
+            || validRedrivePolicy(string(input.Attributes.RedrivePolicy))
+        error: InvalidParameterValue
+        message: Invalid value for the parameter RedrivePolicy.
+      - cond: >
+          !('Attributes' in input) || !('FifoQueue' in input.Attributes)
+            || (q.fifo && string(input.Attributes.FifoQueue) == 'true')
+        error: InvalidAttributeName
+        message: Unknown Attribute FifoQueue.
+      - cond: >
+          !('Attributes' in input) || !sseConflict(merge(s_found ? s.attrs : {}, input.Attributes))
+        error: InvalidAttributeName
+        message: You can use one type of server-side encryption (SSE) at one time. You can either enable KMS SSE or SQS SSE.
     effects:
-      - put: { resource: settings }
+      - put:
+          resource: settings
+          record:
+            attrs: >
+              sqsMergeQueueAttrs(s_found ? s.attrs : {},
+                'Attributes' in input ? input.Attributes : {})
+      - patch:
+          resource: queue
+          record:
+            lastModified: "string(int(now))"
+      - put:
+          resource: dlqmark
+          when: "dlq != ''"
+          key: dlq
+          record:
+            dlq: dlq
 
   TagQueue:
     reads:
       q: { resource: queue }
+      t: { resource: tags }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
     effects:
-      - put: { resource: tags }
+      - put:
+          resource: tags
+          record:
+            tags: "merge(t_found ? t.tags : {}, 'Tags' in input ? input.Tags : {})"
 
   UntagQueue:
     reads:
       q: { resource: queue }
       t: { resource: tags }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.' 
     effects:
       - put:
           resource: tags
           record:
-            tags: "without(t_found ? t.tags : {}, 'TagKeys' in input ? input.TagKeys : [])"
+            tags: "without(t_found ? t.tags : {}, size(sqsTagKeys(input)) > 0 ? sqsTagKeys(input) : ('TagKeys' in input ? input.TagKeys : []))"
 
   ListQueueTags:
     reads:
       q: { resource: queue }
       t: { resource: tags }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+    omit_null: [Tags]
     output:
-      Tags: "t_found ? t.tags : {}"
+      Tags: "t_found && size(t.tags) > 0 ? t.tags : dyn(null)"
 
   SendMessage:
     reads:
       q: { resource: queue }
       s: { resource: settings }
     let:
-      settings: "merge(q.settings, s_found ? s.attrs : {})"
+      # Guarded on q_found: a send naming a queue that does not exist still
+      # evaluates its lets, and the answer the caller gets must be the missing
+      # queue rather than whatever the first unguarded dereference trips over.
+      settings: "merge(q_found ? q.settings : {}, s_found ? s.attrs : {})"
       # Deduplication is explicit, or derived from the body when the queue asks
       # for content-based deduplication, or absent.
       dedupId: >
@@ -308,49 +667,147 @@ operations:
           : (('ContentBasedDeduplication' in settings && string(settings.ContentBasedDeduplication) == 'true')
               ? md5hex(string(input.MessageBody)) : '')
       delay: >
-        int('DelaySeconds' in input && input.DelaySeconds != null
-              ? input.DelaySeconds
-              : coalesce(settings.DelaySeconds, '0'))
+        int(
+          (!('DelaySeconds' in input) || input.DelaySeconds == null
+             || (q_found && q.fifo && int(input.DelaySeconds) == 0))
+            ? coalesce(settings.DelaySeconds, '0')
+            : input.DelaySeconds)
+      explicitDelay: "'DelaySeconds' in input && input.DelaySeconds != null"
     # Ordered: the first failing rule decides the error, and this ordering is
     # the service's error precedence stated as data.
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+      - cond: "'MessageBody' in input && string(input.MessageBody) != ''"
+        error: MissingParameter
+        message: "The request must contain the parameter MessageBody."
+      - cond: "validMessageContents(string(input.MessageBody))"
+        error: InvalidMessageContents
+      - cond: >
+          !('MessageAttributes' in input) || input.MessageAttributes == null
+            || validMessageAttributes(input.MessageAttributes)
+        error: InvalidParameterValue
+        message: The message attribute is invalid.
       - cond: "!q.fifo || ('MessageGroupId' in input && string(input.MessageGroupId) != '')"
         error: MissingParameter
         message: MessageGroupId
+      - cond: >
+          !('MessageGroupId' in input) || validMessageGroupID(string(input.MessageGroupId))
+        error: InvalidParameterValue
+        message_expr: >
+          "Value " + string(input.MessageGroupId)
+            + " for parameter MessageGroupId is invalid. Reason: MessageGroupId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+      # An explicit empty value on a FIFO queue is an invalid value, not an
+      # absent one: the caller named the parameter, so it is judged.
+      - cond: >
+          !('MessageDeduplicationId' in input)
+            || (!q.fifo && string(input.MessageDeduplicationId) == '')
+            || validMessageGroupID(string(input.MessageDeduplicationId))
+        error: InvalidParameterValue
+        message_expr: >
+          "Value " + string(input.MessageDeduplicationId)
+            + " for parameter MessageDeduplicationId is invalid. Reason: MessageDeduplicationId can only include alphanumeric and punctuation characters. 1 to 128 in length."
       - cond: "!q.fifo || dedupId != ''"
         error: InvalidParameterValue
         message: MessageDeduplicationId is required when ContentBasedDeduplication is disabled.
+      - cond: "!(q.fifo && explicitDelay && int(input.DelaySeconds) != 0)"
+        error: InvalidParameterValue
+        message_expr: >
+          "Value " + string(int(input.DelaySeconds))
+            + " for parameter DelaySeconds is invalid. Reason: The request include parameter that is not valid for this queue type."
       - cond: "delay >= 0 && delay <= 900"
         error: InvalidParameterValue
         message: DelaySeconds must be between 0 and 900.
+      - cond: >
+          messageSize(string(input.MessageBody),
+            'MessageAttributes' in input ? input.MessageAttributes : {})
+            <= int('MaximumMessageSize' in settings ? settings.MaximumMessageSize : '1048576')
+        error: InvalidParameterValue
+        message_expr: >
+          "One or more parameters are invalid. Reason: Message must be shorter than "
+            + string(int('MaximumMessageSize' in settings ? settings.MaximumMessageSize : '1048576'))
+            + " bytes."
     effects:
       # A duplicate inside the window replays the first send's answer and
       # writes nothing.
       - dedup:
           when: "dedupId != ''"
           table: "dedup:{queue.id}"
-          key: dedupId
+          key: >
+            (((has(q.dedupScope) && string(q.dedupScope) != '')
+                ? string(q.dedupScope)
+                : ('DeduplicationScope' in settings ? string(settings.DeduplicationScope) : ''))
+              == 'messageGroup' && 'MessageGroupId' in input)
+              ? (string(input.MessageGroupId) + "\u001f" + dedupId)
+              : dedupId
           ttl: 5m
           on_hit:
             output:
               MessageId: hit.MessageId
-              MD5OfMessageBody: hit.MD5OfMessageBody
+              # Pack returns the *request* body digest on a hit, not the stored one.
+              MD5OfMessageBody: "md5hex(string(input.MessageBody))"
+              SequenceNumber: "has(hit.SequenceNumber) ? hit.SequenceNumber : dyn(null)"
+              MD5OfMessageAttributes: >
+                'MessageAttributes' in input && size(input.MessageAttributes) > 0
+                  ? md5MessageAttributes(input.MessageAttributes) : dyn(null)
+              MD5OfMessageSystemAttributes: >
+                'MessageSystemAttributes' in input && size(input.MessageSystemAttributes) > 0
+                  ? md5MessageAttributes(input.MessageSystemAttributes)
+                  : (has_http && 'X-Amzn-Trace-Id' in headers && string(headers['X-Amzn-Trace-Id']) != ''
+                      ? md5MessageAttributes({'AWSTraceHeader': {'DataType': 'String', 'StringValue': string(headers['X-Amzn-Trace-Id'])}})
+                      : dyn(null))
       - create:
           resource: message
           # A delayed message is born invisible with its reappearance already
           # armed, rather than needing anything to wake up and deliver it.
           state: "delay > 0 ? 'invisible' : 'visible'"
           deadline: { name: reappear, after: "seconds(delay)", when: "delay > 0" }
+    omit_null: [SequenceNumber, MD5OfMessageAttributes, MD5OfMessageSystemAttributes]
     output:
       MessageId: rec.id
       MD5OfMessageBody: rec.md5
+      SequenceNumber: "q.fifo ? string(rec.seq) : dyn(null)"
+      MD5OfMessageAttributes: >
+        'MessageAttributes' in input && size(input.MessageAttributes) > 0
+          ? md5MessageAttributes(input.MessageAttributes) : dyn(null)
+      MD5OfMessageSystemAttributes: >
+        'MessageSystemAttributes' in input && size(input.MessageSystemAttributes) > 0
+          ? md5MessageAttributes(input.MessageSystemAttributes)
+          : (has_http && 'X-Amzn-Trace-Id' in headers && string(headers['X-Amzn-Trace-Id']) != ''
+              ? md5MessageAttributes({'AWSTraceHeader': {'DataType': 'String', 'StringValue': string(headers['X-Amzn-Trace-Id'])}})
+              : dyn(null))
 
   SendMessageBatch:
     reads:
       q: { resource: queue }
+      s: { resource: settings }
+    let:
+      settings: "merge(q.settings, s_found ? s.attrs : {})"
+      entries: "'Entries' in input ? input.Entries : []"
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+      - cond: >
+          !q.fifo || !entries.exists(e,
+            !('MessageGroupId' in e) || string(e.MessageGroupId) == '')
+        error: MissingParameter
+        message: MessageGroupId
+      - cond: >
+          !q.fifo
+            || string(coalesce(settings.ContentBasedDeduplication, 'false')) == 'true'
+            || !entries.exists(e,
+              ('MessageGroupId' in e && string(e.MessageGroupId) != '')
+                && (!('MessageDeduplicationId' in e) || string(e.MessageDeduplicationId) == ''))
+        error: InvalidParameterValue
+        message: The queue should either have ContentBasedDeduplication enabled or MessageDeduplicationId provided explicitly
     batch:
       of: SendMessage
       entries: Entries
@@ -358,37 +815,86 @@ operations:
       carry: [QueueUrl, QueueName]
       successful: Successful
       failed: Failed
-      result: [MessageId, MD5OfMessageBody]
+      result: [MessageId, MD5OfMessageBody, SequenceNumber]
+      max_entries: 10
+      empty_error: EmptyBatchRequest
+      too_many_error: TooManyEntriesInBatchRequest
+      invalid_id_error: InvalidBatchEntryId
+      max_bytes: 1048576
+      too_long_error: BatchRequestTooLong
 
   ReceiveMessage:
     reads:
       q: { resource: queue }
       s: { resource: settings }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+      - cond: >
+          !('MaxNumberOfMessages' in input) ||
+          (int(input.MaxNumberOfMessages) >= 1 && int(input.MaxNumberOfMessages) <= 10)
+        error: InvalidParameterValue
+        message_expr: >
+          "Value " + string(int(input.MaxNumberOfMessages))
+            + " for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and 10, if provided."
+      - cond: >
+          !('WaitTimeSeconds' in input) ||
+          (int(input.WaitTimeSeconds) >= 0 && int(input.WaitTimeSeconds) <= 20)
+        error: InvalidParameterValue
+        message_expr: >
+          "Value " + string(int(input.WaitTimeSeconds))
+            + " for parameter WaitTimeSeconds is invalid. Reason: Must be >= 0 and <= 20, if provided."
     let:
       settings: "merge(q.settings, s_found ? s.attrs : {})"
       redrive: >
         'RedrivePolicy' in settings ? parseJSON(string(settings.RedrivePolicy)) : null
+      attrNames: "'AttributeNames' in input ? input.AttributeNames : []"
+      sysNames: "'MessageSystemAttributeNames' in input ? input.MessageSystemAttributeNames : []"
+      wantAttrs: "size(attrNames) > 0 || size(sysNames) > 0"
+      wantReceiveCount: >
+        'All' in attrNames || 'ApproximateReceiveCount' in attrNames
+          || 'All' in sysNames || 'ApproximateReceiveCount' in sysNames
+      wantSenderId: "'All' in attrNames || 'SenderId' in attrNames || 'All' in sysNames || 'SenderId' in sysNames"
+      wantSeq: "'All' in attrNames || 'SequenceNumber' in attrNames || 'All' in sysNames || 'SequenceNumber' in sysNames"
+      wantSent: "'All' in attrNames || 'SentTimestamp' in attrNames || 'All' in sysNames || 'SentTimestamp' in sysNames"
+      wantFirst: >
+        'All' in attrNames || 'ApproximateFirstReceiveTimestamp' in attrNames
+          || 'All' in sysNames || 'ApproximateFirstReceiveTimestamp' in sysNames
+      wantGroup: "'All' in attrNames || 'MessageGroupId' in attrNames || 'All' in sysNames || 'MessageGroupId' in sysNames"
+      wantTrace: "'All' in attrNames || 'AWSTraceHeader' in attrNames || 'All' in sysNames || 'AWSTraceHeader' in sysNames"
     select:
       binding: msgs
       resource: message
       state: visible
+      # Drop retained-past messages the way the pack does on every receive.
+      filter: >
+        now_ms < int(item.sentAt)
+          + int('MessageRetentionPeriod' in settings
+                ? settings.MessageRetentionPeriod : '345600') * 1000
       order_by: item.seq
       limit: "clamp(int(coalesce('MaxNumberOfMessages' in input ? input.MaxNumberOfMessages : 0, 1)), 1, 10)"
       group:
         # FIFO only: a standard queue has no ordering to preserve.
         when: q.fifo
         by: group
-        # A group with a message still in flight is closed until it settles,
-        # which is what "ordered within a group" actually means.
+        # Drain consecutive visible messages from one group (g1-m1 then g1-m2),
+        # and prefer groups with no member still invisible — the pack's partial
+        # deprioritization that makes Terminate/Priority characterization hold.
+        drain: true
         exclusive_in_flight: invisible
     wait:
       until: "msgs.size() > 0"
-      timeout: "seconds(int(coalesce('WaitTimeSeconds' in input ? input.WaitTimeSeconds : 0, 0)))"
+      timeout: >
+        seconds(int('WaitTimeSeconds' in input
+          ? input.WaitTimeSeconds
+          : ('ReceiveMessageWaitTimeSeconds' in settings
+              ? settings.ReceiveMessageWaitTimeSeconds : 0)))
       on_timeout:
-        output:
-          Messages: "[]"
+        output: {}
     effects:
       - send_event:
           foreach: msgs
@@ -403,24 +909,61 @@ operations:
               redrive != null && 'deadLetterTargetArn' in redrive
                 ? queueFromArn(string(redrive.deadLetterTargetArn)) : ''
             queue: q.name
+    omit_null: [Messages]
     output:
       Messages: >
-        msgs.map(m, {
-          'MessageId': m.id,
-          'ReceiptHandle': m.handle,
-          'Body': m.body,
-          'Attributes': {'ApproximateReceiveCount': string(m.receiveCount)},
-          'MessageAttributes': filterAttrs(m.attrs,
-            'MessageAttributeNames' in input ? input.MessageAttributeNames : [])
-        })
+        msgs.filter(m, !('__state' in m) || string(m.__state) != 'redriven').size() == 0
+          ? dyn(null)
+          : msgs.filter(m, !('__state' in m) || string(m.__state) != 'redriven').map(m, merge(
+          merge(
+            {'MessageId': m.id, 'ReceiptHandle': m.handle, 'MD5OfBody': m.md5, 'Body': m.body},
+            wantAttrs
+              ? {'Attributes': merge(
+                  wantReceiveCount ? {'ApproximateReceiveCount': string(m.receiveCount)} : {},
+                  merge(
+                    wantSenderId ? {'SenderId': identity.account} : {},
+                    merge(
+                      wantSeq && q.fifo ? {'SequenceNumber': string(m.seq)} : {},
+                      merge(
+                        wantSent ? {'SentTimestamp': string(int(m.sentAt))} : {},
+                        merge(
+                          wantFirst ? {'ApproximateFirstReceiveTimestamp':
+                            'firstReceiveAt' in m ? string(int(m.firstReceiveAt)) : string(int(now_ms))} : {},
+                          merge(
+                            wantGroup && !q.fifo && string(m.group) != ''
+                              ? {'MessageGroupId': string(m.group)} : {},
+                            wantTrace && 'trace' in m && string(m.trace) != ''
+                              ? {'AWSTraceHeader': string(m.trace)} : {}))))))}
+              : {}),
+          'MessageAttributeNames' in input
+            ? merge(
+                {'MessageAttributes': filterAttrs(m.attrs, input.MessageAttributeNames)},
+                'md5Attrs' in m && string(m.md5Attrs) != ''
+                  ? {'MD5OfMessageAttributes': string(m.md5Attrs)} : {})
+            : {}))
 
   DeleteMessage:
     reads:
       q: { resource: queue }
+      msg: { resource: message, key: "string(input.ReceiptHandle)" }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+      - cond: "validReceiptHandle(string(input.ReceiptHandle))"
+        error: ReceiptHandleIsInvalid
+        message_expr: '"The input receipt handle \"" + string(input.ReceiptHandle) + "\" is not a valid receipt handle."'
+      # FIFO: a handle whose message is visible again after a receive is expired.
+      # Missing is success — DeleteMessage is idempotent on the wire.
+      - cond: >
+          !(q.fifo && msg_found && int(msg.receiveCount) > 0
+            && string(msg['__state']) == 'visible')
+        error: InvalidParameterValue
+        message_expr: '"Value " + string(input.ReceiptHandle) + " for parameter ReceiptHandle is invalid. Reason: The receipt handle has expired."'
     effects:
-      # Deleting a message that is not there is not an error in this service.
       - send_event:
           resource: message
           key: "string(input.ReceiptHandle)"
@@ -431,7 +974,12 @@ operations:
     reads:
       q: { resource: queue }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
     batch:
       of: DeleteMessage
       entries: Entries
@@ -439,18 +987,34 @@ operations:
       carry: [QueueUrl, QueueName]
       successful: Successful
       failed: Failed
+      max_entries: 10
+      empty_error: EmptyDeleteBatchRequest
+      too_many_error: TooManyEntriesInBatchRequest
+      invalid_id_error: InvalidBatchEntryId
+      bare_field: ReceiptHandle
 
   ChangeMessageVisibility:
     reads:
       q: { resource: queue }
+      msg: { resource: message, key: "string(input.ReceiptHandle)" }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+      - cond: "validReceiptHandle(string(input.ReceiptHandle))"
+        error: ReceiptHandleIsInvalid
+        message_expr: '"The input receipt handle \"" + string(input.ReceiptHandle) + "\" is not a valid receipt handle."'
+      - cond: msg_found
+        error: InvalidParameterValue
+        message_expr: '"Value " + string(input.ReceiptHandle) + " for parameter ReceiptHandle is invalid. Reason: Message does not exist or is not available for visibility timeout change."'
     effects:
       - send_event:
           resource: message
           key: "string(input.ReceiptHandle)"
           event: CHANGE_VISIBILITY
-          missing: ignore
           context:
             timeout: "int(coalesce(input.VisibilityTimeout, 0))"
 
@@ -458,7 +1022,12 @@ operations:
     reads:
       q: { resource: queue }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
     batch:
       of: ChangeMessageVisibility
       entries: Entries
@@ -466,15 +1035,32 @@ operations:
       carry: [QueueUrl, QueueName]
       successful: Successful
       failed: Failed
+      max_entries: 10
+      empty_error: EmptyChangeVisibilityBatchRequest
+      too_many_error: TooManyEntriesInBatchRequest
+      invalid_id_error: InvalidBatchEntryId
 
   PurgeQueue:
     reads:
       q: { resource: queue }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.'
+      - cond: "!has(q.purgedAt) || int(now) - int(q.purgedAt) >= 60"
+        error: PurgeQueueInProgress
+        message_expr: '"Only one PurgeQueue operation on " + string(q.name) + " is allowed every 60 seconds."'
     select: { binding: msgs, resource: message }
     effects:
       - send_event: { foreach: msgs, event: PURGE }
+      - delete: { resource: dedup, where: "true" }
+      - delete: { resource: rhandle, where: "true" }
+      - patch:
+          resource: queue
+          record: { purgedAt: "int(now)" }
 
   # The access policy is a JSON document inside a queue attribute, so these two
   # read it, amend the statement list and write the attribute back. Everything
@@ -488,10 +1074,16 @@ operations:
       # Creation-time attributes underneath, SetQueueAttributes on top, which
       # is the same order every read of a queue's attributes uses.
       attrs: "merge(q_found ? q.attrs : {}, s_found ? s.attrs : {})"
+      # A queue with no policy yet answers with the default document SQS names
+      # after the queue itself, and the Version it carries is the old one.
       policy: >
         'Policy' in attrs && string(attrs.Policy) != ''
           ? parseJSON(string(attrs.Policy))
-          : {'Version': '2012-10-17', 'Statement': []}
+          : {'Version': '2008-10-17',
+             'Id': arn(partition(identity.region),
+                       ['sqs', identity.region, identity.account,
+                        q_found ? string(q.name) : '']) + '/SQSDefaultPolicy',
+             'Statement': []}
       statements: >
         policy != null && 'Statement' in policy && policy.Statement != null
           ? policy.Statement : []
@@ -499,7 +1091,12 @@ operations:
       accounts: "'AWSAccountIds' in input ? input.AWSAccountIds : []"
       actions: "'Actions' in input ? input.Actions : []"
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.' 
       - { cond: "label != ''", error: MissingParameter, message: Label }
       - cond: "accounts.size() > 0 && actions.size() > 0"
         error: MissingParameter
@@ -508,7 +1105,7 @@ operations:
       # two statements answering to the same name and no way to remove either.
       - cond: "!statements.exists(st, 'Sid' in st && string(st.Sid) == label)"
         error: InvalidParameterValue
-        message: Label exists
+        message_expr: '"Value " + label + " for parameter Label is invalid. Reason: Already exists."'
     effects:
       # A bare action name is qualified and a qualified one is left alone, so
       # AddPermission('SendMessage') and AddPermission('SQS:SendMessage') mean
@@ -517,18 +1114,15 @@ operations:
           resource: settings
           record:
             attrs: >
-              merge(attrs, {'Policy': toJSON({
-                'Version': policy != null && 'Version' in policy
-                  ? policy.Version : '2012-10-17',
+              merge(attrs, {'Policy': toJSON(merge(policy, {
                 'Statement': statements + [{
                   'Sid': label,
                   'Effect': 'Allow',
-                  'Principal': {'AWS': accounts.map(a, string(a))},
-                  'Action': actions.map(a,
-                    string(a).contains(':') ? string(a) : 'SQS:' + string(a)),
-                  'Resource': arn('aws', ['sqs', identity.region, identity.account, q.name])
+                  'Principal': {'AWS': sqsIAMPrincipals(accounts, identity.region)},
+                  'Action': sqsSQSActions(actions),
+                  'Resource': arn(partition(identity.region), ['sqs', identity.region, identity.account, q.name])
                 }]
-              })})
+              }))})
 
   RemovePermission:
     reads:
@@ -546,22 +1140,30 @@ operations:
       label: "'Label' in input ? string(input.Label) : ''"
       kept: "statements.filter(st, !('Sid' in st) || string(st.Sid) != label)"
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.' 
       # Removing a label that is not there is an error rather than a no-op:
       # the caller believes a permission exists that does not.
       - cond: "kept.size() != statements.size()"
         error: InvalidParameterValue
-        message: Label not found
+        message_expr: >
+          "Value " + label + " for parameter Label is invalid. Reason: can't find label."
     effects:
       - put:
           resource: settings
           record:
             attrs: >
-              merge(attrs, {'Policy': toJSON({
-                'Version': policy != null && 'Version' in policy
-                  ? policy.Version : '2012-10-17',
-                'Statement': kept
-              })})
+              kept.size() == 0
+                ? without(attrs, ['Policy'])
+                : merge(attrs, {'Policy': toJSON({
+                    'Version': policy != null && 'Version' in policy
+                      ? policy.Version : '2012-10-17',
+                    'Statement': kept
+                  })})
 
   # The per-item join: a queue's redrive policy may sit on the queue record or
   # on its settings, so deciding whether a queue feeds this dead-letter queue
@@ -570,7 +1172,12 @@ operations:
     reads:
       q: { resource: queue }
     require:
-      - { cond: q_found, error: NonExistentQueue }
+      - cond: q_found
+        error: NonExistentQueue
+        message_expr: >
+          has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
+            ? 'The specified queue does not exist for this wsdl version.'
+            : 'The specified queue does not exist.' 
     list:
       resource: queue
       member: queueUrls
@@ -591,22 +1198,49 @@ operations:
 
   StartMessageMoveTask:
     reads:
+      # adest before q so source is the last queue id -- msgs:{queue.id}.
+      adest:
+        resource: queue
+        key: >
+          'DestinationArn' in input && input.DestinationArn != null && string(input.DestinationArn) != ''
+            ? queueFromArn(string(input.DestinationArn)) : ''
       q: { resource: queue }
+      qdmark: { resource: dlqmark, key: "q_found ? string(q.name) : ''" }
+      qrun:
+        resource: moverunning
+        key: >
+          'SourceArn' in input && input.SourceArn != null
+            ? queueFromArn(string(input.SourceArn)) : ''
     let:
-      source: "q_found ? string(q.name) : ''"
+      source: >
+        'SourceArn' in input && input.SourceArn != null
+          ? queueFromArn(string(input.SourceArn)) : (q_found ? string(q.name) : '')
       destination: >
         'DestinationArn' in input && input.DestinationArn != null
           ? queueFromArn(string(input.DestinationArn)) : ''
+      throttled: >
+        'MaxNumberOfMessagesPerSecond' in input && input.MaxNumberOfMessagesPerSecond != null &&
+        int(input.MaxNumberOfMessagesPerSecond) > 0
     require:
       - { cond: "source != ''", error: MissingParameter, message: SourceArn }
+      - cond: "q_found && qdmark_found"
+        error: InvalidParameterValue
+        message: "Source queue must be configured as a Dead Letter Queue."
+      - cond: "destination == '' || adest_found"
+        error: ResourceNotFound
+        message: "The resource that you specified for the DestinationArn parameter doesn't exist."
+      - cond: "!throttled || !qrun_found"
+        error: InvalidParameterValue
+        message: "There is already a task running. Only one active task is allowed for a source queue arn at a given time."
     select:
       binding: msgs
       resource: message
       # Without a destination the move is a redrive back to where each message
       # came from, so a message that was never redriven has nowhere to go and
       # is left alone -- as is one whose origin is the queue it is already in.
-      # Deciding eligibility here rather than in the statechart is what makes
-      # the moved count the size of this selection.
+      # A positive MaxNumberOfMessagesPerSecond moves one message now and
+      # leaves the task RUNNING; otherwise every eligible message moves and
+      # the task is COMPLETED.
       filter: >
         (destination != ''
           ? destination
@@ -614,40 +1248,76 @@ operations:
         (destination != ''
           ? destination
           : ('origin' in item && item.origin != null ? string(item.origin) : '')) != source
+      limit: "throttled ? 1 : 0"
     effects:
-      # The event carries the requested destination, which is the same for
-      # every message; where it is empty each message falls back to its own
-      # origin, and only the record knows that, so the fallback is in the move
-      # action rather than here.
       - send_event:
           foreach: msgs
           event: MOVE
           context:
             dest: destination
       - create:
+          resource: moverunning
+          when: throttled
+      - create:
           resource: movetask
           record:
             SourceArn: "'SourceArn' in input ? input.SourceArn : ''"
             DestinationArn: "'DestinationArn' in input ? input.DestinationArn : ''"
             ApproximateNumberOfMessagesMoved: "msgs.size()"
+            ApproximateNumberOfMessagesToMove: "msgs.size()"
+            MaxNumberOfMessagesPerSecond: >
+              throttled ? dyn(int(input.MaxNumberOfMessagesPerSecond)) : dyn(null)
+            Status: "throttled ? 'RUNNING' : 'COMPLETED'"
             source: source
     output:
       TaskHandle: rec.TaskHandle
 
   CancelMessageMoveTask:
     reads:
-      task: { resource: movetask, key: "string(input.TaskHandle)" }
+      # Decode the handle in the key expressions: reads run before let, and
+      # Cancel's SourceArn check needs the queue named inside the token.
+      srcq:
+        resource: queue
+        key: >
+          b64decode(string(input.TaskHandle)) == '' ? '' :
+            (parseJSON(b64decode(string(input.TaskHandle))) != null &&
+             'sourceArn' in parseJSON(b64decode(string(input.TaskHandle)))
+              ? queueFromArn(string(parseJSON(b64decode(string(input.TaskHandle))).sourceArn)) : '')
+    let:
+      handleDoc: >
+        b64decode(string(input.TaskHandle)) == '' ? null : parseJSON(b64decode(string(input.TaskHandle)))
+      handleValid: >
+        handleDoc != null && 'taskId' in handleDoc && string(handleDoc.taskId) != '' &&
+        'sourceArn' in handleDoc && string(handleDoc.sourceArn) != ''
     require:
-      - { cond: task_found, error: ResourceNotFound, message: TaskHandle }
-      - cond: "string(task.Status) == 'RUNNING'"
+      - cond: handleValid
+        error: InvalidParameterValue
+        message: "Value for parameter TaskHandle is invalid."
+      - cond: srcq_found
+        error: ResourceNotFound
+        message: "The resource that you specified for the SourceArn parameter doesn't exist."
+      - cond: "matched.size() > 0"
+        error: ResourceNotFound
+        message: "Task does not exist."
+      - cond: "string(matched[0].Status) == 'RUNNING'"
         error: InvalidParameterValue
         message: task is not in progress
+    select:
+      binding: matched
+      resource: movetask
+      filter: "string(item.TaskHandle) == string(input.TaskHandle)"
+      limit: "1"
     effects:
       - patch:
           resource: movetask
-          key: "string(input.TaskHandle)"
+          where: "string(item.TaskHandle) == string(input.TaskHandle)"
           record:
-            Status: "'CANCELLING'"
+            Status: "'CANCELLED'"
+      - delete:
+          resource: moverunning
+          key: "string(matched[0].source)"
+    output:
+      ApproximateNumberOfMessagesMoved: "matched[0].ApproximateNumberOfMessagesMoved"
 
   ListMessageMoveTasks:
     let:
@@ -660,14 +1330,17 @@ operations:
       filter: "source == '' || string(item.source) == source"
     output:
       Results: >
-        items.map(t, {
-          'TaskHandle': t.TaskHandle,
-          'Status': t.Status,
-          'SourceArn': t.SourceArn,
-          'DestinationArn': t.DestinationArn,
+        items.size() == 0 ? dyn(null) : dyn(items.map(t, {
           'ApproximateNumberOfMessagesMoved': t.ApproximateNumberOfMessagesMoved,
-          'StartedTimestamp': t.StartedTimestamp
-        })
+          'ApproximateNumberOfMessagesToMove': t.ApproximateNumberOfMessagesToMove,
+          'SourceArn': t.SourceArn,
+          'StartedTimestamp': t.StartedTimestamp,
+          'Status': t.Status,
+          'DestinationArn': ('DestinationArn' in t && t.DestinationArn != null ? dyn(t.DestinationArn) : dyn(null)),
+          'FailureReason': ('FailureReason' in t && t.FailureReason != null ? dyn(t.FailureReason) : dyn(null)),
+          'TaskHandle': (string(t.Status) == 'RUNNING' || string(t.Status) == 'COMPLETED' ? dyn(t.TaskHandle) : dyn(null)),
+          'MaxNumberOfMessagesPerSecond': (string(t.Status) == 'RUNNING' ? dyn(t.MaxNumberOfMessagesPerSecond) : dyn(null))
+        }))
 
 quirks:
   - operation: ListDeadLetterSourceQueues
@@ -682,13 +1355,12 @@ quirks:
 
   - operation: CancelMessageMoveTask
     note: >
-      The pack performs a move synchronously and files the task as COMPLETED,
-      so a cancel always fails with "task is not in progress" -- there is no
-      window in which a task is RUNNING. Real SQS moves messages in the
-      background at a bounded rate, which is what MaxNumberOfMessagesPerSecond
-      controls, and that input is accepted and ignored here. Transcribed as it
-      stands; a probe should settle whether a cancel ever succeeds and what
-      ApproximateNumberOfMessagesMoved answers when it does.
+      A positive MaxNumberOfMessagesPerSecond leaves the task RUNNING after
+      moving one message, so Cancel can succeed and answer with the moved
+      count. Without a rate the move finishes inside Start and Cancel faults
+      with "task is not in progress", matching the pack's synchronous path.
+      Real SQS moves in the background for every Start; the rate gate is the
+      approximation that gives Cancel a window without a worker.
 
   - operation: ReceiveMessage
     note: >
@@ -703,8 +1375,9 @@ quirks:
     note: >
       Deleting a queue leaves its messages in the store rather than removing
       the collection. Nothing can reach them, since every message operation
-      requires the queue, but the space is not reclaimed. Transcribed from the
-      pack.
+      requires the queue, but the space is not reclaimed. A RUNNING move task
+      whose DestinationArn names the deleted queue is marked FAILED here,
+      which is what the pack's async worker would observe on its next tick.
     provenance: authored
 
   - note: >

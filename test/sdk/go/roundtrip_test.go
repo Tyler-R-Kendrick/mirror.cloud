@@ -44,7 +44,7 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestAWSSDKPresignedSignatureValidation(t *testing.T) {

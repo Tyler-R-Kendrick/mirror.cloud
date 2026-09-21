@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -477,7 +477,7 @@ func (p *Pack) deadLetter(ctx context.Context, rec, target map[string]any, paylo
 	for key, value := range values {
 		attributes[key] = map[string]any{"DataType": "String", "StringValue": value}
 	}
-	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: accountFromARN(arn), Region: regionFromARN(arn)}, Operation: "SendMessage", Input: map[string]any{
+	_, _ = bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: accountFromARN(arn), Region: regionFromARN(arn)}, Operation: "SendMessage", Input: map[string]any{
 		"QueueName": arn[strings.LastIndex(arn, ":")+1:], "MessageBody": string(payload), "MessageAttributes": attributes,
 	}})
 }

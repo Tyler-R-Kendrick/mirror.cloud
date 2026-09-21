@@ -15,7 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestBootedServerSNSSection48(t *testing.T) {

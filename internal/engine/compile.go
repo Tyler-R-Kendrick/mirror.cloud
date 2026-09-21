@@ -4,10 +4,12 @@ import (
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/prim"
 )
 
 // compileAll turns the bundle's expression sources into runnable programs.
@@ -98,7 +101,10 @@ func runtimeEnv(names []string) (*cel.Env, error) {
 		cel.Variable("input", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("identity", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("now", cel.TimestampType),
+		cel.Variable("now_ms", cel.IntType),
 		cel.Variable("endpoint", cel.StringType),
+		cel.Variable("headers", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("has_http", cel.BoolType),
 	}
 	for _, n := range names {
 		opts = append(opts, cel.Variable(n, cel.DynType))
@@ -137,6 +143,74 @@ func runtimeFuncs() []cel.EnvOption {
 					return types.String("")
 				}
 				return types.String(base64.RawURLEncoding.EncodeToString(raw))
+			}))),
+
+		// b64 / b64decode are std encoding for opaque wire tokens (SQS move
+		// handles are JSON documents in base64, not hex digests).
+		cel.Function("b64", cel.Overload("b64_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				return types.String(base64.StdEncoding.EncodeToString([]byte(fmt.Sprint(v.Value()))))
+			}))),
+		cel.Function("b64decode", cel.Overload("b64decode_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				raw, err := base64.StdEncoding.DecodeString(fmt.Sprint(v.Value()))
+				if err != nil {
+					return types.String("")
+				}
+				return types.String(string(raw))
+			}))),
+
+		cel.Function("validReceiptHandle", cel.Overload("validReceiptHandle_1", []*cel.Type{str}, cel.BoolType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				h := fmt.Sprint(v.Value())
+				if len(h) != 64 {
+					return types.Bool(false)
+				}
+				_, err := hex.DecodeString(h)
+				return types.Bool(err == nil)
+			}))),
+		cel.Function("validMessageContents", cel.Overload("validMessageContents_1", []*cel.Type{str}, cel.BoolType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				for _, r := range fmt.Sprint(v.Value()) {
+					if r != '\t' && r != '\n' && r != '\r' && (r < 0x20 || r > 0xD7FF && r < 0xE000 || r > 0xFFFD && r < 0x10000) {
+						return types.Bool(false)
+					}
+				}
+				return types.Bool(true)
+			}))),
+		cel.Function("validMessageGroupID", cel.Overload("validMessageGroupID_1", []*cel.Type{str}, cel.BoolType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				s := fmt.Sprint(v.Value())
+				if len(s) == 0 || len(s) > 128 {
+					return types.Bool(false)
+				}
+				const punctuation = `!"#$%&'()*+,-./:;<=>?@[\]^_` + "`" + `{|}~`
+				for _, r := range s {
+					if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune(punctuation, r) {
+						return types.Bool(false)
+					}
+				}
+				return types.Bool(true)
+			}))),
+		cel.Function("validQueueName", cel.Overload("validQueueName_1", []*cel.Type{str}, cel.BoolType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				return types.Bool(validQueueName(fmt.Sprint(v.Value())))
+			}))),
+		cel.Function("sqsIAMPrincipals", cel.Overload("sqsIAMPrincipals_2", []*cel.Type{dyn, str}, dyn,
+			cel.BinaryBinding(func(accounts, region ref.Val) ref.Val {
+				return types.DefaultTypeAdapter.NativeToValue(sqsIAMPrincipals(fromCEL(accounts), fmt.Sprint(region.Value())))
+			}))),
+		cel.Function("sqsSQSActions", cel.Overload("sqsSQSActions_1", []*cel.Type{dyn}, dyn,
+			cel.UnaryBinding(func(actions ref.Val) ref.Val {
+				return types.DefaultTypeAdapter.NativeToValue(sqsSQSActions(fromCEL(actions)))
+			}))),
+		cel.Function("sqsQueueAttrConflict", cel.Overload("sqsQueueAttrConflict_2", []*cel.Type{dyn, dyn}, str,
+			cel.BinaryBinding(func(effective, requested ref.Val) ref.Val {
+				return types.String(sqsQueueAttrConflict(fromCEL(effective), fromCEL(requested)))
+			}))),
+		cel.Function("sqsMergeQueueAttrs", cel.Overload("sqsMergeQueueAttrs_2", []*cel.Type{dyn, dyn}, dyn,
+			cel.BinaryBinding(func(existing, updates ref.Val) ref.Val {
+				return types.DefaultTypeAdapter.NativeToValue(sqsMergeQueueAttrs(fromCEL(existing), fromCEL(updates)))
 			}))),
 
 		// trim is strings.TrimSpace.
@@ -472,21 +546,232 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.String(parts[len(parts)-1])
 			}))),
 
+		// md5MessageAttributes is the AWS SQS attribute digest (length-prefixed
+		// name/type/transport/value, names sorted).
+		cel.Function("md5MessageAttributes", cel.Overload("md5MessageAttributes_1", []*cel.Type{dyn}, str,
+			cel.UnaryBinding(func(attrs ref.Val) ref.Val {
+				src, _ := fromCEL(attrs).(map[string]any)
+				if len(src) == 0 {
+					return types.String("")
+				}
+				names := make([]string, 0, len(src))
+				for name := range src {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				d := md5.New()
+				writeField := func(value []byte) {
+					var length [4]byte
+					binary.BigEndian.PutUint32(length[:], uint32(len(value)))
+					_, _ = d.Write(length[:])
+					_, _ = d.Write(value)
+				}
+				for _, name := range names {
+					attribute, _ := src[name].(map[string]any)
+					if attribute == nil {
+						continue
+					}
+					dataType := fmt.Sprint(attribute["DataType"])
+					writeField([]byte(name))
+					writeField([]byte(dataType))
+					transport := byte(1)
+					if strings.HasPrefix(dataType, "Binary") {
+						transport = 2
+					}
+					_, _ = d.Write([]byte{transport})
+					value := fmt.Sprint(attribute["StringValue"])
+					if transport == 2 {
+						switch raw := attribute["BinaryValue"].(type) {
+						case []byte:
+							value = string(raw)
+						default:
+							decoded, err := base64.StdEncoding.DecodeString(fmt.Sprint(raw))
+							if err == nil {
+								value = string(decoded)
+							}
+						}
+					}
+					writeField([]byte(value))
+				}
+				return types.String(hex.EncodeToString(d.Sum(nil)))
+			}))),
+
+		// messageSize is body bytes plus attribute name/type/value bytes — the
+		// SQS MaximumMessageSize accounting the pack uses.
+		cel.Function("messageSize", cel.Overload("messageSize_2", []*cel.Type{str, dyn}, cel.IntType,
+			cel.BinaryBinding(func(body, attrs ref.Val) ref.Val {
+				size := len([]byte(fmt.Sprint(body.Value())))
+				src, _ := fromCEL(attrs).(map[string]any)
+				for name, raw := range src {
+					attribute, _ := raw.(map[string]any)
+					if attribute == nil {
+						continue
+					}
+					str := func(v any) string {
+						if v == nil {
+							return ""
+						}
+						return fmt.Sprint(v)
+					}
+					size += len(name) + len(str(attribute["DataType"])) +
+						len(str(attribute["StringValue"])) + len(str(attribute["BinaryValue"]))
+				}
+				return types.Int(size)
+			}))),
+
+		cel.Function("knownQueueAttribute", cel.Overload("knownQueueAttribute_1", []*cel.Type{str}, cel.BoolType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				switch fmt.Sprint(v.Value()) {
+				case "ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible", "ApproximateNumberOfMessagesDelayed",
+					"QueueArn", "VisibilityTimeout", "DelaySeconds", "MaximumMessageSize", "MessageRetentionPeriod",
+					"ReceiveMessageWaitTimeSeconds", "SqsManagedSseEnabled", "CreatedTimestamp", "LastModifiedTimestamp",
+					"FifoQueue", "ContentBasedDeduplication", "DeduplicationScope", "FifoThroughputLimit",
+					"RedrivePolicy", "Policy", "KmsMasterKeyId", "KmsDataKeyReusePeriodSeconds":
+					return types.Bool(true)
+				default:
+					return types.Bool(false)
+				}
+			}))),
+		cel.Function("validRedrivePolicy", cel.Overload("validRedrivePolicy_1", []*cel.Type{str}, cel.BoolType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				raw := fmt.Sprint(v.Value())
+				var policy map[string]any
+				if json.Unmarshal([]byte(raw), &policy) != nil {
+					return types.Bool(false)
+				}
+				arn := fmt.Sprint(policy["deadLetterTargetArn"])
+				parts := strings.Split(arn, ":")
+				if len(parts) != 6 || parts[0] != "arn" || parts[2] != "sqs" || parts[3] == "" || parts[4] == "" || parts[5] == "" {
+					return types.Bool(false)
+				}
+				count := 0
+				switch value := policy["maxReceiveCount"].(type) {
+				case string:
+					n, err := strconv.Atoi(value)
+					if err != nil {
+						return types.Bool(false)
+					}
+					count = n
+				case float64:
+					count = int(value)
+				case int:
+					count = value
+				default:
+					return types.Bool(false)
+				}
+				return types.Bool(count >= 1 && count <= 1000)
+			}))),
+		cel.Function("sseConflict", cel.Overload("sseConflict_1", []*cel.Type{dyn}, cel.BoolType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				attrs, _ := fromCEL(v).(map[string]any)
+				kms := fmt.Sprint(attrs["KmsMasterKeyId"])
+				sse := fmt.Sprint(attrs["SqsManagedSseEnabled"])
+				return types.Bool(kms != "" && kms != "<nil>" && sse == "true")
+			}))),
+
+		cel.Function("partition", cel.Overload("partition_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				region := fmt.Sprint(v.Value())
+				switch {
+				case strings.HasPrefix(region, "cn-"):
+					return types.String("aws-cn")
+				case strings.HasPrefix(region, "us-gov-"):
+					return types.String("aws-us-gov")
+				case strings.HasPrefix(region, "us-iso-b-"):
+					return types.String("aws-iso-b")
+				case strings.HasPrefix(region, "us-iso-"):
+					return types.String("aws-iso")
+				default:
+					return types.String("aws")
+				}
+			}))),
+		cel.Function("sqsTags", cel.Overload("sqsTags_1", []*cel.Type{dyn}, dyn,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				input, _ := fromCEL(v).(map[string]any)
+				if input == nil {
+					return types.DefaultTypeAdapter.NativeToValue(map[string]any{})
+				}
+				for _, key := range []string{"Tags", "tags"} {
+					if tags, ok := input[key].(map[string]any); ok && len(tags) > 0 {
+						return types.DefaultTypeAdapter.NativeToValue(tags)
+					}
+				}
+				keys, values := map[string]string{}, map[string]string{}
+				for key, value := range input {
+					if strings.HasPrefix(key, "Tag.") || strings.HasPrefix(key, "Tags.member.") {
+						base := strings.TrimSuffix(strings.TrimSuffix(key, ".Key"), ".Value")
+						switch {
+						case strings.HasSuffix(key, ".Key"):
+							keys[base] = fmt.Sprint(value)
+						case strings.HasSuffix(key, ".Value"):
+							values[base] = fmt.Sprint(value)
+						}
+					}
+				}
+				out := make(map[string]any, len(keys))
+				for base, name := range keys {
+					out[name] = values[base]
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+		cel.Function("sqsTagKeys", cel.Overload("sqsTagKeys_1", []*cel.Type{dyn}, dyn,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				input, _ := fromCEL(v).(map[string]any)
+				if input == nil {
+					return types.DefaultTypeAdapter.NativeToValue([]any{})
+				}
+				if raw, ok := input["TagKeys"].([]any); ok {
+					return types.DefaultTypeAdapter.NativeToValue(raw)
+				}
+				var names []string
+				for key, value := range input {
+					if strings.HasPrefix(key, "TagKey.") || strings.HasPrefix(key, "TagKeys.member.") {
+						names = append(names, fmt.Sprint(value))
+					}
+				}
+				sort.Strings(names)
+				out := make([]any, len(names))
+				for i, n := range names {
+					out[i] = n
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+		cel.Function("validMessageAttributes", cel.Overload("validMessageAttributes_1", []*cel.Type{dyn}, cel.BoolType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				return types.Bool(validMessageAttributes(fromCEL(v)))
+			}))),
+
 		// filterAttrs narrows a map to a requested subset. An empty request or
 		// one naming "All" (or its "." shorthand) returns everything, which is
 		// the convention every provider that has such a parameter follows.
 		cel.Function("filterAttrs", cel.Overload("filterAttrs_2", []*cel.Type{dyn, dyn}, dyn,
 			cel.BinaryBinding(func(attrs, want ref.Val) ref.Val {
 				src, _ := fromCEL(attrs).(map[string]any)
+				if src == nil {
+					src = map[string]any{}
+				}
 				names, ok := fromCEL(want).([]any)
 				if !ok || len(names) == 0 {
-					return types.DefaultTypeAdapter.NativeToValue(src)
+					// Empty filter means "return none" for SQS MessageAttributeNames.
+					return types.DefaultTypeAdapter.NativeToValue(map[string]any{})
+				}
+				for _, n := range names {
+					name := fmt.Sprint(n)
+					if name == "All" || name == "*" || name == ".*" || name == "." {
+						return types.DefaultTypeAdapter.NativeToValue(src)
+					}
 				}
 				out := map[string]any{}
 				for _, n := range names {
 					name := fmt.Sprint(n)
-					if name == "All" || name == "." {
-						return types.DefaultTypeAdapter.NativeToValue(src)
+					if strings.HasSuffix(name, ".*") {
+						prefix := strings.TrimSuffix(name, ".*")
+						for key, value := range src {
+							if strings.HasPrefix(key, prefix) {
+								out[key] = value
+							}
+						}
+						continue
 					}
 					if v, ok := src[name]; ok {
 						out[name] = v
@@ -495,12 +780,24 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
-		// prim dispatches to a named pure primitive. None are registered yet,
-		// so a bundle that calls one fails loudly rather than returning a
-		// plausible-looking value.
+		// prim dispatches to a named pure primitive from the registry. An
+		// unregistered name fails loudly rather than returning a
+		// plausible-looking value; a bundle declares the names it calls
+		// under `primitives:`, and the loader refuses unknown names and
+		// versions before any request runs.
 		cel.Function("prim", cel.Overload("prim_2", []*cel.Type{str, dyn}, dyn,
-			cel.BinaryBinding(func(name, _ ref.Val) ref.Val {
-				return types.NewErr("engine: primitive %q is not registered", fmt.Sprint(name.Value()))
+			cel.BinaryBinding(func(name, args ref.Val) ref.Val {
+				n := fmt.Sprint(name.Value())
+				f, ok := prim.Lookup(n)
+				if !ok {
+					return types.NewErr("engine: primitive %q is not registered (registered: %s)", n, strings.Join(prim.Names(), ", "))
+				}
+				list, _ := fromCEL(args).([]any)
+				out, err := f.Call(list)
+				if err != nil {
+					return types.NewErr("engine: primitive %q: %v", n, err)
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 	}
 }

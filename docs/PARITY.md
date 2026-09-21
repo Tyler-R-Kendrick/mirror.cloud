@@ -1408,13 +1408,13 @@ The document is 24 MB and 3,462 operations. `specs/mirror.set` narrows it to the
 
 Authority: the official Vercel REST document, vendored at `specs/vercel/api.json` and pinned in `specs/mirror.lock`, plus an AUTHORED document for Vercel KV at `specs/vercel/kv.json`. Rows are operation -> Mirror evidence, not a live `api.vercel.com` differential.
 
-The counting contract, frozen by `TestVercelCensusDenominators`: the vendored document is the denominator; the narrowing to thirteen path prefixes is a declared property of `specs/mirror.set` (like `digitalocean.v2`'s), never a silent edit; operations the narrowing keeps but no bundle rule serves are mock-tier surface, the same tier one hundred and fifty AWS services live at.
+The counting contract, frozen by `TestVercelCensusDenominators`: the vendored document is the denominator; the `fields=` narrowing in `specs/mirror.set` is a declared property (like `railway.graphql`'s), never a silent edit; every narrowed operation has a bundle rule — Mirror Cloud does not leave mock-tier leftovers on the served Vercel surface.
 
 | Denominator | Count |
 |---|---:|
 | Vercel REST document operations (vendored) | 417 |
 | Vercel REST document paths (vendored) | 297 |
-| Narrowed `vercel.api` model operations | 104 |
+| Narrowed `vercel.api` model operations | 50 |
 | `vercel.kv` authored-document operations | 1 (`Command`) |
 
 The pack's own characterization golden went with it; two equivalence recordings replace it -- 100 steps for the REST API and 12 for KV -- and assert more, because they replay rather than compare one frozen answer. 41 of the 100 are recorded from the pack; the 59 covering the operations the pack never served are authored against the bundle, which the recording itself says in its note.
@@ -1425,13 +1425,13 @@ KV's document is authored rather than vendored, and is the first such entry in t
 
 **Versioning is restored, and it is a visible break.** `vercelRoute` stripped the leading version segment before matching -- any `v` followed by a digit -- so `/v1/projects`, `/v9/projects` and `/v99/projects` were one route. That is not four transcription slips in the table; it is the table erasing versioning, which made four of its rows name a version the document does not serve. Listing projects is `/v10` where the pack answered `/v9`; project env is `/v10` where it answered `/v9`; project domains is `/v9` where it answered `/v10`; listing deployments is `/v7` where it answered `/v6`. A client written against the emulator's laxity breaks, which is the same shape as Cloudflare's percent-encoded slash: the document is `declared` and the pack's tolerance was `authored`.
 
-Routing is the model's now, which widens the surface rather than narrowing it. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it to thirteen prefixes -- the six the pack served, plus the seven the emulate-widening needed (`/v1/projects`, `/v2/teams`, `/v2/files`, and the `/v2`, `/v3`, `/v6` and `/v12` deployment sub-resources) -- giving 92 operations over 20,329 shapes, still the largest model in the tree. The bundle serves 37: the fourteen the pack served, transcribed, and twenty-three written from the document and the oracle. The other 55 narrowed operations -- feature flags, rolling release, routes, check-runs, SDK keys, project members and the rest that no oracle route exercises -- route from the model and answer as mock-tier.
+Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it with `fields=` to the fifty operations the bundle serves (oracle routes plus the pack's REST surface), so the generated model and the emulate surface are the same set — no mock-tier leftovers on the served path. Feature flags, rolling release, check-runs and the rest stay in the vendored document and answer as unknown operations outside the model rather than as silent mock synthesis.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the emulated Vercel slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the two fault envelopes and the three generic rules this extraction needed) |
-| Vercel REST operations served by the bundle | 37 / 92 narrowed (the fourteen the pack served, replayed against its recording; twenty-three written from the document and the oracle, gated by authored recording steps, bundle behavior, booted HTTP and BDD; the other 55 narrowed operations are mock-tier) |
-| Vercel KV commands served | 3 / the Redis command set (SET, GET, DEL; every other verb answers 501 `MirrorNotImplemented`) |
+| Vercel REST operations served by the bundle | 50 / 50 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model) |
+| Vercel KV commands served | 14 string commands (SET, GET, DEL, EXISTS, PING, INCR, DECR, INCRBY, DECRBY, APPEND, STRLEN, EXPIRE, TTL, SETEX; hashes/lists/sets/pipelines answer 501 `MirrorNotImplemented`) |
 | Live Vercel probe | none (not required) |
 
 | Vercel operation | Mirror evidence |
@@ -1473,7 +1473,7 @@ Routing is the model's now, which widens the surface rather than narrowing it. T
 | `POST /v2/files` (`UploadFile`) | Authored recording steps replay the digest registration answering the document's empty object (the oracle answers a bare array; the model can serialize only the one oneOf arm) and a missing digest 400/`bad_request` |
 | `GET /v1/projects/{projectId}/promote/aliases` (`ListPromoteAliases`) | Authored recording steps replay the document's `{aliases, pagination}` arm (the oracle's `{status, alias}` shape is one the model cannot serialize) and an unknown project 404 |
 | `PATCH /v1/projects/{idOrName}/protection-bypass` (`UpdateProjectProtectionBypass`) | Authored recording steps replay generate with a caller-chosen secret, an update's note edit, a revoke-with-regenerate under a fresh secret, a plain revoke answering the empty map, and an unknown project 404. The map lives on the project record, which GetProjects now projects around -- recorded as a quirk |
-| `POST /` on `*.kv.vercel-storage.com` (`Command`) | Its own recording: SET, GET, a GET that misses answering `{result: null}` rather than a fault, `get` folding to `GET`, DEL answering 1 then 0, and four malformed commands answering 400. Chaos `TestVercelConcurrentKVSetGet`. An unsupported verb answers 501 `MirrorNotImplemented` with the `x-mirror-not-implemented` header, which distinguishes "mirror has not got to this" from "you sent nonsense" |
+| `POST /` on `*.kv.vercel-storage.com` (`Command`) | Its own recording: SET, GET, a GET that misses answering `{result: null}` rather than a fault, `get` folding to `GET`, DEL answering 1 then 0, INCR answering 1 on a missing key, four malformed commands answering 400, and HSET answering 501 `MirrorNotImplemented` with the `x-mirror-not-implemented` header. Chaos `TestVercelConcurrentKVSetGet` |
 | Vercel faults vs AWS faults | Two envelopes, because they are two documents' answers. The REST API answers `{error: {code, message}}` and KV the bare `{error: "..."}` Upstash answers; neither carries `x-amzn-errortype`. Mutant `vercel-kv-encodes-the-rest-fault` |
 | Routing | `FuzzVercelRoute` drives `httpuri.Match` over the generated model, seeded with both the document's versions and the four the pack answered. `TestVercelRoutesFromItsGeneratedModel` asserts nineteen routes, five operations beyond what the table knew, and that each of the four moved versions is now unserved. `vercel-kv-host-falls-through` covers the host split |
 

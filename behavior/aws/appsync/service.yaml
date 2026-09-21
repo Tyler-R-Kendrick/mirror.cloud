@@ -14,12 +14,6 @@ provenance: authored
 # behavior runs; the pack's own fallbacks for that case are dead.
 missing_input_error: NotFound
 
-shadow: >
-  Complete and gated, but not yet serving: the pack's GraphQL operation (the
-  query echo) has no operation in the generated model, and the loader rejects
-  bundle operations the model lacks, so a serving bundle would drop the query
-  endpoint the pack answers. The bundle takes over when the model carries it.
-
 resources:
   api:
     collection: asapi
@@ -193,6 +187,20 @@ operations:
       - delete: { resource: data_source, missing: ignore }
     output: {}
 
+  # The query echo the pack served, transcribed rather than removed: a
+  # __typename mention answers Query, a hello mention answers world, and
+  # anything else comes back under _echo. The pack answered without looking
+  # up the api, so this reads nothing; the served model carries the operation
+  # from the catalog union, which is what unshadowed it.
+  GraphQL:
+    let:
+      q: "('query' in input && input.query != null) ? string(input.query) : ''"
+    output:
+      data: >
+        merge(merge(q.contains('__typename') ? {'__typename': 'Query'} : {},
+          q.contains('hello') ? {'hello': 'world'} : {}),
+          !q.contains('__typename') && !q.contains('hello') ? {'_echo': q} : {})
+
 quirks:
   - operation: CreateGraphqlApi
     note: >
@@ -241,11 +249,11 @@ quirks:
       include the stored apiId, which the DataSource shape does not declare,
       so the bundle's list projects the declared members and the recording
       supersedes that one member per item.
-  - operation: GetGraphqlApi
+  - operation: GraphQL
     note: >
       The pack served a GraphQL operation that echoed query text -- a
       __typename mention answered Query, a hello mention answered world, and
       anything else came back under _echo. There is no such operation in the
-      AWS model, which declares only the control plane, so no SDK could ever
-      have called it and the bundle cannot express it. It is the one operation
-      this extraction removes, and it is not in the recording.
+      AWS model, which declares only the control plane; the served model
+      carries it from the catalog union instead, so the bundle transcribes
+      the echo rather than removing the endpoint. It is not in the recording.

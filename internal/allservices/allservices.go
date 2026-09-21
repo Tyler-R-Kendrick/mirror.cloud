@@ -18,7 +18,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/appsync"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/athena"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudcontrol"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudformation"
@@ -34,7 +33,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lookoutmetrics"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/organizations"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/pipes"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/qldb"
@@ -44,10 +42,8 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduler"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/timestream"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 )

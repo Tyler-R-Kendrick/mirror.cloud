@@ -23,11 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -35,7 +34,7 @@ import (
 func TestTopicSubscribePublish(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := &Pack{deps: deps}
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	_, _ = qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "q"}})
@@ -70,7 +69,7 @@ func TestTopicSubscribePublish(t *testing.T) {
 func TestSNSPublishTargetAndSubscriptionTimingCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invokeSNSQueue(t, qp, id, "CreateQueue", map[string]any{"QueueName": "publish-target"})
@@ -176,7 +175,7 @@ func TestSNSCrossRegionTopicAccessRejected(t *testing.T) {
 func TestSNSCrossAccountAndRegionSQSDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	owner := spi.Identity{Account: "111111111111", Region: "us-east-1"}
 	sameRegionQueueOwner := spi.Identity{Account: "222222222222", Region: "us-east-1"}
 	queueOwner := spi.Identity{Account: "222222222222", Region: "us-west-2"}
@@ -199,7 +198,7 @@ func TestSNSCrossAccountAndRegionSQSDelivery(t *testing.T) {
 	}
 }
 
-func invokeSNSQueue(t *testing.T, p *sqs.Pack, id spi.Identity, operation string, input map[string]any) *spi.Response {
+func invokeSNSQueue(t *testing.T, p spi.BehaviorPack, id spi.Identity, operation string, input map[string]any) *spi.Response {
 	t.Helper()
 	resp, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
 	if err != nil {
@@ -220,7 +219,7 @@ func invokeSNS(t *testing.T, p *Pack, id spi.Identity, operation string, input m
 func TestPublishFilterAndSQSDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	_, _ = qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "q"}})
@@ -256,7 +255,7 @@ func TestPublishFilterAndSQSDelivery(t *testing.T) {
 
 func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	snsCall := func(operation string, input map[string]any) *spi.Response {
@@ -299,7 +298,7 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 
 func TestSNSUnicodeMessageToSQS(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invokeSNSQueue(t, qp, id, "CreateQueue", map[string]any{"QueueName": "unicode-message"})
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "unicode-message"}).Output["TopicArn"])
@@ -362,7 +361,7 @@ func TestSNSSetMissingPlatformEndpointAttributes(t *testing.T) {
 
 func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invokeSNSQueue(t, qp, id, "CreateQueue", map[string]any{"QueueName": "standard-group"})
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "standard-group"}).Output["TopicArn"])
@@ -384,7 +383,7 @@ func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
 
 func TestSNSFlattenedBinaryMessageAttributeDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "flattened-binary"}}); err != nil {
@@ -419,7 +418,7 @@ func TestSNSFlattenedBinaryMessageAttributeDelivery(t *testing.T) {
 
 func TestSNSSQSNotificationPreservesMessageAttributes(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "envelope-attrs"}}); err != nil {
@@ -454,7 +453,7 @@ func TestSNSSQSNotificationPreservesMessageAttributes(t *testing.T) {
 
 func TestSNSSQSNotificationSignatureVersionTwo(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "signature-v2"}}); err != nil {
@@ -617,7 +616,7 @@ func TestSNSHTTPUnsubscribeConfirmation(t *testing.T) {
 
 func TestSNSSQSDeliveryPropagatesTraceHeader(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "trace-queue"}}); err != nil {
@@ -1294,7 +1293,7 @@ func TestSNSFIFOPublishValidationAndTopicDeduplication(t *testing.T) {
 
 func TestSNSFIFOTopicToSQSWithoutQueueDeduplication(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -1331,7 +1330,7 @@ func TestSNSFIFOTopicToSQSWithoutQueueDeduplication(t *testing.T) {
 
 func TestSNSFIFOTopicToStandardSQS(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sns-fifo-standard"}}); err != nil {
@@ -1357,7 +1356,7 @@ func TestSNSFIFOTopicToStandardSQS(t *testing.T) {
 
 func TestSNSFIFOPublishBatchRedrivesToFIFODLQ(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	for _, name := range []string{"sns-fifo-source.fifo", "sns-fifo-dlq.fifo"} {
@@ -1393,7 +1392,7 @@ func TestSNSFIFOPublishBatchRedrivesToFIFODLQ(t *testing.T) {
 
 func TestSNSPublishBatchToFIFOSQS(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -1422,7 +1421,7 @@ func TestSNSPublishBatchToFIFOSQS(t *testing.T) {
 
 func TestSNSFIFODeduplicationAcrossSubscriptions(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{
@@ -1447,7 +1446,7 @@ func TestSNSFIFODeduplicationAcrossSubscriptions(t *testing.T) {
 
 func TestSNSFIFOOrderingAcrossSubscriptions(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{
@@ -1484,7 +1483,7 @@ func TestSNSFIFOOrderingAcrossSubscriptions(t *testing.T) {
 
 func TestSNSFIFONoContentDeduplicationDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
@@ -1506,7 +1505,7 @@ func TestSNSFIFONoContentDeduplicationDelivery(t *testing.T) {
 func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "structured"}}); err != nil {
@@ -1632,7 +1631,7 @@ func TestSNSPublishBatchFIFOValidation(t *testing.T) {
 
 func TestSNSPublishBatchSQSDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "batch-sqs"}).Output["TopicArn"])
@@ -1689,7 +1688,7 @@ func TestSNSPublishBatchSQSDelivery(t *testing.T) {
 func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	create := func(operation string, input map[string]any) {
@@ -1742,7 +1741,7 @@ func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 
 func TestSNSSQSSubscriptionAutoConfirmation(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "auto-confirm"}}); err != nil {
@@ -2849,7 +2848,7 @@ func TestSNSPendingEmailSubscription(t *testing.T) {
 
 func TestSNSSubscriptionIdempotency(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sns-idempotent"}}); err != nil {
@@ -2930,7 +2929,7 @@ func TestSNSUnknownSQSQueueSubscription(t *testing.T) {
 func TestSNSHTTPSubscriptionRedrive(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	queue, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sns-http-dlq"}})
@@ -2988,7 +2987,7 @@ func TestSNSHTTPSubscriptionRedrive(t *testing.T) {
 func TestSNSSQSSubscriptionRedrive(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	for _, name := range []string{"sns-sqs-source", "sns-sqs-dlq"} {
@@ -3030,7 +3029,7 @@ func TestSNSSQSSubscriptionRedrive(t *testing.T) {
 func TestSNSLambdaSubscriptionRedrive(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	qp := sqs.New(deps)
+	qp := bundled.Handler("aws.sqs", deps)
 	lp := lambda.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
@@ -3296,7 +3295,7 @@ func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 
 func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "q"}}); err != nil {
@@ -3379,7 +3378,7 @@ func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
 
 func TestSNSMessageBodyFilterDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "body-filter"}}); err != nil {
@@ -3420,7 +3419,7 @@ func TestSNSMessageBodyFilterDelivery(t *testing.T) {
 
 func TestSNSSubscribeIdempotency(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "q"}}); err != nil {
@@ -3560,7 +3559,7 @@ func TestSNSSubscriptionAttributeValidation(t *testing.T) {
 
 func TestSNSSubscriptionAttributesProjection(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "subscription-attributes"}}); err != nil {
@@ -3579,7 +3578,7 @@ func TestSNSSubscriptionAttributesProjection(t *testing.T) {
 
 func TestSNSSetSubscriptionAttributesAfterUnsubscribe(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "deleted-subscription"}}); err != nil {
@@ -3650,7 +3649,7 @@ func TestSNSFilterPolicyConstraints(t *testing.T) {
 
 func TestSNSFilterPolicyNumericSQSDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "numeric-filter"}}); err != nil {
@@ -3842,7 +3841,7 @@ func sesMessages(t *testing.T, deps spi.Deps, id spi.Identity) []map[string]any 
 
 func TestSNSCertURLUsesAdvertiseHost(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, qp := New(deps), sqs.New(deps)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "cert-host"}}); err != nil {
@@ -3868,7 +3867,7 @@ func TestSNSLambdaFunctionDLQToTopic(t *testing.T) {
 		t.Skip("python3 not installed")
 	}
 	deps := spitest.Deps(t)
-	p, lp, qp := New(deps), lambda.New(deps), sqs.New(deps)
+	p, lp, qp := New(deps), lambda.New(deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "lambda-dlq"}}); err != nil {

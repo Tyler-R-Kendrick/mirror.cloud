@@ -42,13 +42,16 @@ resources:
       value: >
         ('body' in input && input.body != null && size(input.body) > 2)
           ? string(input.body[2]) : ''
+      # 0 means no TTL. Redis SET clears expiry; SETEX/EXPIRE write a unix
+      # deadline here and reads treat a past deadline as a miss.
+      expires_at: "0"
 
 errors:
   BadRequest:
     code: bad_request
     http: 400
     fault: client
-  # An unsupported verb is not a malformed request. INCR is a real Redis
+  # An unsupported verb is not a malformed request. HSET is a real Redis
   # command that the real service answers and this emulator does not, which is
   # what 501 MirrorNotImplemented says -- and the REST/JSON codec puts the
   # x-mirror-not-implemented header on any fault carrying that code, so a
@@ -73,6 +76,31 @@ operations:
       # command. The pack did the same.
       cmd: "('body' in input && input.body != null) ? input.body : []"
       verb: "size(cmd) > 0 ? upper(string(cmd[0])) : ''"
+      # A key past its deadline is a miss for every read path, matching Redis
+      # lazy expiry. expires_at 0 / absent means no TTL. entry is {} on a miss,
+      # so every field access sits behind entry_found / alive.
+      alive: >
+        entry_found && (
+          !('expires_at' in entry) || entry.expires_at == null || int(entry.expires_at) == 0
+            || int(entry.expires_at) > int(now)
+        )
+      # Numeric payload for INCR family. Missing key starts at 0; a live
+      # non-integer is refused below as BadRequest. matches-guards keep int()
+      # from running in let before require can answer 400.
+      base_num: >
+        alive && string(entry.value).matches('^-?[0-9]+$') ? int(entry.value) : 0
+      delta: >
+        verb == 'INCR' ? 1
+          : (verb == 'DECR' ? -1
+          : (verb == 'INCRBY' && size(cmd) > 2 && string(cmd[2]).matches('^-?[0-9]+$') ? int(cmd[2])
+          : (verb == 'DECRBY' && size(cmd) > 2 && string(cmd[2]).matches('^-?[0-9]+$') ? -int(cmd[2]) : 0)))
+      next_num: "base_num + delta"
+      # SETEX key seconds value -- value is argv[3], not the schema's body[2].
+      setex_value: "size(cmd) > 3 ? string(cmd[3]) : ''"
+      setex_ttl: >
+        size(cmd) > 2 && string(cmd[2]).matches('^[0-9]+$') ? int(cmd[2]) : 0
+      expire_ttl: >
+        size(cmd) > 2 && string(cmd[2]).matches('^[0-9]+$') ? int(cmd[2]) : 0
     reads:
       # Read unconditionally rather than per command: GET answers the value,
       # and DEL answers how many keys it removed, which is whether this read
@@ -84,48 +112,99 @@ operations:
       - { cond: "verb != 'SET' || size(cmd) > 2", error: BadRequest, message: "SET needs key and value" }
       - { cond: "verb != 'GET' || size(cmd) > 1", error: BadRequest, message: "GET needs key" }
       - { cond: "verb != 'DEL' || size(cmd) > 1", error: BadRequest, message: "DEL needs key" }
+      - { cond: "verb != 'EXISTS' || size(cmd) > 1", error: BadRequest, message: "EXISTS needs key" }
+      - { cond: "verb != 'INCR' || size(cmd) > 1", error: BadRequest, message: "INCR needs key" }
+      - { cond: "verb != 'DECR' || size(cmd) > 1", error: BadRequest, message: "DECR needs key" }
+      - { cond: "verb != 'INCRBY' || size(cmd) > 2", error: BadRequest, message: "INCRBY needs key and increment" }
+      - { cond: "verb != 'DECRBY' || size(cmd) > 2", error: BadRequest, message: "DECRBY needs key and decrement" }
+      - { cond: "verb != 'APPEND' || size(cmd) > 2", error: BadRequest, message: "APPEND needs key and value" }
+      - { cond: "verb != 'STRLEN' || size(cmd) > 1", error: BadRequest, message: "STRLEN needs key" }
+      - { cond: "verb != 'EXPIRE' || size(cmd) > 2", error: BadRequest, message: "EXPIRE needs key and seconds" }
+      - { cond: "verb != 'TTL' || size(cmd) > 1", error: BadRequest, message: "TTL needs key" }
+      - { cond: "verb != 'SETEX' || size(cmd) > 3", error: BadRequest, message: "SETEX needs key, seconds and value" }
+      - { cond: "verb != 'SETEX' || setex_ttl > 0", error: BadRequest, message: "ERR invalid expire time in setex" }
+      - { cond: "verb != 'EXPIRE' || expire_ttl > 0", error: BadRequest, message: "ERR invalid expire time in expire" }
+      # INCR family on a live non-integer: Redis WRONGTYPE/ERR, not 501.
+      - {
+          cond: "!(verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY') || !alive || string(entry.value).matches('^-?[0-9]+$')",
+          error: BadRequest,
+          message: "ERR value is not an integer or out of range"
+        }
       # Last, so a malformed SET still reads as malformed rather than as an
-      # unimplemented command.
-      - { cond: "verb == 'SET' || verb == 'GET' || verb == 'DEL'", error: NotImplemented, message: "vercel.kv Command is not implemented for this verb at the requested fidelity; required tier: emulate" }
+      # unimplemented command. String + control verbs below; hashes/lists/sets
+      # and pipelines stay 501 until there is evidence for them.
+      - {
+          cond: "verb == 'SET' || verb == 'GET' || verb == 'DEL' || verb == 'EXISTS' || verb == 'PING' || verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY' || verb == 'APPEND' || verb == 'STRLEN' || verb == 'EXPIRE' || verb == 'TTL' || verb == 'SETEX'",
+          error: NotImplemented,
+          message: "vercel.kv Command is not implemented for this verb at the requested fidelity; required tier: emulate"
+        }
     effects:
       - put:
           resource: entry
           when: "verb == 'SET'"
+      - put:
+          resource: entry
+          when: "verb == 'SETEX'"
+          record:
+            value: setex_value
+            expires_at: "int(now) + setex_ttl"
+      - put:
+          resource: entry
+          when: "verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY'"
+          record:
+            value: "string(next_num)"
+            # INCR on a missing/expired key mints a fresh string with no TTL.
+            expires_at: "alive ? int(entry.expires_at) : 0"
+      - put:
+          resource: entry
+          when: "verb == 'APPEND'"
+          record:
+            value: "alive ? string(entry.value) + string(cmd[2]) : string(cmd[2])"
+            expires_at: "alive ? int(entry.expires_at) : 0"
+      - put:
+          resource: entry
+          when: "verb == 'EXPIRE' && alive"
+          record:
+            value: "string(entry.value)"
+            expires_at: "int(now) + expire_ttl"
       - delete:
           resource: entry
           when: "verb == 'DEL'"
           # A DEL of a key that is not there is not an error; it answers 0.
           missing: ignore
     output:
-      # One member, three shapes, because one endpoint answers three commands:
-      # OK for a write, the stored value or null for a read that missed, and
-      # the number of keys removed for a delete. The response shape declares
-      # `result` as a union of a string and an integer, which is what lets a
-      # single member carry all three.
-      #
+      # One member, many shapes, because one endpoint answers many commands.
       # dyn() on each arm because CEL requires a conditional's branches to
       # agree on a type and these deliberately do not: the response shape
       # declares `result` a union of a string and an integer, and a GET that
       # missed answers null.
       result: >
-        verb == 'SET' ? dyn('OK')
-          : (verb == 'GET' ? (entry_found ? dyn(string(entry.value)) : dyn(null))
-          : (entry_found ? dyn(1) : dyn(0)))
+        verb == 'SET' || verb == 'SETEX' ? dyn('OK')
+          : (verb == 'PING' ? dyn('PONG')
+          : (verb == 'GET' ? (alive ? dyn(string(entry.value)) : dyn(null))
+          : (verb == 'EXISTS' ? dyn(alive ? 1 : 0)
+          : (verb == 'DEL' ? dyn(alive ? 1 : 0)
+          : (verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY' ? dyn(next_num)
+          : (verb == 'APPEND' ? dyn(int(size(alive ? string(entry.value) + string(cmd[2]) : string(cmd[2]))))
+          : (verb == 'STRLEN' ? dyn(alive ? int(size(string(entry.value))) : 0)
+          : (verb == 'EXPIRE' ? dyn(alive ? 1 : 0)
+          : (verb == 'TTL' ? (
+                !alive ? dyn(-2)
+                  : (int(entry.expires_at) == 0 ? dyn(-1)
+                  : dyn(int(entry.expires_at) - int(now))))
+          : dyn(null))))))))))
 
 quirks:
   - operation: Command
     note: >
-      Three commands of Redis, not Redis. SET, GET and DEL are what the pack
-      implemented and therefore all this has evidence for; every other verb
-      answers 501 `MirrorNotImplemented`, with the x-mirror-not-implemented
-      header the codec puts on that code. The real service answers the whole
-      command set, so a client doing anything else -- INCR, EXPIRE, a pipeline
-      -- gets a refusal here where production would work, and the refusal says
-      which kind it is: the emulator has not got to this verb, not that the
-      caller sent something malformed. That is a narrower surface honestly
-      labelled rather than a guess at semantics nobody recorded.
+      LocalStack-class string surface for Upstash REST: SET, GET, DEL, EXISTS,
+      PING, INCR, DECR, INCRBY, DECRBY, APPEND, STRLEN, EXPIRE, TTL, SETEX.
+      Hashes, lists, sets, sorted sets, MGET/MSET, pipelines and SET options
+      (EX/PX/NX/XX as argv) answer 501 `MirrorNotImplemented` with the
+      x-mirror-not-implemented header. SET with those options still stores the
+      value and clears TTL the way a bare SET does -- argv beyond key/value are
+      ignored, matching the old pack's silence on EX/PX rather than inventing
+      option parsing without a probe.
 
-      SET takes no options. EX, PX, NX and XX are accepted by the real API and
-      ignored here, because the pack ignored them: a caller setting a TTL gets
-      a key that never expires, which is the kind of silence a probe run is
-      meant to turn into evidence.
+      EXPIRE/SETEX use whole seconds against the injected clock; sub-second
+      PEXPIRE is not in the served set.

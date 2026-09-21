@@ -19,11 +19,10 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -1247,7 +1246,7 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	if _, present := in["MessageDeduplicationId"]; !present && dedupOverride != "" && strings.HasSuffix(name, ".fifo") {
 		in["MessageDeduplicationId"] = dedupOverride
 	}
-	_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: targetReq.Identity, Operation: "SendMessage", Input: in, HTTP: req.HTTP})
+	_, err := bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: targetReq.Identity, Operation: "SendMessage", Input: in, HTTP: req.HTTP})
 	return err == nil
 }
 

@@ -1,5 +1,5 @@
 schema: bir/1
-service: aws.opensearch
+service: aws.es
 
 # Transcribed from the hand-written pack, not established against the real
 # service. A domain is Created the moment it is asked for, with an Endpoint
@@ -7,24 +7,17 @@ service: aws.opensearch
 # collection with a substring query, not Lucene.
 provenance: authored
 
-# IndexDocument, GetDocument, DeleteDocument and Search come from the
-# hand-authored catalog with no input or output shape -- the vendored
-# 2021-01-01 specification is the control plane only -- so the bundle cannot
-# declare the _index, _id, _source and hits members the pack answers with:
-# the loader requires every output member to resolve against the served model,
-# and there is no output shape to resolve against. The pack keeps serving
-# until the model carries the data-plane shapes or the engine gains an
-# escape; the recording's data-plane steps are superseded with this reason.
-# Their writes and deletes are still transcribed, so the day the shapes land
-# the state behind them is already the pack's.
-shadow: >
-  The data plane is not expressible: the served model carries IndexDocument,
-  GetDocument, DeleteDocument and Search from the catalog with empty input and
-  output shapes, and the loader forbids output members an output shape does
-  not declare, so the bundle can answer them with nothing but an empty body
-  where the pack answered _index/_id/result, found/_source and hits. Every
-  control-plane operation is transcribed and gated.
+# The bundle calls one engine primitive: the OpenSearch substring query,
+# which CEL cannot express and the pack implemented in Go. It is declared
+# with the version it was written against; the loader refuses anything the
+# registry does not carry.
+primitives:
+  match: { name: opensearch.match, version: 1 }
 
+# IndexDocument, GetDocument, DeleteDocument and Search ride an authored
+# supplement (specs/es-dataplane.json): the vendored 2021-01-01 specification
+# is the control plane only, so the supplement declares the data-plane input
+# and output shapes the bundle answers with.
 # The pack answered an empty DomainName on create with ValidationException;
 # that is also the service's vocabulary for the required members the model now
 # enforces.
@@ -173,9 +166,8 @@ operations:
       - delete: { resource: tag, missing: ignore }
     output: {}
 
-  # See the shadow note: the four data-plane operations answer members no
-  # output shape declares, so their answers here are empty. Their faults and
-  # their writes are the pack's.
+  # The four data-plane operations answer members the authored supplement
+  # declares.
   IndexDocument:
     reads:
       d: { resource: domain }
@@ -216,10 +208,38 @@ operations:
                 : ('_source' in input && input._source != null
                     ? input._source
                     : without(input, ['DomainName', 'domainName', 'Index', 'index', 'Id', 'id', 'query', 'body']))
-    output: {}
+    output:
+      _index: idx
+      _id: "did != '' ? did : fx.docid"
+      result: "'created'"
+      _shards: "{'total': 1, 'successful': 1}"
 
   GetDocument:
-    output: {}
+    reads:
+      doc: { resource: document, key: "(('DomainName' in input && string(input.DomainName) != '') ? string(input.DomainName) : (('domainName' in input && string(input.domainName) != '') ? string(input.domainName) : '_')) + '/' + (('Index' in input && string(input.Index) != '') ? string(input.Index) : (('index' in input && string(input.index) != '') ? string(input.index) : '')) + '/' + (('Id' in input && string(input.Id) != '') ? string(input.Id) : (('id' in input && string(input.id) != '') ? string(input.id) : ''))" }
+    let:
+      dom: >
+        'DomainName' in input && string(input.DomainName) != ''
+          ? string(input.DomainName)
+          : ('domainName' in input && string(input.domainName) != ''
+              ? string(input.domainName) : '')
+      idx: >
+        'Index' in input && string(input.Index) != ''
+          ? string(input.Index)
+          : ('index' in input && string(input.index) != ''
+              ? string(input.index) : '')
+      did: >
+        'Id' in input && string(input.Id) != ''
+          ? string(input.Id)
+          : ('id' in input && string(input.id) != ''
+              ? string(input.id) : '')
+    output:
+      found: doc_found
+      _index: idx
+      _id: did
+      _source: "doc_found ? dyn(doc._source) : dyn(null)"
+    # A missed get answers with no _source member at all, not a null one.
+    omit_null: [_source]
 
   DeleteDocument:
     let:
@@ -243,13 +263,39 @@ operations:
           resource: document
           key: "(dom == '' ? '_' : dom) + '/' + idx + '/' + did"
           missing: ignore
-    output: {}
+    output:
+      _index: idx
+      _id: did
+      result: "'deleted'"
 
-  # ponytail: the pack's match_all / term / match / query_string substring
-  # query is not transcribed at all; upgrade is the model carrying the
-  # data-plane shapes, then a real query DSL.
   Search:
-    output: {}
+    let:
+      dom: >
+        'DomainName' in input && string(input.DomainName) != ''
+          ? string(input.DomainName)
+          : ('domainName' in input && string(input.domainName) != ''
+              ? string(input.domainName) : '')
+      idx: >
+        'Index' in input && string(input.Index) != ''
+          ? string(input.Index)
+          : ('index' in input && string(input.index) != ''
+              ? string(input.index) : '')
+      domkey: "dom == '' ? '_' : dom"
+      q: >
+        ('query' in input && input.query != null) ? input.query
+          : (('body' in input && type(input.body) == map && 'query' in input.body && input.body.query != null)
+            ? input.body.query : null)
+    select:
+      binding: found
+      resource: document
+      filter: "string(item._domain) == domkey && string(item._index) == idx"
+    output:
+      hits: >
+        {'total': {'value': size(found.filter(r, prim('opensearch.match', [q, r._source]))), 'relation': 'eq'},
+         'hits': size(found.filter(r, prim('opensearch.match', [q, r._source]))) == 0 ? dyn(null)
+           : dyn(found.filter(r, prim('opensearch.match', [q, r._source]))
+             .map(h, {'_index': string(h._index), '_id': string(h._id), '_source': h._source, '_score': 1}))}
+      timed_out: "false"
 
 quirks:
   - operation: CreateDomain
@@ -327,6 +373,6 @@ quirks:
       Not a query engine: match_all and the empty query match everything,
       term and match compare one arbitrarily chosen field (Go map order, so a
       multi-field query is nondeterministic), and query_string substring-
-      matches Go's fmt rendering of the document. None of this is
-      transcribed -- the catalog carries Search with no output shape, which
-      is why the bundle is shadowed.
+      matches Go's fmt rendering of the document. The matching lives in the
+      opensearch.match engine primitive, ported verbatim from the pack,
+      because CEL cannot express it.

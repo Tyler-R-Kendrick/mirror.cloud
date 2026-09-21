@@ -1,7 +1,6 @@
-package opensearch
+package behavior
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,17 +10,13 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
-func TestOpenSearchHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 14 {
-		t.Fatalf("opensearch Operations() %d want 14", n)
-	}
-}
-
+// TestBootedServerOpenSearchDomainAndSearch drives the control plane and the
+// document plane over HTTP. It boots the runtime rather than the pack: the
+// pack is deleted, and this is the test that proves the bundle answers both
+// the target-dispatched operations and the document shapes the served model
+// carries for them.
 func TestBootedServerOpenSearchDomainAndSearch(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.es"}
@@ -145,17 +140,6 @@ func TestBootedServerOpenSearchRESTDataPlane(t *testing.T) {
 	_, gone := do(http.MethodGet, "/cities/_doc/1", "")
 	if strings.Contains(gone, `"found":true`) {
 		t.Fatalf("still present %s", gone)
-	}
-}
-
-func TestIndexDocumentRejectsMissingDomain(t *testing.T) {
-	p := New(spitest.Deps(t))
-	_, err := p.Invoke(context.Background(), &spi.Request{
-		Identity: spi.Identity{Account: "123456789012", Region: "us-east-1"}, Operation: "IndexDocument",
-		Input: map[string]any{"DomainName": "missing", "Index": "events", "Document": map[string]any{"message": "lost"}},
-	})
-	if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceNotFoundException" {
-		t.Fatalf("missing domain error %#v", err)
 	}
 }
 

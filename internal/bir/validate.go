@@ -370,6 +370,7 @@ func Validate(s *Service, svc *model.Service) error {
 			compile(where+".list.key", l.Key)
 			compile(where+".list.prefix", l.Prefix)
 			compile(where+".list.after", l.After)
+			compile(where+".list.limit", l.Limit)
 			// The filter sees one candidate record as `item`, its per-item
 			// joins, and nothing the rest of the operation cannot see.
 			itemScope := append(append([]string{}, scope...), "item")

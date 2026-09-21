@@ -49,7 +49,7 @@ resources:
       # Total: the expression is evaluated wherever the resource is addressed,
       # and a request carrying no title must yield an empty key rather than an
       # evaluation error.
-      derive: "('title' in input && input.title != null) ? string(input.title) : ''"
+      derive: "('title' in input && type(input.title) == type('')) ? input.title : ''"
 
   entry:
     # Parent-scoped: each namespace's keys are their own collection, named for
@@ -60,11 +60,18 @@ resources:
       input_members: [key_name]
     record:
       name: id
-      # `body` is what the document calls the request payload, and the REST
-      # codec binds it from the raw bytes because the member's shape is a
-      # union of a string and a blob. The pack read `value`, which was its own
-      # codec branch's name for the same bytes.
-      value: "('body' in input && input.body != null) ? string(input.body) : ''"
+      # Store as base64 so arbitrary bytes survive JSON persistence (invalid
+      # UTF-8 must not become U+FFFD on the way through the store).
+      value: "b64(('body' in input && input.body != null) ? string(input.body) : '')"
+      # Multipart writes may bind metadata; plain body writes leave {}.
+      metadata: "('metadata' in input && input.metadata != null) ? input.metadata : {}"
+      # Absolute unix seconds. 0 means no expiry. Prefer explicit expiration
+      # over TTL when both are present (document allows either query form).
+      expires_at: >
+        ('expiration' in input && input.expiration != null && string(input.expiration) != '')
+          ? int(input.expiration)
+          : (('expiration_ttl' in input && input.expiration_ttl != null && string(input.expiration_ttl) != '')
+            ? (int(now) + int(input.expiration_ttl)) : 0)
 
 errors:
   # Cloudflare's codes are integers on the wire; the fault encoder converts a
@@ -103,7 +110,7 @@ operations:
       # `string(input.title)` on one raises, and a CEL error inside a require
       # becomes InternalFailure 500. Without the guard the "no title" case
       # answered a server error instead of the 10007 it declares.
-      - { cond: "has(input.title) && string(input.title) != ''", error: InvalidInput, message: "Title is required" }
+      - { cond: "has(input.title) && type(input.title) == type('') && input.title != ''", error: InvalidInput, message: "Title is required" }
       - { cond: "!taken_found", error: NamespaceTitleTaken, message: "A namespace with this account ID and title already exists" }
     effects:
       # The title index is written before the namespace, and the order matters:
@@ -153,7 +160,7 @@ operations:
       taken: { resource: namespace_title }
     require:
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
-      - { cond: "string(input.title) != ''", error: InvalidInput, message: "Title is required" }
+      - { cond: "has(input.title) && type(input.title) == type('') && input.title != ''", error: InvalidInput, message: "Title is required" }
       # Renaming a namespace to the title it already has is not a collision
       # with itself.
       - { cond: "!taken_found || string(ns.title) == string(input.title)", error: NamespaceTitleTaken, message: "A namespace with this account ID and title already exists" }
@@ -183,6 +190,8 @@ operations:
     require:
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
     effects:
+      # Cascade keys first while namespace.id is still bound for the collection.
+      - delete: { resource: entry, where: "true" }
       - delete: { resource: namespace }
       # Keyed off the stored record, not the request: a delete addresses the
       # namespace by id and never carries its title.
@@ -203,7 +212,7 @@ operations:
       # looked at, so writing to a namespace that does not exist is 10013 and
       # never 10007.
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
-      - { cond: "string(input.key_name) != ''", error: InvalidInput, message: "Key is required" }
+      - { cond: "has(input.key_name) && type(input.key_name) == type('') && input.key_name != ''", error: InvalidInput, message: "Key is required" }
     effects:
       - put: { resource: entry }
     output:
@@ -216,15 +225,19 @@ operations:
     reads:
       ns: { resource: namespace }
       entry: { resource: entry }
+    let:
+      alive: >
+        entry_found && (
+          !('expires_at' in entry) || entry.expires_at == null || int(entry.expires_at) == 0
+            || int(entry.expires_at) > int(now)
+        )
     require:
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
-      - { cond: entry_found, error: KeyNotFound, message: "key not found" }
+      - { cond: alive, error: KeyNotFound, message: "key not found" }
     output:
       # `_raw` is bir.TopLevelRaw: the body is the stored value itself, with no
-      # envelope around it. The document answers this operation as
-      # application/octet-stream, which is the one Cloudflare operation here
-      # that is not enveloped, and the only reason the convention exists.
-      _raw: "string(entry.value)"
+      # envelope around it. Decode the base64 store form back to exact bytes.
+      _raw: "b64decode(string(entry.value))"
 
   WorkersKvNamespaceDeleteKeyValuePair:
     reads:
@@ -246,17 +259,35 @@ operations:
       ns: { resource: namespace }
     require:
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
-    list: { resource: entry, member: result }
+    list:
+      resource: entry
+      member: result
+      filter: >
+        (!('expires_at' in item) || item.expires_at == null || int(item.expires_at) == 0
+          || int(item.expires_at) > int(now))
+        && (!has(input.prefix) || input.prefix == null || string(input.prefix) == ''
+          || string(item.name).startsWith(string(input.prefix)))
+        && (!has(input.cursor) || input.cursor == null || string(input.cursor) == ''
+          || string(item.name) > string(input.cursor))
+      limit: "has(input.limit) && input.limit != null ? int(input.limit) : 1000"
     output:
       success: "true"
       errors: "[]"
       messages: "[]"
-      # The stored record carries the value as well as the name, and a key
-      # listing must not answer with it: the projection replaces the list the
-      # `list` spec placed in `result` with one key object per entry, which is
-      # what workers-kv_key declares.
-      result: "items.map(i, {'name': string(i.name)})"
-      result_info: "{'count': double(size(items)), 'cursor': ''}"
+      # No values in the listing. Expiration seconds when set; metadata when present.
+      result: >
+        items.map(i, {
+          'name': string(i.name),
+          'expiration': (has(i.expires_at) && i.expires_at != null && int(i.expires_at) != 0
+            ? dyn(int(i.expires_at)) : dyn(null)),
+          'metadata': (has(i.metadata) && i.metadata != null && size(i.metadata) > 0
+            ? dyn(i.metadata) : dyn(null))
+        })
+      result_info: >
+        {
+          'count': double(size(items)),
+          'cursor': (size(items) > 0 ? string(items[size(items)-1].name) : '')
+        }
 
 quirks:
   - operation: WorkersKvNamespaceCreateANamespace
@@ -297,11 +328,8 @@ quirks:
       the codec states one for every `_raw` operation rather than per provider.
   - operation: WorkersKvNamespaceRemoveANamespace
     note: >
-      Deleting a namespace leaves its keys behind. Nothing reads them -- the
-      collection is named for a namespace id that can no longer be resolved --
-      but a namespace later created with the same id would inherit them, and
-      the real API does not do that. The pack could not delete a namespace at
-      all, so this is new surface rather than a transcribed defect.
+      Namespace delete cascades the parent-scoped key collection, so a later
+      namespace that happens to reuse an id cannot inherit orphaned keys.
   - operation: WorkersKvNamespaceListNamespaces
     note: >
       Unpaginated: page, per_page and total_count describe a single page
@@ -310,23 +338,17 @@ quirks:
       listing is in store order rather than by title.
   - operation: "WorkersKvNamespaceListANamespace'SKeys"
     note: >
-      New surface: the pack served no key listing. `prefix`, `limit` and
-      `cursor` are accepted and ignored, and the cursor answered in result_info
-      is always empty, so a client that pages on it stops after one page and
-      sees every key. Expiration and metadata are never answered, because the
-      write operation stores neither: the document takes metadata only in the
-      multipart form of the request body, which this does not parse.
+      prefix / limit / cursor are honored. Cursor is the last key name on the
+      page (lexicographic resume). Expired keys are omitted. Values are never
+      listed. Metadata appears only when the write supplied it.
   - operation: WorkersKvNamespaceWriteKeyValuePairWithMetadata
     note: >
-      expiration and expiration_ttl are accepted by the document and ignored
-      here, as they were by the pack. A value written with expiration_ttl=60
-      never expires, and a client that writes one and waits for it to vanish
-      waits forever.
+      expiration (absolute unix seconds) and expiration_ttl (relative seconds
+      from spi.Clock) are stored; reads and listings treat expired keys as
+      absent. Values are base64 in the store so arbitrary bytes round-trip.
 
-      The multipart form of the request body is not parsed: whatever bytes
-      arrive become the value, so a multipart write stores the MIME envelope
-      rather than the value inside it. The pack had the same behavior for the
-      same reason.
+      Multipart bodies are parsed by the REST/JSON codec into `body` (value
+      part) and `metadata` (JSON object part) when Content-Type is multipart.
   - operation: WorkersKvNamespaceRenameANamespace
     note: >
       New surface: the pack served no rename. Renaming to the namespace's own

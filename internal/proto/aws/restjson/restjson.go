@@ -2,9 +2,12 @@
 package restjson
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -406,6 +409,47 @@ func azureTableRoute(r *http.Request) string {
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
 	body, _ := io.ReadAll(r.Body)
 	in := map[string]any{}
+	// Multipart form bodies carry named parts (Cloudflare KV value+metadata).
+	// Parse them before the opaque-payload rule, or the MIME envelope becomes
+	// the stored value.
+	if len(body) > 0 && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		if _, params, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil {
+			if boundary := params["boundary"]; boundary != "" {
+				mr := multipart.NewReader(bytes.NewReader(body), boundary)
+				for {
+					part, err := mr.NextPart()
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						break
+					}
+					pbody, _ := io.ReadAll(part)
+					name := part.FormName()
+					switch name {
+					case "value", "body":
+						if pname, ok := svc.PayloadMember(op); ok {
+							in[pname] = string(pbody)
+						} else {
+							in["body"] = string(pbody)
+						}
+					case "metadata":
+						var meta any
+						if json.Unmarshal(pbody, &meta) == nil {
+							in["metadata"] = meta
+						} else {
+							in["metadata"] = string(pbody)
+						}
+					default:
+						if name != "" {
+							in[name] = string(pbody)
+						}
+					}
+				}
+				body = nil
+			}
+		}
+	}
 	// A member bound to the payload whose shape is a string or a blob IS the
 	// request body: Cloudflare's KV write declares `body` that way, Lambda
 	// declares `Payload`, Glacier declares `body`. Parsing such a body as JSON
@@ -417,7 +461,7 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	// model.PayloadMember answers only for the opaque case and everything else
 	// decodes as before. This was a branch keyed on one service id and one
 	// operation name, which is C41's shape: what in it mentioned the provider?
-	if name, ok := svc.PayloadMember(op); ok {
+	if name, ok := svc.PayloadMember(op); ok && body != nil {
 		in[name] = string(body)
 		body = nil
 	}

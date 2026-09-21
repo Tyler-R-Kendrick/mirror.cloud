@@ -1290,6 +1290,16 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 	}
 
 	items := make([]any, 0, len(entries))
+	maxItems := 0
+	if op.List.Limit != "" {
+		v, err := ev.eval(base + "limit")
+		if err != nil {
+			return err
+		}
+		if n, ok := toFloat(v); ok && n > 0 {
+			maxItems = int(n)
+		}
+	}
 	for _, kv := range entries {
 		rec := map[string]any{}
 		if err := unmarshal(kv.Value, &rec); err != nil {
@@ -1360,6 +1370,10 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 				return tokErr
 			}
 			last = fmt.Sprint(tok)
+		}
+		if maxItems > 0 && len(items) >= maxItems {
+			more = true
+			break
 		}
 	}
 	ev.binds["__list"] = items

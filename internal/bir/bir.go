@@ -450,6 +450,9 @@ type ListSpec struct {
 	// service that publishes its keys.
 	After string `yaml:"after,omitempty"`
 	Token string `yaml:"token,omitempty"`
+	// Limit caps how many filtered records the page may hold. It is a CEL
+	// expression (often the request's limit member) evaluated once per list.
+	Limit string `yaml:"limit,omitempty"`
 	// Reads are companion records loaded once per candidate, keyed off the
 	// candidate itself, and bound for the filter exactly as an operation's
 	// reads are bound for its requires: each binding x also binds x_found.

@@ -21,3 +21,9 @@ S1 codegen (`cmd/mirrorgen`, `specs/`) replaces `internal/catalog` as the model 
 - **`aws.protocols#awsQueryError` has no model cell.** It is treated as handled (not recorded as unknown) because it only affects query error wrapping in the codec, not the canonical model.
 - **Multiple protocols on one service (SQS).** The model has a single `Protocol`. The Smithy receiver prefers restJson1 > restXml > awsJson1_1 > awsJson1_0 > awsQuery > ec2Query, so SQS becomes `awsJson1_0`. Dual-protocol dispatch stays an edge concern (§4.3).
 - **Service IDs vs endpoint prefixes.** `aws.api#service.endpointPrefix` is the default ID suffix, with aliases `monitoring→cloudwatch`, `tagging→resourcegroupstaggingapi`, `elasticloadbalancing`+sdkId v2→`elbv2`, `application-autoscaling→applicationautoscaling`, so `specs/mirror.set` names match botocore-style IDs rather than raw prefixes.
+
+## Optional external Workers runtimes (Cloudflare)
+
+Historical v2 excluded real compute. Optional execution by existing external Workers-compatible runtimes (Miniflare/`workerd`, experimental celld) is authorized as an additive seam. This does not authorize rebuilding a JS runtime, Durable Object scheduler, SQL engine, or object store inside mirror; nor hosted multi-tenancy; nor weakening B-IR or ratchets.
+
+`spi.ComputeProvider` stays for existing byte-oriented callers. Workers HTTP/stream/bindings use the additive `CapabilitySession` types in `internal/spi/capability.go` and the generic dispatcher in `internal/execution/capability`. Cloudflare operation→action mapping stays in provider data; adapters own Miniflare/celld I/O. External I/O must not run under a held Store transaction. See also `docs/CLOUDFLARE.md`.

@@ -2,7 +2,7 @@ BIN := bin
 GO  := go
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
+.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e test-cloudflare-miniflare test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
 
 all: build
 
@@ -49,6 +49,15 @@ test-cicd-process:
 
 test-cicd-e2e:
 	$(GO) test ./internal/execution/cicd/... -count=1
+
+# Required live Cloudflare runtime suite: real node + workerd through the
+# pinned helper under tools/cloudflare-runtime. Built with -tags miniflare so
+# the default unit path stays usable without optional runtimes; built WITH
+# the tag, an unprovisioned environment FAILS (the test fatals, it never
+# skips) -- this target must not report success when the backend is absent.
+# Provision once: (cd tools/cloudflare-runtime && npm ci)
+test-cloudflare-miniflare:
+	$(GO) test -tags miniflare ./internal/execution/ -run 'TestMiniflare' -count=1 -v
 
 test-fuzz-seeds:
 	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./test/behavior/aws ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql -count=1

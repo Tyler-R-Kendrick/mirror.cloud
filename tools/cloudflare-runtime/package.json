@@ -1,0 +1,14 @@
+{
+  "name": "@mirror/cloudflare-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Optional Miniflare/workerd session helper for mirror.cloud. Not required by the native binary; spawned only when the miniflare execution profile is selected.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "miniflare": "5.20260921.0-alpha"
+  },
+  "scripts": {
+    "session": "node session.mjs"
+  }
+}

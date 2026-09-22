@@ -2,9 +2,12 @@
 package restjson
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -418,7 +421,37 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	// decodes as before. This was a branch keyed on one service id and one
 	// operation name, which is C41's shape: what in it mentioned the provider?
 	if name, ok := svc.PayloadMember(op); ok {
-		in[name] = string(body)
+		// An opaque payload may arrive as multipart: Cloudflare's KV write
+		// takes `value` plus optional `metadata` as form parts, not only as
+		// raw bytes. Split the envelope here -- the value stays under the
+		// payload member and the metadata lands beside it -- so a bundle
+		// rule can store the two separately. Anything that is not multipart
+		// keeps the old behavior: the whole body is the value.
+		//
+		// The split runs before `body` is cleared below: nil-ing the slice
+		// first and then parsing it is how an "always malformed" bug hides
+		// behind a helper that works in isolation.
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			value, meta, ok := splitMultipart(r.Header.Get("Content-Type"), body)
+			if !ok {
+				// The content type promised a multipart envelope and the
+				// bytes did not deliver one. Storing the raw bytes would
+				// save the MIME envelope as the value -- the defect this
+				// split removes -- so the request is refused here, before
+				// any store sees it. A client-class 400 with a neutral
+				// code: the model declares no error for a body that is
+				// malformed at the transport layer, and inventing a
+				// provider code in a shared codec would be worse than an
+				// honest one.
+				return nil, &spi.Fault{Code: "InvalidBody", Message: "malformed multipart/form-data body", HTTPStatus: 400, Fault: "client"}
+			}
+			in[name] = value
+			if meta != nil {
+				in["__multipart_metadata"] = *meta
+			}
+		} else {
+			in[name] = string(body)
+		}
 		body = nil
 	}
 	// The third answer to "what is this payload": a bare JSON array, which has
@@ -879,6 +912,63 @@ func encodeVercelBlobContent(w http.ResponseWriter, status int, resp *spi.Respon
 	body, _ := out["body"].(string)
 	_, err := io.WriteString(w, body)
 	return err
+}
+
+// splitMultipart divides a multipart/form-data body into the opaque value and
+// the optional metadata part Cloudflare's KV write accepts beside it. It
+// reports false when the body does not parse as multipart, and the caller then
+// keeps the whole body as the value -- the pre-existing answer for a payload
+// member, and still the right one for every non-multipart request.
+//
+// The value part is whatever part Cloudflare names `value` (or, defensively,
+// the first unnamed part, since some clients omit the name on the payload).
+// Metadata rides as its own part; when it is absent the write is a plain
+// value write and meta stays nil so no empty metadata is recorded.
+func splitMultipart(contentType string, body []byte) (value string, meta *string, ok bool) {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return "", nil, false
+	}
+	boundary := params["boundary"]
+	if boundary == "" {
+		return "", nil, false
+	}
+	mr := multipart.NewReader(bytes.NewReader(body), boundary)
+	found := false
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			// A malformed envelope after a valid prefix is not a value:
+			// falling back to the raw body would store the MIME envelope,
+			// which is the defect this split exists to remove.
+			return "", nil, false
+		}
+		data, readErr := io.ReadAll(part)
+		part.Close()
+		if readErr != nil {
+			return "", nil, false
+		}
+		switch part.FormName() {
+		case "value":
+			value = string(data)
+			found = true
+		case "":
+			if !found {
+				value = string(data)
+				found = true
+			}
+		case "metadata":
+			s := string(data)
+			meta = &s
+		}
+	}
+	if !found {
+		return "", nil, false
+	}
+	return value, meta, true
 }
 
 // rawBody reports the opaque body an operation projected, if it projected one.

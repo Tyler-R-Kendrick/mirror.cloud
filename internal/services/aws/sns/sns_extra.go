@@ -13,7 +13,7 @@ import (
 func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["TopicArn"])
 	if !validTopicARN(arn) {
-		return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: TopicArn", HTTPStatus: 400, Fault: "client"}
+		return nil, clientFault("InvalidParameter", "Invalid parameter: TopicArn", 400)
 	}
 	parts := strings.Split(arn, ":")
 	if parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
@@ -42,20 +42,20 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 	if req.Operation == "AddPermission" {
 		label := str(req.Input["Label"])
 		if label == "" {
-			return nil, &spi.Fault{Code: "MissingParameter", Message: "Label", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("MissingParameter", "Label", 400)
 		}
 		accts := stringList(req.Input, "AWSAccountIds", "AWSAccountId")
 		acts := stringList(req.Input, "ActionNames", "ActionName")
 		for _, statement := range stmts {
 			if str(asMap(statement)["Sid"]) == label {
-				return nil, &spi.Fault{Code: "InvalidParameter", Message: "A policy statement with this label already exists", HTTPStatus: 400, Fault: "client"}
+				return nil, clientFault("InvalidParameter", "A policy statement with this label already exists", 400)
 			}
 		}
 		for _, action := range acts {
 			switch str(action) {
 			case "Publish", "Subscribe", "Receive", "SendMessage", "GetTopicAttributes", "SetTopicAttributes", "DeleteTopic", "ListSubscriptionsByTopic", "AddPermission", "RemovePermission", "GetDataProtectionPolicy", "PutDataProtectionPolicy", "TagResource", "UntagResource":
 			default:
-				return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid action", HTTPStatus: 400, Fault: "client"}
+				return nil, clientFault("InvalidParameter", "Invalid action", 400)
 			}
 		}
 		stmts = append(stmts, map[string]any{"Sid": label, "Effect": "Allow", "Principal": map[string]any{"AWS": accts}, "Action": acts, "Resource": arn})
@@ -78,7 +78,7 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 		kept = append(kept, s)
 	}
 	if !found {
-		return nil, &spi.Fault{Code: "NotFound", Message: "Label", HTTPStatus: 404, Fault: "client"}
+		return nil, clientFault("NotFound", "Label", 404)
 	}
 	pol["Statement"] = kept
 	raw, _ := json.Marshal(pol)
@@ -125,11 +125,11 @@ func mergeDeliveryPolicy(dst, src map[string]any) {
 func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["SubscriptionArn"])
 	if !validSubscriptionARN(arn) {
-		return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: SubscriptionArn", HTTPStatus: 400, Fault: "client"}
+		return nil, clientFault("InvalidParameter", "Invalid parameter: SubscriptionArn", 400)
 	}
 	b, ok, _ := p.col(req, "subs").Get(ctx, arn)
 	if !ok {
-		return nil, &spi.Fault{Code: "NotFound", Message: "Subscription does not exist", HTTPStatus: 404, Fault: "client"}
+		return nil, clientFault("NotFound", "Subscription does not exist", 404)
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(b, &rec)
@@ -217,7 +217,7 @@ func (p *Pack) dataProtection(ctx context.Context, req *spi.Request) (*spi.Respo
 	}
 	if req.Operation == "PutDataProtectionPolicy" {
 		if !validTopicARN(arn) {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: ResourceArn", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: ResourceArn", 400)
 		}
 		parts := strings.Split(arn, ":")
 		if parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
@@ -389,7 +389,7 @@ func filterPolicyFault(detail string) *spi.Fault {
 	if detail != "" {
 		msg += ": " + detail
 	}
-	return &spi.Fault{Code: "InvalidParameter", Message: msg, HTTPStatus: 400, Fault: "client"}
+	return clientFault("InvalidParameter", msg, 400)
 }
 
 func validateSubscriptionAttribute(name, value string) *spi.Fault {
@@ -403,22 +403,22 @@ func validateSubscriptionAttribute(name, value string) *spi.Fault {
 		}
 	case "FilterPolicyScope":
 		if value != "MessageAttributes" && value != "MessageBody" {
-			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicyScope", HTTPStatus: 400, Fault: "client"}
+			return clientFault("InvalidParameter", "Invalid parameter: FilterPolicyScope", 400)
 		}
 	case "RawMessageDelivery":
 		if !strings.EqualFold(value, "true") && !strings.EqualFold(value, "false") {
-			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: RawMessageDelivery", HTTPStatus: 400, Fault: "client"}
+			return clientFault("InvalidParameter", "Invalid parameter: RawMessageDelivery", 400)
 		}
 	case "RedrivePolicy":
 		if value != "" {
 			var policy map[string]any
 			if json.Unmarshal([]byte(value), &policy) != nil || !validSQSARN(str(policy["deadLetterTargetArn"])) {
-				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: RedrivePolicy", HTTPStatus: 400, Fault: "client"}
+				return clientFault("InvalidParameter", "Invalid parameter: RedrivePolicy", 400)
 			}
 		}
 	case "DeliveryPolicy", "SubscriptionRoleArn":
 	default:
-		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: " + name, HTTPStatus: 400, Fault: "client"}
+		return clientFault("InvalidParameter", "Invalid parameter: "+name, 400)
 	}
 	return nil
 }
@@ -436,7 +436,7 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		plat := str(req.Input["Platform"])
 		attrs := flattenAttrEntries(req.Input, "Attributes")
 		if len(attrs) == 0 && req.Input["Attributes"] != nil {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: Attributes", 400)
 		}
 		if fault := validatePlatformApplication(name, plat, attrs); fault != nil {
 			return nil, fault
@@ -479,11 +479,11 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 	case "SetPlatformApplicationAttributes":
 		arn := str(req.Input["PlatformApplicationArn"])
 		if !validPlatformApplicationARN(arn) {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PlatformApplicationArn", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: PlatformApplicationArn", 400)
 		}
 		b, ok, _ := col.Get(ctx, arn)
 		if !ok {
-			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
+			return nil, clientFault("NotFound", "Platform application does not exist", 404)
 		}
 		rec := map[string]any{"PlatformApplicationArn": arn}
 		_ = json.Unmarshal(b, &rec)
@@ -503,11 +503,11 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 	default:
 		arn := str(req.Input["PlatformApplicationArn"])
 		if !validPlatformApplicationARN(arn) {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PlatformApplicationArn", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: PlatformApplicationArn", 400)
 		}
 		b, ok, _ := col.Get(ctx, arn)
 		if !ok {
-			return nil, &spi.Fault{Code: "NotFound", HTTPStatus: 404, Fault: "client"}
+			return nil, clientFault("NotFound", "", 404)
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
@@ -526,19 +526,19 @@ func validPlatformApplicationARN(arn string) bool {
 
 func validatePlatformApplication(name, platform string, attrs map[string]any) *spi.Fault {
 	if len(name) < 1 || len(name) > 256 || !validTopicChars(name) {
-		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Name", HTTPStatus: 400, Fault: "client"}
+		return clientFault("InvalidParameter", "Invalid parameter: Name", 400)
 	}
 	switch platform {
 	case "ADM", "APNS", "APNS_SANDBOX", "BAIDU", "FCM", "GCM", "MPNS", "WNS":
 	default:
-		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Platform", HTTPStatus: 400, Fault: "client"}
+		return clientFault("InvalidParameter", "Invalid parameter: Platform", 400)
 	}
 	if len(attrs) > 0 && (str(attrs["PlatformCredential"]) == "" || (platform == "ADM" && str(attrs["PlatformPrincipal"]) == "")) {
-		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+		return clientFault("InvalidParameter", "Invalid parameter: Attributes", 400)
 	}
 	for key := range attrs {
 		if key != "PlatformPrincipal" && key != "PlatformCredential" {
-			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+			return clientFault("InvalidParameter", "Invalid parameter: Attributes", 400)
 		}
 	}
 	return nil
@@ -551,10 +551,10 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		app := str(req.Input["PlatformApplicationArn"])
 		tok := str(req.Input["Token"])
 		if _, ok, _ := p.col(req, "platapps").Get(ctx, app); !ok {
-			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
+			return nil, clientFault("NotFound", "Platform application does not exist", 404)
 		}
 		if tok == "" {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Token", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: Token", 400)
 		}
 		attrs := flattenAttrEntries(req.Input, "Attributes")
 		if fault := validateEndpointAttributes(attrs); fault != nil {
@@ -580,7 +580,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 						continue
 					}
 					if str(existing[key]) != str(value) {
-						return nil, &spi.Fault{Code: "InvalidParameter", Message: fmt.Sprintf("Endpoint %s already exists with the same Token, but different attributes.", str(existing["EndpointArn"])), HTTPStatus: 400, Fault: "client"}
+						return nil, clientFault("InvalidParameter", fmt.Sprintf("Endpoint %s already exists with the same Token, but different attributes.", str(existing["EndpointArn"])), 400)
 					}
 				}
 				return &spi.Response{Output: map[string]any{"EndpointArn": existing["EndpointArn"]}}, nil
@@ -609,13 +609,13 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		arn := str(req.Input["EndpointArn"])
 		b, ok, _ := col.Get(ctx, arn)
 		if !ok {
-			return nil, &spi.Fault{Code: "NotFound", Message: "Endpoint does not exist", HTTPStatus: 404, Fault: "client"}
+			return nil, clientFault("NotFound", "Endpoint does not exist", 404)
 		}
 		rec := map[string]any{"EndpointArn": arn}
 		_ = json.Unmarshal(b, &rec)
 		attrs := flattenAttrEntries(req.Input, "Attributes")
 		if len(attrs) == 0 {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: Attributes", 400)
 		}
 		if fault := validateEndpointAttributes(attrs); fault != nil {
 			return nil, fault
@@ -629,7 +629,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 	case "ListEndpointsByPlatformApplication":
 		app := str(req.Input["PlatformApplicationArn"])
 		if _, ok, _ := p.col(req, "platapps").Get(ctx, app); !ok {
-			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
+			return nil, clientFault("NotFound", "Platform application does not exist", 404)
 		}
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		var out []any
@@ -646,7 +646,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		arn := str(req.Input["EndpointArn"])
 		b, ok, _ := col.Get(ctx, arn)
 		if !ok {
-			return nil, &spi.Fault{Code: "NotFound", HTTPStatus: 404, Fault: "client"}
+			return nil, clientFault("NotFound", "", 404)
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
@@ -667,18 +667,18 @@ func validateEndpointAttributes(attrs map[string]any) *spi.Fault {
 		switch key {
 		case "Enabled":
 			if !strings.EqualFold(str(value), "true") && !strings.EqualFold(str(value), "false") {
-				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Enabled", HTTPStatus: 400, Fault: "client"}
+				return clientFault("InvalidParameter", "Invalid parameter: Enabled", 400)
 			}
 		case "Token":
 			if str(value) == "" {
-				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Token", HTTPStatus: 400, Fault: "client"}
+				return clientFault("InvalidParameter", "Invalid parameter: Token", 400)
 			}
 		case "CustomUserData":
 			if len(str(value)) > 2048 {
-				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: CustomUserData", HTTPStatus: 400, Fault: "client"}
+				return clientFault("InvalidParameter", "Invalid parameter: CustomUserData", 400)
 			}
 		default:
-			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: " + key, HTTPStatus: 400, Fault: "client"}
+			return clientFault("InvalidParameter", "Invalid parameter: "+key, 400)
 		}
 	}
 	return nil
@@ -769,11 +769,11 @@ func validateSMSAttribute(name, value string) *spi.Fault {
 	case "DeliveryStatusSuccessSamplingRate":
 		rate, err := strconv.Atoi(value)
 		if err != nil || rate < 0 || rate > 100 {
-			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DeliveryStatusSuccessSamplingRate", HTTPStatus: 400, Fault: "client"}
+			return clientFault("InvalidParameter", "Invalid parameter: DeliveryStatusSuccessSamplingRate", 400)
 		}
 	case "DefaultSenderID":
 		if len(value) > 11 || value == "" {
-			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DefaultSenderID", HTTPStatus: 400, Fault: "client"}
+			return clientFault("InvalidParameter", "Invalid parameter: DefaultSenderID", 400)
 		}
 		letter := false
 		for _, r := range value {
@@ -781,18 +781,18 @@ func validateSMSAttribute(name, value string) *spi.Fault {
 				letter = true
 			}
 			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != ' ' {
-				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DefaultSenderID", HTTPStatus: 400, Fault: "client"}
+				return clientFault("InvalidParameter", "Invalid parameter: DefaultSenderID", 400)
 			}
 		}
 		if !letter {
-			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DefaultSenderID", HTTPStatus: 400, Fault: "client"}
+			return clientFault("InvalidParameter", "Invalid parameter: DefaultSenderID", 400)
 		}
 	case "DefaultSMSType":
 		if value != "Promotional" && value != "Transactional" {
-			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DefaultSMSType", HTTPStatus: 400, Fault: "client"}
+			return clientFault("InvalidParameter", "Invalid parameter: DefaultSMSType", 400)
 		}
 	default:
-		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: " + name, HTTPStatus: 400, Fault: "client"}
+		return clientFault("InvalidParameter", "Invalid parameter: "+name, 400)
 	}
 	return nil
 }
@@ -806,13 +806,13 @@ func (p *Pack) smsOpt(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "OptInPhoneNumber":
 		if !validSMSNumber(phone) {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PhoneNumber", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: PhoneNumber", 400)
 		}
 		_ = col.Delete(ctx, phone)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "CheckIfPhoneNumberIsOptedOut":
 		if !validSMSNumber(phone) {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PhoneNumber", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: PhoneNumber", 400)
 		}
 		_, ok, _ := col.Get(ctx, phone)
 		return &spi.Response{Output: map[string]any{"isOptedOut": ok}}, nil
@@ -832,7 +832,7 @@ func (p *Pack) smsSandbox(ctx context.Context, req *spi.Request) (*spi.Response,
 	switch req.Operation {
 	case "CreateSMSSandboxPhoneNumber":
 		if !validSMSNumber(phone) {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PhoneNumber", HTTPStatus: 400, Fault: "client"}
+			return nil, clientFault("InvalidParameter", "Invalid parameter: PhoneNumber", 400)
 		}
 		rec := map[string]any{"PhoneNumber": phone, "Status": "Pending"}
 		b, _ := json.Marshal(rec)
@@ -841,7 +841,7 @@ func (p *Pack) smsSandbox(ctx context.Context, req *spi.Request) (*spi.Response,
 	case "VerifySMSSandboxPhoneNumber":
 		b, ok, _ := col.Get(ctx, phone)
 		if !ok {
-			return nil, &spi.Fault{Code: "NotFound", Message: "Phone number is not registered", HTTPStatus: 404, Fault: "client"}
+			return nil, clientFault("NotFound", "Phone number is not registered", 404)
 		}
 		rec := map[string]any{"PhoneNumber": phone}
 		_ = json.Unmarshal(b, &rec)

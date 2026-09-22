@@ -49,6 +49,8 @@ def main(argv):
     try:
         with open(path) as f:
             declared = {e["test"]: e for e in json.load(f)["expected"]}
+    except FileNotFoundError:
+        declared = {}
     except (OSError, ValueError, KeyError) as err:
         print("known-red: cannot read %s: %s" % (path, err), file=sys.stderr)
         return 2

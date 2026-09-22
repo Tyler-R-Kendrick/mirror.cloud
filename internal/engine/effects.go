@@ -325,7 +325,6 @@ func (ev *eval) putKeyAlias(ctx context.Context, res bir.Resource, oldKey, newKe
 	return ev.e.scope(ev.req).Collection(name).Put(ctx, oldKey, []byte(newKey))
 }
 
-
 func (ev *eval) runExecute(ctx context.Context, path string, e bir.ExecuteEffect) error {
 	if e.When != "" {
 		ok, err := ev.evalBool(path + ".when")

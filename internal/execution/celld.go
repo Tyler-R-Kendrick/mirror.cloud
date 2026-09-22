@@ -23,11 +23,11 @@ import (
 
 // CelldPin is the on-disk pin beside tools/celld-runtime.
 type CelldPin struct {
-	Name      string                    `json:"name"`
-	Version   string                    `json:"version"`
-	Tag       string                    `json:"tag"`
-	Upstream  string                    `json:"upstream"`
-	Artifacts map[string]CelldArtifact  `json:"artifacts"`
+	Name      string                   `json:"name"`
+	Version   string                   `json:"version"`
+	Tag       string                   `json:"tag"`
+	Upstream  string                   `json:"upstream"`
+	Artifacts map[string]CelldArtifact `json:"artifacts"`
 }
 
 // CelldArtifact is one OS/arch release binary.

@@ -499,12 +499,12 @@ type Effect struct {
 // composition validates the mix at load. AbsentError names a bundle error
 // when the backend answers class absent (e.g. KeyNotFound).
 type ExecuteEffect struct {
-	Action       string            `yaml:"action"`
-	Args         map[string]string `yaml:"args,omitempty"`
-	Bind         string            `yaml:"bind,omitempty"`
-	When         string            `yaml:"when,omitempty"`
-	AbsentError  string            `yaml:"absent_error,omitempty"`
-	AbsentMessage string           `yaml:"absent_message,omitempty"`
+	Action        string            `yaml:"action"`
+	Args          map[string]string `yaml:"args,omitempty"`
+	Bind          string            `yaml:"bind,omitempty"`
+	When          string            `yaml:"when,omitempty"`
+	AbsentError   string            `yaml:"absent_error,omitempty"`
+	AbsentMessage string            `yaml:"absent_message,omitempty"`
 }
 
 // WriteEffect creates or updates a resource record.

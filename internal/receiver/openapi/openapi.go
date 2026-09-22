@@ -121,11 +121,11 @@ type responseObject struct {
 }
 
 type operation struct {
-	OperationID string      `json:"operationId"`
-	Summary     string      `json:"summary"`
-	Parameters  []parameter `json:"parameters"`
-	RequestBody *requestBodyObject `json:"requestBody"`
-	Responses map[string]responseObject `json:"responses"`
+	OperationID string                    `json:"operationId"`
+	Summary     string                    `json:"summary"`
+	Parameters  []parameter               `json:"parameters"`
+	RequestBody *requestBodyObject        `json:"requestBody"`
+	Responses   map[string]responseObject `json:"responses"`
 	// MirrorName is `x-mirror-name`: the operation's exact served name when
 	// the document's own spelling cannot carry it. GraphQL operation names
 	// start lowercase, and exported() would capitalize them into names the

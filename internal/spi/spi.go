@@ -114,7 +114,7 @@ type Deps struct {
 	SQSEndpointStrategy       string
 	// Executor runs B-IR execute effects (external authoritative backends).
 	// Nil means those effects answer unavailable.
-	Executor                  Executor
+	Executor Executor
 }
 
 // Executor dispatches one named action with evaluated arguments. Implemented

@@ -206,8 +206,9 @@ func TestMiniflareWorkerdTTL(t *testing.T) {
 	if found, _ := got["found"].(bool); !found {
 		t.Fatal("key missing immediately after put")
 	}
-	deadline := time.Now().Add(90 * time.Second)
-	for {
+	// Fixed iteration budget (~90s): no time.Now — determinism lint forbids it
+	// outside /clock, and wall sleep is the point of the external-clock half.
+	for i := 0; i < 45; i++ {
 		got, err = s.Call(ctx, "kv.get", map[string]any{"namespace": "DATA", "key": "temp"})
 		if err != nil {
 			t.Fatal(err)
@@ -215,11 +216,9 @@ func TestMiniflareWorkerdTTL(t *testing.T) {
 		if found, _ := got["found"].(bool); !found {
 			return
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("workerd did not expire key with expirationTtl=60 within 90s")
-		}
 		time.Sleep(2 * time.Second)
 	}
+	t.Fatal("workerd did not expire key with expirationTtl=60 within ~90s")
 }
 
 func TestMiniflareD1R2Queue(t *testing.T) {

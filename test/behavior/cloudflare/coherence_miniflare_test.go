@@ -67,7 +67,6 @@ func TestCFKVCoherenceViaExecute(t *testing.T) {
 	}
 	ns := out["result"].(map[string]any)["id"].(string)
 
-
 	if _, err := invoke("WorkersKvNamespaceWriteKeyValuePairWithMetadata", map[string]any{
 		"account_id": "cohere-acct", "namespace_id": ns,
 		"key_name": "from-rest", "body": "rest-bytes",

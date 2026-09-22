@@ -6,10 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/xmlenc"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -79,9 +79,9 @@ func (c Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWr
 	} else {
 		fmt.Fprintf(&b, `<%sResponse>`, op.Name)
 	}
-	e := enc{svc: svc}
+	e := xmlenc.Encoder{Svc: svc}
 	if svc.Protocol == model.ProtoEC2Query {
-		e.value(&b, op.Output, resp.Output)
+		e.Value(&b, op.Output, resp.Output)
 		fmt.Fprintf(&b, `<requestId>mirror</requestId></%sResponse>`, op.Name)
 	} else {
 		// An operation that produced nothing gets a self-closing result
@@ -90,7 +90,7 @@ func (c Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWr
 		// The open/close pair says the same thing to an XML parser and a
 		// different thing to everything else reading the bytes.
 		var body strings.Builder
-		e.value(&body, op.Output, resp.Output)
+		e.Value(&body, op.Output, resp.Output)
 		if body.Len() == 0 {
 			fmt.Fprintf(&b, `<%sResult/>`, op.Name)
 		} else {
@@ -137,7 +137,7 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	}
 	w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
 	w.WriteHeader(status)
-	_, err := fmt.Fprintf(w, `<ErrorResponse><Error><Type>%s</Type><Code>%s</Code><Message>%s</Message></Error><RequestId>%s</RequestId></ErrorResponse>`, typ, f.Code, xmlEscape(f.Message), requestID)
+	_, err := fmt.Fprintf(w, `<ErrorResponse><Error><Type>%s</Type><Code>%s</Code><Message>%s</Message></Error><RequestId>%s</RequestId></ErrorResponse>`, typ, f.Code, xmlenc.Escape(f.Message), requestID)
 	return err
 }
 
@@ -157,164 +157,6 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 // therefore serialize identically, which is what the extraction equivalence gate
 // compares.
 //
-// XML attributes are not honoured here. No awsQuery or ec2Query response shape
-// in the served models declares one, and a member written as an element where an
-// attribute was declared would be a silent wrong answer rather than an obvious
-// one, so this records the gap rather than guessing at it.
-type enc struct{ svc *model.Service }
-
-// value writes the contents of one element: the members of a structure, the
-// entries of a map, or the text of a scalar.
-func (e enc) value(b *strings.Builder, shapeID string, v any) {
-	shape, known := e.svc.Shapes[shapeID]
-	switch t := v.(type) {
-	case map[string]any:
-		if known && shape.Kind == model.KindMap {
-			e.entries(b, shape, t)
-			return
-		}
-		for _, k := range sortedKeys(t) {
-			wire, child, flat := e.resolve(shape, known, k)
-			e.member(b, wire, child, flat, t[k])
-		}
-	case []any:
-		// A list the shape did not describe -- an undeclared member, or a
-		// producer answering something the model does not carry. The wrapper
-		// the codec has always written is kept so nothing that worked before
-		// this change stops working.
-		for _, item := range t {
-			b.WriteString("<member>")
-			e.value(b, "", item)
-			b.WriteString("</member>")
-		}
-	case nil:
-	default:
-		b.WriteString(xmlEscape(fmt.Sprint(t)))
-	}
-}
-
-// member writes one named member, wrapper included -- except for a flattened
-// list or map, which has no wrapper: each element carries the member's own name.
-func (e enc) member(b *strings.Builder, wire, shapeID string, flat bool, v any) {
-	shape, known := e.svc.Shapes[shapeID]
-	if known {
-		switch shape.Kind {
-		case model.KindList:
-			if items, ok := v.([]any); ok {
-				e.list(b, wire, shape, flat, items)
-				return
-			}
-		case model.KindMap:
-			if entries, ok := v.(map[string]any); ok {
-				if flat {
-					for _, k := range sortedKeys(entries) {
-						open(b, wire)
-						e.entry(b, shape, k, entries[k])
-						closeTag(b, wire)
-					}
-					return
-				}
-			}
-		}
-	}
-	open(b, wire)
-	e.value(b, shapeID, v)
-	closeTag(b, wire)
-}
-
-// list writes an indexed list. The element name comes from the list shape's own
-// member -- `item` in ec2, `member` where the specification says nothing.
-func (e enc) list(b *strings.Builder, wire string, shape model.Shape, flat bool, items []any) {
-	if flat {
-		for _, item := range items {
-			e.member(b, wire, shape.Member, false, item)
-		}
-		return
-	}
-	elem := shape.MemberBinding.Name
-	if elem == "" {
-		elem = "member"
-	}
-	open(b, wire)
-	for _, item := range items {
-		e.member(b, elem, shape.Member, false, item)
-	}
-	closeTag(b, wire)
-}
-
-// entries writes a map's entries, each carrying its key and value explicitly.
-func (e enc) entries(b *strings.Builder, shape model.Shape, m map[string]any) {
-	for _, k := range sortedKeys(m) {
-		b.WriteString("<entry>")
-		e.entry(b, shape, k, m[k])
-		b.WriteString("</entry>")
-	}
-}
-
-func (e enc) entry(b *strings.Builder, shape model.Shape, k string, v any) {
-	kn, vn := shape.KeyBinding.Name, shape.MemberBinding.Name
-	if kn == "" {
-		kn = "key"
-	}
-	if vn == "" {
-		vn = "value"
-	}
-	open(b, kn)
-	b.WriteString(xmlEscape(k))
-	closeTag(b, kn)
-	e.member(b, vn, shape.Member, false, v)
-}
-
-// resolve maps one key of a produced record onto the member it stands for,
-// answering the element name to write, the shape to write it with, and whether
-// the member is flattened.
-func (e enc) resolve(shape model.Shape, known bool, key string) (wire, child string, flat bool) {
-	if !known || (shape.Kind != model.KindStructure && shape.Kind != model.KindUnion) {
-		return key, "", false
-	}
-	if m, ok := shape.Members[key]; ok {
-		if m.Binding.Name != "" {
-			return m.Binding.Name, m.Shape, m.Binding.XMLFlattened
-		}
-		return key, m.Shape, m.Binding.XMLFlattened
-	}
-	// Already a wire name. Sorted so two members sharing one wire name -- which
-	// no served model has, but which a vendor could introduce -- resolve the
-	// same way on every run rather than by map order.
-	for _, n := range sortedMembers(shape) {
-		if m := shape.Members[n]; m.Binding.Name == key {
-			return key, m.Shape, m.Binding.XMLFlattened
-		}
-	}
-	return key, "", false
-}
-
-func open(b *strings.Builder, name string)     { b.WriteString("<" + name + ">") }
-func closeTag(b *strings.Builder, name string) { b.WriteString("</" + name + ">") }
-
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func sortedMembers(shape model.Shape) []string {
-	names := make([]string, 0, len(shape.Members))
-	for n := range shape.Members {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func xmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
-	return r.Replace(s)
-}
-
 // FormEncode is exported for tests.
 func FormEncode(v url.Values) string { return v.Encode() }
 

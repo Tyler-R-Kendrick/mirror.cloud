@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/xmlenc"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -179,7 +180,7 @@ func RouteName(r *http.Request) string {
 		}
 		return putOrGet(m, "PutBucketEncryption", "GetBucketEncryption")
 	case hasQuery(r, "object-lock"):
-		return putOrGet(m, "PutObjectLockConfiguration", "GetBucketObjectLockConfiguration")
+		return putOrGet(m, "PutObjectLockConfiguration", "GetObjectLockConfiguration")
 	case hasQuery(r, "requestPayment"):
 		return putOrGet(m, "PutBucketRequestPayment", "GetBucketRequestPayment")
 	case hasQuery(r, "accelerate"):
@@ -1233,392 +1234,60 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		_, err := io.WriteString(w, fmt.Sprint(resp.Output["Policy"]))
 		return err
 	}
-	if op.Name == "GetBucketEncryption" {
-		w.Header().Set("Content-Type", "application/xml")
-		w.WriteHeader(status)
-		if len(resp.Output) == 0 {
-			return nil
-		}
-		var b strings.Builder
-		b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		for _, value := range resp.Output["Rules"].([]any) {
-			rule, _ := value.(map[string]any)
-			b.WriteString("<Rule>")
-			if defaults, ok := rule["ApplyServerSideEncryptionByDefault"].(map[string]any); ok {
-				b.WriteString("<ApplyServerSideEncryptionByDefault>")
-				fmt.Fprintf(&b, "<SSEAlgorithm>%s</SSEAlgorithm>", xmlEscape(fmt.Sprint(defaults["SSEAlgorithm"])))
-				if keyID, exists := defaults["KMSMasterKeyID"]; exists {
-					fmt.Fprintf(&b, "<KMSMasterKeyID>%s</KMSMasterKeyID>", xmlEscape(fmt.Sprint(keyID)))
-				}
-				b.WriteString("</ApplyServerSideEncryptionByDefault>")
-			}
-			if enabled, exists := rule["BucketKeyEnabled"]; exists {
-				fmt.Fprintf(&b, "<BucketKeyEnabled>%v</BucketKeyEnabled>", enabled)
-			}
-			b.WriteString("</Rule>")
-		}
-		b.WriteString("</ServerSideEncryptionConfiguration>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
 	if resp.Output == nil {
 		return nil
 	}
-	type kv struct {
-		XMLName xml.Name
-		Value   string `xml:",chardata"`
-	}
-	// Simple XML object encoder.
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	if op.Name == "GetBucketLocation" {
-		b.WriteString(`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		_ = xml.EscapeText(&b, []byte(fmt.Sprint(resp.Output["LocationConstraint"])))
-		b.WriteString(`</LocationConstraint>`)
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketRequestPayment" {
-		b.WriteString(`<RequestPaymentConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		write(resp.Output, &b)
-		b.WriteString("</RequestPaymentConfiguration>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketAccelerateConfiguration" {
-		b.WriteString(`<AccelerateConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		write(resp.Output, &b)
-		b.WriteString("</AccelerateConfiguration>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketLogging" {
-		b.WriteString(`<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		write(resp.Output, &b)
-		b.WriteString("</BucketLoggingStatus>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketCors" {
-		b.WriteString(`<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		for _, value := range resp.Output["CORSRules"].([]any) {
-			rule, _ := value.(map[string]any)
-			b.WriteString("<CORSRule>")
-			for _, field := range []string{"ID", "AllowedHeaders", "AllowedMethods", "AllowedOrigins", "ExposeHeaders", "MaxAgeSeconds"} {
-				value, ok := rule[field]
-				if !ok {
-					continue
-				}
-				tag := strings.TrimSuffix(field, "s")
-				if values, ok := value.([]any); ok {
-					for _, value := range values {
-						fmt.Fprintf(&b, "<%s>%s</%s>", tag, xmlEscape(fmt.Sprint(value)), tag)
-					}
-					continue
-				}
-				fmt.Fprintf(&b, "<%s>%s</%s>", field, xmlEscape(fmt.Sprint(value)), field)
-			}
-			b.WriteString("</CORSRule>")
+	e := xmlenc.Encoder{Svc: svc}
+	out := svc.Shapes[op.Output]
+	switch name, member, ok := payloadOf(svc, op.Output); {
+	case ok:
+		// The body is one member, under its own element. A pack answers it
+		// either under that name or flat, and an empty answer is an empty
+		// body -- a bucket with no encryption configuration answers nothing.
+		if len(resp.Output) == 0 {
+			return nil
 		}
-		b.WriteString("</CORSConfiguration>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketWebsite" {
-		b.WriteString(`<WebsiteConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		for _, field := range []string{"RedirectAllRequestsTo", "IndexDocument", "ErrorDocument"} {
-			if value, ok := resp.Output[field]; ok {
-				fmt.Fprintf(&b, "<%s>", field)
-				write(value, &b)
-				fmt.Fprintf(&b, "</%s>", field)
-			}
+		v, present := resp.Output[name]
+		if !present {
+			v = resp.Output
 		}
-		if rules, ok := resp.Output["RoutingRules"].([]any); ok {
-			b.WriteString("<RoutingRules>")
-			for _, value := range rules {
-				rule, _ := value.(map[string]any)
-				b.WriteString("<RoutingRule>")
-				for _, field := range []string{"Condition", "Redirect"} {
-					if value, ok := rule[field]; ok {
-						fmt.Fprintf(&b, "<%s>", field)
-						write(value, &b)
-						fmt.Fprintf(&b, "</%s>", field)
-					}
-				}
-				b.WriteString("</RoutingRule>")
-			}
-			b.WriteString("</RoutingRules>")
-		}
-		b.WriteString("</WebsiteConfiguration>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketLifecycleConfiguration" {
-		b.WriteString(`<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		writeLifecycle(resp.Output, &b)
-		b.WriteString("</LifecycleConfiguration>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketNotificationConfiguration" {
-		b.WriteString(`<NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		for _, destination := range []struct{ field, tag, arnField, arnTag string }{
-			{"TopicConfigurations", "TopicConfiguration", "TopicArn", "Topic"},
-			{"QueueConfigurations", "QueueConfiguration", "QueueArn", "Queue"},
-			{"LambdaFunctionConfigurations", "CloudFunctionConfiguration", "LambdaFunctionArn", "CloudFunction"},
-		} {
-			configurations, _ := resp.Output[destination.field].([]any)
-			for _, value := range configurations {
-				configuration, _ := value.(map[string]any)
-				fmt.Fprintf(&b, "<%s>", destination.tag)
-				id, _ := configuration["Id"].(string)
-				if id != "" {
-					fmt.Fprintf(&b, "<Id>%s</Id>", xmlEscape(id))
-				}
-				arn, _ := configuration[destination.arnField].(string)
-				fmt.Fprintf(&b, "<%s>%s</%s>", destination.arnTag, xmlEscape(arn), destination.arnTag)
-				events, _ := configuration["Events"].([]any)
-				for _, event := range events {
-					fmt.Fprintf(&b, "<Event>%s</Event>", xmlEscape(fmt.Sprint(event)))
-				}
-				if filter, ok := configuration["Filter"].(map[string]any); ok {
-					b.WriteString("<Filter><S3Key>")
-					key, _ := filter["Key"].(map[string]any)
-					rules, _ := key["FilterRules"].([]any)
-					for _, value := range rules {
-						b.WriteString("<FilterRule>")
-						write(value, &b)
-						b.WriteString("</FilterRule>")
-					}
-					b.WriteString("</S3Key></Filter>")
-				}
-				fmt.Fprintf(&b, "</%s>", destination.tag)
-			}
-		}
-		if _, ok := resp.Output["EventBridgeConfiguration"]; ok {
-			b.WriteString("<EventBridgeConfiguration></EventBridgeConfiguration>")
-		}
-		b.WriteString("</NotificationConfiguration>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketAcl" || op.Name == "GetObjectAcl" {
-		b.WriteString(`<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		owner, _ := resp.Output["Owner"].(map[string]any)
-		b.WriteString("<Owner>")
-		for _, field := range []string{"ID", "DisplayName"} {
-			if value := xmlString(owner[field]); value != "" {
-				fmt.Fprintf(&b, "<%s>%s</%s>", field, xmlEscape(value), field)
-			}
-		}
-		b.WriteString("</Owner><AccessControlList>")
-		for _, value := range asAnySlice(resp.Output["Grants"]) {
-			grant, _ := value.(map[string]any)
-			grantee, _ := grant["Grantee"].(map[string]any)
-			b.WriteString(`<Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="` + xmlEscape(xmlString(grantee["Type"])) + `">`)
-			for _, field := range []string{"ID", "DisplayName", "URI", "EmailAddress"} {
-				if value := xmlString(grantee[field]); value != "" {
-					fmt.Fprintf(&b, "<%s>%s</%s>", field, xmlEscape(value), field)
-				}
-			}
-			b.WriteString("</Grantee><Permission>" + xmlEscape(xmlString(grant["Permission"])) + "</Permission></Grant>")
-		}
-		b.WriteString("</AccessControlList></AccessControlPolicy>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if shape := namedConfigurationShape(op.Name); shape.configuration != "" {
-		if strings.HasPrefix(op.Name, "Get") {
-			fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, shape.configuration)
-			writeNamedConfiguration(resp.Output[shape.configuration], &b)
-			fmt.Fprintf(&b, "</%s>", shape.configuration)
-			_, err := io.WriteString(w, b.String())
-			return err
-		}
-		if strings.HasPrefix(op.Name, "List") {
-			root := op.Name + "Result"
-			fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, root)
-			for _, field := range []string{"ContinuationToken", "NextContinuationToken", "IsTruncated"} {
-				if value, ok := resp.Output[field]; ok {
-					fmt.Fprintf(&b, "<%s>", field)
-					writeNamedConfiguration(value, &b)
-					fmt.Fprintf(&b, "</%s>", field)
-				}
-			}
-			for _, value := range asAnySlice(resp.Output[shape.list]) {
-				fmt.Fprintf(&b, "<%s>", shape.configuration)
-				writeNamedConfiguration(value, &b)
-				fmt.Fprintf(&b, "</%s>", shape.configuration)
-			}
-			fmt.Fprintf(&b, "</%s>", root)
-			_, err := io.WriteString(w, b.String())
-			return err
-		}
-	}
-	configurationRoot := map[string]string{
-		"GetBucketObjectLockConfiguration": "ObjectLockConfiguration",
-		"GetObjectLockConfiguration":       "ObjectLockConfiguration",
-		"GetObjectLegalHold":               "LegalHold",
-		"GetObjectRetention":               "Retention",
-		"GetPublicAccessBlock":             "PublicAccessBlockConfiguration",
-	}[op.Name]
-	if configurationRoot != "" {
-		fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, configurationRoot)
-		write(resp.Output[configurationRoot], &b)
-		fmt.Fprintf(&b, "</%s>", configurationRoot)
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketOwnershipControls" {
-		b.WriteString(`<OwnershipControls xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		controls, _ := resp.Output["OwnershipControls"].(map[string]any)
-		rules, _ := controls["Rules"].([]any)
-		for _, rule := range rules {
-			b.WriteString("<Rule>")
-			write(rule, &b)
-			b.WriteString("</Rule>")
-		}
-		b.WriteString("</OwnershipControls>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	if op.Name == "GetBucketReplication" {
-		configuration, _ := resp.Output["ReplicationConfiguration"].(map[string]any)
-		if configuration == nil {
-			configuration = resp.Output
-		}
-		b.WriteString(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-		if role := configuration["Role"]; role != nil {
-			write(map[string]any{"Role": role}, &b)
-		}
-		rules, _ := configuration["Rules"].([]any)
-		for _, rule := range rules {
-			b.WriteString("<Rule>")
-			document, _ := rule.(map[string]any)
-			fields := make(map[string]any, len(document))
-			for key, value := range document {
-				if key != "Filter" {
-					fields[key] = value
-				}
-			}
-			write(fields, &b)
-			if filter, ok := document["Filter"].(map[string]any); ok {
-				b.WriteString("<Filter>")
-				filterFields := make(map[string]any, len(filter))
-				for key, value := range filter {
-					if key != "And" {
-						filterFields[key] = value
-					}
-				}
-				write(filterFields, &b)
-				if and, ok := filter["And"].(map[string]any); ok {
-					b.WriteString("<And>")
-					andFields := make(map[string]any, len(and))
-					for key, value := range and {
-						if key != "Tags" {
-							andFields[key] = value
-						}
-					}
-					write(andFields, &b)
-					tags, _ := and["Tags"].([]any)
-					for _, tag := range tags {
-						b.WriteString("<Tag>")
-						write(tag, &b)
-						b.WriteString("</Tag>")
-					}
-					b.WriteString("</And>")
-				}
-				b.WriteString("</Filter>")
-			}
-			b.WriteString("</Rule>")
-		}
-		b.WriteString("</ReplicationConfiguration>")
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-	root := op.Name + "Result"
-	if op.Name == "ListBuckets" {
-		root = "ListAllMyBucketsResult"
-	}
-	if op.Name == "ListObjectsV2" || op.Name == "ListObjects" {
-		root = "ListBucketResult"
-	}
-	if op.Name == "GetObjectAttributes" {
-		root = "GetObjectAttributesResponse"
-	}
-	if op.Name == "PostObject" {
-		root = "PostResponse"
-	}
-	namespace := ""
-	if op.Name == "DeleteObjects" {
-		root = "DeleteResult"
-		namespace = ` xmlns="http://s3.amazonaws.com/doc/2006-03-01/"`
-	}
-	fmt.Fprintf(&b, "<%s%s>", root, namespace)
-	switch op.Name {
-	case "ListBuckets":
-		top := make(map[string]any, len(resp.Output)-1)
-		for key, value := range resp.Output {
-			if key != "Buckets" {
-				top[key] = value
-			}
-		}
-		write(top, &b)
-		b.WriteString("<Buckets>")
-		buckets, _ := resp.Output["Buckets"].([]any)
-		for _, item := range buckets {
-			b.WriteString("<Bucket>")
-			write(item, &b)
-			b.WriteString("</Bucket>")
-		}
-		b.WriteString("</Buckets>")
-	case "ListParts":
-		writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})
-	case "ListMultipartUploads":
-		writeFlattened(resp.Output, &b, [][2]string{{"Uploads", "Upload"}, {"CommonPrefixes", "CommonPrefixes"}})
-	case "ListObjectVersions":
-		writeFlattened(resp.Output, &b, [][2]string{{"Versions", "Version"}, {"DeleteMarkers", "DeleteMarker"}, {"CommonPrefixes", "CommonPrefixes"}})
-	case "ListObjects", "ListObjectsV2":
-		writeFlattened(resp.Output, &b, [][2]string{{"Contents", "Contents"}, {"CommonPrefixes", "CommonPrefixes"}})
-	case "GetObjectAttributes":
-		writeFields := func(keys ...string) {
-			for _, key := range keys {
-				if value, ok := resp.Output[key]; ok {
-					write(map[string]any{key: value}, &b)
-				}
-			}
-		}
-		writeFields("ETag", "Checksum")
-		if parts, ok := resp.Output["ObjectParts"].(map[string]any); ok {
-			b.WriteString("<ObjectParts>")
-			encoded := make(map[string]any, len(parts))
-			for key, value := range parts {
-				encoded[key] = value
-			}
-			if count, ok := encoded["TotalPartsCount"]; ok {
-				delete(encoded, "TotalPartsCount")
-				encoded["PartsCount"] = count
-			}
-			writeFlattened(encoded, &b, [][2]string{{"Parts", "Part"}})
-			b.WriteString("</ObjectParts>")
-		}
-		writeFields("StorageClass", "ObjectSize")
-	case "GetObjectTagging", "GetBucketTagging":
-		b.WriteString("<TagSet>")
-		for _, item := range resp.Output["TagSet"].([]any) {
-			b.WriteString("<Tag>")
-			write(item, &b)
-			b.WriteString("</Tag>")
-		}
-		b.WriteString("</TagSet>")
-	case "DeleteObjects":
-		writeFlattened(resp.Output, &b, [][2]string{{"Deleted", "Deleted"}, {"Errors", "Error"}})
+		wire := wireName(name, member.Binding)
+		fmt.Fprintf(&b, `<%s xmlns=%q>`, wire, svc.XMLNamespace)
+		e.Value(&b, member.Shape, v)
+		fmt.Fprintf(&b, "</%s>", wire)
+	case op.Name == "GetBucketLocation":
+		// aws.customizations#s3UnwrappedXmlOutput: the one member is the
+		// root, not a child of it.
+		fmt.Fprintf(&b, `<LocationConstraint xmlns=%q>%s</LocationConstraint>`, svc.XMLNamespace, xmlenc.Escape(fmt.Sprint(resp.Output["LocationConstraint"])))
 	default:
-		write(resp.Output, &b)
+		// The root is the output shape's own xmlName -- ListBucketResult,
+		// AccessControlPolicy -- and, as restXml has it, the shape's own name
+		// where the trait is absent: GetBucketNotificationConfiguration's
+		// output is the NotificationConfiguration structure itself.
+		root := out.XMLName
+		if root == "" {
+			root = op.Output[strings.LastIndex(op.Output, "#")+1:]
+		}
+		if op.Output == "" {
+			root = op.Name + "Result"
+		}
+		if op.Name == "PostObject" {
+			root = "PostResponse" // no model describes the browser upload
+		}
+		// The namespace is the model's; an operation the model does not
+		// describe answers without one.
+		if op.Output == "" {
+			fmt.Fprintf(&b, "<%s>", root)
+		} else {
+			fmt.Fprintf(&b, `<%s xmlns=%q>`, root, svc.XMLNamespace)
+		}
+		e.Value(&b, op.Output, resp.Output)
+		fmt.Fprintf(&b, "</%s>", root)
 	}
-	fmt.Fprintf(&b, "</%s>", root)
 	_, err := io.WriteString(w, b.String())
 	return err
 }
@@ -1640,142 +1309,6 @@ func namedConfigurationShape(operation string) namedConfigurationXMLShape {
 		return namedConfigurationXMLShape{"MetricsConfiguration", "MetricsConfigurationList"}
 	default:
 		return namedConfigurationXMLShape{}
-	}
-}
-
-func asAnySlice(value any) []any {
-	result, _ := value.([]any)
-	return result
-}
-
-func writeNamedConfiguration(value any, b *strings.Builder) {
-	switch value := value.(type) {
-	case map[string]any:
-		keys := make([]string, 0, len(value))
-		for key := range value {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			items, isSlice := value[key].([]any)
-			if key == "OptionalFields" && isSlice {
-				b.WriteString("<OptionalFields>")
-				for _, item := range items {
-					b.WriteString("<Field>")
-					writeNamedConfiguration(item, b)
-					b.WriteString("</Field>")
-				}
-				b.WriteString("</OptionalFields>")
-				continue
-			}
-			if (key == "Tags" || key == "Tierings") && isSlice {
-				tag := strings.TrimSuffix(key, "s")
-				for _, item := range items {
-					fmt.Fprintf(b, "<%s>", tag)
-					writeNamedConfiguration(item, b)
-					fmt.Fprintf(b, "</%s>", tag)
-				}
-				continue
-			}
-			fmt.Fprintf(b, "<%s>", key)
-			writeNamedConfiguration(value[key], b)
-			fmt.Fprintf(b, "</%s>", key)
-		}
-	case nil:
-	default:
-		b.WriteString(xmlEscape(fmt.Sprint(value)))
-	}
-}
-
-func writeFlattened(output map[string]any, b *strings.Builder, members [][2]string) {
-	top := make(map[string]any, len(output)-len(members))
-	for key, value := range output {
-		top[key] = value
-	}
-	for _, member := range members {
-		delete(top, member[0])
-	}
-	write(top, b)
-	for _, member := range members {
-		items, _ := output[member[0]].([]any)
-		for _, item := range items {
-			fmt.Fprintf(b, "<%s>", member[1])
-			write(item, b)
-			fmt.Fprintf(b, "</%s>", member[1])
-		}
-	}
-}
-
-func stringsToAny(values []string) []any {
-	result := make([]any, len(values))
-	for i, value := range values {
-		result[i] = value
-	}
-	return result
-}
-
-func write(v any, b *strings.Builder) {
-	switch t := v.(type) {
-	case map[string]any:
-		keys := make([]string, 0, len(t))
-		for k := range t {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			if values, ok := t[k].([]any); ok && k == "ChecksumAlgorithm" {
-				for _, value := range values {
-					fmt.Fprintf(b, "<ChecksumAlgorithm>%s</ChecksumAlgorithm>", xmlEscape(fmt.Sprint(value)))
-				}
-				continue
-			}
-			fmt.Fprintf(b, "<%s>", k)
-			write(t[k], b)
-			fmt.Fprintf(b, "</%s>", k)
-		}
-	case []any:
-		for _, item := range t {
-			b.WriteString("<member>")
-			write(item, b)
-			b.WriteString("</member>")
-		}
-	case nil:
-	default:
-		b.WriteString(xmlEscape(fmt.Sprint(t)))
-	}
-}
-
-func writeLifecycle(v any, b *strings.Builder) {
-	switch value := v.(type) {
-	case map[string]any:
-		keys := make([]string, 0, len(value))
-		for key := range value {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			tag := map[string]string{
-				"Rules": "Rule", "Tags": "Tag", "Transitions": "Transition",
-				"NoncurrentVersionTransitions": "NoncurrentVersionTransition",
-			}[key]
-			if tag == "" {
-				tag = key
-			}
-			if items, ok := value[key].([]any); ok {
-				for _, item := range items {
-					fmt.Fprintf(b, "<%s>", tag)
-					writeLifecycle(item, b)
-					fmt.Fprintf(b, "</%s>", tag)
-				}
-				continue
-			}
-			fmt.Fprintf(b, "<%s>", tag)
-			writeLifecycle(value[key], b)
-			fmt.Fprintf(b, "</%s>", tag)
-		}
-	case nil:
-	default:
-		b.WriteString(xmlEscape(fmt.Sprint(value)))
 	}
 }
 
@@ -1880,15 +1413,15 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 		var b strings.Builder
 		b.WriteString(`<?xml version="1.0" encoding="utf-8"?><EnumerationResults ServiceEndpoint="">`)
 		b.WriteString("<Where>")
-		b.WriteString(xmlEscape(strAny(resp.Output["where"])))
+		b.WriteString(xmlenc.Escape(strAny(resp.Output["where"])))
 		b.WriteString("</Where><Blobs>")
 		if lst, ok := resp.Output["blobs"].([]any); ok {
 			for _, item := range lst {
 				m, _ := item.(map[string]any)
 				b.WriteString("<Blob><Name>")
-				b.WriteString(xmlEscape(strAny(m["name"])))
+				b.WriteString(xmlenc.Escape(strAny(m["name"])))
 				b.WriteString("</Name><ContainerName>")
-				b.WriteString(xmlEscape(strAny(m["container"])))
+				b.WriteString(xmlenc.Escape(strAny(m["container"])))
 				b.WriteString("</ContainerName><Tags><TagSet>")
 				writeAzureTagSet(&b, m["tags"])
 				b.WriteString("</TagSet></Tags></Blob>")
@@ -1970,7 +1503,7 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 				for _, item := range asAny(lst) {
 					m, _ := item.(map[string]any)
 					b.WriteString("<Latest>")
-					b.WriteString(xmlEscape(strAny(m["id"])))
+					b.WriteString(xmlenc.Escape(strAny(m["id"])))
 					b.WriteString("</Latest>")
 				}
 				b.WriteString("</BlockList>")
@@ -1989,7 +1522,7 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 					m, _ := item.(map[string]any)
 					if p := strAny(m["prefix"]); p != "" {
 						b.WriteString("<BlobPrefix><Name>")
-						b.WriteString(xmlEscape(p))
+						b.WriteString(xmlenc.Escape(p))
 						b.WriteString("</Name></BlobPrefix>")
 						continue
 					}
@@ -2007,7 +1540,7 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 				for _, item := range asAny(lst) {
 					m, _ := item.(map[string]any)
 					b.WriteString("<Container><Name>")
-					b.WriteString(xmlEscape(strAny(m["name"])))
+					b.WriteString(xmlenc.Escape(strAny(m["name"])))
 					b.WriteString("</Name></Container>")
 				}
 				b.WriteString("</Containers>")
@@ -2025,11 +1558,11 @@ func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response, op strin
 // snapshot id when the entry is a snapshot projection.
 func writeAzureBlobListItem(b *strings.Builder, m map[string]any, snapshot string) {
 	b.WriteString("<Blob><Name>")
-	b.WriteString(xmlEscape(strAny(m["name"])))
+	b.WriteString(xmlenc.Escape(strAny(m["name"])))
 	b.WriteString("</Name>")
 	if snapshot != "" {
 		b.WriteString("<Snapshot>")
-		b.WriteString(xmlEscape(snapshot))
+		b.WriteString(xmlenc.Escape(snapshot))
 		b.WriteString("</Snapshot>")
 	}
 	if tags, ok := m["tags"].(map[string]any); ok && len(tags) > 0 {
@@ -2054,9 +1587,9 @@ func writeAzureTagSet(b *strings.Builder, v any) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		b.WriteString("<Tag><Key>")
-		b.WriteString(xmlEscape(k))
+		b.WriteString(xmlenc.Escape(k))
 		b.WriteString("</Key><Value>")
-		b.WriteString(xmlEscape(fmt.Sprint(tags[k])))
+		b.WriteString(xmlenc.Escape(fmt.Sprint(tags[k])))
 		b.WriteString("</Value></Tag>")
 	}
 }
@@ -2084,7 +1617,7 @@ func azureUnix(v any) string {
 // PopReceipt and TimeNextVisible, peek responses do not.
 func writeAzureQueueMessage(b *strings.Builder, m map[string]any, withReceipt bool) {
 	b.WriteString("<QueueMessage><MessageId>")
-	b.WriteString(xmlEscape(strAny(m["id"])))
+	b.WriteString(xmlenc.Escape(strAny(m["id"])))
 	b.WriteString("</MessageId>")
 	if s := azureUnix(m["inserted_at"]); s != "" {
 		b.WriteString("<InsertionTime>")
@@ -2099,7 +1632,7 @@ func writeAzureQueueMessage(b *strings.Builder, m map[string]any, withReceipt bo
 	if withReceipt {
 		if s := strAny(m["pop_receipt"]); s != "" {
 			b.WriteString("<PopReceipt>")
-			b.WriteString(xmlEscape(s))
+			b.WriteString(xmlenc.Escape(s))
 			b.WriteString("</PopReceipt>")
 		}
 		if s := azureUnix(m["visible_at"]); s != "" {
@@ -2111,7 +1644,7 @@ func writeAzureQueueMessage(b *strings.Builder, m map[string]any, withReceipt bo
 	b.WriteString("<DequeueCount>")
 	b.WriteString(strAny(m["dequeue_count"]))
 	b.WriteString("</DequeueCount><MessageText>")
-	b.WriteString(xmlEscape(strAny(m["message"])))
+	b.WriteString(xmlenc.Escape(strAny(m["message"])))
 	b.WriteString("</MessageText></QueueMessage>")
 }
 
@@ -2242,10 +1775,10 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		}
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(status)
-		_, err := io.WriteString(w, `<Error><Code>`+xmlEscape(f.Code)+`</Code><Message>`+xmlEscape(f.Message)+`</Message></Error>`)
+		_, err := io.WriteString(w, `<Error><Code>`+xmlenc.Escape(f.Code)+`</Code><Message>`+xmlenc.Escape(f.Message)+`</Message></Error>`)
 		return err
 	}
-	if region := xmlString(f.Fields["Region"]); region != "" {
+	if region, _ := f.Fields["Region"].(string); region != "" {
 		w.Header().Set("x-amz-bucket-region", region)
 	}
 	w.Header().Set("Content-Type", "application/xml")
@@ -2255,19 +1788,9 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		message = "The XML you provided was not well-formed or did not validate against our published schema"
 	}
 	var body strings.Builder
-	fmt.Fprintf(&body, `<Error><Code>%s</Code><Message>%s</Message>`, xmlEscape(f.Code), xmlEscape(message))
-	write(f.Fields, &body)
-	fmt.Fprintf(&body, `<RequestId>%s</RequestId><HostId>mirror</HostId></Error>`, xmlEscape(requestID))
+	fmt.Fprintf(&body, `<Error><Code>%s</Code><Message>%s</Message>`, xmlenc.Escape(f.Code), xmlenc.Escape(message))
+	xmlenc.Encoder{}.Value(&body, "", f.Fields)
+	fmt.Fprintf(&body, `<RequestId>%s</RequestId><HostId>mirror</HostId></Error>`, xmlenc.Escape(requestID))
 	_, err := io.WriteString(w, body.String())
 	return err
-}
-
-func xmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
-}
-
-func xmlString(value any) string {
-	result, _ := value.(string)
-	return result
 }

@@ -2,6 +2,7 @@
 package smithy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"path"
@@ -244,7 +245,10 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 			if ns := namespace(sid); ns != namespace(id) && sh.Type != "service" {
 				continue
 			}
-			ms := model.Shape{ID: sid, Kind: kindOf(sh.Type), Members: map[string]model.Member{}}
+			ms := model.Shape{ID: sid, Kind: kindOf(sh.Type), Members: map[string]model.Member{}, XMLName: xmlNameOf(sh.Traits)}
+			if ms.Kind == model.KindStructure || ms.Kind == model.KindUnion {
+				ms.MemberOrder = memberOrder(doc.Shapes[sid])
+			}
 			for n, m := range sh.Members {
 				ms.Members[n] = model.Member{
 					Shape:    m.Target,
@@ -270,6 +274,60 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		return nil, nil
 	}
 	return out, nil
+}
+
+// memberOrder reads the member names of a shape in the order the document
+// declares them. A map loses that order and the reference writes XML in it,
+// so it is read from the tokens rather than the decoded object.
+func memberOrder(raw json.RawMessage) []string {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	// Walk the shape object's top-level keys to "members", then read that
+	// object's keys in order; every other value is skipped whole.
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil
+	}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		if key != "members" {
+			var skip json.RawMessage
+			if dec.Decode(&skip) != nil {
+				return nil
+			}
+			continue
+		}
+		if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+			return nil
+		}
+		var order []string
+		for dec.More() {
+			name, err := dec.Token()
+			if err != nil {
+				return nil
+			}
+			var skip json.RawMessage
+			if dec.Decode(&skip) != nil {
+				return nil
+			}
+			order = append(order, name.(string))
+		}
+		return order
+	}
+	return nil
+}
+
+// xmlNameOf is the shape-level xmlName: the element a structure is written
+// as when it is a restXml body's root. Every S3 response root -- ListBucketResult,
+// BucketLoggingStatus, AccessControlPolicy -- is one of these, and an encoder
+// that does not have it can only transcribe them by hand.
+func xmlNameOf(traits json.RawMessage) string {
+	var t struct {
+		Name string `json:"smithy.api#xmlName"`
+	}
+	_ = json.Unmarshal(traits, &t)
+	return t.Name
 }
 
 func decodeNamed(traits json.RawMessage, name string, dst any) {

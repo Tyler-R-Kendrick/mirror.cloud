@@ -246,22 +246,6 @@ var mutants = []mutant{
 		run:  "TestDeleteObjectsVersionAndQuietSemantics",
 	},
 	{
-		name: "restxml-use-wrong-multi-delete-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `root = "DeleteResult"`,
-		new:  `root = "DeleteObjectsResult"`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestEncodeDeleteObjectsXML",
-	},
-	{
-		name: "restxml-nest-multi-delete-members",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `writeFlattened(resp.Output, &b, [][2]string{{"Deleted", "Deleted"}, {"Errors", "Error"}})`,
-		new:  `write(resp.Output, &b)`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestEncodeDeleteObjectsXML",
-	},
-	{
 		name: "restxml-drop-multi-delete-checksum-body",
 		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
 		old:  `			if op.Name == "DeleteObjects" {`,
@@ -380,14 +364,6 @@ var mutants = []mutant{
 		new:  `if false { p.setBucketObjectLockEnabled(ctx, req, b) }`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestObjectLockBucketGuards",
-	},
-	{
-		name: "restxml-drop-object-lock-response-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `"GetObjectLockConfiguration":       "ObjectLockConfiguration",`,
-		new:  `"GetObjectLockConfiguration":       "",`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestEncodeObjectLockXML",
 	},
 	{
 		name: "s3-ignore-unpaired-write-retention",
@@ -998,14 +974,6 @@ var mutants = []mutant{
 		run:  "TestListPartsAndMultipartUploads",
 	},
 	{
-		name: "restxml-nest-list-parts-members",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})`,
-		new:  `write(resp.Output, &b)`,
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerS3QuerySemantics",
-	},
-	{
 		name: "s3-list-uploads-skip-bucket-check",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  "func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tbucket := str(req.Input[\"Bucket\"])\n\tif err := p.requireBucket(ctx, req, bucket); err != nil {",
@@ -1114,14 +1082,6 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `req.Input["Delimiter"] = q.Get("delimiter")`,
 		new:  `req.Input["Delimiter"] = q.Get("mutated-delimiter")`,
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerS3QuerySemantics",
-	},
-	{
-		name: "restxml-nest-list-multipart-upload-members",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `writeFlattened(resp.Output, &b, [][2]string{{"Uploads", "Upload"}, {"CommonPrefixes", "CommonPrefixes"}})`,
-		new:  `write(resp.Output, &b)`,
 		pkg:  "./internal/spine",
 		run:  "TestBootedServerS3QuerySemantics",
 	},
@@ -1350,22 +1310,6 @@ var mutants = []mutant{
 		new:  "func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, bucket, key, version, kind string, value []byte) { version = \"\"",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestReplicationTargetsVersionMetadata",
-	},
-	{
-		name: "s3-restxml-wrap-replication-result",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  "b.WriteString(`<ReplicationConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">`)",
-		new:  "b.WriteString(`<GetBucketReplicationResult>`)",
-		pkg:  "./test/behavior/aws",
-		run:  "TestS3ObjectLifecycle/Given_versioned_replication",
-	},
-	{
-		name: "s3-restxml-drop-replication-tags",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `for _, tag := range tags {`,
-		new:  `for _, tag := range []any{} {`,
-		pkg:  "./test/behavior/aws",
-		run:  "TestS3ObjectLifecycle/Given_versioned_replication",
 	},
 	{
 		name: "s3-tag-write-ignore-header-validation",
@@ -2300,14 +2244,6 @@ var mutants = []mutant{
 		run:  "TestListBucketsPaginationAndFilters",
 	},
 	{
-		name: "restxml-list-buckets-use-generic-members",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `case "ListBuckets":`,
-		new:  `case "MutatedListBuckets":`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
-	},
-	{
 		name: "s3-bucket-location-ignore-nested-config",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  "constraint := str(req.Input[\"LocationConstraint\"])",
@@ -2674,14 +2610,6 @@ var mutants = []mutant{
 	}`,
 		pkg: "./internal/services/aws/s3",
 		run: "TestCreateBucketValidatesGlobalNames",
-	},
-	{
-		name: "restxml-wrap-bucket-location",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketLocation" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
 	{
 		name: "s3-self-copy-ignore-source-bucket",
@@ -3328,30 +3256,6 @@ var mutants = []mutant{
 		new:  `markerErr != nil || maxErr != nil || marker < 0 || maxParts < 0`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestGetObjectAttributesContract",
-	},
-	{
-		name: "restxml-object-attributes-wrong-parts-count-name",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `encoded["PartsCount"] = count`,
-		new:  `encoded["TotalPartsCount"] = count`,
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerS3QuerySemantics",
-	},
-	{
-		name: "restxml-panic-on-missing-flattened-list",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `items, _ := output[member[0]].([]any)`,
-		new:  `items := output[member[0]].([]any)`,
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerS3QuerySemantics",
-	},
-	{
-		name: "restxml-nest-tagging-in-members",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  "case \"GetObjectTagging\", \"GetBucketTagging\":\n\t\tb.WriteString(\"<TagSet>\")\n\t\tfor _, item := range resp.Output[\"TagSet\"].([]any) {\n\t\t\tb.WriteString(\"<Tag>\")",
-		new:  "case \"GetObjectTagging\", \"GetBucketTagging\":\n\t\tb.WriteString(\"<TagSet>\")\n\t\tfor _, item := range resp.Output[\"TagSet\"].([]any) {\n\t\t\tb.WriteString(\"<member>\")",
-		pkg:  "./internal/spine",
-		run:  "TestBootedServerS3QuerySemantics",
 	},
 	{
 		name: "s3-skip-put-object-checksum-validation",
@@ -12244,6 +12148,89 @@ var mutants = []mutant{
 		run:  "TestDecodeDeleteObjectsXML",
 	},
 	{
+		// The shape-level xmlName is the element a restXml body's root is
+		// written as. A receiver that drops it leaves the encoder transcribing
+		// every S3 response root by hand, which is where this started.
+		name: "smithy-drop-the-shape-xml-name",
+		file: filepath.Join("internal", "receiver", "aws", "smithy", "smithy.go"),
+		old:  "Members: map[string]model.Member{}, XMLName: xmlNameOf(sh.Traits)}",
+		new:  "Members: map[string]model.Member{}}",
+		pkg:  "./internal/receiver/aws/smithy",
+		run:  "TestIngestRecordsWhereAMemberSitsOnTheWire",
+	},
+	{
+		// Every hand-written root -- ListBucketResult, AccessControlPolicy,
+		// DeleteResult -- is the output shape's xmlName now. A root that is
+		// the shape's own name instead is one no SDK looks for.
+		name: "restxml-root-ignores-the-shape-xml-name",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  "\t\troot := out.XMLName\n\t\tif root == \"\" {",
+		new:  "\t\troot := \"\"\n\t\tif root == \"\" {",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestRESTXMLEncodeAndFaultContracts",
+	},
+	{
+		// A modelled root carries the service's namespace, as the reference's
+		// does.
+		name: "restxml-root-drops-the-namespace",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  "\t\t\tfmt.Fprintf(&b, `<%s xmlns=%q>`, root, svc.XMLNamespace)\n\t\t}\n\t\te.Value(&b, op.Output, resp.Output)",
+		new:  "\t\t\tfmt.Fprintf(&b, \"<%s>\", root)\n\t\t}\n\t\te.Value(&b, op.Output, resp.Output)",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestRESTXMLEncodeAndFaultContracts",
+	},
+	{
+		// A payload member answered under its own name is written as that
+		// element's contents, not nested under a second copy of it.
+		name: "restxml-payload-written-with-its-wrapper",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  "\t\tv, present := resp.Output[name]\n\t\tif !present {\n\t\t\tv = resp.Output\n\t\t}",
+		new:  "\t\tv := any(resp.Output)",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestEncodeObjectLockXML",
+	},
+	{
+		// The reference writes members in declaration order and a client that
+		// validates the sequence expects it; sorted order is what a map gives
+		// and is not the same thing.
+		name: "xmlenc-writes-members-in-sorted-order",
+		file: filepath.Join("internal", "proto", "aws", "xmlenc", "xmlenc.go"),
+		old:  "\t\tfor _, k := range declaredOrder(shape, known, t) {",
+		new:  "\t\tfor _, k := range sortedKeys(t) {",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestBucketEncryptionXML",
+	},
+	{
+		// A flattened list has no wrapper: each element carries the member's
+		// own name. Wrapping it is a document no SDK can read.
+		name: "xmlenc-wraps-a-flattened-list",
+		file: filepath.Join("internal", "proto", "aws", "xmlenc", "xmlenc.go"),
+		old:  "\tif flat {\n\t\tfor _, item := range items {\n\t\t\te.Member(b, wire, shape.Member, false, item)",
+		new:  "\tif false {\n\t\tfor _, item := range items {\n\t\t\te.Member(b, wire, shape.Member, false, item)",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestRESTXMLEncodeAndFaultContracts",
+	},
+	{
+		// A grantee's type is an attribute; a writer that skips attributes
+		// answers an ACL nothing can type.
+		name: "xmlenc-drops-attributes",
+		file: filepath.Join("internal", "proto", "aws", "xmlenc", "xmlenc.go"),
+		old:  "\tb.WriteString(\"<\" + wire + e.attributes(shape, known, v) + \">\")",
+		new:  "\tb.WriteString(\"<\" + wire + \">\")",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestACLXML",
+	},
+	{
+		// A member bound to a header is answered in the header; writing it as
+		// an element too is a body the schema does not describe.
+		name: "xmlenc-writes-header-members-as-elements",
+		file: filepath.Join("internal", "proto", "aws", "xmlenc", "xmlenc.go"),
+		old:  "\t\t\tif m, ok := shape.Members[k]; known && ok && (m.Binding.XMLAttribute || !inBody(m.Binding)) {",
+		new:  "\t\t\tif m, ok := shape.Members[k]; known && ok && m.Binding.XMLAttribute {",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestRESTXMLEncodeAndFaultContracts",
+	},
+	{
 		// The reference validates a body against its schema; a walker that
 		// skips elements it does not know accepts what S3 answers MalformedXML
 		// to, and every pack that answered that from the raw body stops.
@@ -12382,7 +12369,7 @@ var mutants = []mutant{
 	},
 	{
 		name: "awsquery-encode-keeps-the-declared-name",
-		file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+		file: filepath.Join("internal", "proto", "aws", "xmlenc", "xmlenc.go"),
 		old:  "\t\tif m.Binding.Name != \"\" {\n\t\t\treturn m.Binding.Name, m.Shape, m.Binding.XMLFlattened\n\t\t}",
 		new:  "\t\tif false {\n\t\t\treturn m.Binding.Name, m.Shape, m.Binding.XMLFlattened\n\t\t}",
 		pkg:  "./internal/proto/aws/awsquery",
@@ -12390,7 +12377,7 @@ var mutants = []mutant{
 	},
 	{
 		name: "awsquery-encode-ignores-the-list-element-name",
-		file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+		file: filepath.Join("internal", "proto", "aws", "xmlenc", "xmlenc.go"),
 		old:  "\telem := shape.MemberBinding.Name",
 		new:  "\telem := \"\"",
 		pkg:  "./internal/proto/aws/awsquery",
@@ -13958,14 +13945,6 @@ var mutants = []mutant{
 		run:  "TestCreateBucketObjectOwnership",
 	},
 	{
-		name: "s3-restxml-drop-ownership-rules",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  "controls, _ := resp.Output[\"OwnershipControls\"].(map[string]any)\n\t\trules, _ := controls[\"Rules\"].([]any)\n\t\tfor _, rule := range rules {",
-		new:  "controls, _ := resp.Output[\"OwnershipControls\"].(map[string]any)\n\t\t_, _ = controls[\"Rules\"].([]any)\n\t\tfor _, rule := range []any{} {",
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
-	},
-	{
 		name: "s3-ownership-controls-skip-validation",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  "if req.Operation == \"PutBucketOwnershipControls\" {\n\t\t\tif err := validateOwnershipControls(req.Input[\"OwnershipControls\"]); err != nil {",
@@ -14038,14 +14017,6 @@ var mutants = []mutant{
 		run:  "TestPublicAccessBlock",
 	},
 	{
-		name: "s3-restxml-wrong-public-access-block-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `"GetPublicAccessBlock":             "PublicAccessBlockConfiguration",`,
-		new:  `"GetPublicAccessBlock":             "GetPublicAccessBlockResult",`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
-	},
-	{
 		name: "s3-request-payment-skip-validation",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `if req.Operation == "PutBucketRequestPayment" {`,
@@ -14076,14 +14047,6 @@ var mutants = []mutant{
 		new:  "if false {\n\t\treturn &spi.Response{Status: 200, Output: map[string]any{\"Payer\": asMap(doc[\"RequestPaymentConfiguration\"])[\"Payer\"]}}, nil",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketRequestPayment",
-	},
-	{
-		name: "s3-restxml-drop-request-payment-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketRequestPayment" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
 	{
 		name: "s3-accelerate-skip-validation",
@@ -14124,14 +14087,6 @@ var mutants = []mutant{
 		new:  "if false {\n\t\treturn &spi.Response{Status: 200, Output: map[string]any{\"Status\": asMap(doc[\"AccelerateConfiguration\"])[\"Status\"]}}, nil",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketAccelerateConfiguration",
-	},
-	{
-		name: "s3-restxml-drop-accelerate-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketAccelerateConfiguration" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
 	{
 		name: "states-schedule-relative-wait-deadline",
@@ -14214,14 +14169,6 @@ var mutants = []mutant{
 		run:  "TestBucketLogging",
 	},
 	{
-		name: "s3-restxml-drop-logging-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketLogging" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
-	},
-	{
 		name: "s3-cors-skip-validation",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `if req.Operation == "PutBucketCors" {`,
@@ -14292,14 +14239,6 @@ var mutants = []mutant{
 		new:  "if false {\n\t\treturn &spi.Response{Status: 200, Output: map[string]any{\"CORSRules\": asMap(doc[\"CORSConfiguration\"])[\"CORSRules\"]}}, nil",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketCors",
-	},
-	{
-		name: "s3-restxml-drop-cors-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketCors" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
 	{
 		name: "s3-website-skip-validation",
@@ -14416,14 +14355,6 @@ var mutants = []mutant{
 		new:  "if false {\n\t\treturn &spi.Response{Status: 200, Output: asMap(doc[\"WebsiteConfiguration\"])}, nil",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketWebsite",
-	},
-	{
-		name: "s3-restxml-drop-website-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketWebsite" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
 	{
 		name: "s3-notifications-skip-validation",
@@ -14586,14 +14517,6 @@ var mutants = []mutant{
 		run:  "TestBucketNotificationConfigurationCharacterization",
 	},
 	{
-		name: "s3-restxml-drop-notification-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketNotificationConfiguration" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
-	},
-	{
 		name: "s3-lifecycle-skip-validation",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  "configuration, err := validateLifecycleConfiguration(req.Input[\"LifecycleConfiguration\"])\n\t\tif err != nil {",
@@ -14674,14 +14597,6 @@ var mutants = []mutant{
 		run:  "TestBucketLifecycleExpirationHeaders",
 	},
 	{
-		name: "s3-restxml-drop-lifecycle-root",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketLifecycleConfiguration" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestLifecycleXML",
-	},
-	{
 		name: "s3-named-configurations-unsorted-list",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `sort.Slice(items, func(i, j int) bool { return str(asMap(items[i])["Id"]) < str(asMap(items[j])["Id"]) })`,
@@ -14738,14 +14653,6 @@ var mutants = []mutant{
 		run:  "TestNamedBucketConfigurations",
 	},
 	{
-		name: "s3-restxml-drop-named-configuration-shape",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if shape := namedConfigurationShape(op.Name); shape.configuration != "" {`,
-		new:  `if shape := namedConfigurationShape(op.Name); false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestNamedConfigurationXML",
-	},
-	{
 		name: "s3-acl-allow-missing-security-header",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  "if required {\n\t\t\treturn nil, false, &spi.Fault{Code: \"MissingSecurityHeader\"",
@@ -14800,14 +14707,6 @@ var mutants = []mutant{
 		new:  "if false {\n\t\treq.Input[\"AccessControlPolicy\"] = u.acl\n\t}",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketAndObjectACLConfigurations",
-	},
-	{
-		name: "s3-restxml-drop-acl-response-shape",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketAcl" || op.Name == "GetObjectAcl" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestACLXML",
 	},
 	{
 		name: "s3-bucket-policy-skip-validation",
@@ -14894,14 +14793,6 @@ var mutants = []mutant{
 		run:  "TestBucketEncryptionConfiguration",
 	},
 	{
-		name: "s3-restxml-drop-bucket-encryption-response",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "GetBucketEncryption" {`,
-		new:  `if false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestBucketEncryptionXML",
-	},
-	{
 		name: "s3-cross-region-skip-global-lookup",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  "if !ok {\n\t\traw, exists, err := p.deps.Store.Scope(\"_mirror\", \"global\").Collection(\"s3buckets\").Get(ctx, b)",
@@ -14932,14 +14823,6 @@ var mutants = []mutant{
 		new:  "headers.Set(\"x-amz-bucket-region\", \"us-east-1\")\n\treturn &spi.Response{Headers: headers, Output: out}, nil",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCrossRegionBucketResolutionAndHeadMetadata",
-	},
-	{
-		name: "restxml-drop-structured-fault-fields",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `write(f.Fields, &body)`,
-		new:  `write(nil, &body)`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
 	{
 		name: "s3-skip-explicit-kms-validation",
@@ -16324,22 +16207,6 @@ var mutants = []mutant{
 		new:  `setListChecksumMetadata(map[string]any{}, meta)`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestListObjectVersionChecksumMetadata",
-	},
-	{
-		name: "restxml-wrap-list-checksum-algorithms",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if values, ok := t[k].([]any); ok && k == "ChecksumAlgorithm" {`,
-		new:  `if values, ok := t[k].([]any); ok && false {`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
-	},
-	{
-		name: "restxml-reorder-object-attribute-fields",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `writeFields("ETag", "Checksum")`,
-		new:  `writeFields("Checksum", "ETag")`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
 	{
 		name: "s3-ignore-repeated-object-attribute-headers",
@@ -18843,14 +18710,6 @@ var mutants = []mutant{
 		run:  "TestListObjectVersionsPagination",
 	},
 	{
-		name: "restxml-wrap-list-version-members",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `case "ListObjectVersions":`,
-		new:  `case "MutatedListObjectVersions":`,
-		pkg:  "./test/behavior/aws",
-		run:  "TestS3ObjectLifecycle/Given_object_versions_When_listing_pages",
-	},
-	{
 		name: "s3-list-objects-drop-common-prefix-entry",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `entries = append(entries, entry{value: pfx, prefix: true})`,
@@ -18945,14 +18804,6 @@ var mutants = []mutant{
 		new:  "if parsed, err := http.ParseTime(modified); err == nil {\n\t\t\tmodified = parsed.UTC().Format(time.RFC3339)\n\t\t}",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestListObjectsV2Prefix",
-	},
-	{
-		name: "restxml-wrap-list-object-members",
-		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `case "ListObjects", "ListObjectsV2":`,
-		new:  `case "MutatedListObjects", "MutatedListObjectsV2":`,
-		pkg:  "./internal/proto/aws/restxml",
-		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
 	{
 		name: "identity-keep-localhost-region",

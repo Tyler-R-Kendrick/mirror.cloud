@@ -143,7 +143,7 @@ const bindingDoc = `{
       }
     },
     "com.example#PutOutput": {
-      "type": "structure",
+      "type": "structure", "traits": {"smithy.api#xmlName": "PutResult"},
       "members": {
         "Vpcs":   {"target": "smithy.api#String", "traits": {"smithy.api#xmlName": "vpcSet", "smithy.api#xmlFlattened": {}}},
         "Nested": {"target": "smithy.api#String", "traits": {"smithy.api#jsonName": "nested"}},
@@ -238,6 +238,16 @@ func TestIngestRecordsWhereAMemberSitsOnTheWire(t *testing.T) {
 	}
 	if got := out["Ns"].Binding.XMLNamespace; got != "http://example/" {
 		t.Errorf("xml namespace is %q", got)
+	}
+	// The shape's own xmlName is the element a restXml body's root is written
+	// as; without it an encoder can only transcribe every root by hand.
+	if got := svc.Shapes["com.example#PutOutput"].XMLName; got != "PutResult" {
+		t.Errorf("shape-level xmlName is %q, want PutResult", got)
+	}
+	// Declaration order is what the reference writes an XML body in; a map
+	// cannot keep it, so the receiver reads it from the document's tokens.
+	if got := svc.Shapes["com.example#PutInput"].MemberOrder; len(got) == 0 || got[0] != "Id" {
+		t.Errorf("member order is %v, want the document's, starting with Id", got)
 	}
 }
 

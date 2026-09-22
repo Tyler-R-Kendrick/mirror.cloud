@@ -527,7 +527,7 @@ func Boot(cfg config.Config) (*Runtime, error) {
 			Session: sess,
 			Inner:   execution.RegistryExecutor{Reg: mfReg},
 		}
-		// Stash closer on a temporary; Boot assigns after Runtime is built.
+		stopExtra = sess.Close
 	}
 	if cfg.PersistDir != "" {
 		if err := os.MkdirAll(cfg.PersistDir, 0o755); err != nil {

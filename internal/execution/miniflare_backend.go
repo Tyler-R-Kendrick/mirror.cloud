@@ -86,6 +86,11 @@ func (m *MiniflareBackend) Call(ctx context.Context, req Request) (Response, err
 			return Response{}, &Failure{Class: ClassAbsent, Action: req.Action, Detail: "not found"}
 		}
 	}
+	if req.Action == "kv.delete" {
+		if found, ok := out["found"].(bool); ok && !found {
+			return Response{}, &Failure{Class: ClassAbsent, Action: "kv.delete", Detail: "key not found"}
+		}
+	}
 	if req.Action == "kv.list" {
 		// Normalize listComplete naming if helper used list_complete.
 		if _, ok := out["listComplete"]; !ok {

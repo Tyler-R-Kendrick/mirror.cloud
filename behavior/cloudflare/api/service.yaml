@@ -542,6 +542,9 @@ operations:
       - { cond: db_found, error: NotFound, message: "Database not found" }
     effects:
       - delete: { resource: d1db }
+      - delete:
+          resource: d1db_name
+          key: "string(db.name)"
     output:
       success: "true"
       errors: "[]"
@@ -731,6 +734,9 @@ operations:
       - { cond: q_found, error: NotFound, message: "Queue not found" }
     effects:
       - delete: { resource: cfqueue }
+      - delete:
+          resource: cfqueue_name
+          key: "string(q.queue_name)"
     output:
       success: "true"
       errors: "[]"
@@ -746,7 +752,7 @@ operations:
           action: queue.send
           args:
             queue: "string(q.queue_id)"
-            body: "''"
+            body: "('body' in input && input.body != null) ? string(input.body) : (('message' in input && input.message != null) ? string(input.message) : '')"
     output:
       success: "true"
       errors: "[]"

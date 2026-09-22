@@ -333,8 +333,10 @@ async function doCall(body) {
       }
       requireNamespace(body.namespace);
       const ns = await mf.getKVNamespace(body.namespace);
+      const prior = await ns.get(body.key, { type: 'arrayBuffer' });
+      if (prior === null) return { deleted: false, found: false };
       await ns.delete(body.key);
-      return { deleted: true };
+      return { deleted: true, found: true };
     }
     case 'kv.list': {
       if (typeof body.namespace !== 'string') {

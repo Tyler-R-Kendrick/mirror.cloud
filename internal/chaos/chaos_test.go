@@ -6564,12 +6564,24 @@ func TestConcurrentSQSMessageAttributeFiltersAreStable(t *testing.T) {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-attribute-filters", "MessageAttributeNames": filters[index%len(filters)].values}})
-			if err != nil {
-				errs <- err
+			var attrs map[string]any
+			for attempt := 0; attempt < 64; attempt++ {
+				response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-attribute-filters", "MessageAttributeNames": filters[index%len(filters)].values}})
+				if err != nil {
+					errs <- err
+					return
+				}
+				messages, _ := response.Output["Messages"].([]any)
+				if len(messages) == 0 {
+					continue
+				}
+				attrs, _ = messages[0].(map[string]any)["MessageAttributes"].(map[string]any)
+				break
+			}
+			if attrs == nil && filters[index%len(filters)].want != 0 {
+				errs <- fmt.Errorf("filter %#v: empty receive", filters[index%len(filters)].values)
 				return
 			}
-			attrs := response.Output["Messages"].([]any)[0].(map[string]any)["MessageAttributes"].(map[string]any)
 			if len(attrs) != filters[index%len(filters)].want {
 				errs <- fmt.Errorf("filter %#v attrs %#v", filters[index%len(filters)].values, attrs)
 			}

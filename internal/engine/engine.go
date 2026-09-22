@@ -214,6 +214,15 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	// visibility bookkeeping is exactly as concurrent as it was before this.
 	ev := e.newEval(req, op)
 	locked := false
+	flushed := false
+	flushWakes := func() {
+		if flushed {
+			return
+		}
+		flushed = true
+		ev.flushSQSWakes()
+	}
+	defer flushWakes()
 	if op.Wait == nil {
 		e.mu.Lock()
 		locked = true
@@ -221,10 +230,7 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 			if locked {
 				e.mu.Unlock()
 			}
-			ev.flushSQSWakes()
 		}()
-	} else {
-		defer ev.flushSQSWakes()
 	}
 	if err := ev.resolveReads(ctx, op); err != nil {
 		return nil, firstOf(inputFault, err)
@@ -306,6 +312,8 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		e.mu.Unlock()
 		locked = false
 	}
+	// Flush before AfterInvoke so hooks never run ahead of wake publication.
+	flushWakes()
 	if err := runAfterInvoke(ctx, e.ir.ServiceID, e.deps, req, resp); err != nil {
 		return nil, err
 	}

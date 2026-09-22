@@ -27,11 +27,13 @@ This is **not** a claim of LocalStack-complete parity for every AWS/Azure/GCP/Cl
 
 Under `internal/execution/cicd/**/capability.json` — each names `requiredTests` and honest `limitations`.
 
-## Still out of claim
+## Non-goals (ceilings, not open bugs)
+
+These are deliberate claim boundaries for execute-mode. They are not tracked defects and do not belong in `known-red.json`.
 
 - Marketplace GH actions / full runner protocol / container actions beyond local `uses: ./`
 - workerd-backed Workers Builds as default CI (join is opt-in Miniflare)
-- Vercel Edge/ISR/image optimization; BOA functions beyond tiny Node handler ABI
+- Vercel Edge/ISR/image optimization; BOA beyond the tiny Node `(req,res)` shim in `vercel/boa.go`
 - Azure ACR ARM Tasks runner; App Service slots/Oryx
 - GCP Cloud Deploy Skaffold + Cloud Run containers
 - Distribution OCI HTTP API / containerd

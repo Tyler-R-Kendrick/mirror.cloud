@@ -109,7 +109,7 @@ func InvokeFunction(outputDir, name, path string) ([]byte, error) {
 	if path == "" {
 		path = "/"
 	}
-	// ponytail: one-shot req/res shim; full Vercel/Next/edge runtime later.
+	// Ceiling: tiny Node (req,res) ABI only — not Edge/ISR/Next (see docs/CICD_IMPLEMENTATION_REPORT.md).
 	script := `
 const { pathToFileURL } = require('url');
 const handlerPath = process.env.MIRROR_VC_HANDLER;

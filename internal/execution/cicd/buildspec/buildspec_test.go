@@ -183,3 +183,61 @@ secondary-artifacts:
 		t.Fatal("want missing secondary artifact error")
 	}
 }
+
+func TestArtifactGlobRequiresMatch(t *testing.T) {
+	dir := t.TempDir()
+	yaml := []byte(`version: 0.2
+phases:
+  build:
+    commands:
+      - mkdir -p nested/deep && echo x > nested/deep/out.bin
+artifacts:
+  files:
+    - "nested/**/*.bin"
+`)
+	spec, err := buildspec.Parse(yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := buildspec.Run(context.Background(), spec, buildspec.Config{Dir: dir})
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("run %#v err %v", res, err)
+	}
+
+	empty := []byte(`version: 0.2
+phases:
+  build:
+    commands:
+      - true
+artifacts:
+  files:
+    - "**/*.bin"
+`)
+	spec2, err := buildspec.Parse(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildspec.Run(context.Background(), spec2, buildspec.Config{Dir: t.TempDir()}); err == nil {
+		t.Fatal("want glob miss error")
+	}
+}
+
+func TestArtifactLiteralRejectsEscape(t *testing.T) {
+	dir := t.TempDir()
+	yaml := []byte(`version: 0.2
+phases:
+  build:
+    commands:
+      - true
+artifacts:
+  files:
+    - ../outside.txt
+`)
+	spec, err := buildspec.Parse(yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildspec.Run(context.Background(), spec, buildspec.Config{Dir: dir}); err == nil {
+		t.Fatal("want path escape error")
+	}
+}

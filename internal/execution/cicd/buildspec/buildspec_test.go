@@ -183,3 +183,41 @@ secondary-artifacts:
 		t.Fatal("want missing secondary artifact error")
 	}
 }
+
+func TestArtifactGlobRequiresMatch(t *testing.T) {
+	dir := t.TempDir()
+	yaml := []byte(`version: 0.2
+phases:
+  build:
+    commands:
+      - mkdir -p nested && echo x > nested/out.bin
+artifacts:
+  files:
+    - "**/*"
+`)
+	spec, err := buildspec.Parse(yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := buildspec.Run(context.Background(), spec, buildspec.Config{Dir: dir})
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("run %#v err %v", res, err)
+	}
+
+	empty := []byte(`version: 0.2
+phases:
+  build:
+    commands:
+      - true
+artifacts:
+  files:
+    - "**/*.bin"
+`)
+	spec2, err := buildspec.Parse(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildspec.Run(context.Background(), spec2, buildspec.Config{Dir: t.TempDir()}); err == nil {
+		t.Fatal("want glob miss error")
+	}
+}

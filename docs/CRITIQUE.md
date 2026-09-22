@@ -2,6 +2,8 @@
 
 > This document exists to argue *against* [`DIRECTION.md`](./DIRECTION.md) and [`MASTER_PROMPT.md`](./MASTER_PROMPT.md). Findings that produced concrete changes are marked **→ folded in**. Findings that remain live risks are marked **→ open**. Nothing here is rhetorical; every objection is one a hostile reviewer would actually raise.
 
+**Present tense (2026-09-22).** Entries below are dated attacks and repairs, not a live status board. Current tree: no `known-red.json` (file absent = no permitted failures; empty list must be deleted, not left). Ratchet gates green against the checked-in `ratchet.json` pin (may only fall; honest `-write` after surface shrink is allowed, raising the pin to absorb drift is not). Coverage floor remains 80% via `make test-coverage`.
+
 ---
 
 ## Part 1 — Attacks on the thesis
@@ -953,6 +955,8 @@ That reasoning is this document's own recurring finding pointed backwards. C50 r
 **And the pin does not describe the tree it claims to.** Its `pack_dirs` lists `vercel/api`, a pack that had already been extracted and whose directory does not exist. So the baseline was computed against a checkout predating that extraction: it is not the tree, and it never was any tree. A gate re-pinned to a measurement nobody can reproduce is worse than a red gate, because it reads as green.
 
 Restored to 47/1734/45537/754. `TestRatchetNotExceeded` and `TestRatchetBaselineMatchesTree` are red again, which is what `known-red.json` already declares and explains, and `TestRatchetBaselineOnlyFalls` passes, because 50 to 47 is a fall. The gate goes green when the last two packs are extracted.
+
+**(Later, folded.)** Those packs were extracted; the known-red ratchet entries were retired. As of 2026-09-22 the permitted list is empty and the file is gone (#416). Present-tense readers: see the status note at the top of this document, not the paragraph above.
 
 **The general form, and it is the third time this document has written it down.** A gate exists to refuse. Every pressure on a red gate pushes toward the one change that makes the red go away, and for a ratchet that change is always available and always wrong -- the baseline is a file, and `-write` will happily set it to whatever is there. The defence cannot be discipline, because the case for re-pinning is genuinely persuasive in the moment. It has to be that the honest state is LIVABLE: a declared red, with its reason attached, that does not block the work and does not hide a new failure. That is what `known-red.json` is for, and this is the first time it was load-bearing.
 

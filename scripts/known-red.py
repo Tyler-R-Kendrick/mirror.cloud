@@ -9,10 +9,11 @@ were hidden by a colour that already meant `failing`.
 
 So this changes nothing about what passes. Every entry in known-red.json is
 still a failing test and still fails its step -- suppressing them would trade
-one kind of blindness for another, and the ratchet entries in particular exist
-to stay red until the packs they measure are gone. What it changes is that the
-END of the step says whether the red is the one expected or a new one, BY NAME.
-That is the difference between a gate and a colour.
+one kind of blindness for another. Declared reds exist only while a named
+failure is intentionally carried; when the list is empty the file must be
+deleted (absent file = no permitted failures). What the script changes is that
+the END of the step says whether the red is the one expected or a new one, BY
+NAME. That is the difference between a gate and a colour.
 
 Usage:
     go test ./... 2>&1 | tee out.txt; scripts/known-red.py out.txt

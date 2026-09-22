@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,14 +162,72 @@ func checkArtifactFiles(dir, label string, art *Artifacts) error {
 		return nil
 	}
 	for _, f := range art.Files {
-		if f == "**/*" || strings.Contains(f, "*") {
-			continue // ponytail: glob collection → Walk later
+		if strings.ContainsAny(f, "*?[") {
+			ok, err := artifactGlobMatches(dir, f)
+			if err != nil {
+				return fmt.Errorf("buildspec: %s %q: %w", label, f, err)
+			}
+			if !ok {
+				return fmt.Errorf("buildspec: %s %q matched no files", label, f)
+			}
+			continue
 		}
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			return fmt.Errorf("buildspec: %s %q missing: %w", label, f, err)
 		}
 	}
 	return nil
+}
+
+// artifactGlobMatches reports whether pattern matches ≥1 regular file under dir.
+// Supports CodeBuild-style **/* plus filepath.Match patterns on the slash path.
+func artifactGlobMatches(dir, pattern string) (bool, error) {
+	pattern = filepath.ToSlash(pattern)
+	found := false
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if matchArtifactPattern(pattern, rel) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
+func matchArtifactPattern(pattern, rel string) bool {
+	if pattern == "**" || pattern == "**/*" {
+		return true
+	}
+	if strings.HasPrefix(pattern, "**/") {
+		suffix := strings.TrimPrefix(pattern, "**/")
+		if ok, _ := filepath.Match(suffix, filepath.Base(rel)); ok {
+			return true
+		}
+		if ok, _ := filepath.Match(suffix, rel); ok {
+			return true
+		}
+		// **/a/b → match trailing segments
+		if i := strings.Index(rel, "/"); i >= 0 {
+			return matchArtifactPattern(pattern, rel[i+1:])
+		}
+		return false
+	}
+	ok, _ := filepath.Match(pattern, rel)
+	return ok
 }
 
 func envMapFrom(env []string) map[string]string {

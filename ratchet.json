@@ -1,12 +1,11 @@
 {
-  "packs": 23,
-  "case_labels": 1103,
+  "packs": 22,
+  "case_labels": 1094,
   "services_files": 54,
-  "services_loc": 41200,
-  "fault_sites": 720,
-  "register_sites": 23,
+  "services_loc": 41099,
+  "fault_sites": 717,
+  "register_sites": 22,
   "pack_dirs": [
-    "aws/athena",
     "aws/cloudcontrol",
     "aws/cloudformation",
     "aws/dynamodb",

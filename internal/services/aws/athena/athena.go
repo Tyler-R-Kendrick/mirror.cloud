@@ -1,4 +1,7 @@
-// Package athena runs SELECT 1 / SELECT 'lit' and SELECT over Glue table locations on S3.
+// Package athena is StartQueryExecution: the query engine behavior/aws/athena
+// lists as native. It runs SELECT 1 / SELECT 'lit', SELECT over Glue table
+// locations on S3, and DDL/DML against S3 Tables, synchronously; workgroups
+// and the execution reads are the bundle's.
 package athena
 
 import (
@@ -12,142 +15,46 @@ import (
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.athena", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	bundled.RegisterNative("aws.athena", "StartQueryExecution", func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+		return (&runner{deps}).start(ctx, req)
+	})
 }
 
-// Pack implements Athena-lite.
-type Pack struct{ deps spi.Deps }
+// runner is the query engine behind StartQueryExecution.
+type runner struct{ deps spi.Deps }
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
-
-func (p *Pack) ServiceID() string { return "aws.athena" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return []string{
-		"StartQueryExecution", "GetQueryExecution", "GetQueryResults", "StopQueryExecution", "ListQueryExecutions",
-		"CreateWorkGroup", "GetWorkGroup", "ListWorkGroups", "DeleteWorkGroup",
-	}
-}
-
-func (p *Pack) col(req *spi.Request, n string) spi.Collection {
+func (p *runner) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
 }
 
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	switch req.Operation {
-	case "CreateWorkGroup":
-		name := first(req.Input, "Name")
-		rec := map[string]any{"Name": name, "State": "ENABLED", "Description": first(req.Input, "Description")}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "atwg").Put(ctx, name, b)
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "GetWorkGroup":
-		name := first(req.Input, "WorkGroup")
-		b, ok, _ := p.col(req, "atwg").Get(ctx, name)
-		if !ok {
-			return nil, &spi.Fault{Code: "InvalidRequestException", HTTPStatus: 400, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: map[string]any{"WorkGroup": rec}}, nil
-	case "ListWorkGroups":
-		kvs, _, _ := p.col(req, "atwg").List(ctx, "", "", 0)
-		var items []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			items = append(items, rec)
-		}
-		return &spi.Response{Output: map[string]any{"WorkGroups": items}}, nil
-	case "DeleteWorkGroup":
-		_ = p.col(req, "atwg").Delete(ctx, first(req.Input, "WorkGroup"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "StartQueryExecution":
-		id := p.deps.Rand.Hex(16)
-		sql := first(req.Input, "QueryString")
-		defDB := ""
-		catalog := ""
-		if qec, ok := req.Input["QueryExecutionContext"].(map[string]any); ok {
-			defDB = first(qec, "Database")
-			catalog = first(qec, "Catalog")
-		}
-		cols, rows, state, reason := p.runQuery(ctx, req, sql, defDB, catalog)
-		status := map[string]any{"State": state}
-		if reason != "" {
-			status["StateChangeReason"] = reason
-		}
-		rec := map[string]any{
-			"QueryExecutionId": id, "Query": sql, "Status": status,
-			"WorkGroup": first(req.Input, "WorkGroup"), "columns": cols, "rows": rows,
-		}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "atq").Put(ctx, id, b)
-		return &spi.Response{Output: map[string]any{"QueryExecutionId": id}}, nil
-	case "GetQueryExecution":
-		id := first(req.Input, "QueryExecutionId")
-		b, ok, _ := p.col(req, "atq").Get(ctx, id)
-		if !ok {
-			return nil, &spi.Fault{Code: "InvalidRequestException", HTTPStatus: 400, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		out := map[string]any{
-			"QueryExecutionId": rec["QueryExecutionId"], "Query": rec["Query"],
-			"Status": rec["Status"], "WorkGroup": rec["WorkGroup"],
-		}
-		return &spi.Response{Output: map[string]any{"QueryExecution": out}}, nil
-	case "GetQueryResults":
-		id := first(req.Input, "QueryExecutionId")
-		b, ok, _ := p.col(req, "atq").Get(ctx, id)
-		if !ok {
-			return nil, &spi.Fault{Code: "InvalidRequestException", HTTPStatus: 400, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		cols, _ := rec["columns"].([]any)
-		rows, _ := rec["rows"].([]any)
-		var headers []any
-		for _, c := range cols {
-			headers = append(headers, map[string]any{"VarCharValue": c})
-		}
-		rsRows := []any{map[string]any{"Data": headers}}
-		for _, r := range rows {
-			var cells []any
-			if arr, ok := r.([]any); ok {
-				for _, cell := range arr {
-					cells = append(cells, map[string]any{"VarCharValue": cell})
-				}
-			}
-			rsRows = append(rsRows, map[string]any{"Data": cells})
-		}
-		return &spi.Response{Output: map[string]any{
-			"ResultSet": map[string]any{
-				"Rows":              rsRows,
-				"ResultSetMetadata": map[string]any{"ColumnInfo": colInfo(cols)},
-			},
-		}}, nil
-	case "StopQueryExecution":
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "ListQueryExecutions":
-		kvs, _, _ := p.col(req, "atq").List(ctx, "", "", 0)
-		var ids []any
-		for _, kv := range kvs {
-			ids = append(ids, kv.Key)
-		}
-		return &spi.Response{Output: map[string]any{"QueryExecutionIds": ids}}, nil
-	default:
-		return nil, spi.NotImplemented("aws.athena", req.Operation, "emulate")
+// start runs the query synchronously and stores the execution record the
+// bundle's GetQueryExecution and GetQueryResults read.
+func (p *runner) start(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	id := p.deps.Rand.Hex(16)
+	sql := first(req.Input, "QueryString")
+	defDB := ""
+	catalog := ""
+	if qec, ok := req.Input["QueryExecutionContext"].(map[string]any); ok {
+		defDB = first(qec, "Database")
+		catalog = first(qec, "Catalog")
 	}
+	cols, rows, state, reason := p.runQuery(ctx, req, sql, defDB, catalog)
+	status := map[string]any{"State": state}
+	if reason != "" {
+		status["StateChangeReason"] = reason
+	}
+	rec := map[string]any{
+		"QueryExecutionId": id, "Query": sql, "Status": status,
+		"WorkGroup": first(req.Input, "WorkGroup"), "columns": cols, "rows": rows,
+	}
+	b, _ := json.Marshal(rec)
+	_ = p.col(req, "atq").Put(ctx, id, b)
+	return &spi.Response{Output: map[string]any{"QueryExecutionId": id}}, nil
 }
 
 type sel struct {
@@ -156,7 +63,7 @@ type sel struct {
 	whereCol, whereVal string
 }
 
-func (p *Pack) runQuery(ctx context.Context, req *spi.Request, sql, defDB, catalog string) (cols []any, rows []any, state, reason string) {
+func (p *runner) runQuery(ctx context.Context, req *spi.Request, sql, defDB, catalog string) (cols []any, rows []any, state, reason string) {
 	if strings.HasPrefix(strings.ToLower(catalog), "s3tablescatalog/") {
 		cols, rows, err := p.runS3TablesQuery(ctx, req, sql, defDB, strings.TrimPrefix(catalog, "s3tablescatalog/"))
 		if err != nil {
@@ -179,7 +86,7 @@ func (p *Pack) runQuery(ctx context.Context, req *spi.Request, sql, defDB, catal
 	return cols, rows, "SUCCEEDED", ""
 }
 
-func (p *Pack) scanTable(ctx context.Context, req *spi.Request, q sel) ([]any, []any, error) {
+func (p *runner) scanTable(ctx context.Context, req *spi.Request, q sel) ([]any, []any, error) {
 	// Glue is a bundle now, so it is reached the way any service reaches
 	// another: through the registry-backed handler, which carries a build
 	// failure into the call rather than to this caller.
@@ -459,14 +366,6 @@ func runSQL(q string) (cols []any, rows []any) {
 		}
 	}
 	return []any{}, []any{}
-}
-
-func colInfo(cols []any) []any {
-	var out []any
-	for _, c := range cols {
-		out = append(out, map[string]any{"Name": c, "Type": "varchar"})
-	}
-	return out
 }
 
 func first(in map[string]any, keys ...string) string {

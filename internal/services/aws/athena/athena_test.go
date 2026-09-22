@@ -25,7 +25,7 @@ func TestS3TablesCatalogDDLInsertSelectAndCTAS(t *testing.T) {
 	if _, err := bundled.Handler("aws.s3tables", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTableBucket", Input: map[string]any{"name": "warehouse"}}); err != nil {
 		t.Fatal(err)
 	}
-	p := New(deps)
+	p := bundled.Handler("aws.athena", deps)
 	run := func(sql string) map[string]any {
 		t.Helper()
 		started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartQueryExecution", Input: map[string]any{
@@ -62,13 +62,6 @@ func TestS3TablesCatalogDDLInsertSelectAndCTAS(t *testing.T) {
 	arn := "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"
 	if _, err := bundled.Handler("aws.s3tables", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTable", Input: map[string]any{"tableBucketARN": arn, "namespace": "analytics", "name": "copied"}}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestAthenaHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 9 {
-		t.Fatalf("athena Operations() %d want 9", n)
 	}
 }
 

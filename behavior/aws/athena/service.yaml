@@ -13,23 +13,12 @@ provenance: authored
 # rejects the absence first, so that is also the missing-input answer.
 missing_input_error: InvalidRequest
 
-# Complete and gated, but not yet serving: StartQueryExecution is a query
-# engine, not a CRUD write. The SELECT 1 / unparseable-SQL paths are data
-# below, but a SELECT with FROM invokes aws.glue GetTable and streams aws.s3
-# object bodies through the registry, parsing CSV and JSON-lines; a
-# s3tablescatalog/ catalog does DDL and DML against the s3tables pack's own
-# collections; and SELECT 'lit' needs a string search CEL does not have. The
-# effect vocabulary has no cross-service invocation and no primitive registry
-# exists yet (the engine's prim dispatch reports none registered), so a
-# serving bundle would answer every real query with an empty SUCCEEDED result
-# where the pack scans or fails. The bundle takes over when an
-# aws.athena/query primitive carries runQuery, moved verbatim.
-shadow: >
-  StartQueryExecution's FROM and s3tablescatalog paths call sibling services
-  (aws.glue, aws.s3) and parse object bodies, and SELECT '<literal>' needs
-  string search; none of that is expressible without a primitive registry,
-  which does not exist yet. Everything else the pack does is transcribed and
-  gated below.
+# StartQueryExecution is a query engine, not a CRUD write, and it is Go, in
+# internal/services/aws/athena: a SELECT with FROM resolves the table through
+# aws.glue and scans its S3 location parsing CSV or JSON-lines, and an
+# s3tablescatalog/ catalog runs DDL and DML against S3 Tables. It writes the
+# query_execution record below, which the reads here project.
+native: [StartQueryExecution]
 
 resources:
   workgroup:
@@ -41,27 +30,12 @@ resources:
       State: "'ENABLED'"
       Description: "'Description' in input ? string(input.Description) : ''"
 
-  # The pack stored the query's computed columns and rows on the execution
-  # record; reads project them back out. Written only by StartQueryExecution.
+  # The query's computed columns and rows live on the execution record, which
+  # only the native StartQueryExecution writes; reads project them back out.
   query_execution:
     collection: atq
     id:
-      generate: { kind: hex, bytes: 16 }
       input_members: [QueryExecutionId]
-    record:
-      QueryExecutionId: id
-      Query: "string(input.QueryString)"
-      WorkGroup: "'WorkGroup' in input ? string(input.WorkGroup) : ''"
-      Status: "{'State': 'SUCCEEDED'}"
-      # Only the SELECT 1 family is expressible; see quirks.
-      columns: >
-        (upper(string(input.QueryString)) == 'SELECT 1'
-          || upper(string(input.QueryString)).startsWith('SELECT 1 ')
-          || upper(string(input.QueryString)) == 'SELECT 1 AS N') ? ['_col0'] : []
-      rows: >
-        (upper(string(input.QueryString)) == 'SELECT 1'
-          || upper(string(input.QueryString)).startsWith('SELECT 1 ')
-          || upper(string(input.QueryString)) == 'SELECT 1 AS N') ? [['1']] : []
 
 errors:
   InvalidRequest:
@@ -83,12 +57,6 @@ operations:
     effects:
       - delete: { resource: workgroup, missing: ignore }
     output: {}
-
-  StartQueryExecution:
-    effects:
-      - create: { resource: query_execution }
-    output:
-      QueryExecutionId: id
 
   # The pack answered exactly these four members, not the stored record.
   GetQueryExecution:
@@ -130,20 +98,10 @@ operations:
 quirks:
   - operation: StartQueryExecution
     note: >
-      The pack is a SQL engine: SELECT 1 and SELECT '<literal>' answer inline,
-      a SELECT with FROM resolves the table through aws.glue and scans its
-      S3 location parsing CSV or JSON-lines, and a QueryExecutionContext
-      catalog of s3tablescatalog/<bucket> runs CREATE TABLE, INSERT and CTAS
-      against the s3tables pack's collections. Only the SELECT 1 family and
-      the unparseable-query path (SUCCEEDED, no columns, no rows) are
-      transcribed; the rest is the shadow reason above. The pack also trims
-      whitespace and one trailing semicolon before matching, which CEL cannot
-      express, so 'SELECT 1;' falls to the empty path here. The query runs
-      synchronously at start: the execution is SUCCEEDED (or FAILED, on the
-      untranscribed paths) the moment it is created, with no SubmissionDateTime
-      or CompletionDateTime ever set, and the WorkGroup named is not checked
-      to exist. The model requires QueryString and the engine now rejects its
-      absence, which the pack accepted as an empty, succeeded query.
+      The query runs synchronously at start: the execution is SUCCEEDED or
+      FAILED the moment it is created, with no SubmissionDateTime or
+      CompletionDateTime ever set, and the WorkGroup named is not checked to
+      exist.
   - operation: GetQueryExecution
     note: >
       The answer carries QueryExecutionId, Query, Status and WorkGroup only;

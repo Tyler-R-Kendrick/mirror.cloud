@@ -9,7 +9,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
-func (p *Pack) runS3TablesQuery(ctx context.Context, req *spi.Request, sql, database, bucket string) ([]any, []any, error) {
+func (p *runner) runS3TablesQuery(ctx context.Context, req *spi.Request, sql, database, bucket string) ([]any, []any, error) {
 	query := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sql), ";"))
 	upper := strings.ToUpper(query)
 	switch {
@@ -69,7 +69,7 @@ func (p *Pack) runS3TablesQuery(ctx context.Context, req *spi.Request, sql, data
 	}
 }
 
-func (p *Pack) putS3Table(ctx context.Context, req *spi.Request, bucket, database, table string, cols, rows []any) error {
+func (p *runner) putS3Table(ctx context.Context, req *spi.Request, bucket, database, table string, cols, rows []any) error {
 	if _, ok, _ := p.col(req, "s3tb").Get(ctx, bucket); !ok {
 		return fmt.Errorf("table bucket %s not found", bucket)
 	}
@@ -94,7 +94,7 @@ type s3Rows struct {
 	Rows []any `json:"rows"`
 }
 
-func (p *Pack) scanS3Table(ctx context.Context, req *spi.Request, bucket string, selection sel) ([]any, []any, error) {
+func (p *runner) scanS3Table(ctx context.Context, req *spi.Request, bucket string, selection sel) ([]any, []any, error) {
 	key := s3TableKey(bucket, selection.db, selection.table)
 	raw, ok, _ := p.col(req, "s3tt").Get(ctx, key)
 	if !ok {

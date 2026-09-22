@@ -1269,3 +1269,5 @@ A bundle can now list those operations under `native:`. The bundle serves; the l
 **Kinesis had the same kind of hidden cascade as the three before it.** A recreated stream restarts at sequence 0, and the bundle's DeleteStream left the old records behind for GetRecords to answer. It now empties the stream's record collection, guarded by a YAML needle. The booted tests had also pinned invented paths (`/methodresponses/`) and pack-era members (`WarmThroughputMiBPerSecond`). They use the model's paths and members now.
 
 KMS followed the same pattern: fifteen cryptographic operations are native, and the other thirty-nine are the bundle's. It needed one reconciliation. The pack kept key material as base64, while the bundle draws it as hex. The native code reads hex, and a needle fails if it reads the old encoding.
+
+Athena needed less: the pack and the bundle already shared the execution record's layout. StartQueryExecution, the query engine, is native, and the bundle's `SELECT 1` approximation of it is deleted rather than kept as a second answer. Workgroups and the execution reads come from the bundle.

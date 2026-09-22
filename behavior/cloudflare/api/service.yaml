@@ -91,6 +91,89 @@ resources:
       # at 1024 bytes, which the write require enforces below.
       metadata: "('__multipart_metadata' in input && input.__multipart_metadata != null) ? string(input.__multipart_metadata) : ''"
 
+  worker:
+    collection: cfworkers
+    id:
+      derive: "('script_name' in input && input.script_name != null) ? string(input.script_name) : ''"
+    record:
+      # List-shape members only (workers_script-response-collection).
+      id: id
+      etag: "'mirror-local'"
+      created_on: "'2020-01-01T00:00:00Z'"
+      modified_on: "'2020-01-01T00:00:00Z'"
+      handlers: "['fetch']"
+
+  # Module bytes live beside the listable worker row so list projection stays
+  # inside the document's list member shape.
+  worker_script:
+    collection: cfwscript
+    id:
+      derive: "('script_name' in input && input.script_name != null) ? string(input.script_name) : ''"
+    record:
+      id: id
+      script: "('body' in input && input.body != null) ? string(input.body) : (('script' in rec && rec.script != null) ? string(rec.script) : '')"
+
+  d1db:
+    collection: cfd1
+    id:
+      generate: { kind: hex, bytes: 16 }
+      input_members: [database_id]
+    record:
+      uuid: id
+      name: "string(input.name)"
+      created_at: "'2020-01-01T00:00:00Z'"
+      version: "'production'"
+
+  d1db_name:
+    collection: cfd1name
+    id:
+      derive: "('name' in input && input.name != null) ? string(input.name) : ''"
+    record:
+      name: id
+
+  r2bucket:
+    collection: cfr2b
+    id:
+      derive: "('bucket_name' in input && input.bucket_name != null) ? string(input.bucket_name) : (('name' in input && input.name != null) ? string(input.name) : '')"
+    record:
+      name: id
+      creation_date: "'2020-01-01T00:00:00Z'"
+      location: "('locationHint' in input && input.locationHint != null) ? string(input.locationHint) : ''"
+      storage_class: "('storageClass' in input && input.storageClass != null) ? string(input.storageClass) : 'Standard'"
+
+  cfqueue:
+    collection: cfqueues
+    id:
+      generate: { kind: hex, bytes: 16 }
+      input_members: [queue_id]
+    record:
+      queue_id: id
+      queue_name: "string(input.queue_name)"
+      created_on: "'2020-01-01T00:00:00Z'"
+      modified_on: "'2020-01-01T00:00:00Z'"
+      consumers_total_count: "0.0"
+      producers_total_count: "0.0"
+
+  cfqueue_name:
+    collection: cfqueuename
+    id:
+      derive: "('queue_name' in input && input.queue_name != null) ? string(input.queue_name) : ''"
+    record:
+      name: id
+
+  cfworkflow:
+    collection: cfworkflows
+    id:
+      derive: "('workflow_name' in input && input.workflow_name != null) ? string(input.workflow_name) : ''"
+    record:
+      id: id
+      name: id
+      class_name: "string(input.class_name)"
+      script_name: "string(input.script_name)"
+      created_on: "'2020-01-01T00:00:00Z'"
+      modified_on: "'2020-01-01T00:00:00Z'"
+
+
 errors:
   # Cloudflare's codes are integers on the wire; the fault encoder converts a
   # numeric code back to a number when it writes the envelope.
@@ -111,6 +194,14 @@ errors:
     # 400, not 409: this is the status the pack answered and the one the real
     # API answers. Cloudflare carries the distinction in the code, not the
     # status.
+    http: 400
+    fault: client
+  NotFound:
+    code: "10013"
+    http: 404
+    fault: client
+  Conflict:
+    code: "10014"
     http: 400
     fault: client
 
@@ -245,8 +336,19 @@ operations:
       # slip past by character count. Only multipart writes carry metadata;
       # a plain write never trips this.
       - { cond: "!('__multipart_metadata' in input && input.__multipart_metadata != null && blen(string(input.__multipart_metadata)) > 1024)", error: InvalidInput, message: "metadata must be 1024 bytes or less" }
+    # Entry bytes live behind Deps.Executor (native-kv by default; miniflare
+    # when that profile is selected) so REST and Worker bindings share one
+    # authoritative resource when the external backend owns it.
     effects:
-      - put: { resource: entry }
+      - execute:
+          action: kv.put
+          args:
+            namespace: "string(ns.id)"
+            key: "string(input.key_name)"
+            value: "('body' in input && input.body != null) ? b64(string(input.body)) : ''"
+            expiration: "('expiration' in input && input.expiration != null) ? int(input.expiration) : 0"
+            expirationTtl: "('expiration_ttl' in input && input.expiration_ttl != null && !('expiration' in input && input.expiration != null)) ? int(input.expiration_ttl) : 0"
+            metadata: "('__multipart_metadata' in input && input.__multipart_metadata != null) ? string(input.__multipart_metadata) : ''"
     output:
       success: "true"
       errors: "[]"
@@ -256,33 +358,38 @@ operations:
   WorkersKvNamespaceReadKeyValuePair:
     reads:
       ns: { resource: namespace }
-      entry: { resource: entry }
     require:
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
-      - { cond: entry_found, error: KeyNotFound, message: "key not found" }
-      # An expired key is a missing key: the real API answers 404 once the
-      # deadline has passed. now_ms is the engine's controlled clock, so a
-      # test can step past the deadline and watch the key vanish. Stored 0
-      # means no deadline (see the write path), never "already expired".
-      - { cond: "!('expiration' in entry && entry.expiration != null && double(entry.expiration) > 0.0 && double(entry.expiration) <= double(now_ms / 1000))", error: KeyNotFound, message: "key not found" }
+    effects:
+      - execute:
+          action: kv.get
+          args:
+            namespace: "string(ns.id)"
+            key: "string(input.key_name)"
+          bind: got
+          absent_error: KeyNotFound
+          absent_message: key not found
     output:
       # `_raw` is bir.TopLevelRaw: the body is the stored value itself, with no
       # envelope around it. The document answers this operation as
       # application/octet-stream, which is the one Cloudflare operation here
       # that is not enveloped, and the only reason the convention exists.
       # The base64 envelope from the write path is decoded back here.
-      _raw: "b64decode(string(entry.value))"
+      _raw: "b64decode(string(fx.got.value))"
 
   WorkersKvNamespaceDeleteKeyValuePair:
     reads:
       ns: { resource: namespace }
-      entry: { resource: entry }
     require:
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
-      - { cond: entry_found, error: KeyNotFound, message: "key not found" }
-      - { cond: "!('expiration' in entry && entry.expiration != null && double(entry.expiration) > 0.0 && double(entry.expiration) <= double(now_ms / 1000))", error: KeyNotFound, message: "key not found" }
     effects:
-      - delete: { resource: entry }
+      - execute:
+          action: kv.delete
+          args:
+            namespace: "string(ns.id)"
+            key: "string(input.key_name)"
+          absent_error: KeyNotFound
+          absent_message: key not found
     output:
       success: "true"
       errors: "[]"
@@ -291,31 +398,27 @@ operations:
 
   WorkersKvNamespaceReadTheMetadataForAKey:
     # New surface: the pack served no metadata read, so this operation was
-    # answered by the deterministic mock. It reads the same entry the write
-    # stores metadata beside, which makes it the direct proof that a
-    # multipart write separated value from metadata rather than storing the
-    # envelope: the value reads back through ReadKeyValuePair, the metadata
-    # here.
+    # answered by the deterministic mock. It reads via Executor so the same
+    # authoritative entry the write stored is what metadata answers.
     reads:
       ns: { resource: namespace }
-      entry: { resource: entry }
     require:
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
-      - { cond: entry_found, error: KeyNotFound, message: "key not found" }
-      # An expired key's metadata is as gone as its value: same deadline
-      # test as the value read, same 10009.
-      - { cond: "!('expiration' in entry && entry.expiration != null && double(entry.expiration) > 0.0 && double(entry.expiration) <= double(now_ms / 1000))", error: KeyNotFound, message: "key not found" }
+    effects:
+      - execute:
+          action: kv.get
+          args:
+            namespace: "string(ns.id)"
+            key: "string(input.key_name)"
+            withMetadata: "true"
+          bind: got
+          absent_error: KeyNotFound
+          absent_message: key not found
     output:
       success: "true"
       errors: "[]"
       messages: "[]"
-      # The stored metadata is the part's exact text; parseJSON turns it
-      # into the structure the document's `any`-shaped result holds. A key
-      # written without a metadata part has none, and the document's result
-      # member is optional, so the answer is null and omit_null keeps it off
-      # the wire rather than sending an empty string a client would have to
-      # distinguish from real metadata.
-      result: "('metadata' in entry && entry.metadata != null && string(entry.metadata) != '') ? parseJSON(string(entry.metadata)) : null"
+      result: "('metadata' in fx.got && fx.got.metadata != null) ? fx.got.metadata : null"
     omit_null: [result]
 
   "WorkersKvNamespaceListANamespace'SKeys":
@@ -323,31 +426,423 @@ operations:
       ns: { resource: namespace }
     require:
       - { cond: ns_found, error: NamespaceNotFound, message: "Namespace not found" }
-    # Prefix narrows to one key-name prefix at store level; the expiration
-    # filter drops dead keys per candidate (a deadline is record state, not a
-    # key prefix, so it cannot be a store prefix).
-    list:
-      resource: entry
-      member: result
-      prefix: "('prefix' in input && input.prefix != null) ? string(input.prefix) : ''"
-      filter: "!('expiration' in item && item.expiration != null && double(item.expiration) > 0.0 && double(item.expiration) <= double(now_ms / 1000))"
+    effects:
+      - execute:
+          action: kv.list
+          args:
+            namespace: "string(ns.id)"
+            prefix: "('prefix' in input && input.prefix != null) ? string(input.prefix) : ''"
+          bind: listed
     output:
       success: "true"
       errors: "[]"
       messages: "[]"
-      # The stored record carries the value as well as the name, and a key
-      # listing must not answer with it: the projection replaces the list the
-      # `list` spec placed in `result` with one key object per entry, which is
-      # what workers-kv_key declares. Expiration rides along when the key has
-      # one (positive deadline), and is omitted for keys that never expire.
-      # Metadata rides when the write carried a multipart metadata part; it is
-      # stored as the part's exact text and answered as-is here (the shape
-      # declares metadata as arbitrary JSON, and a JSON-looking string is
-      # what the API accepts). parseJSON turns it into the structure a client
-      # expects; a non-JSON metadata part (which Cloudflare's API would have
-      # rejected) parses to null rather than a string a client cannot read.
-      result: "items.map(i, merge(merge({'name': string(i.name)}, (('expiration' in i && i.expiration != null && double(i.expiration) > 0.0) ? {'expiration': i.expiration} : {})), (('metadata' in i && i.metadata != null && string(i.metadata) != '') ? {'metadata': parseJSON(string(i.metadata))} : {})))"
-      result_info: "{'count': double(size(items)), 'cursor': ''}"
+      # Executor already projects name/expiration/metadata; empty cursor is the
+      # documented quirk (no pagination trait on the generated model).
+      result: "fx.listed.keys"
+      result_info: "{'count': double(size(fx.listed.keys)), 'cursor': ''}"
+
+
+  WorkerScriptUploadWorkerModule:
+    reads:
+      existing: { resource: worker }
+    effects:
+      - put:
+          resource: worker
+          record:
+            id: "string(input.script_name)"
+            etag: "'mirror-local'"
+            created_on: "'2020-01-01T00:00:00Z'"
+            modified_on: "'2020-01-01T00:00:00Z'"
+            handlers: "['fetch']"
+      - put:
+          resource: worker_script
+          record:
+            id: "string(input.script_name)"
+            script: "('body' in input && input.body != null) ? string(input.body) : ''"
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "{'id': string(input.script_name), 'etag': 'mirror-local', 'handlers': ['fetch'], 'created_on': '2020-01-01T00:00:00Z', 'modified_on': '2020-01-01T00:00:00Z'}"
+
+  WorkerScriptListWorkers:
+    list: { resource: worker, member: result }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+
+  WorkerScriptDeleteWorker:
+    reads:
+      existing: { resource: worker }
+      script: { resource: worker_script }
+    require:
+      - { cond: existing_found, error: NotFound, message: "Worker not found" }
+    effects:
+      - delete: { resource: worker }
+      - delete: { resource: worker_script }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "null"
+    omit_null: [result]
+
+  WorkerScriptDownloadWorker:
+    reads:
+      existing: { resource: worker }
+      script: { resource: worker_script }
+    require:
+      - { cond: existing_found, error: NotFound, message: "Worker not found" }
+    output:
+      _raw: "('script' in script && script.script != null) ? string(script.script) : ''"
+
+  D1CreateDatabase:
+    reads:
+      taken: { resource: d1db_name }
+    require:
+      - { cond: "has(input.name) && type(input.name) == string && string(input.name) != ''", error: InvalidInput, message: "name is required" }
+      - { cond: "!taken_found", error: Conflict, message: "A database with this name already exists" }
+    effects:
+      - put:
+          resource: d1db_name
+          record:
+            name: id
+      - create: { resource: d1db }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: rec
+
+  D1ListDatabases:
+    list: { resource: d1db, member: result }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result_info: "{'count': double(size(items)), 'page': 1.0, 'per_page': 100.0, 'total_count': double(size(items))}"
+
+  D1GetDatabase:
+    reads:
+      db: { resource: d1db }
+    require:
+      - { cond: db_found, error: NotFound, message: "Database not found" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: db
+
+  D1DeleteDatabase:
+    reads:
+      db: { resource: d1db }
+    require:
+      - { cond: db_found, error: NotFound, message: "Database not found" }
+    effects:
+      - delete: { resource: d1db }
+      - delete:
+          resource: d1db_name
+          key: "string(db.name)"
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "null"
+    omit_null: [result]
+
+  D1QueryDatabase:
+    reads:
+      db: { resource: d1db }
+    require:
+      - { cond: db_found, error: NotFound, message: "Database not found" }
+    effects:
+      - execute:
+          action: d1.query
+          args:
+            database: "string(db.uuid)"
+            sql: "('body' in input && input.body != null && type(input.body) == list && size(input.body) > 0) ? string(input.body[0].sql) : (('body' in input && input.body != null && has(input.body.sql)) ? string(input.body.sql) : '')"
+            binds: "('body' in input && input.body != null && type(input.body) == list && size(input.body) > 0 && has(input.body[0].params)) ? input.body[0].params : []"
+          bind: q
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "[fx.q]"
+
+  R2CreateBucket:
+    reads:
+      existing: { resource: r2bucket }
+    require:
+      - { cond: "has(input.name) && type(input.name) == string && string(input.name) != ''", error: InvalidInput, message: "name is required" }
+      - { cond: "!existing_found", error: Conflict, message: "Bucket already exists" }
+    effects:
+      - put: { resource: r2bucket }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: rec
+
+  R2ListBuckets:
+    select:
+      binding: buckets
+      resource: r2bucket
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "{'buckets': buckets}"
+
+  R2GetBucket:
+    reads:
+      b: { resource: r2bucket }
+    require:
+      - { cond: b_found, error: NotFound, message: "Bucket not found" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: b
+
+  R2DeleteBucket:
+    reads:
+      b: { resource: r2bucket }
+    require:
+      - { cond: b_found, error: NotFound, message: "Bucket not found" }
+    effects:
+      - delete: { resource: r2bucket }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "null"
+    omit_null: [result]
+
+  R2PutObject:
+    reads:
+      b: { resource: r2bucket }
+    require:
+      - { cond: b_found, error: NotFound, message: "Bucket not found" }
+    effects:
+      - execute:
+          action: r2.put
+          args:
+            bucket: "string(b.name)"
+            key: "string(input.object_key)"
+            value: "('body' in input && input.body != null) ? b64(string(input.body)) : ''"
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "{'key': string(input.object_key), 'size': 0.0, 'etag': 'mirror-local', 'version': '', 'storage_class': 'Standard', 'uploaded': '2020-01-01T00:00:00Z'}"
+
+  R2GetObject:
+    reads:
+      b: { resource: r2bucket }
+    require:
+      - { cond: b_found, error: NotFound, message: "Bucket not found" }
+    effects:
+      - execute:
+          action: r2.get
+          args:
+            bucket: "string(b.name)"
+            key: "string(input.object_key)"
+          bind: obj
+          absent_error: NotFound
+          absent_message: Object not found
+    output:
+      _raw: "b64decode(string(fx.obj.value))"
+
+  R2DeleteObject:
+    reads:
+      b: { resource: r2bucket }
+    require:
+      - { cond: b_found, error: NotFound, message: "Bucket not found" }
+    effects:
+      - execute:
+          action: r2.delete
+          args:
+            bucket: "string(b.name)"
+            key: "string(input.object_key)"
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "null"
+    omit_null: [result]
+
+  R2ListObjects:
+    reads:
+      b: { resource: r2bucket }
+    require:
+      - { cond: b_found, error: NotFound, message: "Bucket not found" }
+    effects:
+      - execute:
+          action: r2.list
+          args:
+            bucket: "string(b.name)"
+          bind: listed
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "fx.listed"
+
+  QueuesCreate:
+    reads:
+      taken: { resource: cfqueue_name }
+    require:
+      - { cond: "has(input.queue_name) && type(input.queue_name) == string && string(input.queue_name) != ''", error: InvalidInput, message: "queue_name is required" }
+      - { cond: "!taken_found", error: Conflict, message: "Queue already exists" }
+    effects:
+      - put:
+          resource: cfqueue_name
+          record:
+            name: id
+      - create: { resource: cfqueue }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: rec
+
+  QueuesList:
+    list: { resource: cfqueue, member: result }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result_info: "{'count': double(size(items)), 'page': 1.0, 'per_page': 100.0, 'total_count': double(size(items))}"
+
+  QueuesGet:
+    reads:
+      q: { resource: cfqueue }
+    require:
+      - { cond: q_found, error: NotFound, message: "Queue not found" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: q
+
+  QueuesDelete:
+    reads:
+      q: { resource: cfqueue }
+    require:
+      - { cond: q_found, error: NotFound, message: "Queue not found" }
+    effects:
+      - delete: { resource: cfqueue }
+      - delete:
+          resource: cfqueue_name
+          key: "string(q.queue_name)"
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+
+  QueuesPushMessage:
+    reads:
+      q: { resource: cfqueue }
+    require:
+      - { cond: q_found, error: NotFound, message: "Queue not found" }
+    effects:
+      - execute:
+          action: queue.send
+          args:
+            queue: "string(q.queue_id)"
+            body: "('body' in input && input.body != null) ? string(input.body) : (('message' in input && input.message != null) ? string(input.message) : '')"
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "{'metadata': {'metrics': {}}}"
+
+  DurableObjectsNamespaceListNamespaces:
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "[]"
+      result_info: "{'count': 0.0, 'page': 1.0, 'per_page': 20.0, 'total_count': 0.0}"
+
+  WorCreateOrModifyWorkflow:
+    effects:
+      - put: { resource: cfworkflow }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: rec
+
+  WorListWorkflows:
+    list: { resource: cfworkflow, member: result }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result_info: "{'count': double(size(items)), 'page': 1.0, 'per_page': 100.0, 'total_count': double(size(items))}"
+
+  WorGetWorkflowDetails:
+    reads:
+      wf: { resource: cfworkflow }
+    require:
+      - { cond: wf_found, error: NotFound, message: "Workflow not found" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: wf
+
+  WorDeleteWorkflow:
+    reads:
+      wf: { resource: cfworkflow }
+    require:
+      - { cond: wf_found, error: NotFound, message: "Workflow not found" }
+    effects:
+      - delete: { resource: cfworkflow }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "null"
+    omit_null: [result]
+
+  WorCreateNewWorkflowInstance:
+    reads:
+      wf: { resource: cfworkflow }
+    require:
+      - { cond: wf_found, error: NotFound, message: "Workflow not found" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "{'id': 'inst-local', 'status': 'queued', 'workflow_name': string(wf.name)}"
+
+  WorDescribeWorkflowInstance:
+    reads:
+      wf: { resource: cfworkflow }
+    require:
+      - { cond: wf_found, error: NotFound, message: "Workflow not found" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "{'id': string(input.instance_id), 'status': 'complete', 'workflow_name': string(wf.name)}"
+
+  WorListWorkflowInstances:
+    reads:
+      wf: { resource: cfworkflow }
+    require:
+      - { cond: wf_found, error: NotFound, message: "Workflow not found" }
+    output:
+      success: "true"
+      errors: "[]"
+      messages: "[]"
+      result: "[]"
+      result_info: "{'count': 0.0, 'page': 1.0, 'per_page': 100.0, 'total_count': 0.0}"
+
 
 quirks:
   - operation: WorkersKvNamespaceCreateANamespace

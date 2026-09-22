@@ -12,6 +12,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/blobs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/execution"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/journal"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
@@ -32,13 +33,20 @@ func SeedKMSKey(t testing.TB, deps spi.Deps, identity spi.Identity, keyARN, stat
 // Deps returns a ready spi.Deps for tests.
 func Deps(t testing.TB) spi.Deps {
 	t.Helper()
+	clk := clock.NewControllable()
+	st := store.NewMemory("test")
+	kvReg, err := execution.NewRegistry(&execution.NativeKV{Store: st, Clock: clk})
+	if err != nil {
+		t.Fatalf("execution registry: %v", err)
+	}
 	return spi.Deps{
-		Store:   store.NewMemory("test"),
-		Blobs:   blobs.NewMemory(),
-		Bus:     bus.New(),
-		Clock:   clock.NewControllable(),
-		Rand:    rand.New("test"),
-		Journal: journal.New(),
-		Model:   &model.Bundle{SchemaVersion: "1"},
+		Store:    st,
+		Blobs:    blobs.NewMemory(),
+		Bus:      bus.New(),
+		Clock:    clk,
+		Rand:     rand.New("test"),
+		Journal:  journal.New(),
+		Model:    &model.Bundle{SchemaVersion: "1"},
+		Executor: execution.RegistryExecutor{Reg: kvReg},
 	}
 }

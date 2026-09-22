@@ -21013,6 +21013,13 @@ func shard(t *testing.T) (index, count int) {
 }
 
 func TestMutantsAreKilled(t *testing.T) {
+	// Bare `go test ./internal/mutation` uses Go's default 600s budget and
+	// cannot finish ~2.5k mutants. CI/make always set MUTATION_SHARDS or
+	// MIRROR_MUTATION_FULL=1 (see make test-mutation). Needle/name/shard
+	// checks below still run in the fast path.
+	if os.Getenv("MUTATION_SHARDS") == "" && os.Getenv("MIRROR_MUTATION_FULL") != "1" {
+		t.Skip("set MUTATION_SHARDS=N (CI) or MIRROR_MUTATION_FULL=1 (make test-mutation)")
+	}
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("caller")

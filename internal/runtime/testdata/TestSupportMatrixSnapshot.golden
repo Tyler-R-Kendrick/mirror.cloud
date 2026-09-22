@@ -161,7 +161,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `azure.blobs` | `restXml` | 54 | 1 |
 | `azure.queue` | `restXml` | 16 | 0 |
 | `azure.table` | `restJson1` | 9 | 1 |
-| `cloudflare.api` | `restJson1` | 10 | 4 |
+| `cloudflare.api` | `restJson1` | 40 | 4 |
 | `digitalocean.v2` | `restJson1` | 8 | 32 |
 | `fly.machines` | `restJson1` | 8 | 90 |
 | `gcp.storage` | `gcpRestJson` | 87 | 0 |

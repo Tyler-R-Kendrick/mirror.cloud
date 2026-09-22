@@ -31,7 +31,7 @@ import (
 //
 // It mirrors runEffects. A delete, a dedup and a send_event bind nothing, which
 // is why they are absent rather than forgotten: only the three writes, the
-// counter and an explicit generate reach `fx`.
+// counter, an explicit generate, and an execute bind reach `fx`.
 func fxKeys(op Operation) map[string]bool {
 	keys := map[string]bool{}
 	for _, eff := range op.Effects {
@@ -47,6 +47,10 @@ func fxKeys(op Operation) map[string]bool {
 		case eff.Generate != nil:
 			if eff.Generate.Bind != "" {
 				keys[eff.Generate.Bind] = true
+			}
+		case eff.Execute != nil:
+			if eff.Execute.Bind != "" {
+				keys[eff.Execute.Bind] = true
 			}
 		}
 	}

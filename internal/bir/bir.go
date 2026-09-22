@@ -490,6 +490,21 @@ type Effect struct {
 	Emit      *EmitEffect     `yaml:"emit,omitempty"`
 	Generate  *GenerateEffect `yaml:"generate,omitempty"`
 	Primitive *PrimEffect     `yaml:"primitive,omitempty"`
+	Execute   *ExecuteEffect  `yaml:"execute,omitempty"`
+}
+
+// ExecuteEffect dispatches one action through Deps.Executor — the authoritative
+// external backend for that resource. An operation that carries execute may
+// not also carry native store mutations (create/put/patch/delete/…) or list;
+// composition validates the mix at load. AbsentError names a bundle error
+// when the backend answers class absent (e.g. KeyNotFound).
+type ExecuteEffect struct {
+	Action        string            `yaml:"action"`
+	Args          map[string]string `yaml:"args,omitempty"`
+	Bind          string            `yaml:"bind,omitempty"`
+	When          string            `yaml:"when,omitempty"`
+	AbsentError   string            `yaml:"absent_error,omitempty"`
+	AbsentMessage string            `yaml:"absent_message,omitempty"`
 }
 
 // WriteEffect creates or updates a resource record.

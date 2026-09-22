@@ -1,0 +1,10 @@
+{
+  "name": "@mirror/celld-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pinned celld v0.5.1 helper + esbuild for local Workers/DO/D1/R2. Binary under bin/ via scripts/provision-celld.sh.",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "esbuild": "0.25.0"
+  }
+}

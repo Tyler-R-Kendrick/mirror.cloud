@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/execution"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -322,4 +323,46 @@ func (ev *eval) putKeyAlias(ctx context.Context, res bir.Resource, oldKey, newKe
 		return err
 	}
 	return ev.e.scope(ev.req).Collection(name).Put(ctx, oldKey, []byte(newKey))
+}
+
+func (ev *eval) runExecute(ctx context.Context, path string, e bir.ExecuteEffect) error {
+	if e.When != "" {
+		ok, err := ev.evalBool(path + ".when")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+	if ev.e.deps.Executor == nil {
+		return &spi.Fault{Code: "InternalFailure", Message: "execute effect: no executor configured", HTTPStatus: 500, Fault: "server"}
+	}
+	args := map[string]any{}
+	for _, k := range sortedKeys(e.Args) {
+		v, err := ev.eval(path + ".args." + k)
+		if err != nil {
+			return err
+		}
+		args[k] = v
+	}
+	out, err := ev.e.deps.Executor.Execute(ctx, ev.req.Identity.Account, ev.req.Identity.Region, e.Action, args)
+	if err != nil {
+		var f *execution.Failure
+		if errors.As(err, &f) && f.Class == execution.ClassAbsent && e.AbsentError != "" {
+			msg := e.AbsentMessage
+			if msg == "" {
+				msg = e.AbsentError
+			}
+			return ev.e.fault(e.AbsentError, msg)
+		}
+		if errors.As(err, &f) {
+			return &spi.Fault{Code: "InternalFailure", Message: f.Error(), HTTPStatus: 500, Fault: "server"}
+		}
+		return err
+	}
+	if e.Bind != "" {
+		ev.fx[e.Bind] = out
+	}
+	return nil
 }

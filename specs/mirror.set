@@ -171,7 +171,7 @@ aws.kinesisanalyticsv2 emulate
 hostinger.api emulate
 hetzner.v1 emulate
 fly.machines emulate
-cloudflare.api emulate paths=/client/v4/accounts/{account_id}/storage/kv
+cloudflare.api emulate paths=/client/v4/accounts/{account_id}/storage/kv fields=WorkerScriptListWorkers,WorkerScriptUploadWorkerModule,WorkerScriptDeleteWorker,WorkerScriptDownloadWorker,D1ListDatabases,D1CreateDatabase,D1GetDatabase,D1DeleteDatabase,D1QueryDatabase,R2ListBuckets,R2CreateBucket,R2GetBucket,R2DeleteBucket,R2PutObject,R2GetObject,R2DeleteObject,R2ListObjects,QueuesList,QueuesCreate,QueuesGet,QueuesDelete,QueuesPushMessage,DurableObjectsNamespaceListNamespaces,WorListWorkflows,WorCreateOrModifyWorkflow,WorGetWorkflowDetails,WorDeleteWorkflow,WorCreateNewWorkflowInstance,WorDescribeWorkflowInstance,WorListWorkflowInstances
 digitalocean.v2 emulate paths=/v2/droplets,/v2/domains
 # fields= keeps exactly the bundle-served ops. A paths= prefix under
 # /v1/projects or /v2/deployments also pulled in feature-flags, rolling-release,

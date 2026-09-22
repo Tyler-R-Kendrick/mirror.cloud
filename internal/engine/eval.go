@@ -532,6 +532,10 @@ func (ev *eval) runEffects(ctx context.Context, op bir.Operation) error {
 			if err := ev.runSendEvent(ctx, path+".send_event", *eff.SendEvent); err != nil {
 				return err
 			}
+		case eff.Execute != nil:
+			if err := ev.runExecute(ctx, path+".execute", *eff.Execute); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("engine: %s: effect kind is not yet supported by this engine", path)
 		}

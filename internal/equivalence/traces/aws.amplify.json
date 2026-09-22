@@ -416,9 +416,11 @@
           "appId": "7c589129",
           "branchName": "main",
           "jobId": "9c8e2cb0",
-          "status": "SUCCEED"
+          "status": "RUNNING",
+          "buildSpec": ""
         }
-      }
+      },
+      "recut": "StartJob admits RUNNING; process executor may advance to SUCCEED/FAILED (not silent SUCCEED)."
     },
     {
       "operation": "GetJob",
@@ -445,9 +447,11 @@
           "appId": "7c589129",
           "branchName": "main",
           "jobId": "9c8e2cb0",
-          "status": "SUCCEED"
+          "status": "RUNNING",
+          "buildSpec": ""
         }
-      }
+      },
+      "recut": "StartJob admits RUNNING; process executor may advance to SUCCEED/FAILED (not silent SUCCEED)."
     },
     {
       "operation": "GetJob",
@@ -494,10 +498,12 @@
             "appId": "7c589129",
             "branchName": "main",
             "jobId": "9c8e2cb0",
-            "status": "SUCCEED"
+            "status": "RUNNING",
+            "buildSpec": ""
           }
         ]
-      }
+      },
+      "recut": "StartJob admits RUNNING; process executor may advance to SUCCEED/FAILED (not silent SUCCEED)."
     },
     {
       "operation": "StartJob",
@@ -521,9 +527,11 @@
           "appId": "7c589129",
           "branchName": "absent",
           "jobId": "33f6fc5d",
-          "status": "SUCCEED"
+          "status": "RUNNING",
+          "buildSpec": ""
         }
-      }
+      },
+      "recut": "StartJob admits RUNNING; process executor may advance to SUCCEED/FAILED (not silent SUCCEED)."
     },
     {
       "operation": "ListJobs",
@@ -547,16 +555,19 @@
             "appId": "7c589129",
             "branchName": "absent",
             "jobId": "33f6fc5d",
-            "status": "SUCCEED"
+            "status": "RUNNING",
+            "buildSpec": ""
           },
           {
             "appId": "7c589129",
             "branchName": "main",
             "jobId": "9c8e2cb0",
-            "status": "SUCCEED"
+            "status": "RUNNING",
+            "buildSpec": ""
           }
         ]
-      }
+      },
+      "recut": "StartJob admits RUNNING; process executor may advance to SUCCEED/FAILED (not silent SUCCEED)."
     },
     {
       "operation": "DeleteBranch",

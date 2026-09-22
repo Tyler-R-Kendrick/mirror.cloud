@@ -1,0 +1,26 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "cloudflare",
+  "service": "cloudflare.ci",
+  "profile": "cloudflare-ci-0.2-local",
+  "feature": "artifacts.push.runners",
+  "backend": "trusted-process",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "not-assessed",
+  "evidenceGrade": "authored",
+  "requiredTests": ["CF-CI-RUNNERS"],
+  "sourceRefs": [
+    "https://github.com/cloudflare/ci",
+    "https://developers.cloudflare.com/artifacts/guides/build-and-deploy-on-push/",
+    "https://blog.cloudflare.com/ci-workflows/"
+  ],
+  "packagePin": "@cloudflare/ci@0.2.0",
+  "limitations": [
+    "Local process stand-in for Sandbox; no Workflows durable steps, R2 cache pointers, or Containers/DO",
+    "Not Workers Builds / Pages GitHub App integration",
+    "Pipeline authored as RunnerNode graph (fixture), not live TypeScript CIWorkflow class evaluation",
+    "cache.inputs are literal relative paths only (no globs)"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "fly",
+  "service": "fly.machines",
+  "profile": "host-static-local-0.1",
+  "feature": "delivery.static",
+  "backend": "bir-admit+mirror-owned-static-site",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "partial",
+  "evidenceGrade": "authored",
+  "requiredTests": ["HOST-FLY-DELIVERY"],
+  "limitations": [
+    "B-IR admits AppsCreate/AppsShow; static bytes via mirror-owned StaticSite",
+    "Not Machines runtime / Volumes / flyctl deploy parity"
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "github",
+  "service": "github.actions",
+  "profile": "github-actions-workflow-local",
+  "feature": "workflow.push.jobs.matrix.artifacts.local-actions",
+  "backend": "trusted-process",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "executable",
+  "evidenceGrade": "authored",
+  "requiredTests": [
+    "GH-DELIVERY",
+    "GH-ACTIONS",
+    "ADV-TOLERATED-FAILURE"
+  ],
+  "sourceRefs": [
+    "https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions",
+    "https://docs.github.com/en/actions/creating-actions/metadata-syntax-for-github-actions"
+  ],
+  "packagePin": "github-actions-workflow-subset/1",
+  "supported": [
+    "on.push (+ branches filter)",
+    "jobs.<id>.needs (string or list)",
+    "jobs.<id>.steps[].run via /bin/sh -c",
+    "jobs.<id>.steps[].id + $GITHUB_OUTPUT",
+    "jobs.<id>.steps[].continue-on-error",
+    "jobs.<id>.steps[].uses: ./local composite (action.yml runs.steps[].run)",
+    "jobs.<id>.steps[].uses: ./local node20 (action.yml main.js \u2192 GITHUB_OUTPUT)",
+    "jobs.<id>.outputs with ${{ steps.*.outputs.* }}",
+    "strategy.matrix axes + include/exclude (string values)",
+    "${{ matrix.* }} expansion in run strings",
+    "MIRROR_ARTIFACTS shared dir for cross-job file handoff"
+  ],
+  "limitations": [
+    "No remote actions (owner/repo@ref), docker actions, services, containers, or reusable workflows",
+    "No expression language beyond matrix.* and steps.*.outputs.*",
+    "Jobs share one WorkDir (not isolated runners)",
+    "Not act / full Actions runner parity",
+    "Local uses: ./ composite + node* only \u2014 no remote actions marketplace",
+    "continue-on-error supported"
+  ]
+}

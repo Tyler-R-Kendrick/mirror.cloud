@@ -2,7 +2,7 @@
   "schema": "trace/1",
   "service": "aws.codebuild",
   "source": "internal/services/aws/codebuild",
-  "note": "Projects and builds; the update that empties what it does not resend.",
+  "note": "Projects and builds with real admission: StartBuild is IN_PROGRESS; UpdateProject merges; missing projects/builds fault. Execution is outside equivalence (MIRROR_CICD_EXECUTE). Corrected 2026-09-21 from false SUCCEEDED.",
   "steps": [
     {
       "operation": "ListProjects",
@@ -47,15 +47,21 @@
       "output": {
         "project": {
           "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
+          "name": "alpha",
+          "source": {
+            "type": "NO_SOURCE"
+          },
           "environment": {
             "computeType": "BUILD_GENERAL1_SMALL",
             "image": "aws/codebuild/standard:7.0",
             "type": "LINUX_CONTAINER"
           },
-          "name": "alpha",
-          "source": {
-            "type": "NO_SOURCE"
-          }
+          "artifacts": {
+            "type": "NO_ARTIFACTS"
+          },
+          "serviceRole": "arn:aws:iam::000000000000:role/cb",
+          "timeoutInMinutes": 30,
+          "description": "dropped"
         }
       }
     },
@@ -86,15 +92,20 @@
       "output": {
         "project": {
           "arn": "arn:aws:codebuild:us-east-1:000000000000:project/beta",
+          "name": "beta",
+          "source": {
+            "type": "NO_SOURCE"
+          },
           "environment": {
             "computeType": "BUILD_GENERAL1_SMALL",
             "image": "aws/codebuild/standard:7.0",
             "type": "LINUX_CONTAINER"
           },
-          "name": "beta",
-          "source": {
-            "type": "NO_SOURCE"
-          }
+          "artifacts": {
+            "type": "NO_ARTIFACTS"
+          },
+          "serviceRole": "arn:aws:iam::000000000000:role/cb",
+          "timeoutInMinutes": 60
         }
       }
     },
@@ -134,29 +145,41 @@
         "projects": [
           {
             "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
-            "environment": {
-              "computeType": "BUILD_GENERAL1_SMALL",
-              "image": "aws/codebuild/standard:7.0",
-              "type": "LINUX_CONTAINER"
-            },
             "name": "alpha",
             "source": {
               "type": "NO_SOURCE"
-            }
-          },
-          {
-            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/beta",
+            },
             "environment": {
               "computeType": "BUILD_GENERAL1_SMALL",
               "image": "aws/codebuild/standard:7.0",
               "type": "LINUX_CONTAINER"
             },
+            "artifacts": {
+              "type": "NO_ARTIFACTS"
+            },
+            "serviceRole": "arn:aws:iam::000000000000:role/cb",
+            "timeoutInMinutes": 30,
+            "description": "dropped"
+          },
+          {
+            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/beta",
             "name": "beta",
             "source": {
               "type": "NO_SOURCE"
-            }
+            },
+            "environment": {
+              "computeType": "BUILD_GENERAL1_SMALL",
+              "image": "aws/codebuild/standard:7.0",
+              "type": "LINUX_CONTAINER"
+            },
+            "artifacts": {
+              "type": "NO_ARTIFACTS"
+            },
+            "serviceRole": "arn:aws:iam::000000000000:role/cb",
+            "timeoutInMinutes": 60
           }
-        ]
+        ],
+        "projectsNotFound": []
       }
     },
     {
@@ -178,29 +201,43 @@
       "output": {
         "projects": [
           {
-            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/beta",
-            "environment": {
-              "computeType": "BUILD_GENERAL1_SMALL",
-              "image": "aws/codebuild/standard:7.0",
-              "type": "LINUX_CONTAINER"
-            },
-            "name": "beta",
-            "source": {
-              "type": "NO_SOURCE"
-            }
-          },
-          {
             "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
-            "environment": {
-              "computeType": "BUILD_GENERAL1_SMALL",
-              "image": "aws/codebuild/standard:7.0",
-              "type": "LINUX_CONTAINER"
-            },
             "name": "alpha",
             "source": {
               "type": "NO_SOURCE"
-            }
+            },
+            "environment": {
+              "computeType": "BUILD_GENERAL1_SMALL",
+              "image": "aws/codebuild/standard:7.0",
+              "type": "LINUX_CONTAINER"
+            },
+            "artifacts": {
+              "type": "NO_ARTIFACTS"
+            },
+            "serviceRole": "arn:aws:iam::000000000000:role/cb",
+            "timeoutInMinutes": 30,
+            "description": "dropped"
+          },
+          {
+            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/beta",
+            "name": "beta",
+            "source": {
+              "type": "NO_SOURCE"
+            },
+            "environment": {
+              "computeType": "BUILD_GENERAL1_SMALL",
+              "image": "aws/codebuild/standard:7.0",
+              "type": "LINUX_CONTAINER"
+            },
+            "artifacts": {
+              "type": "NO_ARTIFACTS"
+            },
+            "serviceRole": "arn:aws:iam::000000000000:role/cb",
+            "timeoutInMinutes": 60
           }
+        ],
+        "projectsNotFound": [
+          "absent"
         ]
       },
       "superseded": "The pack answered the named projects in request order; a filtered list answers them in store order, which for these names is lexical. BatchGetProjectsOutput orders nothing, so neither order is the declared one and the store's is the one the engine has."
@@ -220,7 +257,10 @@
         "Project": ""
       },
       "output": {
-        "projects": null
+        "projects": [],
+        "projectsNotFound": [
+          "absent"
+        ]
       }
     },
     {
@@ -239,11 +279,24 @@
       "output": {
         "project": {
           "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
-          "environment": null,
           "name": "alpha",
-          "source": null
+          "source": {
+            "type": "NO_SOURCE"
+          },
+          "environment": {
+            "computeType": "BUILD_GENERAL1_SMALL",
+            "image": "aws/codebuild/standard:7.0",
+            "type": "LINUX_CONTAINER"
+          },
+          "artifacts": {
+            "type": "NO_ARTIFACTS"
+          },
+          "serviceRole": "arn:aws:iam::000000000000:role/cb",
+          "timeoutInMinutes": 30,
+          "description": "still dropped"
         }
-      }
+      },
+      "recut": "UpdateProject merges omitted members instead of nulling them (AWS-compatible partial update)."
     },
     {
       "operation": "BatchGetProjects",
@@ -263,11 +316,24 @@
         "projects": [
           {
             "arn": "arn:aws:codebuild:us-east-1:000000000000:project/alpha",
-            "environment": null,
             "name": "alpha",
-            "source": null
+            "source": {
+              "type": "NO_SOURCE"
+            },
+            "environment": {
+              "computeType": "BUILD_GENERAL1_SMALL",
+              "image": "aws/codebuild/standard:7.0",
+              "type": "LINUX_CONTAINER"
+            },
+            "artifacts": {
+              "type": "NO_ARTIFACTS"
+            },
+            "serviceRole": "arn:aws:iam::000000000000:role/cb",
+            "timeoutInMinutes": 30,
+            "description": "still dropped"
           }
-        ]
+        ],
+        "projectsNotFound": []
       }
     },
     {
@@ -285,15 +351,11 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "project": {
-          "arn": "arn:aws:codebuild:us-east-1:000000000000:project/ghost",
-          "environment": null,
-          "name": "ghost",
-          "source": {
-            "type": "NO_SOURCE"
-          }
-        }
+      "recut": "UpdateProject on missing project faults ResourceNotFoundException; no implicit create.",
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
       }
     },
     {
@@ -311,17 +373,12 @@
         "Project": ""
       },
       "output": {
-        "projects": [
-          {
-            "arn": "arn:aws:codebuild:us-east-1:000000000000:project/ghost",
-            "environment": null,
-            "name": "ghost",
-            "source": {
-              "type": "NO_SOURCE"
-            }
-          }
+        "projects": [],
+        "projectsNotFound": [
+          "ghost"
         ]
-      }
+      },
+      "recut": "BatchGetProjects reports projectsNotFound."
     },
     {
       "operation": "ListBuilds",
@@ -352,10 +409,21 @@
       },
       "output": {
         "build": {
-          "buildStatus": "SUCCEEDED",
+          "buildStatus": "IN_PROGRESS",
           "id": "alpha:7c589129",
-          "projectName": "alpha"
+          "projectName": "alpha",
+          "currentPhase": "BUILD"
         }
+      },
+      "recut": "StartBuild admits IN_PROGRESS; execution is via CI/CD executor, not silent SUCCEEDED.",
+      "superseded_members": {
+        "build.startTime": "clock-bound",
+        "build.phases": "admitted phases",
+        "build.source": "project snapshot",
+        "build.environment": "project snapshot",
+        "build.artifacts": "project snapshot",
+        "build.buildspecOverride": "optional override",
+        "build.idempotencyToken": "token echo"
       }
     },
     {
@@ -373,10 +441,21 @@
       },
       "output": {
         "build": {
-          "buildStatus": "SUCCEEDED",
+          "buildStatus": "IN_PROGRESS",
           "id": "alpha:5f59f223",
-          "projectName": "alpha"
+          "projectName": "alpha",
+          "currentPhase": "BUILD"
         }
+      },
+      "recut": "StartBuild admits IN_PROGRESS; execution is via CI/CD executor, not silent SUCCEEDED.",
+      "superseded_members": {
+        "build.startTime": "clock-bound",
+        "build.phases": "admitted phases",
+        "build.source": "project snapshot",
+        "build.environment": "project snapshot",
+        "build.artifacts": "project snapshot",
+        "build.buildspecOverride": "optional override",
+        "build.idempotencyToken": "token echo"
       }
     },
     {
@@ -391,12 +470,11 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "build": {
-          "buildStatus": "SUCCEEDED",
-          "id": "nosuch:9c8e2cb0",
-          "projectName": "nosuch"
-        }
+      "recut": "StartBuild requires an existing project.",
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
       }
     },
     {
@@ -412,8 +490,7 @@
       "output": {
         "ids": [
           "alpha:5f59f223",
-          "alpha:7c589129",
-          "nosuch:9c8e2cb0"
+          "alpha:7c589129"
         ]
       }
     },
@@ -428,6 +505,12 @@
         "AccessKeyID": "",
         "ARN": "",
         "Project": ""
+      },
+      "recut": "StopBuild faults ResourceNotFoundException when the build is absent.",
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
       }
     },
     {
@@ -445,7 +528,10 @@
         "Project": ""
       },
       "output": {
-        "builds": null
+        "builds": [],
+        "buildsNotFound": [
+          "absent:00000000"
+        ]
       }
     },
     {
@@ -486,8 +572,7 @@
       },
       "output": {
         "projects": [
-          "alpha",
-          "ghost"
+          "alpha"
         ]
       }
     },
@@ -504,8 +589,7 @@
       "output": {
         "ids": [
           "alpha:5f59f223",
-          "alpha:7c589129",
-          "nosuch:9c8e2cb0"
+          "alpha:7c589129"
         ]
       }
     }

@@ -1,0 +1,18 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "gcp",
+  "service": null,
+  "profile": "gcp-clouddeploy-local-0.1",
+  "feature": "delivery.cloud-deploy-approval",
+  "backend": "mirror-owned-staging-approval-production",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "partial",
+  "evidenceGrade": "authored",
+  "requiredTests": ["GCP-CLOUDDEPLOY-DELIVERY"],
+  "limitations": [
+    "Local staging → Approve/Reject → Promote/Rollback HTTP sites; optional gcpcloudbuild compose",
+    "Not Cloud Deploy Skaffold / Cloud Run / GKE / render pipelines"
+  ]
+}

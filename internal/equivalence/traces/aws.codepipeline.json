@@ -2,7 +2,7 @@
   "schema": "trace/1",
   "service": "aws.codepipeline",
   "source": "pack:internal/services/aws/codepipeline@HEAD",
-  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette. Recut 2026-09-21: StartPipelineExecution admits InProgress with stageStates; GetPipelineState nonempty.",
   "steps": [
     {
       "operation": "ListPipelines",
@@ -157,8 +157,40 @@
       },
       "output": {
         "pipelineName": "p1",
-        "stageStates": []
-      }
+        "stageStates": [
+          {
+            "stageName": "Source",
+            "inboundTransitionState": {
+              "enabled": true
+            },
+            "actionStates": [
+              {
+                "actionName": "src",
+                "latestExecution": {
+                  "status": "InProgress",
+                  "actionExecutionId": "src"
+                }
+              }
+            ]
+          },
+          {
+            "stageName": "Build",
+            "inboundTransitionState": {
+              "enabled": true
+            },
+            "actionStates": [
+              {
+                "actionName": "build",
+                "latestExecution": {
+                  "status": "InProgress",
+                  "actionExecutionId": "build"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "recut": "GetPipelineState projects stageStates from the pipeline declaration."
     },
     {
       "operation": "CreatePipeline",
@@ -273,9 +305,28 @@
             "type": "S3"
           },
           "name": "p1",
-          "roleArn": "arn:aws:iam::000000000000:role/cp"
+          "roleArn": "arn:aws:iam::000000000000:role/cp",
+          "stages": [
+            {
+              "actions": [
+                {
+                  "name": "src"
+                }
+              ],
+              "name": "Source"
+            },
+            {
+              "actions": [
+                {
+                  "name": "build"
+                }
+              ],
+              "name": "Build"
+            }
+          ]
         }
-      }
+      },
+      "recut": "Pipeline declaration persists stages."
     },
     {
       "operation": "GetPipeline",
@@ -296,9 +347,28 @@
             "type": "S3"
           },
           "name": "p1",
-          "roleArn": "arn:aws:iam::000000000000:role/cp"
+          "roleArn": "arn:aws:iam::000000000000:role/cp",
+          "stages": [
+            {
+              "actions": [
+                {
+                  "name": "src"
+                }
+              ],
+              "name": "Source"
+            },
+            {
+              "actions": [
+                {
+                  "name": "build"
+                }
+              ],
+              "name": "Build"
+            }
+          ]
         }
-      }
+      },
+      "recut": "Pipeline declaration persists stages."
     },
     {
       "operation": "StartPipelineExecution",
@@ -336,9 +406,10 @@
         "pipelineExecution": {
           "pipelineExecutionId": "p1-7c589129",
           "pipelineName": "p1",
-          "status": "Succeeded"
+          "status": "InProgress"
         }
-      }
+      },
+      "recut": "StartPipelineExecution admits InProgress (not Succeeded)."
     },
     {
       "operation": "ListPipelineExecutions",
@@ -357,10 +428,11 @@
           {
             "pipelineExecutionId": "p1-7c589129",
             "pipelineName": "p1",
-            "status": "Succeeded"
+            "status": "InProgress"
           }
         ]
-      }
+      },
+      "recut": "StartPipelineExecution admits InProgress (not Succeeded)."
     },
     {
       "operation": "StopPipelineExecution",
@@ -382,7 +454,8 @@
       },
       "output": {
         "pipelineExecutionId": "p1-7c589129"
-      }
+      },
+      "recut": "StartPipelineExecution admits InProgress (not Succeeded)."
     },
     {
       "operation": "GetPipelineExecution",
@@ -406,7 +479,8 @@
           "pipelineName": "p1",
           "status": "Stopped"
         }
-      }
+      },
+      "recut": "StartPipelineExecution admits InProgress (not Succeeded)."
     },
     {
       "operation": "StopPipelineExecution",
@@ -425,7 +499,8 @@
       },
       "output": {
         "pipelineExecutionId": "absent"
-      }
+      },
+      "recut": "StartPipelineExecution admits InProgress (not Succeeded)."
     },
     {
       "operation": "GetPipelineExecution",
@@ -497,7 +572,8 @@
             "status": "Stopped"
           }
         ]
-      }
+      },
+      "recut": "StartPipelineExecution admits InProgress (not Succeeded)."
     },
     {
       "operation": "DeletePipeline",

@@ -1,0 +1,33 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "azure",
+  "service": "azure.pipelines",
+  "profile": "azure-pipelines-yml-local",
+  "feature": "stages.jobs.steps.dependsOn.environment",
+  "backend": "trusted-process",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "executable",
+  "controlPlane": "unsupported",
+  "evidenceGrade": "authored",
+  "requiredTests": ["AZ-DELIVERY"],
+  "sourceRefs": [
+    "https://learn.microsoft.com/en-us/azure/devops/pipelines/yaml-schema"
+  ],
+  "packagePin": "azure-pipelines-yml-subset/1",
+  "supported": [
+    "stages[].stage + jobs[] (or top-level jobs)",
+    "dependsOn (string or list) on stages/jobs",
+    "condition: succeeded() / eq(succeeded(), true|Succeeded) / failed() / always()",
+    "steps[].script or steps[].bash via /bin/sh -c",
+    "job.environment (string or {name}) with Config.Approvals local gate",
+    "$(Build.SourcesDirectory) / $(Build.ArtifactStagingDirectory) / $(MIRROR_OUT)"
+  ],
+  "limitations": [
+    "Dialect-only: no Azure DevOps REST / B-IR control-plane service",
+    "templates / extends / resources / checkout@ / task@ unsupported (Parse error)",
+    "No Docker agents, matrix, or full expression language",
+    "Jobs within a stage run sequentially (not parallel)"
+  ]
+}

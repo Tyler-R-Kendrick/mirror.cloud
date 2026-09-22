@@ -1,16 +1,15 @@
 schema: bir/1
 service: aws.codepipeline
 
-# Transcribed from the hand-written pack, not established against the real
-# service. Nothing is built: an execution has Succeeded before the call
-# returns, without running a stage or an action.
+# Pipeline control plane with real stage-state projection. Executions admit as
+# InProgress. Optional AfterInvoke (MIRROR_CICD_EXECUTE=1 / codepipeline.Enable)
+# dispatches Build/CodeBuild → StartBuild, stops on Approval/Manual Pending, and
+# on PutApprovalResult(Approved) continues Deploy/CodeDeploy → CreateDeployment.
+# Fixture may supply mirrorAppSpec / mirrorRevisionFiles on Deploy action config.
+# Without execute, GetPipelineState projects InProgress from the declaration.
 provenance: authored
 
 resources:
-  # The pack stored the caller's whole pipeline structure with the name forced
-  # into it, so a pipeline answered back whatever the caller had sent --
-  # including members PipelineDeclaration does not declare. Only the declared
-  # members are stored here.
   pipeline:
     collection: cp
     id:
@@ -30,8 +29,6 @@ resources:
         'pipeline' in input && 'stages' in input.pipeline
           ? input.pipeline.stages : []
 
-  # An execution is keyed by an identifier that carries the pipeline's name,
-  # which is how the pack built it.
   execution:
     collection: cpex
     id:
@@ -53,12 +50,55 @@ errors:
     fault: client
 
 operations:
-  # Create and update are one write: both replace the whole record, so an
-  # update that omits a stage list empties it.
-  CreatePipeline: {put: {resource: pipeline, wrap: pipeline}}
-  UpdatePipeline: {put: {resource: pipeline, wrap: pipeline}}
-  GetPipeline: {get: {resource: pipeline, error: PipelineNotFound, key: string(input.name), wrap: pipeline}}
-  # A pipeline has no stage states, so nothing reports what a stage did.
+  CreatePipeline:
+    effects:
+      - put: { resource: pipeline }
+    output:
+      pipeline: rec
+
+  # Partial update: omitted stages/roleArn/artifactStore keep prior values.
+  UpdatePipeline:
+    reads:
+      p:
+        resource: pipeline
+        key: >
+          'pipeline' in input && 'name' in input.pipeline
+            ? string(input.pipeline.name)
+            : string(input.name)
+    require:
+      - { cond: p_found, error: PipelineNotFound }
+    effects:
+      - patch:
+          resource: pipeline
+          key: "string(p.name)"
+          when: "'pipeline' in input && 'roleArn' in input.pipeline"
+          record:
+            roleArn: "string(input.pipeline.roleArn)"
+      - patch:
+          resource: pipeline
+          key: "string(p.name)"
+          when: "'pipeline' in input && 'artifactStore' in input.pipeline"
+          record:
+            artifactStore: input.pipeline.artifactStore
+      - patch:
+          resource: pipeline
+          key: "string(p.name)"
+          when: "'pipeline' in input && 'stages' in input.pipeline"
+          record:
+            stages: input.pipeline.stages
+    output:
+      pipeline: rec
+
+  GetPipeline:
+    reads:
+      p: { resource: pipeline, key: "string(input.name)" }
+    require:
+      - { cond: p_found, error: PipelineNotFound }
+    output:
+      pipeline: p
+
+  # Prefer stageStates snapped by the execute AfterInvoke; otherwise project
+  # InProgress from the stored pipeline declaration.
   GetPipelineState:
     reads:
       p: { resource: pipeline, key: "string(input.name)" }
@@ -66,7 +106,20 @@ operations:
       - { cond: p_found, error: PipelineNotFound }
     output:
       pipelineName: p.name
-      stageStates: "[]"
+      stageStates: >
+        ('stageStates' in p && p.stageStates != null)
+          ? p.stageStates
+          : (p.stages == null ? [] : p.stages).map(s, {
+              'stageName': string(s.name),
+              'inboundTransitionState': {'enabled': true},
+              'actionStates': (s.actions == null ? [] : s.actions).map(a, {
+                'actionName': string(a.name),
+                'latestExecution': {
+                  'status': 'InProgress',
+                  'actionExecutionId': string(a.name)
+                }
+              })
+            })
 
   ListPipelines:
     list: { resource: pipeline, member: pipelines, paginate: model }
@@ -75,6 +128,10 @@ operations:
 
   DeletePipeline: {delete: {resource: pipeline, key: string(input.name), missing: ignore}}
   StartPipelineExecution:
+    reads:
+      p: { resource: pipeline, key: "string(input.name)" }
+    require:
+      - { cond: p_found, error: PipelineNotFound }
     effects:
       - generate: { bind: run, kind: hex, bytes: 8 }
       - put:
@@ -83,16 +140,30 @@ operations:
           record:
             pipelineName: "string(input.name)"
             pipelineExecutionId: "string(input.name) + '-' + fx.run"
-            status: "'Succeeded'"
+            status: "'InProgress'"
+      - patch:
+          resource: pipeline
+          key: "string(input.name)"
+          record:
+            latestExecutionId: "string(input.name) + '-' + fx.run"
     output:
-      pipelineExecutionId: rec.pipelineExecutionId
+      pipelineExecutionId: "string(input.name) + '-' + fx.run"
 
   GetPipelineExecution: {get: {resource: execution, error: ExecutionNotFound, key: string(input.pipelineExecutionId), wrap: pipelineExecution}}
   ListPipelineExecutions:
-    list: { resource: execution, member: pipelineExecutionSummaries, paginate: model }
+    list:
+      resource: execution
+      member: pipelineExecutionSummaries
+      paginate: model
+      filter: "string(item.pipelineName) == string(input.pipelineName)"
 
-  # Stopping answers the id whether or not there was an execution to stop, and
-  # only writes when there was one.
+  # Mirror ack for Manual approval. Execute AfterInvoke advances past Pending
+  # when result.status is Approved; Rejected fails the execution without deploy.
+  PutApprovalResult:
+    output: {}
+
+  # Stopping an absent id still answers the id (pack quirk). Only InProgress
+  # executions are rewritten; terminal statuses stay put.
   StopPipelineExecution:
     reads:
       e: { resource: execution, key: "string(input.pipelineExecutionId)" }
@@ -100,52 +171,39 @@ operations:
       - patch:
           resource: execution
           key: "string(input.pipelineExecutionId)"
-          when: e_found
+          when: "e_found && string(e.status) == 'InProgress' && !('abandon' in input && input.abandon)"
           record:
             status: "'Stopped'"
+      - patch:
+          resource: execution
+          key: "string(input.pipelineExecutionId)"
+          when: "e_found && string(e.status) == 'InProgress' && 'abandon' in input && input.abandon"
+          record:
+            status: "'Abandoned'"
     output:
       pipelineExecutionId: "string(input.pipelineExecutionId)"
 
 quirks:
-  - operation: CreatePipeline
-    note: >
-      The pack stored the caller's whole pipeline structure with the name
-      forced into it, so a pipeline answered back whatever had been sent --
-      including members PipelineDeclaration does not declare, and omitting the
-      ones it declares that the request did not carry. Only the declared
-      members are stored now: name, roleArn, artifactStore and stages. The
-      version the model declares is never set, so a pipeline has no version
-      however many times it is updated.
-
-      Create and update are one write, replacing the whole record, so an update
-      that omits the stages empties them rather than leaving them alone. The
-      required roleArn is stored without being validated, and no stage or
-      action is ever inspected.
   - operation: StartPipelineExecution
     note: >
-      An execution has Succeeded before the call returns, so nothing observes
-      InProgress and no stage or action ever runs: GetPipelineState answers an
-      empty stageStates for every pipeline, so a caller cannot see which stage
-      a build reached because none was entered. The pipeline the execution
-      names is not checked to exist, so an execution can be started for a
-      pipeline that was never created.
-  - operation: ListPipelineExecutions
+      Executions admit as InProgress. With execute enabled, AfterInvoke dispatches
+      Build/CodeBuild → StartBuild, leaves Approval/Manual Pending (later stages
+      not dispatched), and may snap stageStates / terminal status. Deploy/CodeDeploy
+      runs only after approval. Without execute, GetPipelineState projects InProgress.
+  - operation: PutApprovalResult
     note: >
-      Every execution in the account and region is listed, not the named
-      pipeline's -- the required pipelineName narrows nothing. The summaries
-      answered are the stored executions, which carry a pipelineName the
-      summary shape does not, so a caller sees which pipeline each belongs to
-      only because the member survives the shape it is listed in.
+      Control-plane ack (empty output). With execute enabled, Approved resumes
+      Finalize past the Pending action (including Deploy/CodeDeploy). Rejected
+      marks the approval Failed and the execution Failed without deploying.
+      Token is ignored. Missing/non-Pending actions are no-ops.
   - operation: StopPipelineExecution
     note: >
-      Stopping answers the id whether or not an execution of that id exists, so
-      the answer does not distinguish a stopped execution from one that was
-      never started -- but one that does exist really is moved to Stopped.
-      Since every execution Succeeded the moment it started, stopping moves a
-      finished execution backwards, which the real service refuses. The
-      required abandon and reason members are ignored.
-  - operation: DeletePipeline
+      Only InProgress executions move to Stopped or Abandoned. Terminal
+      executions keep their status. Missing ids still answer the requested id.
+  - operation: ListPipelineExecutions
     note: >
-      Deleting an absent pipeline succeeds where getting it faults, and
-      deleting a pipeline leaves its executions behind, still naming it and
-      still listed.
+      Results are filtered to the requested pipelineName.
+  - operation: UpdatePipeline
+    note: >
+      Omitted stages/roleArn/artifactStore keep prior values. Missing
+      pipelines fault PipelineNotFoundException.

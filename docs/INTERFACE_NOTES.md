@@ -21,3 +21,11 @@ Objections to frozen interfaces in `docs/MASTER_PROMPT.md` §3 go here. They do 
 - **`aws.protocols#awsQueryError` has no model cell.** It is treated as handled (not recorded as unknown) because it only affects query error wrapping in the codec, not the canonical model.
 - **Multiple protocols on one service (SQS).** The model has a single `Protocol`. The Smithy receiver prefers restJson1 > restXml > awsJson1_1 > awsJson1_0 > awsQuery > ec2Query, so SQS becomes `awsJson1_0`. Dual-protocol dispatch stays an edge concern (§4.3).
 - **Service IDs vs endpoint prefixes.** `aws.api#service.endpointPrefix` is the default ID suffix, with aliases `monitoring→cloudwatch`, `tagging→resourcegroupstaggingapi`, `elasticloadbalancing`+sdkId v2→`elbv2`, `application-autoscaling→applicationautoscaling`, so `specs/mirror.set` names match botocore-style IDs rather than raw prefixes.
+
+## Optional local CI/CD execution (JobControl)
+
+Historical v2 models CI/CD control planes as B-IR CRUD. Optional trusted-process execution is an additive seam: provider-neutral `JobControl` in `internal/execution/cicd`, plus engine `AfterInvoke` hooks that may advance an admitted job. Fidelity modes stay `mock|emulate|proxy` (`x-mirror-fidelity`); execute-mode is not a fourth fidelity tier.
+
+Opt-in only: `MIRROR_CICD_EXECUTE=1`, or `codebuild.Enable()` in tests. Without an executor, StartBuild stays `IN_PROGRESS` — never silent `SUCCEEDED`. Credential-free covenant unchanged (dummy/`test` credentials still work). Namespace ≠ auth: Store account+region namespaces do not imply cloud identity.
+
+No new provider Go CRUD packs for CodeBuild: control plane remains B-IR (`behavior/aws/codebuild/service.yaml`); process execution lives in the AfterInvoke hook package. See `docs/CICD.md`.

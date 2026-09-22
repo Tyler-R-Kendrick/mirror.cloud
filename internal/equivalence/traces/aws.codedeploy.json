@@ -312,9 +312,10 @@
               "key": "k"
             }
           },
-          "status": "Succeeded"
+          "status": "InProgress"
         }
-      }
+      },
+      "recut": "CreateDeployment admits InProgress; local Linux target execute may advance to Succeeded/Failed."
     },
     {
       "operation": "GetDeployment",

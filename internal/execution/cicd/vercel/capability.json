@@ -1,0 +1,23 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "vercel",
+  "service": "vercel.api",
+  "profile": "vc-delivery-0.1",
+  "feature": "delivery.static",
+  "backend": "bir-create-deployment+mirror-owned-static-site",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "partial",
+  "evidenceGrade": "authored",
+  "requiredTests": ["VC-DELIVERY", "VC-BOA-STATIC", "VC-BOA-FUNCTION"],
+  "limitations": [
+    "CreateDeployment registers file digests; GetDeploymentFileContents does not retain bodies",
+    "Static bytes verified via mirror-owned StaticSite published from the same prebuilt output",
+    "Promote/rollback set project productionDeploymentId; ListPromoteAliases PROMOTED + GetAlias resolve the pointer",
+    "GetProject does not expose productionDeploymentId in output — pointer asserted via promote aliases",
+    "HTTP nonce isolation is mirror-owned StaticSite roots, not Vercel CDN alias routing",
+    "BOA v3: static/ + config.json route/override file refs; Node functions via InvokeFunction (nodejs* + default (req,res) only)",
+    "Not full Vercel build/runtime/edge/middleware parity"
+  ]
+}

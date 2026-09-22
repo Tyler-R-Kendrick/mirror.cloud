@@ -1,0 +1,20 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "aws",
+  "service": "aws.amplify",
+  "profile": "amplify-startjob-local-0.1",
+  "feature": "delivery.amplify",
+  "backend": "bir-startjob+afterinvoke-buildspec",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "executable",
+  "evidenceGrade": "authored",
+  "requiredTests": ["AWS-AMPLIFY-DELIVERY"],
+  "limitations": [
+    "AfterInvoke Finalize runs buildspec 0.2 locally when amplify.Enable() or MIRROR_CICD_EXECUTE=1",
+    "Artifact body is index.html from the job work dir; preview vs main use distinct branch current blob keys",
+    "HTTP verify via mirror-owned delivery.Publish of artifact bytes — not Amplify Hosting CDN parity",
+    "Without executor, StartJob remains RUNNING (no fabricated SUCCEED)"
+  ]
+}

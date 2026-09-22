@@ -2,7 +2,7 @@ BIN := bin
 GO  := go
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
+.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
 
 all: build
 
@@ -40,6 +40,15 @@ test-chaos:
 
 test-bdd:
 	$(GO) test ./test/behavior/... ./test/terraform -count=1
+
+test-cicd-core:
+	$(GO) test ./internal/execution/cicd/ ./internal/execution/cicd/lifecycle/ -count=1
+
+test-cicd-process:
+	$(GO) test ./internal/execution/cicd/buildspec/ ./internal/execution/cicd/codebuild/ ./internal/execution/cicd/cloudflareci/ ./internal/execution/cicd/cfbuilds/ ./internal/execution/cicd/cfpages/ ./internal/execution/cicd/vercel/ -count=1
+
+test-cicd-e2e:
+	$(GO) test ./internal/execution/cicd/... -count=1
 
 test-fuzz-seeds:
 	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./test/behavior/aws ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql -count=1

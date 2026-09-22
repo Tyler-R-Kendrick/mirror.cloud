@@ -1,0 +1,14 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "oci",
+  "profile": "local-registry-0.1",
+  "feature": "registry.push-pull",
+  "backend": "filesystem-blob-registry",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "executable",
+  "evidenceGrade": "authored",
+  "requiredTests": ["OCI-PUSH-PULL"],
+  "limitations": ["No containerd/Docker/Distribution HTTP API; local name:tag blob store only"]
+}

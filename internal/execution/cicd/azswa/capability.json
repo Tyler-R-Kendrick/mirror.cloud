@@ -1,0 +1,18 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "azure",
+  "service": null,
+  "profile": "az-swa-local-0.1",
+  "feature": "delivery.static-web-apps",
+  "backend": "mirror-owned-preview-production",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "local-binding-only",
+  "evidenceGrade": "authored",
+  "requiredTests": ["AZ-SWA-PREVIEW"],
+  "limitations": [
+    "No Azure Static Web Apps B-IR / Oryx / SWA CLI parity",
+    "Preview closure deletes local preview root only"
+  ]
+}

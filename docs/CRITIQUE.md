@@ -1271,3 +1271,9 @@ A bundle can now list those operations under `native:`. The bundle serves; the l
 KMS followed the same pattern: fifteen cryptographic operations are native, and the other thirty-nine are the bundle's. It needed one reconciliation. The pack kept key material as base64, while the bundle draws it as hex. The native code reads hex, and a needle fails if it reads the old encoding.
 
 Athena needed less: the pack and the bundle already shared the execution record's layout. StartQueryExecution, the query engine, is native, and the bundle's `SELECT 1` approximation of it is deleted rather than kept as a second answer. Workgroups and the execution reads come from the bundle.
+
+IAM's shadow gave NewAuthorizer as a reason the pack had to stay. That was never true: the authorizer needs the records, not the pack. It read one `iam` collection by key prefix (`rolepolicy:`, `attached:`, `ug:`). Each prefix is one of the bundle's collections, with the same records. The authorizer now reads those, and the policy simulator and GetAccountSummary are the three native operations. Promoting it exposed three things:
+
+- The user-and-group test could not tell a group Deny from an implicit deny, because nothing allowed the action in the first place. It does now, and a needle guards the group read.
+- CreateVirtualMFADevice answered `MFADevice` and a bare `SerialNumber`, neither of them a member of the output, so the wire carried nothing. It now answers `VirtualMFADevice`, as AWS does.
+- Several tests pinned pack answers AWS does not give: names in UpdateRole, UpdateUser, UpdateGroup and GetSAMLProvider results, and `PolicyName` accepted where the model requires `PolicyArn`. They now expect AWS's answers.

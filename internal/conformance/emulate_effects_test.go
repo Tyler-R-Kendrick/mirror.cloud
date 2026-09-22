@@ -11,7 +11,6 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
@@ -297,70 +296,6 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 			}
 		}
 		assertWritesCovered(t, snsP.Operations(), seen)
-
-		seen = map[string]bool{}
-		iamP := iam.New(spitest.Deps(t))
-		inv(iamP, "CreateRole", map[string]any{"RoleName": "r"})
-		inv(iamP, "UpdateRole", map[string]any{"RoleName": "r"})
-		inv(iamP, "UpdateAssumeRolePolicy", map[string]any{"RoleName": "r", "PolicyDocument": "{}"})
-		inv(iamP, "CreateUser", map[string]any{"UserName": "u"})
-		inv(iamP, "UpdateUser", map[string]any{"UserName": "u", "NewUserName": "u"})
-		inv(iamP, "CreatePolicy", map[string]any{"PolicyName": "p", "PolicyDocument": "{}"})
-		inv(iamP, "CreatePolicyVersion", map[string]any{"PolicyName": "p", "PolicyDocument": "{}"})
-		inv(iamP, "SetDefaultPolicyVersion", map[string]any{"PolicyName": "p", "VersionId": "v1"})
-		inv(iamP, "DeletePolicyVersion", map[string]any{"PolicyName": "p", "VersionId": "v2"})
-		inv(iamP, "PutRolePolicy", map[string]any{"RoleName": "r", "PolicyName": "inline", "PolicyDocument": "{}"})
-		inv(iamP, "AttachRolePolicy", map[string]any{"RoleName": "r", "PolicyArn": "arn:aws:iam::aws:policy/x"})
-		inv(iamP, "TagRole", map[string]any{"RoleName": "r", "Tags": []any{}})
-		ak := inv(iamP, "CreateAccessKey", map[string]any{"UserName": "u"})
-		akid := str(asMap(ak.Output["AccessKey"])["AccessKeyId"])
-		inv(iamP, "UpdateAccessKey", map[string]any{"UserName": "u", "AccessKeyId": akid, "Status": "Inactive"})
-		inv(iamP, "DeleteAccessKey", map[string]any{"UserName": "u", "AccessKeyId": akid})
-		inv(iamP, "PutUserPolicy", map[string]any{"UserName": "u", "PolicyName": "up", "PolicyDocument": "{}"})
-		inv(iamP, "DeleteUserPolicy", map[string]any{"UserName": "u", "PolicyName": "up"})
-		inv(iamP, "AttachUserPolicy", map[string]any{"UserName": "u", "PolicyArn": "arn:aws:iam::aws:policy/x"})
-		inv(iamP, "DetachUserPolicy", map[string]any{"UserName": "u", "PolicyArn": "arn:aws:iam::aws:policy/x"})
-		inv(iamP, "TagUser", map[string]any{"UserName": "u", "Tags": []any{}})
-		inv(iamP, "UntagUser", map[string]any{"UserName": "u"})
-		inv(iamP, "CreateLoginProfile", map[string]any{"UserName": "u"})
-		inv(iamP, "UpdateLoginProfile", map[string]any{"UserName": "u"})
-		inv(iamP, "DeleteLoginProfile", map[string]any{"UserName": "u"})
-		inv(iamP, "CreateGroup", map[string]any{"GroupName": "g"})
-		inv(iamP, "UpdateGroup", map[string]any{"GroupName": "g"})
-		inv(iamP, "AddUserToGroup", map[string]any{"GroupName": "g", "UserName": "u"})
-		inv(iamP, "PutGroupPolicy", map[string]any{"GroupName": "g", "PolicyName": "gp", "PolicyDocument": "{}"})
-		inv(iamP, "DeleteGroupPolicy", map[string]any{"GroupName": "g", "PolicyName": "gp"})
-		inv(iamP, "AttachGroupPolicy", map[string]any{"GroupName": "g", "PolicyArn": "arn:aws:iam::aws:policy/x"})
-		inv(iamP, "DetachGroupPolicy", map[string]any{"GroupName": "g", "PolicyArn": "arn:aws:iam::aws:policy/x"})
-		inv(iamP, "RemoveUserFromGroup", map[string]any{"GroupName": "g", "UserName": "u"})
-		inv(iamP, "DeleteGroup", map[string]any{"GroupName": "g"})
-		inv(iamP, "CreateInstanceProfile", map[string]any{"InstanceProfileName": "ip"})
-		inv(iamP, "AddRoleToInstanceProfile", map[string]any{"InstanceProfileName": "ip", "RoleName": "r"})
-		inv(iamP, "RemoveRoleFromInstanceProfile", map[string]any{"InstanceProfileName": "ip", "RoleName": "r"})
-		inv(iamP, "DeleteInstanceProfile", map[string]any{"InstanceProfileName": "ip"})
-		inv(iamP, "CreateAccountAlias", map[string]any{"AccountAlias": "a"})
-		inv(iamP, "DeleteAccountAlias", map[string]any{"AccountAlias": "a"})
-		inv(iamP, "UpdateAccountPasswordPolicy", map[string]any{"MinimumPasswordLength": "12"})
-		inv(iamP, "DeleteAccountPasswordPolicy", map[string]any{})
-		inv(iamP, "CreateOpenIDConnectProvider", map[string]any{"Url": "https://example.com"})
-		inv(iamP, "UpdateOpenIDConnectProviderThumbprint", map[string]any{"OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/example.com"})
-		inv(iamP, "DeleteOpenIDConnectProvider", map[string]any{"OpenIDConnectProviderArn": "arn:aws:iam::000000000000:oidc-provider/example.com"})
-		inv(iamP, "CreateSAMLProvider", map[string]any{"Name": "s", "SAMLMetadataDocument": "<xml/>"})
-		inv(iamP, "UpdateSAMLProvider", map[string]any{"Name": "s", "SAMLMetadataDocument": "<xml2/>"})
-		inv(iamP, "DeleteSAMLProvider", map[string]any{"Name": "s"})
-		inv(iamP, "DetachRolePolicy", map[string]any{"RoleName": "r", "PolicyArn": "arn:aws:iam::aws:policy/x"})
-		inv(iamP, "DeleteRolePolicy", map[string]any{"RoleName": "r", "PolicyName": "inline"})
-		inv(iamP, "UntagRole", map[string]any{"RoleName": "r"})
-		inv(iamP, "DeletePolicy", map[string]any{"PolicyName": "p"})
-		inv(iamP, "DeleteUser", map[string]any{"UserName": "u"})
-		inv(iamP, "DeleteRole", map[string]any{"RoleName": "r"})
-		fatIAM := map[string]any{"UserName": "u", "RoleName": "r", "SerialNumber": "mfa", "ServerCertificateName": "sc", "PolicyArn": "arn:p"}
-		for _, op := range iamP.Operations() {
-			if isWriteOp(op) && !seen[op] {
-				inv(iamP, op, fatIAM)
-			}
-		}
-		assertWritesCovered(t, iamP.Operations(), seen)
 
 		seen = map[string]bool{}
 		ssmP := ssm.New(spitest.Deps(t))

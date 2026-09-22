@@ -25,8 +25,9 @@ func TestMockLabeledAndStrictRefuses(t *testing.T) {
 		}
 		ts := httptest.NewServer(rt.Handler())
 		t.Cleanup(ts.Close)
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{}`))
-		req.Header.Set("X-Amz-Target", "TrentService.CreateKey")
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"IndexId":"i"}`))
+		// Kendra is served, but its bundle does not define ListFaqs.
+		req.Header.Set("X-Amz-Target", "AWSKendraFrontendService.ListFaqs")
 		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {

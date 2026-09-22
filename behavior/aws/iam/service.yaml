@@ -15,33 +15,14 @@ provenance: authored
 # under the empty key; that path is dead now (see quirks).
 missing_input_error: NoSuchEntity
 
-# Complete and gated, but not yet serving. Three gaps, none expressible:
-#
-#   - SimulatePrincipalPolicy and SimulateCustomPolicy are a policy decision
-#     engine: glob matching over Action/Resource, the Condition operator
-#     vocabulary (StringLike, Numeric*, Null, IfExists), and -- for the
-#     OrganizationsDecisionDetail member -- a read of the aws.organizations
-#     pack's SCP attachments in another account's scope. CEL has no glob
-#     match and B-IR has no cross-scope read, so both operations are omitted
-#     below rather than approximated.
-#   - GetAccountSummary counts five collections; B-IR can list one resource
-#     per operation and has no count. Omitted rather than answered with a
-#     constant.
-#   - The pack also exports NewAuthorizer, the policy evaluator the runtime
-#     (internal/runtime) uses to authorize every service's requests against
-#     these records. That is engine infrastructure with a Go-only API, not
-#     service behavior; it is why the pack directory stays regardless.
-#
-# The bundle takes over when an iam/evaluate primitive carries the decision
-# engine (with its cross-scope SCP read), a count or size-over-list reaches
-# outputs, and the authorizer's ownership moves into the engine.
-shadow: >
-  SimulatePrincipalPolicy/SimulateCustomPolicy need glob matching, the IAM
-  Condition operators and a cross-scope read of SCP attachments, and
-  GetAccountSummary needs a count over five collections; none of that is
-  expressible in B-IR today, and the pack's NewAuthorizer is Go-only engine
-  infrastructure consumed by internal/runtime. Everything else the pack does
-  is transcribed and gated below.
+# Policy evaluation is Go, in internal/services/aws/iam: SimulatePrincipalPolicy
+# and SimulateCustomPolicy are a decision engine -- glob matching over
+# Action/Resource, the Condition operator vocabulary, and a read of
+# aws.organizations' SCP attachments in the management account's scope --
+# and GetAccountSummary counts five collections. The same package holds
+# NewAuthorizer, which the runtime checks every request with against the
+# records below.
+native: [GetAccountSummary, SimulatePrincipalPolicy, SimulateCustomPolicy]
 
 resources:
   role:
@@ -1102,7 +1083,11 @@ operations:
           spread: input
           record:
             SerialNumber: "eid != '' ? eid : string(fx.gen)"
-    output: {}
+    # AWS answers the device; the pack answered MFADevice and a bare
+    # SerialNumber, neither a member of the output, so the wire carried
+    # nothing.
+    output:
+      VirtualMFADevice: "{'SerialNumber': rec.SerialNumber}"
 
   DeactivateMFADevice:
     let:

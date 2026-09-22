@@ -3,6 +3,7 @@ package organizations
 import (
 	"context"
 	"encoding/json"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -93,7 +94,7 @@ func TestServiceControlPolicyEnforcesMemberAccount(t *testing.T) {
 	if err := authorizer.Authorize(ctx, management, "aws.s3", "DeleteBucket", "*"); err != nil {
 		t.Fatalf("management account must be exempt from SCPs: %v", err)
 	}
-	iamPack := iam.New(deps)
+	iamPack := bundled.Handler("aws.iam", deps)
 	invokeIAM := func(operation string, input map[string]any) *spi.Response {
 		t.Helper()
 		resp, err := iamPack.Invoke(ctx, &spi.Request{Identity: member, Operation: operation, Input: input})

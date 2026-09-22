@@ -35,12 +35,12 @@ func (a *authorizer) authorize(ctx context.Context, id spi.Identity, serviceID, 
 		return nil
 	}
 	action := iamAction(serviceID, operation)
-	col := a.st.Scope(id.Account, id.Region).Collection("iam")
-	kind, name, active := principal(ctx, col, id)
+	scope := a.st.Scope(id.Account, id.Region)
+	kind, name, active := principal(ctx, scope, id)
 	if !active {
 		return denied(id.ARN, action)
 	}
-	docs := loadPrincipalDocs(ctx, col, kind, name)
+	docs := loadPrincipalDocs(ctx, scope, kind, name)
 	if decideWithContext(docs, action, resource, values) != "allowed" {
 		return denied(id.ARN, action)
 	}
@@ -112,12 +112,12 @@ func addRequestTag(values map[string]string, key, value string) {
 	values["s3:RequestObjectTag/"+key] = value
 }
 
-func principal(ctx context.Context, col spi.Collection, id spi.Identity) (kind, name string, active bool) {
+func principal(ctx context.Context, scope spi.Scope, id spi.Identity) (kind, name string, active bool) {
 	if role := roleFromARN(id.ARN); role != "" {
 		return "role", role, true
 	}
 	if id.AccessKeyID != "" {
-		kvs, _, _ := col.List(ctx, "ak:", "", 0)
+		kvs, _, _ := scope.Collection("iamak").List(ctx, "", "", 0)
 		for _, kv := range kvs {
 			var rec map[string]any
 			_ = json.Unmarshal(kv.Value, &rec)
@@ -180,29 +180,23 @@ func iamAction(serviceID, operation string) string {
 	return svc + ":" + operation
 }
 
-func loadDocs(ctx context.Context, col spi.Collection, role string) []map[string]any {
-	return loadPrincipalDocs(ctx, col, "role", role)
-}
-
-func loadPrincipalDocs(ctx context.Context, col spi.Collection, kind, name string) []map[string]any {
+// loadPrincipalDocs reads a principal's inline and attached policies, and a
+// user's groups', from the collections behavior/aws/iam stores them in.
+func loadPrincipalDocs(ctx context.Context, scope spi.Scope, kind, name string) []map[string]any {
 	if name == "" {
 		return nil
 	}
-	inline, attached := "rolepolicy:", "attached:"
+	inline, attached := "iamrp", "iamatt"
 	if kind == "user" {
-		inline, attached = "userpolicy:", "uattached:"
+		inline, attached = "iamup", "iamuatt"
 	}
-	docs := loadInlineDocs(ctx, col, inline+name+":")
-	docs = append(docs, loadAttachedDocs(ctx, col, attached+name+":")...)
+	docs := loadInlineDocs(ctx, scope.Collection(inline), name+":")
+	docs = append(docs, loadAttachedDocs(ctx, scope, attached, name+":")...)
 	if kind == "user" {
-		groups, _, _ := col.List(ctx, "ug:"+name+":", "", 0)
+		groups, _, _ := scope.Collection("iamug:"+name).List(ctx, "", "", 0)
 		for _, kv := range groups {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			group := str(rec["GroupName"])
-			groupDocs := loadInlineDocs(ctx, col, "grouppolicy:"+group+":")
-			docs = append(docs, groupDocs...)
-			docs = append(docs, loadAttachedDocs(ctx, col, "gattached:"+group+":")...)
+			docs = append(docs, loadInlineDocs(ctx, scope.Collection("iamgp"), kv.Key+":")...)
+			docs = append(docs, loadAttachedDocs(ctx, scope, "iamgable", kv.Key+":")...)
 		}
 	}
 	return docs
@@ -221,9 +215,9 @@ func loadInlineDocs(ctx context.Context, col spi.Collection, prefix string) []ma
 	return docs
 }
 
-func loadAttachedDocs(ctx context.Context, col spi.Collection, prefix string) []map[string]any {
+func loadAttachedDocs(ctx context.Context, scope spi.Scope, attachments, prefix string) []map[string]any {
 	var docs []map[string]any
-	atts, _, _ := col.List(ctx, prefix, "", 0)
+	atts, _, _ := scope.Collection(attachments).List(ctx, prefix, "", 0)
 	for _, kv := range atts {
 		var rec map[string]any
 		_ = json.Unmarshal(kv.Value, &rec)
@@ -232,7 +226,7 @@ func loadAttachedDocs(ctx context.Context, col spi.Collection, prefix string) []
 		if i := strings.LastIndex(arn, "/"); i >= 0 {
 			name = arn[i+1:]
 		}
-		b, ok, _ := col.Get(ctx, "policy:"+name)
+		b, ok, _ := scope.Collection("iampolicy").Get(ctx, name)
 		if !ok {
 			continue
 		}
@@ -240,7 +234,7 @@ func loadAttachedDocs(ctx context.Context, col spi.Collection, prefix string) []
 		_ = json.Unmarshal(b, &pol)
 		doc := pol["PolicyDocument"]
 		if version := str(pol["DefaultVersionId"]); version != "" && version != "v1" {
-			if vb, found, _ := col.Get(ctx, "polver:"+name+":"+version); found {
+			if vb, found, _ := scope.Collection("iampolver:"+name).Get(ctx, name+":"+version); found {
 				var rec map[string]any
 				_ = json.Unmarshal(vb, &rec)
 				doc = rec["Document"]

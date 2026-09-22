@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestRoleRoundTrip(t *testing.T) {
-	p := &Pack{deps: spitest.Deps(t)}
+	p := bundled.Handler("aws.iam", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateRole", Input: map[string]any{"RoleName": "r", "AssumeRolePolicyDocument": "{}"}})
@@ -44,9 +45,20 @@ func TestRoleRoundTrip(t *testing.T) {
 	}
 }
 
-func TestIAMHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 89+len(extraOps()) {
-		t.Fatalf("iam Operations() %d want %d", n, 89+len(extraOps()))
+func TestAccountSummaryCounts(t *testing.T) {
+	p := bundled.Handler("aws.iam", spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, name := range []string{"a", "b"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateUser", Input: map[string]any{"UserName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetAccountSummary", Input: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary := got.Output["SummaryMap"].(map[string]any); summary["Users"] != 2 || summary["Roles"] != 0 {
+		t.Fatalf("summary %v", summary)
 	}
 }

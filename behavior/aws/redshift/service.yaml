@@ -6,8 +6,7 @@ service: aws.redshift
 # copy grants, event subscriptions and tags are flat control-plane records
 # that are "available" the moment they are written; the 109 remaining
 # operations are a generic keyed store over the request, classified by name.
-# No SQL ever runs -- the pack's data plane is a Firehose COPY row store
-# reached only from Go, which is the shadow reason below.
+# No SQL ever runs; the only rows are the Firehose COPY row store.
 provenance: authored
 
 # The pack never named absent input with a fault of its own: its first()
@@ -16,23 +15,10 @@ provenance: authored
 # succeeded. The engine's model check now rejects the absence first with the
 # default ValidationException, so those empty-key paths are dead; see quirks.
 
-# Complete and gated, but not yet serving: aws.firehose's Redshift COPY
-# destination does not reach this service over HTTP. It builds the pack with
-# redshift.New(deps) and calls the Go-only CreateTable, Copy and TableRows
-# methods -- Copy parses delimited and JSON row bodies in a transaction,
-# checks the stored credential's SHA-256, and appends to a whole-table JSON
-# document under rstable. None of that has an HTTP operation, and B-IR has no
-# cross-service invocation, no []byte row parsing, and no primitive registry
-# (the engine's prim dispatch reports none registered). Deleting the pack
-# would orphan firehose's destination and its retry loop; registering both
-# would describe one service twice. The bundle takes over when an
-# aws.redshift/copy primitive carries CreateTable/Copy/TableRows, moved
-# verbatim, and firehose routes through it.
-shadow: >
-  aws.firehose calls the pack's Go-only CreateTable/Copy/TableRows data plane
-  (COPY row parsing and credential checks over the rstable/rscredential
-  collections) -- no HTTP operation reaches it and no B-IR primitive exists
-  for it yet. Everything the HTTP surface does is transcribed and gated below.
+# Served. The COPY data plane aws.firehose loads through -- CreateTable, Copy
+# and TableRows over the rstable collection, checking the rscredential this
+# bundle writes -- is Go in internal/services/aws/redshift, because no SPI
+# operation reaches it.
 
 resources:
   cluster:
@@ -44,6 +30,13 @@ resources:
   # the Go-only COPY data plane (the shadow reason above) ever reads it.
   credential:
     collection: rscredential
+    id:
+      input_members: [ClusterIdentifier]
+
+  # A COPY table, written by the Go data plane; declared so DeleteCluster can
+  # take a cluster's tables with it.
+  copy_table:
+    collection: rstable
     id:
       input_members: [ClusterIdentifier]
 
@@ -313,6 +306,7 @@ operations:
     effects:
       - delete: { resource: cluster, missing: ignore }
       - delete: { resource: credential, missing: ignore }
+      - delete: { resource: copy_table, where: "string(item.Cluster) == string(input.ClusterIdentifier)" }
     output:
       Cluster: "{'ClusterIdentifier': string(input.ClusterIdentifier), 'ClusterStatus': 'deleting'}"
 

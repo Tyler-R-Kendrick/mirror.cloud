@@ -1,10 +1,10 @@
 {
-  "packs": 29,
-  "case_labels": 1262,
-  "services_files": 58,
-  "services_loc": 43197,
-  "fault_sites": 737,
-  "register_sites": 29,
+  "packs": 26,
+  "case_labels": 1210,
+  "services_files": 57,
+  "services_loc": 42461,
+  "fault_sites": 730,
+  "register_sites": 26,
   "pack_dirs": [
     "aws/apigateway",
     "aws/athena",
@@ -17,7 +17,6 @@
     "aws/events",
     "aws/firehose",
     "aws/iam",
-    "aws/kafka",
     "aws/kinesis",
     "aws/kms",
     "aws/lambda",
@@ -26,9 +25,7 @@
     "aws/pipes",
     "aws/qldb",
     "aws/rds",
-    "aws/redshift",
     "aws/s3",
-    "aws/s3tables",
     "aws/scheduler",
     "aws/sns",
     "aws/ssm",
@@ -37,7 +34,7 @@
     "gcp/gcs"
   ],
   "routing_mismatches": 0,
-  "routing_mismatch_services": [],
+  "routing_mismatch_services": null,
   "demux_guesses": 0,
-  "demux_guess_names": []
+  "demux_guess_names": null
 }

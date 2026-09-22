@@ -12,23 +12,9 @@ provenance: authored
 # absence first, so that is also the missing-input answer.
 missing_input_error: NotFound
 
-# Complete and gated, but not yet serving: the pack is also an in-process
-# message bus. aws.firehose imports it and calls the Go-only Publish and
-# Messages methods -- Publish stores a topic record in the mskrecords
-# collection and posts to the deps.Bus topic "kafka" that a firehose delivery
-# stream subscribes to, and Messages answers a Go caller with the stored
-# records at or after a timestamp from a key-prefix scan. Neither is an SPI
-# operation: one is a bus publish with a side effect in another service's
-# subscription, the other a stream answer to a Go caller, and B-IR has no
-# surface for either. The bundle takes over when aws.firehose no longer
-# imports the pack; the seven served operations are transcribed and gated
-# below.
-shadow: >
-  aws.firehose calls the pack's Go-only Publish and Messages methods --
-  Publish posts to the deps.Bus topic "kafka" that firehose subscribes to and
-  Messages is a stream answer to a Go caller over the mskrecords collection --
-  and none of that is an SPI operation a bundle can serve. Everything else the
-  pack does is transcribed and gated below.
+# Served. The topic plane aws.firehose reads -- Publish and Messages over the
+# mskrecords collection -- is Go in internal/services/aws/kafka, because no
+# SPI operation reaches it; the cluster API here owns both collections.
 
 resources:
   # Addressed by its full ARN everywhere but creation. The generated half of a
@@ -36,6 +22,13 @@ resources:
   # names the key and the resource only knows how to be read.
   cluster:
     collection: msk
+    id:
+      input_members: [ClusterArn]
+    record: {}
+  # A topic record, written by the Go topic plane; declared so DeleteCluster
+  # can take a cluster's messages with it.
+  message:
+    collection: mskrecords
     id:
       input_members: [ClusterArn]
     record: {}
@@ -70,12 +63,10 @@ operations:
     list: { resource: cluster, member: ClusterInfoList, paginate: model }
 
   # Deleting is unconditional: an unknown ARN deletes cleanly and still
-  # answers DELETING. The pack also deleted the cluster's topic messages from
-  # mskrecords; that collection is written only by the Go-only Publish, so the
-  # cleanup is unobservable through the served surface and stays with the
-  # pack -- see shadow.
+  # answers DELETING, and the cluster's topic messages go with it.
   DeleteCluster:
     effects:
+      - delete: { resource: message, where: "string(item.ClusterARN) == string(input.ClusterArn)" }
       - delete: { resource: cluster, missing: ignore }
     output:
       ClusterArn: "string(input.ClusterArn)"
@@ -124,9 +115,7 @@ quirks:
       Deleting never faults and changes nothing observable beyond removing
       the record: an unknown ARN answers DELETING too, CurrentVersion is
       accepted and ignored, and the state goes straight to DELETING with no
-      record left to observe it on. The pack also deleted the cluster's
-      mskrecords messages; the producing path is the Go-only Publish, so the
-      cleanup is not transcribed -- see shadow.
+      record left to observe it on.
   - operation: GetBootstrapBrokers
     note: >
       The answer is always localhost:9092 and localhost:9094, whatever the

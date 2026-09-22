@@ -2852,9 +2852,9 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 	definition := `{"StartAt":"Batch","States":{"Batch":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","Parameters":{"JobName":"job","JobQueue":"queue","JobDefinition":"definition"},"ResultPath":null,"Next":"Build"},"Build":{"Type":"Task","Resource":"arn:aws:states:::codebuild:startBuild.sync","Parameters":{"ProjectName":"project"},"ResultPath":null,"Next":"Glue"},"Glue":{"Type":"Task","Resource":"arn:aws:states:::glue:startJobRun.sync","Parameters":{"JobName":"job"},"ResultPath":null,"Next":"Cluster"},"Cluster":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:createCluster.sync","Parameters":{"Name":"cluster","Instances":{"InstanceCount":1,"MasterInstanceType":"m5.xlarge"}},"ResultPath":null,"Next":"Step"},"Step":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:addStep.sync","Parameters":{"JobFlowId":"j-test","Steps":[{"Name":"step","ActionOnFailure":"CONTINUE","HadoopJarStep":{"Jar":"command-runner.jar"}}]},"End":true}}}`
 	// StartBuild requires an existing project (execute-mode admissions no longer invent SUCCEEDED).
 	must(served(t, deps, "aws.codebuild"), "CreateProject", map[string]any{
-		"name": "project",
-		"source": map[string]any{"type": "NO_SOURCE"},
-		"artifacts": map[string]any{"type": "NO_ARTIFACTS"},
+		"name":        "project",
+		"source":      map[string]any{"type": "NO_SOURCE"},
+		"artifacts":   map[string]any{"type": "NO_ARTIFACTS"},
 		"environment": map[string]any{"type": "LINUX_CONTAINER", "image": "aws/codebuild/standard:7.0", "computeType": "BUILD_GENERAL1_SMALL"},
 		"serviceRole": "arn:aws:iam::000000000000:role/cb",
 	})

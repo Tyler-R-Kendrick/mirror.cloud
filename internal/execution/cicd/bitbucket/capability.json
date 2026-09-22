@@ -1,0 +1,31 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "bitbucket",
+  "service": "bitbucket.pipelines",
+  "profile": "bitbucket-pipelines-yml-local",
+  "feature": "pipelines.branches.artifacts.manual",
+  "backend": "trusted-process",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "not-assessed",
+  "evidenceGrade": "authored",
+  "requiredTests": ["BB-DELIVERY"],
+  "sourceRefs": [
+    "https://support.atlassian.com/bitbucket-cloud/docs/bitbucket-pipelines-configuration-reference/"
+  ],
+  "packagePin": "bitbucket-pipelines-yml-subset/1",
+  "supported": [
+    "pipelines.default",
+    "pipelines.branches.<name> step lists",
+    "step.script via /bin/sh -c",
+    "step.artifacts (glob-less relative paths)",
+    "step.trigger: manual (blocks until Config.Manual approves)",
+    "step.deployment name recorded"
+  ],
+  "limitations": [
+    "No parallel / caches / services / pipe: / custom clones",
+    "No pull-requests / tags / custom pipelines selectors beyond branch+default",
+    "Not full Bitbucket Pipelines runner parity"
+  ]
+}

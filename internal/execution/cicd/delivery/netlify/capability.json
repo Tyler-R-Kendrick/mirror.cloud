@@ -1,0 +1,18 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "netlify",
+  "service": null,
+  "profile": "host-netlify-local-0.1",
+  "feature": "delivery.static",
+  "backend": "local-site-deploy-publisher",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "executable",
+  "evidenceGrade": "authored",
+  "requiredTests": ["HOST-NETLIFY-DELIVERY"],
+  "limitations": [
+    "Local Site/Deploy/Publish stand-in — not Netlify cloud Deploy API / Build Hooks / Edge Functions",
+    "Draft deploy URLs are separate from production publish pointer"
+  ]
+}

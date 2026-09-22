@@ -1,10 +1,9 @@
 schema: bir/1
 service: aws.codedeploy
 
-# Transcribed from the hand-written pack, not established against the real
-# service. Nothing deploys: no instance is contacted, no revision is fetched
-# from S3 and no lifecycle hook runs, so a deployment is Succeeded before the
-# call that created it returns.
+# Transcribed from the hand-written pack, then false-success repaired for CI/CD
+# execute: CreateDeployment admits InProgress; optional AfterInvoke runs a
+# local Linux target profile (AppSpec files + ApplicationStart via process).
 provenance: authored
 
 resources:
@@ -112,7 +111,7 @@ operations:
           key: "fx.did"
           spread: input
           record:
-            status: "'Succeeded'"
+            status: "'InProgress'"
     output:
       deploymentId: rec.deploymentId
 
@@ -139,12 +138,12 @@ operations:
 quirks:
   - operation: CreateDeployment
     note: >
-      A deployment is Succeeded before the call returns, so nothing observes
-      Created, Queued, InProgress or Ready and nothing ever reaches Failed.
-      No instance is contacted, no revision is fetched -- the `revision` the
-      request carries is stored verbatim and never resolved, so it may name an
-      S3 bucket or a GitHub repository that does not exist -- and none of the
-      lifecycle hooks a deployment exists to run is run.
+      A deployment admits InProgress (not Succeeded). Local Linux-target
+      execute (AfterInvoke when MIRROR_CICD_EXECUTE=1 / codedeploy.Enable) may
+      copy AppSpec files into a registered destination root, run ApplicationStart
+      (and sibling) hooks via process, and set Succeeded or Failed. Without an
+      executor the deployment stays InProgress. S3/GitHub revision locations are
+      otherwise stored verbatim and unresolved.
 
       The record is the request. Whatever CreateDeploymentInput carried is
       stored as it arrived and answered by GetDeployment, with `deploymentId`
@@ -158,9 +157,8 @@ quirks:
 
       What the record does not have is everything DeploymentInfo declares and
       the request does not carry: `createTime`, `completeTime`, `creator`,
-      `deploymentOverview`, `errorInformation`, `revisionUpdated`. So a
-      caller reading a deployment sees its own request back, plus a status
-      that was never anything else.
+      `deploymentOverview`, `errorInformation`, `revisionUpdated` -- unless the
+      executor writes `errorInformation` on Failed.
 
       Neither the application nor the deployment group is checked to exist, so
       a deployment can name both and have neither, and `deploymentGroupName`
@@ -217,7 +215,7 @@ quirks:
       `deploymentGroupName`, `includeOnlyStatuses` and `createTimeRange` --
       every one of the four ways the operation exists to be narrowed -- so a
       caller asking for one application's failed deployments gets every
-      deployment in the account, all of them Succeeded.
+      deployment in the account, including those still InProgress.
 
       ListDeploymentGroups declares an `applicationName` on its response
       alongside the group names and never sets it, so a caller cannot tell
@@ -231,5 +229,5 @@ quirks:
       and `autoRollbackEnabled` is ignored, so a stop never rolls back.
 
       Nothing checks what status the deployment is in, so a deployment that
-      already says Succeeded -- which is all of them -- can be stopped, and a
+      already says Succeeded or is still InProgress can be stopped, and a
       stopped one can be stopped again.

@@ -1,0 +1,24 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "cloudflare",
+  "service": null,
+  "profile": "cf-workers-builds-local-0.1",
+  "feature": "delivery.workers-builds",
+  "backend": "process-http-version-store",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "local-binding-only",
+  "evidenceGrade": "authored",
+  "requiredTests": ["CF-DELIVERY", "CF-RUNTIME-JOIN"],
+  "sourceRefs": [
+    "https://developers.cloudflare.com/workers/ci-cd/builds/"
+  ],
+  "limitations": [
+    "Local Workers Builds stand-in: module text → Response body version store over net/http — not workerd/miniflare",
+    "CF-RUNTIME-JOIN exercises miniflare when tools/cloudflare-runtime is provisioned; otherwise Skip",
+    "No Cloudflare Workers Builds API / GitHub App / wrangler deploy / R2 assets parity",
+    "Distinct from internal/execution/cicd/cloudflareci (@cloudflare/ci) and cfpages (Pages)",
+    "Generation fence is local to this package; no B-IR Workers Versions control plane"
+  ]
+}

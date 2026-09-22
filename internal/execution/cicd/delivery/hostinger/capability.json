@@ -1,0 +1,18 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "hostinger",
+  "service": "hostinger.api",
+  "profile": "host-static-local-0.1",
+  "feature": "delivery.static",
+  "backend": "bir-admit+mirror-owned-static-site",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "partial",
+  "evidenceGrade": "authored",
+  "requiredTests": ["HOST-HOSTINGER-DELIVERY"],
+  "limitations": [
+    "B-IR admits DomainsPurchase + domain status; static bytes via mirror-owned StaticSite",
+    "Not Hostinger hPanel / VPS deploy parity"
+  ]
+}

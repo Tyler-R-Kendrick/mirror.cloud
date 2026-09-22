@@ -17,6 +17,9 @@ import (
 	// bundle under behavior/, so adding a service adds no Go anywhere.
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 
+	// CI/CD AfterInvoke executors (gated by MIRROR_CICD_EXECUTE=1).
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/execution/cicd/register"
+
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/athena"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudcontrol"

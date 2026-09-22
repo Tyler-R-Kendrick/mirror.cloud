@@ -67,8 +67,8 @@ func TestSpreadStoresWhatTheRequestCarried(t *testing.T) {
 	// The members the effect declares are there alongside the copied ones.
 	// Which of the two wins a collision is TestDeclaredMembersWinOverTheSpread;
 	// no member of these three bundles collides, so this is not that test.
-	if got["status"] != "Succeeded" {
-		t.Errorf("status = %v, want Succeeded", got["status"])
+	if got["status"] != "InProgress" {
+		t.Errorf("status = %v, want InProgress", got["status"])
 	}
 	if got["deploymentId"] != id {
 		t.Errorf("deploymentId = %v, want %v", got["deploymentId"], id)

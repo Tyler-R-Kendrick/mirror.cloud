@@ -1,0 +1,19 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "cloudflare",
+  "service": null,
+  "profile": "cf-pages-local-0.1",
+  "feature": "delivery.pages",
+  "backend": "mirror-owned-pages-publisher",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "local-binding-only",
+  "evidenceGrade": "authored",
+  "requiredTests": ["CF-PAGES-DELIVERY"],
+  "limitations": [
+    "No Cloudflare Pages B-IR — preview vs production roots only",
+    "Not Workers Builds / Pages GitHub App / wrangler pages / R2 assets parity",
+    "Distinct from internal/execution/cicd/cloudflareci (@cloudflare/ci)"
+  ]
+}

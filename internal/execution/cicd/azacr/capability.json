@@ -1,0 +1,18 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "azure",
+  "service": null,
+  "profile": "az-acr-task-local-0.1",
+  "feature": "acr.tasks",
+  "backend": "dockerless-image-bytes-stand-in",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "partial",
+  "evidenceGrade": "authored",
+  "requiredTests": ["AZ-ACR-TASK"],
+  "limitations": [
+    "No Azure ACR ARM / Tasks runner / Docker daemon",
+    "Records task config + writes a mirror-owned image blob file as registry stand-in"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "render",
+  "service": null,
+  "profile": "host-render-local-0.1",
+  "feature": "delivery.static",
+  "backend": "local-site-service-deploy-publisher",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "executable",
+  "evidenceGrade": "authored",
+  "requiredTests": ["HOST-RENDER-DELIVERY"],
+  "limitations": [
+    "Local Service/Site Create + static Deploy + Status + Redeploy stand-in — not Render cloud API / Deploy Hooks / Docker web services",
+    "Failed deploys do not flip the live pointer; Redeploy republishes last successful files"
+  ]
+}

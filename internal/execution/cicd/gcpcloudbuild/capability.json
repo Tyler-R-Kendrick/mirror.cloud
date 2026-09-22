@@ -1,0 +1,32 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "gcp",
+  "service": "gcp.cloudbuild",
+  "profile": "cloudbuild-yaml-local",
+  "feature": "steps.waitFor.substitutions",
+  "backend": "trusted-process",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "executable",
+  "controlPlane": "unsupported",
+  "evidenceGrade": "authored",
+  "requiredTests": ["GCP-DELIVERY"],
+  "sourceRefs": [
+    "https://cloud.google.com/build/docs/build-config-file-schema"
+  ],
+  "packagePin": "cloudbuild-yaml-subset/1",
+  "supported": [
+    "steps[].id",
+    "steps[].waitFor (list; '-' = no wait; omit = all prior)",
+    "steps[].script via /bin/sh -c",
+    "steps[].entrypoint + steps[].args via process.Run (no shell)",
+    "substitutions (${_KEY} / $PROJECT_ID) expanded in script/args"
+  ],
+  "limitations": [
+    "Dialect-only: no Cloud Build API / B-IR control-plane service",
+    "No images pulled; name field ignored for execution (script/entrypoint only)",
+    "No secrets, volumes, network, or machineType",
+    "waitFor DAG runs ready steps sequentially (not parallel workers)"
+  ]
+}

@@ -1,10 +1,9 @@
 schema: bir/1
 service: aws.amplify
 
-# Transcribed from the hand-written pack, not established against the real
-# service. Nothing is hosted: no repository is cloned, no build runs and the
-# defaultDomain an app is given ends in .localhost, so nothing resolves and
-# nothing is served.
+# Transcribed from the hand-written pack, then false-success repaired for CI/CD
+# execute: StartJob admits RUNNING; optional AfterInvoke runs buildSpec locally.
+# defaultDomain still ends in .amplifyapp.localhost (no public DNS).
 provenance: authored
 
 resources:
@@ -116,7 +115,11 @@ operations:
           record:
             appId: "string(input.appId)"
             branchName: "string(input.branchName)"
-            status: "'SUCCEED'"
+            status: "'RUNNING'"
+            buildSpec: >
+              'buildSpec' in input && string(input.buildSpec) != ''
+                ? string(input.buildSpec)
+                : ('buildSpec' in app ? string(app.buildSpec) : '')
     output:
       jobSummary: rec
 
@@ -188,12 +191,13 @@ quirks:
       collections, still reachable by appId.
   - operation: StartJob
     note: >
-      A job is SUCCEED before the call returns -- the pack's spelling, and
-      the SDK's -- so nothing observes PENDING, PROVISIONING or RUNNING and
-      nothing ever fails. No build runs, so `steps`, `startTime`, `endTime`,
-      `commitId` and `commitMessage` are declared on JobSummary and never
-      set, and the `jobId` the request may supply is ignored in favour of a
-      generated one.
+      A job admits RUNNING (not SUCCEED). Local execute (AfterInvoke when
+      MIRROR_CICD_EXECUTE=1 / amplify.Enable) may run buildSpec commands and
+      advance to SUCCEED or FAILED with artifact bytes; without an executor the
+      job stays RUNNING. `steps`, `startTime`, `endTime`, `commitId` and
+      `commitMessage` stay unset. The `jobId` the request may supply is ignored
+      in favour of a generated one. buildSpec is taken from the request when
+      non-empty, otherwise from the app record.
 
       The branch the job names is not checked to exist: step for step, a job
       started against a branch that was never created is indistinguishable

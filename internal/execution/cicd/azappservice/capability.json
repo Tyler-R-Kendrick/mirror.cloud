@@ -1,0 +1,18 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "azure",
+  "service": null,
+  "profile": "az-appservice-local-0.1",
+  "feature": "delivery.zip-static",
+  "backend": "mirror-owned-zip-extract-static-site",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "executable",
+  "evidenceGrade": "authored",
+  "requiredTests": ["AZ-APPSERVICE-DELIVERY"],
+  "limitations": [
+    "Local ZIP/files → wwwroot + loopback FileServer — not Azure App Service ARM / Kudu / Run-From-Package / containers",
+    "No slot swap, custom domains, or MSDeploy"
+  ]
+}

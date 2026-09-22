@@ -1,0 +1,32 @@
+{
+  "schema": "mirror.cicd.capability/1",
+  "provider": "gitlab",
+  "service": "gitlab.ci",
+  "profile": "gitlab-ci-yml-local",
+  "feature": "pipeline.stages.artifacts.manual",
+  "backend": "trusted-process",
+  "platform": "linux",
+  "mode": "execute",
+  "implementation": "required",
+  "availability": "not-assessed",
+  "evidenceGrade": "authored",
+  "requiredTests": ["GL-DELIVERY"],
+  "sourceRefs": [
+    "https://docs.gitlab.com/ee/ci/yaml/"
+  ],
+  "packagePin": "gitlab-ci-yml-subset/1",
+  "supported": [
+    "stages + job.stage ordering",
+    "script (list of shell commands via /bin/sh -c)",
+    "needs (string or list)",
+    "artifacts.paths (copy into shared artifact store)",
+    "when: manual (blocks until Config.Manual approves)",
+    "only: [branches] job selection",
+    "if: $CI_COMMIT_BRANCH == \"name\" (equality only)"
+  ],
+  "limitations": [
+    "No rules: full CEL, no include:, no DAG beyond needs+stages",
+    "No Docker images / services / parallel matrix",
+    "Not gitlab-ci-local / runner.server parity"
+  ]
+}

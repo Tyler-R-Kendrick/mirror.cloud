@@ -42,7 +42,7 @@ stages:
 	// need art from build — run with approval and both stages in one workdir after copying
 	// Re-run full pipeline with approval in fresh dir that includes prior build via single run:
 	r2, err := azurepipelines.Run(context.Background(), p, azurepipelines.Config{
-		WorkDir: dir2,
+		WorkDir:            dir2,
 		ApproveEnvironment: func(name string) bool { return name == "production" },
 	})
 	if err != nil {

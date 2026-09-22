@@ -25,18 +25,18 @@ type Stage struct {
 }
 
 type Job struct {
-	Job         string   `yaml:"job"`
-	DependsOn   any      `yaml:"dependsOn"`
-	Condition   string   `yaml:"condition"`
-	Steps       []Step   `yaml:"steps"`
+	Job         string `yaml:"job"`
+	DependsOn   any    `yaml:"dependsOn"`
+	Condition   string `yaml:"condition"`
+	Steps       []Step `yaml:"steps"`
 	Environment *struct {
 		Name string `yaml:"name"`
 	} `yaml:"environment"`
 }
 
 type Step struct {
-	Script string `yaml:"script"`
-	Bash   string `yaml:"bash"`
+	Script      string `yaml:"script"`
+	Bash        string `yaml:"bash"`
 	DisplayName string `yaml:"displayName"`
 }
 

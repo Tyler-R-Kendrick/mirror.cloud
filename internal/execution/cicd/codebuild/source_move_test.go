@@ -46,7 +46,7 @@ func TestADV_SOURCE_MOVE(t *testing.T) {
 	// Mutate project after build completed — new StartBuild would see new spec;
 	// admitted build record must still reflect original (artifact body via override path).
 	call("UpdateProject", map[string]any{
-		"name": "src-move",
+		"name":   "src-move",
 		"source": map[string]any{"type": "NO_SOURCE", "buildspec": "version: 0.2\nphases:\n  build:\n    commands:\n      - echo -n mutated > out.txt\n"},
 	})
 	// Re-read original build — status remains SUCCEEDED (not rewritten by project mutate).

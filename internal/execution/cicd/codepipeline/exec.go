@@ -16,9 +16,9 @@ import (
 	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/engine"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/execution/cicd/codebuild"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/execution/cicd/codedeploy"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/engine"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 

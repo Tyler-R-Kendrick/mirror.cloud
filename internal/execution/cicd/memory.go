@@ -20,10 +20,10 @@ type MemoryJobControl struct {
 }
 
 type memJob struct {
-	handle     JobHandle
-	events     []JobEvent
-	cancelReq  bool
-	terminal   bool
+	handle      JobHandle
+	events      []JobEvent
+	cancelReq   bool
+	terminal    bool
 	disposition string
 }
 

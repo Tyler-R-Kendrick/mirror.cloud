@@ -50,14 +50,55 @@ errors:
     fault: client
 
 operations:
-  # Create and update are one write: both replace the whole record, so an
-  # update that omits a stage list empties it.
-  CreatePipeline: {put: {resource: pipeline, wrap: pipeline}}
-  UpdatePipeline: {put: {resource: pipeline, wrap: pipeline}}
-  GetPipeline: {get: {resource: pipeline, error: PipelineNotFound, key: string(input.name), wrap: pipeline}}
+  CreatePipeline:
+    effects:
+      - put: { resource: pipeline }
+    output:
+      pipeline: rec
+
+  # Partial update: omitted stages/roleArn/artifactStore keep prior values.
+  UpdatePipeline:
+    reads:
+      p:
+        resource: pipeline
+        key: >
+          'pipeline' in input && 'name' in input.pipeline
+            ? string(input.pipeline.name)
+            : string(input.name)
+    require:
+      - { cond: p_found, error: PipelineNotFound }
+    effects:
+      - patch:
+          resource: pipeline
+          key: "string(p.name)"
+          when: "'pipeline' in input && 'roleArn' in input.pipeline"
+          record:
+            roleArn: "string(input.pipeline.roleArn)"
+      - patch:
+          resource: pipeline
+          key: "string(p.name)"
+          when: "'pipeline' in input && 'artifactStore' in input.pipeline"
+          record:
+            artifactStore: input.pipeline.artifactStore
+      - patch:
+          resource: pipeline
+          key: "string(p.name)"
+          when: "'pipeline' in input && 'stages' in input.pipeline"
+          record:
+            stages: input.pipeline.stages
+    output:
+      pipeline: rec
+
+  GetPipeline:
+    reads:
+      p: { resource: pipeline, key: "string(input.name)" }
+    require:
+      - { cond: p_found, error: PipelineNotFound }
+    output:
+      pipeline: p
+
   # Prefer stageStates snapped by the execute AfterInvoke; otherwise project
   # InProgress from the stored pipeline declaration.
-
   GetPipelineState:
     reads:
       p: { resource: pipeline, key: "string(input.name)" }

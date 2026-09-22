@@ -168,13 +168,13 @@ func MapPushEventToCiParams(ev *ArtifactsPushEvent) (*CiParams, error) {
 		return nil, nil
 	}
 	p := &CiParams{
-		Provider: "cloudflare-artifacts",
-		Owner:    ev.Source.Namespace,
-		Repo:     ev.Source.RepoName,
-		SHA:      ev.Payload.After,
-		Trigger:  "push",
-		Ref:      ref,
-		Remote:   "cloudflare",
+		Provider:  "cloudflare-artifacts",
+		Owner:     ev.Source.Namespace,
+		Repo:      ev.Source.RepoName,
+		SHA:       ev.Payload.After,
+		Trigger:   "push",
+		Ref:       ref,
+		Remote:    "cloudflare",
 		BeforeSHA: ev.Payload.Before,
 	}
 	p.ProviderData.Namespace = ev.Source.Namespace

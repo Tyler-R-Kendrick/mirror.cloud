@@ -54,7 +54,9 @@ func TestCF_CI_RUNNERS(t *testing.T) {
 			RunnerOptions: cloudflareci.RunnerOptions{
 				Name:    "install",
 				Command: "mkdir -p .deps && echo installed > .deps/ok",
-				Cache:   &struct{ Inputs []string `json:"inputs"` }{Inputs: []string{"package.json", "bun.lock"}},
+				Cache: &struct {
+					Inputs []string `json:"inputs"`
+				}{Inputs: []string{"package.json", "bun.lock"}},
 			},
 			Children: []cloudflareci.RunnerNode{
 				{RunnerOptions: cloudflareci.RunnerOptions{Name: "lint", Command: "test -f .deps/ok"}},

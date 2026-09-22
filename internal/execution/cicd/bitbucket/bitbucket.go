@@ -24,7 +24,7 @@ type File struct {
 
 // Pipelines holds default and branch pipelines.
 type Pipelines struct {
-	Default  []StepWrap          `yaml:"default"`
+	Default  []StepWrap            `yaml:"default"`
 	Branches map[string][]StepWrap `yaml:"branches"`
 }
 

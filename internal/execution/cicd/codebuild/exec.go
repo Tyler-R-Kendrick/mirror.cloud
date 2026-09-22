@@ -28,8 +28,8 @@ func init() {
 }
 
 var (
-	mu      sync.Mutex
-	forced  bool
+	mu       sync.Mutex
+	forced   bool
 	workRoot string // optional override for tests
 )
 
@@ -232,9 +232,9 @@ func patchTerminal(ctx context.Context, scope spi.Scope, buildID string, build m
 	build["phases"] = closed
 	if len(log) > 0 {
 		build["logs"] = map[string]any{
-			"groupName": "codebuild",
+			"groupName":  "codebuild",
 			"streamName": buildID,
-			"deepLink":  "local://" + buildID,
+			"deepLink":   "local://" + buildID,
 		}
 		// Keep a bounded log excerpt on the record for tests (not a secret sink).
 		excerpt := string(log)

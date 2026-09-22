@@ -126,11 +126,11 @@ func anyMapToString(in map[string]any) map[string]string {
 
 // Step is a run: shell step or local uses: composite/js action.
 type Step struct {
-	ID               string `yaml:"id"`
-	Name             string `yaml:"name"`
-	Run              string `yaml:"run"`
-	Uses             string `yaml:"uses"`
-	ContinueOnError  bool   `yaml:"continue-on-error"`
+	ID              string `yaml:"id"`
+	Name            string `yaml:"name"`
+	Run             string `yaml:"run"`
+	Uses            string `yaml:"uses"`
+	ContinueOnError bool   `yaml:"continue-on-error"`
 }
 
 // StringList accepts a YAML string or sequence.
@@ -374,7 +374,7 @@ func excluded(cell map[string]string, excl []map[string]string) bool {
 }
 
 var (
-	reMatrix = regexp.MustCompile(`\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}`)
+	reMatrix  = regexp.MustCompile(`\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}`)
 	reStepOut = regexp.MustCompile(`\$\{\{\s*steps\.([A-Za-z0-9_]+)\.outputs\.([A-Za-z0-9_]+)\s*\}\}`)
 )
 

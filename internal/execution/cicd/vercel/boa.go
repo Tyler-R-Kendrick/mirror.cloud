@@ -160,7 +160,6 @@ const reqPath = process.env.MIRROR_VC_PATH || '/';
 	return out, nil
 }
 
-
 func validateBOARefs(staticDir string, cfg boaConfig) error {
 	for _, r := range cfg.Routes {
 		if err := requireStaticFile(staticDir, r.Dest); err != nil {

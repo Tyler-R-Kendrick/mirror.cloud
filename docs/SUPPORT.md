@@ -31,11 +31,11 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.cloudhsmv2` | `awsJson1_1` | 6 | 12 |
 | `aws.cloudtrail` | `awsJson1_1` | 11 | 49 |
 | `aws.codeartifact` | `restJson1` | 7 | 41 |
-| `aws.codebuild` | `awsJson1_1` | 9 | 50 |
+| `aws.codebuild` | `awsJson1_1` | 10 | 49 |
 | `aws.codecommit` | `awsJson1_1` | 11 | 69 |
 | `aws.codeconnections` | `awsJson1_0` | 6 | 21 |
 | `aws.codedeploy` | `awsJson1_1` | 12 | 35 |
-| `aws.codepipeline` | `awsJson1_1` | 10 | 34 |
+| `aws.codepipeline` | `awsJson1_1` | 11 | 33 |
 | `aws.cognito-identity` | `awsJson1_1` | 10 | 13 |
 | `aws.cognito-idp` | `awsJson1_1` | 19 | 113 |
 | `aws.comprehend` | `awsJson1_1` | 12 | 73 |

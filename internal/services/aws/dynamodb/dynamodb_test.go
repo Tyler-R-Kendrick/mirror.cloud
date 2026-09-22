@@ -2,13 +2,14 @@ package dynamodb
 
 import (
 	"context"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -692,7 +693,7 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	}
 	partialSSE := asMap(asMap(partial.Output["TableDescription"])["SSEDescription"])
 	keyARN := str(partialSSE["KMSMasterKeyArn"])
-	key, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": keyARN}})
+	key, err := bundled.Handler("aws.kms", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": keyARN}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -789,7 +790,7 @@ func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
 	}
 	created := must("CreateTable", map[string]any{"TableName": "Encrypted", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "SSESpecification": map[string]any{"Enabled": true}})
 	sse := asMap(asMap(created["TableDescription"])["SSEDescription"])
-	key, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": sse["KMSMasterKeyArn"]}})
+	key, err := bundled.Handler("aws.kms", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": sse["KMSMasterKeyArn"]}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,7 +798,7 @@ func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := must("CreateTable", map[string]any{"TableName": "AlsoEncrypted", "SSESpecification": map[string]any{"Enabled": true}})
-	reusedKey, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": sse["KMSMasterKeyArn"]}})
+	reusedKey, err := bundled.Handler("aws.kms", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": sse["KMSMasterKeyArn"]}})
 	if err != nil {
 		t.Fatal(err)
 	}

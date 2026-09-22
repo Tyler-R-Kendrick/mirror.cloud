@@ -30,7 +30,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
@@ -1614,7 +1614,7 @@ func TestConcurrentDynamoDBDefaultSSEUsesOneKMSKey(t *testing.T) {
 			t.Fatalf("multiple default KMS keys: %q and %q", shared, arn)
 		}
 	}
-	listed, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "ListKeys", Input: map[string]any{}})
+	listed, err := bundled.Handler("aws.kms", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "ListKeys", Input: map[string]any{}})
 	if err != nil {
 		t.Fatal(err)
 	}

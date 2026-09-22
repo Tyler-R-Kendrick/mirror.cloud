@@ -12,7 +12,7 @@ import (
 	"time"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -187,7 +187,7 @@ func FuzzDynamoDBDefaultSSE(f *testing.F) {
 			}
 		}
 		updated, updateErr := call("UpdateTable", map[string]any{"TableName": "A" + name, "BillingMode": "PAY_PER_REQUEST"})
-		key, keyErr := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": firstARN}})
+		key, keyErr := bundled.Handler("aws.kms", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": firstARN}})
 		if updateErr != nil || keyErr != nil {
 			t.Fatalf("default SSE did not persist: first=%q second=%q update=%#v key=%#v errors=%v/%v", firstARN, secondARN, updated, key, updateErr, keyErr)
 		}

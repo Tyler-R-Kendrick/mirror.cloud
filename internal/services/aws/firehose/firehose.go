@@ -33,7 +33,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
@@ -856,7 +856,7 @@ func (p *Pack) ensureEncryptionKey(ctx context.Context, req *spi.Request, encryp
 		if stored, ok, _ := p.col(req, "fhkms").Get(ctx, "aws-owned"); ok {
 			keyID = string(stored)
 		} else {
-			created, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "CreateKey", Input: map[string]any{}})
+			created, err := bundled.Handler("aws.kms", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "CreateKey", Input: map[string]any{}})
 			if err != nil {
 				return "", invalidKMSResource(err)
 			}
@@ -866,7 +866,7 @@ func (p *Pack) ensureEncryptionKey(ctx context.Context, req *spi.Request, encryp
 			}
 		}
 	}
-	described, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "DescribeKey", Input: map[string]any{"KeyId": keyID}})
+	described, err := bundled.Handler("aws.kms", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "DescribeKey", Input: map[string]any{"KeyId": keyID}})
 	if err != nil {
 		return "", invalidKMSResource(err)
 	}
@@ -887,7 +887,7 @@ func (p *Pack) encryptAtRest(ctx context.Context, req *spi.Request, keyID string
 	if keyID == "" {
 		return plaintext, nil
 	}
-	response, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Encrypt", Input: map[string]any{"KeyId": keyID, "Plaintext": plaintext}})
+	response, err := bundled.Handler("aws.kms", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Encrypt", Input: map[string]any{"KeyId": keyID, "Plaintext": plaintext}})
 	if err != nil {
 		return nil, invalidKMSResource(err)
 	}
@@ -914,7 +914,7 @@ func (p *Pack) decryptAtRest(ctx context.Context, req *spi.Request, stored []byt
 	if !bytes.HasPrefix(stored, firehoseEncryptedPrefix) {
 		return stored, nil
 	}
-	response, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Decrypt", Input: map[string]any{"CiphertextBlob": stored[len(firehoseEncryptedPrefix):]}})
+	response, err := bundled.Handler("aws.kms", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Decrypt", Input: map[string]any{"CiphertextBlob": stored[len(firehoseEncryptedPrefix):]}})
 	if err != nil {
 		return nil, invalidKMSResource(err)
 	}

@@ -12,29 +12,18 @@ provenance: authored
 # the absence first, so that is also the missing-input answer.
 missing_input_error: NotFound
 
-# Complete for the expressible surface and gated, but not yet serving: the
-# service's core is cryptography, and none of it is expressible. Encrypt,
-# Decrypt, GenerateDataKey(WithoutPlaintext), GenerateDataKeyPair
-# (WithoutPlaintext) and ReEncrypt are AES-GCM seal/open with a fresh
-# crypto/rand nonce under the stored key material; Sign/Verify and
-# GenerateMac/VerifyMac are HMAC-SHA256 over the message under that material;
-# DeriveSharedSecret XORs the material with the caller's public key;
-# GenerateRandom and GetParametersForImport answer fresh random bytes; and
-# ImportKeyMaterial base64-decodes the submitted material. CEL expressions are
-# pure -- no randomness, no I/O -- and the engine's prim dispatch reports no
-# primitives registered, so there is no seal/open/hmac/base64 to call. A
-# serving bundle would have to answer Encrypt with something that is not
-# encryption. The bundle takes over when an aws.kms/crypto primitive family
-# (seal, open, hmac, random bytes, base64) is registered and those fifteen
-# operations move here verbatim.
-shadow: >
-  Encrypt, Decrypt, GenerateDataKey(WithoutPlaintext), GenerateDataKeyPair
-  (WithoutPlaintext), ReEncrypt, Sign, Verify, GenerateMac, VerifyMac,
-  DeriveSharedSecret, GenerateRandom, GetParametersForImport and
-  ImportKeyMaterial need AES-GCM with a crypto/rand nonce, HMAC-SHA256 keyed by
-  stored material, XOR, base64 decode, or fresh random bytes -- none of which
-  CEL or the (empty) primitive registry can express. Everything else the pack
-  does is transcribed and gated below.
+# The service's core is cryptography, and it is Go, in
+# internal/services/aws/kms: Encrypt, Decrypt, GenerateDataKey(WithoutPlaintext),
+# GenerateDataKeyPair(WithoutPlaintext) and ReEncrypt are AES-GCM seal/open with
+# a fresh crypto/rand nonce under the key's stored material; Sign/Verify and
+# GenerateMac/VerifyMac are HMAC-SHA256 under it; DeriveSharedSecret XORs it with
+# the caller's public key; GenerateRandom and GetParametersForImport answer
+# fresh bytes; ImportKeyMaterial replaces it. CEL is pure, so none of that is
+# an expression.
+native: [Encrypt, Decrypt, GenerateDataKey, GenerateDataKeyWithoutPlaintext,
+  GenerateDataKeyPair, GenerateDataKeyPairWithoutPlaintext, ReEncrypt, Sign,
+  Verify, GenerateMac, VerifyMac, DeriveSharedSecret, GenerateRandom,
+  GetParametersForImport, ImportKeyMaterial]
 
 resources:
   # The key record's members live on the operations' write effects, not here:
@@ -103,11 +92,9 @@ errors:
     message: symmetric keys have no public key
 
 operations:
-  # KeyMaterial is drawn (32 bytes, as 64 hex chars) only to keep the
-  # deterministic draw stream aligned with the pack, which drew the real
-  # material there; the value is never answered -- CreateKey and DescribeKey
-  # strip it -- and the crypto operations that would consume it are the shadow
-  # reason above. CurrentKeyMaterialId is a hash of the key id rather than the
+  # KeyMaterial is the key the native crypto operations use: 32 bytes, as 64
+  # hex chars. It is never answered -- CreateKey and DescribeKey strip it.
+  # CurrentKeyMaterialId is a hash of the key id rather than the
   # pack's derived-stream UUID, which the engine's draw vocabulary cannot
   # express; it is token-shaped, so the recordings unify it.
   CreateKey:
@@ -715,10 +702,9 @@ operations:
 quirks:
   - operation: CreateKey
     note: >
-      The stored KeyMaterial is a 64-character hex draw standing in for the
-      pack's base64 of 32 random bytes; it exists to keep the deterministic
-      draw stream aligned with the pack and is never answered -- both sides
-      strip it from KeyMetadata. CurrentKeyMaterialId is sha256 of the key id
+      The stored KeyMaterial is 32 random bytes as hex, where the pack stored
+      them as base64; the native crypto reads hex, and neither side ever
+      answers it. CurrentKeyMaterialId is sha256 of the key id
       rather than a UUID drawn from a derived stream, which the engine's draw
       vocabulary has no form for. Tags, Policy, KeySpec and every other
       declared request member are accepted and discarded, and creating a key

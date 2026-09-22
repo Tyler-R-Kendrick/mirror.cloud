@@ -39,6 +39,10 @@ type knownRed struct {
 func TestKnownRedIsDeclaredHonestly(t *testing.T) {
 	root := findMod(t)
 	body, err := os.ReadFile(filepath.Join(root, "known-red.json"))
+	if os.IsNotExist(err) {
+		// No declared reds: the honest empty state is absence of the file.
+		return
+	}
 	if err != nil {
 		t.Fatalf("read known-red.json: %v", err)
 	}

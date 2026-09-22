@@ -22,7 +22,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -343,7 +343,7 @@ func (p *Pack) drainSQS(ctx context.Context, identity spi.Identity, pipe map[str
 
 func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
 	stream := source[strings.LastIndex(source, "/")+1:]
-	return p.drainStream(ctx, identity, pipe, kinesis.New(p.deps), map[string]any{
+	return p.drainStream(ctx, identity, pipe, bundled.Handler("aws.kinesis", p.deps), map[string]any{
 		"StreamName": stream, "ShardId": "shardId-000000000000",
 	}, "KinesisStreamParameters", "StartingSequenceNumber", func(record map[string]any) string {
 		return stringValue(record["SequenceNumber"])
@@ -672,7 +672,7 @@ func (p *Pack) invokeAPIGateway(ctx context.Context, identity spi.Identity, pipe
 		}
 	}
 	request.URL.RawQuery = query.Encode()
-	response, err := apigateway.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "ExecuteApi", HTTP: request, Body: io.NopCloser(bytes.NewReader(payload))})
+	response, err := apigateway.Execute(ctx, p.deps, &spi.Request{Identity: identity, Operation: "ExecuteApi", HTTP: request, Body: io.NopCloser(bytes.NewReader(payload))})
 	if err != nil {
 		return nil, err
 	}

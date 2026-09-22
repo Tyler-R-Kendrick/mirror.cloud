@@ -29,7 +29,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
@@ -208,7 +208,7 @@ func TestConcurrentDynamoDBNoOpUpdatesEmitOneStreamRecord(t *testing.T) {
 func TestConcurrentDynamoDBKinesisDestinationKeepsEveryRecord(t *testing.T) {
 	deps := spitest.Deps(t)
 	ddb := dynamodb.New(deps)
-	kin := kinesis.New(deps)
+	kin := bundled.Handler("aws.kinesis", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(pack spi.BehaviorPack, operation string, input map[string]any) (*spi.Response, error) {

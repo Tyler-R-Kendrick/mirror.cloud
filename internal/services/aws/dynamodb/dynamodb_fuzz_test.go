@@ -5,12 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -335,7 +336,7 @@ func FuzzDynamoDBKinesisDestination(f *testing.F) {
 		}
 		deps := spitest.Deps(t)
 		ddb := New(deps)
-		kin := kinesis.New(deps)
+		kin := bundled.Handler("aws.kinesis", deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 		call := func(pack spi.BehaviorPack, operation string, input map[string]any) (*spi.Response, error) {

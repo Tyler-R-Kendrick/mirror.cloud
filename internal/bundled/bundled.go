@@ -19,6 +19,7 @@ package bundled
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	behaviors "github.com/tyler-r-kendrick/mirror.cloud/behavior"
@@ -134,6 +135,70 @@ var (
 // can construct a bundled service without going through the registry, and so
 // one service can reach another the way the edge would.
 func New(id string, deps spi.Deps) (spi.BehaviorPack, error) {
+	e, err := compiled(id, deps)
+	if err != nil {
+		return nil, err
+	}
+	if len(e.IR().Native) == 0 {
+		return e, nil
+	}
+	return hybrid{Engine: e, deps: deps}, nil
+}
+
+// NativeFunc serves one operation a bundle lists under native:.
+type NativeFunc func(context.Context, spi.Deps, *spi.Request) (*spi.Response, error)
+
+// natives is written only from package init, before any New runs.
+var natives = map[string]NativeFunc{}
+
+// RegisterNative supplies the Go for an operation a bundle declares native.
+// Call it from init; the bundle's native: list is what makes it served.
+func RegisterNative(id, op string, fn NativeFunc) { natives[id+"/"+op] = fn }
+
+// Unregistered lists every id/op a bundle declares native that no linked
+// package registered. A binary missing one still serves the rest of that
+// bundle -- CloudFormation reaches API Gateway's control plane without
+// linking ExecuteApi -- so this is checked where every service is linked.
+func Unregistered() []string {
+	var missing []string
+	for _, id := range ServiceIDs() {
+		svc, err := servedModel(id)
+		if err != nil {
+			continue
+		}
+		if ir, err := behaviors.Load(id, svc); err == nil {
+			for _, op := range ir.Native {
+				if natives[id+"/"+op] == nil {
+					missing = append(missing, id+"/"+op)
+				}
+			}
+		}
+	}
+	return missing
+}
+
+// hybrid is a bundle with native operations: the engine serves everything the
+// bundle defines, and the listed operations go to Go against the same store.
+type hybrid struct {
+	*engine.Engine
+	deps spi.Deps
+}
+
+func (h hybrid) Operations() []string {
+	return append(h.Engine.Operations(), h.Engine.IR().Native...)
+}
+
+func (h hybrid) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if !slices.Contains(h.Engine.IR().Native, req.Operation) {
+		return h.Engine.Invoke(ctx, req)
+	}
+	if fn := natives[h.ServiceID()+"/"+req.Operation]; fn != nil {
+		return fn(ctx, h.deps, req)
+	}
+	return nil, fmt.Errorf("bundled %s: native %s has no RegisterNative; link its package", h.ServiceID(), req.Operation)
+}
+
+func compiled(id string, deps spi.Deps) (*engine.Engine, error) {
 	builtMu.Lock()
 	proto, ok := built[id]
 	builtMu.Unlock()

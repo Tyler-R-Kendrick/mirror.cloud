@@ -1,4 +1,8 @@
-// Package kinesis is a single-shard in-memory emulate of Kinesis Data Streams.
+// Package kinesis is the Kinesis record plane: the four operations
+// behavior/aws/kinesis lists as native. PutRecord publishes each record to the
+// deps.Bus "kinesis" topic that aws.pipes and aws.firehose read, and a shard
+// iterator is opaque base64 state with a timestamp scan behind it; the effect
+// vocabulary has neither. Streams themselves are the bundle's.
 package kinesis
 
 import (
@@ -10,94 +14,27 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.kinesis", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range []string{"PutRecord", "PutRecords", "GetShardIterator", "GetRecords"} {
+		bundled.RegisterNative("aws.kinesis", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return records{deps}.invoke(ctx, req)
+		})
+	}
 }
 
-// Pack implements Kinesis-lite.
-type Pack struct{ deps spi.Deps }
+type records struct{ deps spi.Deps }
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
-
-func (p *Pack) ServiceID() string { return "aws.kinesis" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	core := []string{"CreateStream", "DeleteStream", "ListStreams", "DescribeStream", "DescribeStreamSummary",
-		"PutRecord", "PutRecords", "GetShardIterator", "GetRecords", "ListShards",
-		"AddTagsToStream", "ListTagsForStream", "RemoveTagsFromStream",
-		"TagResource", "UntagResource", "ListTagsForResource",
-		"IncreaseStreamRetentionPeriod", "DecreaseStreamRetentionPeriod",
-		"PutResourcePolicy", "GetResourcePolicy", "DeleteResourcePolicy",
-		"RegisterStreamConsumer", "DeregisterStreamConsumer", "DescribeStreamConsumer", "ListStreamConsumers",
-		"SubscribeToShard",
-		"EnableEnhancedMonitoring", "DisableEnhancedMonitoring",
-		"SplitShard", "MergeShards", "UpdateShardCount",
-		"StartStreamEncryption", "StopStreamEncryption",
-		"DescribeLimits", "DescribeAccountSettings", "UpdateAccountSettings",
-		"UpdateMaxRecordSize", "UpdateStreamMode", "UpdateStreamWarmThroughput"}
-	return core
-}
-
-func (p *Pack) col(req *spi.Request, n string) spi.Collection {
+func (p records) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
 }
 
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := first(req.Input, "StreamName")
 	switch req.Operation {
-	case "CreateStream":
-		if name == "" {
-			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
-		}
-		rec := map[string]any{"StreamName": name, "Status": "ACTIVE", "Seq": 0}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "kinesis").Put(ctx, name, b)
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "DeleteStream":
-		_ = p.col(req, "kinesis").Delete(ctx, name)
-		kvs, _, _ := p.col(req, "kinesis:"+name).List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			_ = p.col(req, "kinesis:"+name).Delete(ctx, kv.Key)
-		}
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "ListStreams":
-		kvs, _, _ := p.col(req, "kinesis").List(ctx, "", "", 0)
-		var names []any
-		for _, kv := range kvs {
-			names = append(names, kv.Key)
-		}
-		return &spi.Response{Output: map[string]any{"StreamNames": names, "HasMoreStreams": false}}, nil
-	case "DescribeStream", "DescribeStreamSummary":
-		b, ok, _ := p.col(req, "kinesis").Get(ctx, name)
-		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		arn := "arn:aws:kinesis:" + req.Identity.Region + ":" + req.Identity.Account + ":stream/" + name
-		desc := map[string]any{
-			"StreamName": name, "StreamARN": arn, "StreamStatus": "ACTIVE",
-			"Shards": []any{map[string]any{
-				"ShardId":             "shardId-000000000000",
-				"HashKeyRange":        map[string]any{"StartingHashKey": "0", "EndingHashKey": "340282366920938463463374607431768211455"},
-				"SequenceNumberRange": map[string]any{"StartingSequenceNumber": "0"},
-			}},
-		}
-		if req.Operation == "DescribeStreamSummary" {
-			return &spi.Response{Output: map[string]any{"StreamDescriptionSummary": map[string]any{"StreamName": name, "StreamARN": arn, "StreamStatus": "ACTIVE", "OpenShardCount": 1}}}, nil
-		}
-		_ = rec
-		return &spi.Response{Output: map[string]any{"StreamDescription": desc}}, nil
-	case "ListShards":
-		return &spi.Response{Output: map[string]any{"Shards": []any{map[string]any{"ShardId": "shardId-000000000000"}}}}, nil
 	case "PutRecord":
 		return p.put(ctx, req, name, req.Input["Data"], str(req.Input["PartitionKey"]))
 	case "PutRecords":
@@ -130,7 +67,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		it := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", name, seq)))
 		return &spi.Response{Output: map[string]any{"ShardIterator": it}}, nil
-	case "GetRecords":
+	default: // GetRecords
 		raw, err := base64.StdEncoding.DecodeString(str(req.Input["ShardIterator"]))
 		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -174,12 +111,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		next := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", stream, maxSeq)))
 		return &spi.Response{Output: map[string]any{"Records": recs, "NextShardIterator": next, "MillisBehindLatest": 0}}, nil
-	default:
-		return p.extra(ctx, req, name)
 	}
 }
 
-func (p *Pack) put(ctx context.Context, req *spi.Request, name string, data any, pk string) (*spi.Response, error) {
+func (p records) put(ctx context.Context, req *spi.Request, name string, data any, pk string) (*spi.Response, error) {
 	if _, ok, _ := p.col(req, "kinesis").Get(ctx, name); !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 	}
@@ -195,7 +130,7 @@ func (p *Pack) put(ctx context.Context, req *spi.Request, name string, data any,
 	return &spi.Response{Output: map[string]any{"SequenceNumber": seqStr, "ShardId": "shardId-000000000000"}}, nil
 }
 
-func (p *Pack) atTimestampSeq(ctx context.Context, req *spi.Request, name string, timestamp float64) int {
+func (p records) atTimestampSeq(ctx context.Context, req *spi.Request, name string, timestamp float64) int {
 	kvs, _, _ := p.col(req, "kinesis:"+name).List(ctx, "", "", 0)
 	seq := p.curSeq(ctx, req, name)
 	for _, kv := range kvs {
@@ -209,7 +144,7 @@ func (p *Pack) atTimestampSeq(ctx context.Context, req *spi.Request, name string
 	return seq
 }
 
-func (p *Pack) curSeq(ctx context.Context, req *spi.Request, name string) int {
+func (p records) curSeq(ctx context.Context, req *spi.Request, name string) int {
 	b, ok, _ := p.col(req, "kinesis").Get(ctx, name)
 	if !ok {
 		return 0
@@ -219,7 +154,7 @@ func (p *Pack) curSeq(ctx context.Context, req *spi.Request, name string) int {
 	return asInt(rec["Seq"])
 }
 
-func (p *Pack) nextSeq(ctx context.Context, req *spi.Request, name string) int {
+func (p records) nextSeq(ctx context.Context, req *spi.Request, name string) int {
 	b, ok, _ := p.col(req, "kinesis").Get(ctx, name)
 	var rec map[string]any
 	if ok {

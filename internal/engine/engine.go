@@ -147,6 +147,9 @@ func (e *Engine) ServiceID() string { return e.ir.ServiceID }
 // Tier reports emulate: a bundle describes real semantics, not synthesis.
 func (e *Engine) Tier() model.Tier { return model.TierEmulate }
 
+// IR is the bundle this engine serves.
+func (e *Engine) IR() *bir.Service { return e.ir }
+
 // Operations lists the operations the bundle defines.
 func (e *Engine) Operations() []string { return append([]string(nil), e.ops...) }
 

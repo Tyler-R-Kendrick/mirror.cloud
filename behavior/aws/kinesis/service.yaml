@@ -7,26 +7,13 @@ service: aws.kinesis
 # plane is the shadow below.
 provenance: authored
 
-# Complete and gated for the control plane, but not serving: the record plane
-# is not expressible. PutRecord and PutRecords publish every record to the
-# deps.Bus "kinesis" topic, which aws.pipes drains and aws.firehose subscribes
-# to, and the effect vocabulary has no bus publish -- the emit effect is
-# validated but the engine's runEffects does not execute it ("effect kind is
-# not yet supported by this engine"), so a serving bundle would silently stop
-# feeding pipes and firehose. GetShardIterator and GetRecords carry an opaque
-# base64 "stream|seq" iterator the client hands back, with an AT_TIMESTAMP
-# arrival-time scan over the per-stream record collection, numeric-key
-# ordering and Limit pagination; the CEL env has no base64, no decode-split,
-# and no scan over a second collection. The bundle takes over when an engine
-# effect publishes to the bus and an iterator primitive carries the
-# encode/decode and the scan, moved verbatim.
-shadow: >
-  The record plane -- PutRecord, PutRecords, GetShardIterator, GetRecords --
-  is unexpressible: PutRecord's bus publish feeds aws.pipes and aws.firehose
-  and has no engine effect, and the shard iterator is base64-encoded opaque
-  state with timestamp scans and numeric ordering that CEL cannot express.
-  DeleteStream's cleanup of the per-stream record collection rides with the
-  shadow. Everything else the pack does is transcribed and gated below.
+# The record plane is Go, in internal/services/aws/kinesis: PutRecord and
+# PutRecords publish every record to the deps.Bus "kinesis" topic, which
+# aws.pipes drains and aws.firehose subscribes to, and the effect vocabulary
+# has no bus publish. GetShardIterator and GetRecords carry an opaque base64
+# "stream|seq" iterator, with an AT_TIMESTAMP arrival-time scan over the
+# record collection below, numeric-key ordering and Limit pagination.
+native: [PutRecord, PutRecords, GetShardIterator, GetRecords]
 
 resources:
   # Streams are keyed by StreamName alone for the operations the pack's main
@@ -47,6 +34,12 @@ resources:
   # ones -- so one stream has two tag sets that never meet. Here the map sits
   # under a Tags member so `without` can rewrite it wholesale; the answers are
   # identical.
+  # One collection per stream, keyed by sequence number; the native record
+  # plane writes it, and it is here so DeleteStream can empty it.
+  record:
+    collection: "kinesis:{stream.id}"
+    parent: stream
+
   tag:
     collection: ktags
 
@@ -77,10 +70,13 @@ operations:
             Seq: 0
     output: {}
 
-  # The pack also deletes every record in the stream's per-stream collection;
-  # that collection is the shadow plane and the cleanup rides with it.
+  # A recreated stream starts again at sequence 0, so its predecessor's
+  # records have to go with it or GetRecords would answer them.
   DeleteStream:
+    reads:
+      stream: { resource: stream }
     effects:
+      - delete: { resource: record, where: "true" }
       - delete: { resource: stream, missing: ignore }
     output: {}
 

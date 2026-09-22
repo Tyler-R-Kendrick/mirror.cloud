@@ -4274,10 +4274,10 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-reject-api-gateway-resource",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old: `		return arn, nil
+		old: `		return arn, err
 	case "AWS::ApiGateway::RestApi":
 		n := str(props["Name"])`,
-		new: `		return arn, nil
+		new: `		return arn, err
 	case "AWS::ApiGateway::RestApiMutated":
 		n := str(props["Name"])`,
 		pkg: "./internal/services/aws/cloudformation",
@@ -13036,6 +13036,14 @@ var mutants = []mutant{
 		run:  "TestOpenSearchBufferRetryPersistence",
 	},
 	{
+		name: "kinesis-delete-stream-keeps-records",
+		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
+		old:  `      - delete: { resource: record, where: "true" }`,
+		new:  ``,
+		pkg:  "./internal/services/aws/kinesis",
+		run:  "TestKinesisPublishesRecordsAndStartsAtTimestamp",
+	},
+	{
 		name: "kinesis-reverse-at-timestamp-selection",
 		file: filepath.Join("internal", "services", "aws", "kinesis", "kinesis.go"),
 		old:  `asFloat(record["ApproximateArrivalTimestamp"]) >= timestamp`,
@@ -13254,6 +13262,38 @@ var mutants = []mutant{
 		new:  `if false {`,
 		pkg:  "./internal/services/aws/apigateway",
 		run:  "TestProxyEventSyntheticMetadata",
+	},
+	{
+		name: "bundled-native-falls-to-engine",
+		file: filepath.Join("internal", "bundled", "bundled.go"),
+		old:  `if !slices.Contains(h.Engine.IR().Native, req.Operation) {`,
+		new:  `if !slices.Contains(h.Engine.IR().Native, "") {`,
+		pkg:  "./internal/services/aws/apigateway",
+		run:  "TestBootedServerAPIGatewayLambdaProxy",
+	},
+	{
+		name: "apigateway-integration-outside-bundle-collection",
+		file: filepath.Join("internal", "services", "aws", "apigateway", "apigateway.go"),
+		old:  `"apigwi:"+api`,
+		new:  `"apigw-integ:"+api`,
+		pkg:  "./internal/services/aws/apigateway",
+		run:  "TestBootedServerAPIGatewayLambdaProxy",
+	},
+	{
+		name: "apigateway-no-any-integration",
+		file: filepath.Join("internal", "services", "aws", "apigateway", "apigateway.go"),
+		old:  `ib, ok, _ = integrations.Get(ctx, rid+"/ANY")`,
+		new:  `ib, ok, _ = integrations.Get(ctx, rid+"/"+meth)`,
+		pkg:  "./internal/services/aws/apigateway",
+		run:  "TestBootedServerAPIGatewayLambdaProxy",
+	},
+	{
+		name: "apigateway-every-path-is-root",
+		file: filepath.Join("internal", "services", "aws", "apigateway", "apigateway.go"),
+		old:  `if str(rec["path"]) == path {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/aws/apigateway",
+		run:  "TestBootedServerAPIGatewayLambdaProxy",
 	},
 	{
 		name: "pipes-skip-api-gateway-enrichment",

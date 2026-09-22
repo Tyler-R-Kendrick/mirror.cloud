@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/allservices"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -27,6 +28,9 @@ func TestEveryServiceBuilds(t *testing.T) {
 	}
 	if len(r.Enabled()) == 0 {
 		t.Fatal("no services registered; the blank imports are not doing their job")
+	}
+	if missing := bundled.Unregistered(); len(missing) > 0 {
+		t.Fatalf("native operations with no Go behind them: %v", missing)
 	}
 }
 

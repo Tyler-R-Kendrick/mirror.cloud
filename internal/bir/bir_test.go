@@ -130,6 +130,20 @@ func TestValidationRejects(t *testing.T) {
 			want: "no such operation",
 		},
 		{
+			name: "native operation not in the model",
+			edit: func(b string) string {
+				return strings.Replace(b, "\noperations:", "\nnative: [Imaginary]\noperations:", 1)
+			},
+			want: "native.Imaginary: no such operation",
+		},
+		{
+			name: "native operation also defined",
+			edit: func(b string) string {
+				return strings.Replace(b, "\noperations:", "\nnative: [GetThing]\noperations:", 1)
+			},
+			want: "native.GetThing: also defined under operations",
+		},
+		{
 			name: "unknown error reference",
 			edit: func(b string) string { return strings.Replace(b, "error: NotFound", "error: Missing", 1) },
 			want: `unknown error "Missing"`,

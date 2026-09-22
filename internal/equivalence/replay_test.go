@@ -6,6 +6,8 @@ import (
 	"sort"
 	"testing"
 
+	// Registers the Go behind every bundle's native: operations.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/allservices"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/equivalence"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"

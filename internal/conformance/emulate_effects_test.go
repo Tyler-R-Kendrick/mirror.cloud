@@ -12,7 +12,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
@@ -216,7 +216,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		bArn := str(asMap(bak.Output["BackupDetails"])["BackupArn"])
 		inv("RestoreTableFromBackup", map[string]any{"BackupArn": bArn, "TargetTableName": "Tr"})
 		inv("DeleteBackup", map[string]any{"BackupArn": bArn})
-		if _, err := kinesis.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "s"}}); err != nil {
+		if _, err := bundled.Handler("aws.kinesis", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "s"}}); err != nil {
 			t.Fatal(err)
 		}
 		streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"

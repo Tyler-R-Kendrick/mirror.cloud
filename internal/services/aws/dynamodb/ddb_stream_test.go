@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -172,7 +173,7 @@ func TestDynamoDBDataEncodingCharacterization(t *testing.T) {
 func TestDynamoDBKinesisDestination(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	kinesisPack := kinesis.New(deps)
+	kinesisPack := bundled.Handler("aws.kinesis", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -265,7 +266,7 @@ func TestDynamoDBKinesisDestination(t *testing.T) {
 func TestDynamoDBKinesisDestinationCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
-	kinesisPack := kinesis.New(deps)
+	kinesisPack := bundled.Handler("aws.kinesis", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	must := func(operation string, input map[string]any) map[string]any {

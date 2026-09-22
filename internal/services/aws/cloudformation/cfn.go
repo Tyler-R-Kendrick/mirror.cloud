@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -480,10 +481,8 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		if n == "" {
 			n = logical
 		}
-		rec := map[string]any{"StreamName": n, "Status": "ACTIVE", "Seq": 0}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "kinesis").Put(ctx, n, b)
-		return n, nil
+		_, err := p.call(ctx, req, "aws.kinesis", "CreateStream", map[string]any{"StreamName": n})
+		return n, err
 	case "AWS::Kinesis::ResourcePolicy":
 		arn := str(props["ResourceArn"])
 		if arn == "" {
@@ -493,25 +492,21 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		if policy == nil {
 			policy = props["Policy"]
 		}
-		if text, ok := policy.(string); ok {
-			_ = p.col(req, "kpol").Put(ctx, arn, []byte(text))
-		} else {
+		text, ok := policy.(string)
+		if !ok {
 			body, _ := json.Marshal(policy)
-			_ = p.col(req, "kpol").Put(ctx, arn, body)
+			text = string(body)
 		}
-		return arn, nil
+		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": text})
+		return arn, err
 	case "AWS::ApiGateway::RestApi":
 		n := str(props["Name"])
 		if n == "" {
 			n = logical
 		}
-		id := p.deps.Rand.Hex(8)
-		rec := map[string]any{"id": id, "name": n, "rootResourceId": "root"}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "apigw").Put(ctx, id, b)
-		rb, _ := json.Marshal(map[string]any{"id": "root", "path": "/", "pathPart": ""})
-		_ = p.col(req, "apigw-res").Put(ctx, id+"/root", rb)
-		return id, nil
+		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": n})
+		id, _ := out["id"].(string)
+		return id, err
 	default:
 		return "", &spi.Fault{Code: "ValidationError", Message: "unsupported resource type " + typ, HTTPStatus: 400, Fault: "client"}
 	}
@@ -547,12 +542,22 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) {
 	case "AWS::Lambda::Function":
 		_ = p.col(req, "lambda").Delete(ctx, lastColon(r.Physical))
 	case "AWS::Kinesis::Stream":
-		_ = p.col(req, "kinesis").Delete(ctx, r.Physical)
+		_, _ = p.call(ctx, req, "aws.kinesis", "DeleteStream", map[string]any{"StreamName": r.Physical})
 	case "AWS::Kinesis::ResourcePolicy":
-		_ = p.col(req, "kpol").Delete(ctx, r.Physical)
+		_, _ = p.call(ctx, req, "aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": r.Physical})
 	case "AWS::ApiGateway::RestApi":
-		_ = p.col(req, "apigw").Delete(ctx, r.Physical)
+		_, _ = p.call(ctx, req, "aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": r.Physical})
 	}
+}
+
+// call provisions through the service that owns a resource, so its store
+// layout and cascades stay that service's business.
+func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (map[string]any, error) {
+	resp, err := bundled.Handler(id, p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: op, Input: in})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Output, nil
 }
 
 func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket string, props map[string]any) {

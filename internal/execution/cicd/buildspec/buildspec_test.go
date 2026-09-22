@@ -190,10 +190,10 @@ func TestArtifactGlobRequiresMatch(t *testing.T) {
 phases:
   build:
     commands:
-      - mkdir -p nested && echo x > nested/out.bin
+      - mkdir -p nested/deep && echo x > nested/deep/out.bin
 artifacts:
   files:
-    - "**/*"
+    - "nested/**/*.bin"
 `)
 	spec, err := buildspec.Parse(yaml)
 	if err != nil {
@@ -219,5 +219,25 @@ artifacts:
 	}
 	if _, err := buildspec.Run(context.Background(), spec2, buildspec.Config{Dir: t.TempDir()}); err == nil {
 		t.Fatal("want glob miss error")
+	}
+}
+
+func TestArtifactLiteralRejectsEscape(t *testing.T) {
+	dir := t.TempDir()
+	yaml := []byte(`version: 0.2
+phases:
+  build:
+    commands:
+      - true
+artifacts:
+  files:
+    - ../outside.txt
+`)
+	spec, err := buildspec.Parse(yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildspec.Run(context.Background(), spec, buildspec.Config{Dir: dir}); err == nil {
+		t.Fatal("want path escape error")
 	}
 }

@@ -172,17 +172,38 @@ func checkArtifactFiles(dir, label string, art *Artifacts) error {
 			}
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+		target, err := artifactPathInDir(dir, f)
+		if err != nil {
+			return fmt.Errorf("buildspec: %s %q: %w", label, f, err)
+		}
+		if _, err := os.Stat(target); err != nil {
 			return fmt.Errorf("buildspec: %s %q missing: %w", label, f, err)
 		}
 	}
 	return nil
 }
 
+// artifactPathInDir joins dir+rel and refuses .. / absolute escape.
+func artifactPathInDir(dir, rel string) (string, error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("path escapes build dir")
+	}
+	clean := filepath.Clean(rel)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes build dir")
+	}
+	full := filepath.Join(dir, clean)
+	got, err := filepath.Rel(dir, full)
+	if err != nil || got == ".." || strings.HasPrefix(got, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes build dir")
+	}
+	return full, nil
+}
+
 // artifactGlobMatches reports whether pattern matches ≥1 regular file under dir.
-// Supports CodeBuild-style **/* plus filepath.Match patterns on the slash path.
+// Supports CodeBuild-style ** segments plus filepath.Match on each path segment.
 func artifactGlobMatches(dir, pattern string) (bool, error) {
-	pattern = filepath.ToSlash(pattern)
+	pattern = filepath.ToSlash(strings.TrimSpace(pattern))
 	found := false
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -209,25 +230,34 @@ func artifactGlobMatches(dir, pattern string) (bool, error) {
 }
 
 func matchArtifactPattern(pattern, rel string) bool {
-	if pattern == "**" || pattern == "**/*" {
-		return true
+	return matchGlobSegments(strings.Split(pattern, "/"), strings.Split(rel, "/"))
+}
+
+func matchGlobSegments(pat, name []string) bool {
+	for len(pat) > 0 {
+		if pat[0] == "**" {
+			pat = pat[1:]
+			if len(pat) == 0 {
+				return true
+			}
+			for i := 0; i <= len(name); i++ {
+				if matchGlobSegments(pat, name[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(name) == 0 {
+			return false
+		}
+		ok, err := filepath.Match(pat[0], name[0])
+		if err != nil || !ok {
+			return false
+		}
+		pat = pat[1:]
+		name = name[1:]
 	}
-	if strings.HasPrefix(pattern, "**/") {
-		suffix := strings.TrimPrefix(pattern, "**/")
-		if ok, _ := filepath.Match(suffix, filepath.Base(rel)); ok {
-			return true
-		}
-		if ok, _ := filepath.Match(suffix, rel); ok {
-			return true
-		}
-		// **/a/b → match trailing segments
-		if i := strings.Index(rel, "/"); i >= 0 {
-			return matchArtifactPattern(pattern, rel[i+1:])
-		}
-		return false
-	}
-	ok, _ := filepath.Match(pattern, rel)
-	return ok
+	return len(name) == 0
 }
 
 func envMapFrom(env []string) map[string]string {

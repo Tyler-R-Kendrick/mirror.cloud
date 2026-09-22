@@ -87,10 +87,22 @@ type document struct {
 	} `json:"servers"`
 	Paths      map[string]json.RawMessage `json:"paths"`
 	Components struct {
-		Schemas    map[string]schema         `json:"schemas"`
-		Parameters map[string]parameter      `json:"parameters"`
-		Responses  map[string]responseObject `json:"responses"`
+		Schemas       map[string]schema            `json:"schemas"`
+		Parameters    map[string]parameter         `json:"parameters"`
+		Responses     map[string]responseObject    `json:"responses"`
+		RequestBodies map[string]requestBodyObject `json:"requestBodies"`
 	} `json:"components"`
+}
+
+// requestBodyObject is one entry of an operation's requestBody, or a shared
+// body under components.requestBodies. It carries `$ref` for the same reason
+// responseObject does: Cloudflare (and others) point at a shared body rather
+// than inlining content, and without following the reference the request
+// shape silently loses its payload member.
+type requestBodyObject struct {
+	Ref      string               `json:"$ref"`
+	Required bool                 `json:"required"`
+	Content  map[string]mediaType `json:"content"`
 }
 
 // responseObject is one entry of an operation's `responses` map, or one of the
@@ -112,10 +124,7 @@ type operation struct {
 	OperationID string      `json:"operationId"`
 	Summary     string      `json:"summary"`
 	Parameters  []parameter `json:"parameters"`
-	RequestBody *struct {
-		Required bool                 `json:"required"`
-		Content  map[string]mediaType `json:"content"`
-	} `json:"requestBody"`
+	RequestBody *requestBodyObject `json:"requestBody"`
 	Responses map[string]responseObject `json:"responses"`
 	// MirrorName is `x-mirror-name`: the operation's exact served name when
 	// the document's own spelling cannot carry it. GraphQL operation names
@@ -286,6 +295,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 				name = op.MirrorName
 			}
 			params := resolveParams(append(append([]parameter{}, shared...), op.Parameters...), doc.Components.Parameters, sh)
+			op.RequestBody = resolveRequestBody(op.RequestBody, doc.Components.RequestBodies, sh)
 			binding := model.HTTPBinding{
 				Method: strings.ToUpper(method),
 				URI:    base + templated(uri),
@@ -357,6 +367,31 @@ func pathItem(raw json.RawMessage) (map[string]json.RawMessage, []parameter, err
 		}
 	}
 	return item, shared, nil
+}
+
+const componentRequestBodies = "#/components/requestBodies/"
+
+// resolveRequestBody follows a `$ref` into components.requestBodies so a
+// shared body (Cloudflare workers_script_upload and friends) contributes its
+// content to the request shape. An unresolved ref is recorded on the shaper.
+func resolveRequestBody(body *requestBodyObject, components map[string]requestBodyObject, sh *shaper) *requestBodyObject {
+	if body == nil {
+		return nil
+	}
+	if body.Ref == "" {
+		return body
+	}
+	name := strings.TrimPrefix(body.Ref, componentRequestBodies)
+	shared, ok := components[name]
+	if !ok {
+		sh.missing = append(sh.missing, "requestBody "+body.Ref)
+		return body
+	}
+	out := shared
+	if body.Required {
+		out.Required = true
+	}
+	return &out
 }
 
 // resolveParams dereferences `$ref` parameters against the document's component

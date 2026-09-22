@@ -77,9 +77,8 @@ authorized**, selected explicitly per environment, with these boundaries:
   of the optional profile only, diagnosed by `MiniflareAvailable` before
   any spawn; unsupported hosts get that diagnostic, never a silent
   substitute backend.
-- **Compatibility changes:** none to existing frozen interfaces. The
-  Cloudflare aliases in `internal/runtime` now resolve to the
-  `cloudflare.api` bundle that exists (the legacy `cloudflare.kv` token is
-  kept as an alias), and the bundle gained one newly served operation
-  (`WorkersKvNamespaceReadTheMetadataForAKey`) plus repaired native KV
-  behavior — all inside the B-IR data layer, no engine vocabulary change.
+- **Compatibility changes:** Cloudflare aliases resolve to `cloudflare.api`.
+  Entry-plane KV ops use the B-IR `execute` effect through `Deps.Executor`
+  (`native-kv` by default; Miniflare when that backend is selected). An
+  operation may not mix `execute` with native store mutations or `list`
+  (validated at load). Namespace lifecycle remains native Store.

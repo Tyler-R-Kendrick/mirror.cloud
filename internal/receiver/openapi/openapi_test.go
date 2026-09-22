@@ -3,6 +3,7 @@ package openapi_test
 import (
 	"context"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -634,5 +635,63 @@ func TestMirrorInputDeclaresWhatTheCodecSynthesizes(t *testing.T) {
 	}
 	if _, ok := req.Members["query"]; !ok {
 		t.Errorf("the body's own members were displaced; have %v", memberNames(req))
+	}
+}
+
+func TestRequestBodyRefCarriesPayloadMember(t *testing.T) {
+	// Cloudflare's worker-script upload puts the body under
+	// components.requestBodies and $ref it. Losing the ref meant the model
+	// had script_name and no body — public upload could not be served.
+	const body = `{
+	  "openapi": "3.0.0",
+	  "info": {"title": "t", "version": "1"},
+	  "paths": {
+	    "/accounts/{account_id}/workers/scripts/{script_name}": {
+	      "put": {
+	        "operationId": "worker-script-upload-worker-module",
+	        "parameters": [
+	          {"name": "account_id", "in": "path", "required": true, "schema": {"type": "string"}},
+	          {"name": "script_name", "in": "path", "required": true, "schema": {"type": "string"}}
+	        ],
+	        "requestBody": {"$ref": "#/components/requestBodies/workers_script_upload"},
+	        "responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {"type": "object"}}}}}
+	      }
+	    }
+	  },
+	  "components": {
+	    "requestBodies": {
+	      "workers_script_upload": {
+	        "required": true,
+	        "content": {
+	          "application/javascript": {"schema": {"type": "string"}},
+	          "text/javascript": {"schema": {"type": "string"}}
+	        }
+	      }
+	    }
+	  }
+	}`
+	svcs, err := (openapi.Receiver{}).Ingest(context.Background(), model.SourceRef{Path: "cloudflare/api.json"}, []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(svcs) != 1 || len(svcs[0].Operations) != 1 {
+		t.Fatalf("got %#v", svcs)
+	}
+	op := svcs[0].Operations[0]
+	if op.Name != "WorkerScriptUploadWorkerModule" {
+		t.Fatalf("name %q", op.Name)
+	}
+	shape := svcs[0].Shapes[op.Input]
+	m, ok := shape.Members["body"]
+	if !ok {
+		names := make([]string, 0, len(shape.Members))
+		for n := range shape.Members {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		t.Fatalf("members %v, want body from resolved requestBody $ref", names)
+	}
+	if m.Binding.Location != "payload" {
+		t.Fatalf("body binding %#v", m.Binding)
 	}
 }

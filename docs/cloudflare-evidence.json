@@ -1,0 +1,111 @@
+{
+  "schema": "mirror.cloudflare.evidence/1",
+  "source": "docs/CLOUDFLARE_IMPLEMENTATION_REPORT.md",
+  "cells": [
+    {
+      "id": "CF-BOOT-NATIVE",
+      "status": "pass",
+      "evidence": "native suite runs with no tag, spawns nothing; helper referenced only from `-tags miniflare` code"
+    },
+    {
+      "id": "CF-ALIASES",
+      "status": "pass",
+      "evidence": "`TestCloudflareAliasBooting`: 4 spellings \u2192 emulate + 200; unselected service \u2192 501"
+    },
+    {
+      "id": "CF-STRICT",
+      "status": "pass",
+      "evidence": "`TestCloudflareStrict`: unserved op \u2192 501 MirrorNotImplemented, no success body, stable; served op unaffected"
+    },
+    {
+      "id": "CF-TITLE",
+      "status": "pass",
+      "evidence": "create+rename \u00d7 absent/null/empty/numeric/array \u2192 400/10007"
+    },
+    {
+      "id": "CF-KV-BINARY",
+      "status": "pass",
+      "evidence": "invalid-UTF-8 round-trip over HTTP and byte-exact through live workerd"
+    },
+    {
+      "id": "CF-KV-MULTIPART",
+      "status": "pass",
+      "evidence": "value/metadata separated; metadata op agrees with listing; malformed \u2192 400 nothing stored; 1025-byte metadata \u2192 10007"
+    },
+    {
+      "id": "CF-KV-TIME",
+      "status": "pass",
+      "evidence": "native controlled-clock + workerd `expirationTtl=60` expires under real backend clock (`TestMiniflareWorkerdTTL`)"
+    },
+    {
+      "id": "CF-KV-PAGE",
+      "status": "pass (within documented quirk)",
+      "evidence": "prefix/order/no-value-leak/empty-cursor/truthful count/mutation-between-listings asserted; `limit`/`cursor` accepted-and-ignored is a stated quirk (no pagination trait in the generated model)"
+    },
+    {
+      "id": "CF-KV-COHERENCE",
+      "status": "pass (execute path)",
+      "evidence": "B-IR entry ops use `execute` \u2192 `Deps.Executor`. Default backend is `native-kv` (same Store collections). Miniflare backend + `TestCFKVCoherenceViaExecute` proves REST write\u2194Worker read and Worker write\u2194REST read on ONE namespace. Session Apply of the namespace id remains the profile\u2019s binding step."
+    },
+    {
+      "id": "CF-ACCOUNT",
+      "status": "pass",
+      "evidence": "two accounts, same titles/keys, no crossover; cross-account id \u2192 10013; title freed only in the deleting account"
+    },
+    {
+      "id": "CF-DELETE",
+      "status": "pass",
+      "evidence": "cascade at route level (10013) and store level (entry collection empty); explicit-id resurrection impossible (create generates ids)"
+    },
+    {
+      "id": "CF-WORKER-UPLOAD",
+      "status": "pass",
+      "evidence": "public `WorkerScriptUploadWorkerModule`/`List`/`Delete`/`Download` served via B-IR; OpenAPI `requestBody` `$ref` resolved so `body` is a payload member"
+    },
+    {
+      "id": "CF-CELLD-*",
+      "status": "pass (local)",
+      "evidence": "PIN v0.5.1 + digests; `CelldAvailable`/`CelldStart`; live KV/D1/R2/Queues fixture. Miniflare is not a substitute claim"
+    },
+    {
+      "id": "CF-OFFLINE",
+      "status": "pass",
+      "evidence": "remoteBindings refused; env scrub; `cf:false`; `offline.probe` tripwire; optional `OfflineNetNS`"
+    },
+    {
+      "id": "CF-ADMIN",
+      "status": "pass (control channel)",
+      "evidence": "wrong bearer \u2192 401; non-loopback rejected in code; closed action set answers unsupported to `eval`; public dummy credentials unchanged"
+    },
+    {
+      "id": "CF-REENTRANT",
+      "status": "pass",
+      "evidence": "`TestMiniflareReentrant`: Worker `fetch` \u2192 loopback \"mirror\" \u2192 same-session `kv.put` mid-dispatch; no deadlock"
+    },
+    {
+      "id": "CF-SNAPSHOT / CF-SNAPSHOT-REJECT",
+      "status": "pass",
+      "evidence": "`snapshot`/`restore` control actions; `TestMiniflareSnapshotRestore`"
+    },
+    {
+      "id": "CF-CRASH",
+      "status": "pass",
+      "evidence": "dead backend ClassUnavailable; `hang` + `Kill` mid-invocation \u2192 ClassUnavailable (`TestMiniflareCrashMidInvoke`)"
+    },
+    {
+      "id": "CF-CLOCK",
+      "status": "pass",
+      "evidence": "native half + workerd TTL half (`TestMiniflareWorkerdTTL`)"
+    },
+    {
+      "id": "CF-GENERATE",
+      "status": "pass",
+      "evidence": "`mirror support-matrix` regenerated once; `TestSupportMatrixMatchesDocs` + golden assert byte-stability"
+    },
+    {
+      "id": "CF-EVIDENCE",
+      "status": "pass",
+      "evidence": "`scripts/cloudflare-evidence.py` \u2192 `docs/cloudflare-evidence.json`; `make cloudflare-evidence`"
+    }
+  ]
+}

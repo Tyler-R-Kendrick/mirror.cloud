@@ -57,6 +57,9 @@ type MiniflareStartSpec struct {
 	// ExtraEnv, if any, is appended AFTER the scrub (caller's choice, never
 	// inherited implicitly).
 	ExtraEnv []string
+	// OfflineNetNS runs the helper under `unshare -n` with loopback only
+	// (packet-level isolation). Requires CAP_SYS_ADMIN / unshare permission.
+	OfflineNetNS bool
 }
 
 // scrubEnv builds the helper's environment from scratch: PATH (node resolves
@@ -130,7 +133,18 @@ func MiniflareStart(ctx context.Context, spec MiniflareStartSpec) (*MiniflareSes
 	// would SIGKILL the child the moment readyCtx is cancelled (i.e. the
 	// instant Start returns). Lifecycle belongs to Close; readiness is only
 	// a bounded wait on the ready line below.
-	cmd := exec.Command(spec.NodeBin, "session.mjs")
+	var cmd *exec.Cmd
+	if spec.OfflineNetNS {
+		// Empty network namespace + loopback only: packet-level offline.
+		nodeBin := spec.NodeBin
+		if abs, err := exec.LookPath(nodeBin); err == nil {
+			nodeBin = abs
+		}
+		script := fmt.Sprintf("ip link set lo up 2>/dev/null || true; cd %q && exec %q session.mjs", spec.HelperDir, nodeBin)
+		cmd = exec.Command("unshare", "-n", "--", "bash", "-c", script)
+	} else {
+		cmd = exec.Command(spec.NodeBin, "session.mjs")
+	}
 	cmd.Dir = spec.HelperDir
 	cmd.Env = scrubEnv(append([]string{"MIRROR_SESSION_TOKEN=" + token}, spec.ExtraEnv...))
 	// New process group: Close can signal the whole tree (node -> workerd)
@@ -328,7 +342,7 @@ func (s *MiniflareSession) roundTrip(ctx context.Context, method, path string, p
 // refused before it ran).
 func controlClass(code string, status int) Class {
 	switch code {
-	case "unknown_action":
+	case "unknown_action", "unsupported":
 		return ClassUnsupported
 	case "namespace_absent":
 		return ClassAbsent
@@ -341,4 +355,32 @@ func controlClass(code string, status int) Class {
 		return ClassUnavailable
 	}
 	return ClassValidation
+}
+
+// SnapshotKV exports every applied KV namespace as portable JSON
+// {kv: {ns: {key: base64}}, generation}.
+// Kill SIGKILLs the helper process group immediately. Used by CF-CRASH tests
+// to prove mid-invocation failure maps to ClassUnavailable; not for polite Close.
+func (s *MiniflareSession) Kill() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cmd == nil || s.cmd.Process == nil {
+		return
+	}
+	s.closed = true
+	_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+	s.waitErr = s.cmd.Wait()
+}
+
+func (s *MiniflareSession) SnapshotKV(ctx context.Context) (map[string]any, error) {
+	return s.Call(ctx, "snapshot", map[string]any{})
+}
+
+// RestoreKV loads a prior SnapshotKV payload into the live namespaces.
+func (s *MiniflareSession) RestoreKV(ctx context.Context, snap map[string]any) (map[string]any, error) {
+	kv, _ := snap["kv"].(map[string]any)
+	if kv == nil {
+		kv = snap
+	}
+	return s.Call(ctx, "restore", map[string]any{"kv": kv})
 }

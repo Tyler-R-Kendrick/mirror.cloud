@@ -1,0 +1,23 @@
+{
+  "name": "mirror-celld-fixture",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01",
+  "kv_namespaces": [
+    { "binding": "DATA", "id": "local-data" }
+  ],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "local-db", "database_id": "local-db" }
+  ],
+  "r2_buckets": [
+    { "binding": "BUCKET", "bucket_name": "local-bucket" }
+  ],
+  "queues": {
+    "producers": [{ "binding": "Q", "queue": "local-q" }]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Counter"] }
+  ]
+}

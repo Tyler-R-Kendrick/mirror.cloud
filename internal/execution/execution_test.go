@@ -123,7 +123,7 @@ func driveOne(t *testing.T, b *fakeBackend, putAction, getAction, resource strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := execution.Ref{Environment: "env1", Account: "acct1", Kind: resource, ID: "res1", Generation: 1}
+	ref := execution.Ref{Environment: "env1", Account: "acct1", Region: "us-east-1", Kind: resource, ID: "res1", Generation: 1}
 	ctx := context.Background()
 
 	// Round-trip: put then get, value preserved exactly.
@@ -167,7 +167,7 @@ func driveOne(t *testing.T, b *fakeBackend, putAction, getAction, resource strin
 
 	// Wrong resource kind -> validation (kind mismatch refused before Call).
 	_, err = reg.Dispatch(ctx, execution.Request{
-		Action: putAction, Ref: execution.Ref{Environment: "env1", Account: "acct1", Kind: "other-kind", ID: "x"},
+		Action: putAction, Ref: execution.Ref{Environment: "env1", Account: "acct1", Region: "us-east-1", Kind: "other-kind", ID: "x"},
 		Args: map[string]any{"key": "k", "value": []byte("v")},
 	})
 	assertClass(t, err, execution.ClassValidation)

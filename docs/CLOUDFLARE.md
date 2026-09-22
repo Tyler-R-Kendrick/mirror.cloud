@@ -10,7 +10,7 @@ what has been verified, and how to run each path.
 
 | | `native` (default) | `miniflare` (optional) |
 |---|---|---|
-| What runs your API requests | mirror's B-IR bundle on the native store | same bundle, same store for lifecycle/metadata |
+| What runs your API requests | mirror's B-IR bundle; KV entry bytes via `execute`→`native-kv` Store | same bundle; KV entry bytes via `execute`→Miniflare when that Executor is selected |
 | What runs your application code | nothing — there is no application runtime | Miniflare → real `workerd` in a supervised helper process |
 | Extra dependencies | none (single Go binary) | Node ≥ 22 + `npm ci` in `tools/cloudflare-runtime` |
 | Internet required at runtime | no | no (see Offline) |
@@ -112,15 +112,13 @@ process spawns.
 - **Not the backend's clock.** Expiration, alarms and timers inside
   workerd run on the backend's real clock. Advancing mirror's controlled
   clock must not and does not report success for them.
-- **Bounded surface.** The verified control set is
-  `kv.get/kv.put/kv.delete/kv.list` and `worker.dispatch`, plus apply,
-  quiesce, close. D1, R2, Queues, Workflows and Durable Objects are not
-  claimed by this profile yet; asking for them gets an explicit
-  unsupported/invalid answer, never a silent success.
-- **Snapshot scope.** Re-apply preserves live backend state; a portable
-  quiescent snapshot/restore across environments is not claimed by this
-  document. Do not copy a live helper's working directory as if it were a
-  supported export.
+- **Bounded Miniflare control set.** Verified: `kv.*`, `worker.dispatch`,
+  `snapshot`/`restore`, `offline.probe`, apply/quiesce/close. D1/R2/Queues
+  run under the **celld** profile (`make test-cloudflare-celld`), not by
+  pretending Miniflare is celld.
+- **Snapshot scope.** Portable KV snapshot/restore is supported via the
+  control protocol (`SnapshotKV`/`RestoreKV`). Re-apply also preserves live
+  state. Do not copy a live helper's working directory as a substitute.
 
 ### Offline runtime
 

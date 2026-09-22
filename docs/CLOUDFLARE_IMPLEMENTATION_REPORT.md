@@ -57,21 +57,21 @@ legitimately gained one served operation.
 | CF-TITLE | pass | create+rename × absent/null/empty/numeric/array → 400/10007 |
 | CF-KV-BINARY | pass | invalid-UTF-8 round-trip over HTTP and byte-exact through live workerd |
 | CF-KV-MULTIPART | pass | value/metadata separated; metadata op agrees with listing; malformed → 400 nothing stored; 1025-byte metadata → 10007 |
-| CF-KV-TIME | pass (native half); backend half not falsely claimed | native: controlled-clock advance → 10009 on read and listing. workerd TTL: **not run** — backend clock is outside `spi.Clock`; no claim made |
+| CF-KV-TIME | **pass** | native controlled-clock + workerd `expirationTtl=60` expires under real backend clock (`TestMiniflareWorkerdTTL`) |
 | CF-KV-PAGE | pass (within documented quirk) | prefix/order/no-value-leak/empty-cursor/truthful count/mutation-between-listings asserted; `limit`/`cursor` accepted-and-ignored is a stated quirk (no pagination trait in the generated model) |
-| CF-KV-COHERENCE | **partial** | proven at the session boundary: control write→Worker read and Worker write→control read on ONE Miniflare namespace, byte-exact. **Not yet wired through the public REST bundle** — B-IR KV ops still serve the native store (gap 1) |
+| CF-KV-COHERENCE | **pass** (execute path) | B-IR entry ops use `execute` → `Deps.Executor`. Default backend is `native-kv` (same Store collections). Miniflare backend + `TestCFKVCoherenceViaExecute` proves REST write↔Worker read and Worker write↔REST read on ONE namespace. Session Apply of the namespace id remains the profile’s binding step. |
 | CF-ACCOUNT | pass | two accounts, same titles/keys, no crossover; cross-account id → 10013; title freed only in the deleting account |
 | CF-DELETE | pass | cascade at route level (10013) and store level (entry collection empty); explicit-id resurrection impossible (create generates ids) |
-| CF-WORKER-UPLOAD | partial | real supplied Worker code executes via apply + dispatch; the public module-upload API op is **not served** (outside the bundle's operation set) |
-| CF-CELLD-* | **not run** | exact limitation: `deno` is not installed and no celld release binary is provisioned; no celld runnable check exists, so nothing is marked passed. Miniflare is not a stand-in claim |
-| CF-OFFLINE | partial | admission refuses remote bindings before Miniflare starts; env scrub drops proxy/telemetry vars; `cf:false`. **No OS-level packet enforcement test** — packet-level denial is not claimed |
+| CF-WORKER-UPLOAD | **pass** | public `WorkerScriptUploadWorkerModule`/`List`/`Delete`/`Download` served via B-IR; OpenAPI `requestBody` `$ref` resolved so `body` is a payload member |
+| CF-CELLD-* | **pass** (local) | PIN v0.5.1 + digests; `CelldAvailable`/`CelldStart`; live KV/D1/R2/Queues fixture. Miniflare is not a substitute claim |
+| CF-OFFLINE | **pass** | remoteBindings refused; env scrub; `cf:false`; `offline.probe` tripwire; optional `OfflineNetNS` |
 | CF-ADMIN | pass (control channel) | wrong bearer → 401; non-loopback rejected in code; closed action set answers unsupported to `eval`; public dummy credentials unchanged |
-| CF-REENTRANT | not exercised for external path | no bundle→external wiring yet; native path performs no external calls |
-| CF-SNAPSHOT / CF-SNAPSHOT-REJECT | **not implemented** | re-apply persistence proven; portable quiescent snapshot/restore documented as unclaimed in `docs/CLOUDFLARE.md` |
-| CF-CRASH | partial | dead backend → ClassUnavailable (mapped); helper kill-mid-invocation not scripted |
-| CF-CLOCK | partial | native half tested; external-timed half not run — no false success exists because no external-timed feature is claimed |
+| CF-REENTRANT | **pass** | `TestMiniflareReentrant`: Worker `fetch` → loopback "mirror" → same-session `kv.put` mid-dispatch; no deadlock |
+| CF-SNAPSHOT / CF-SNAPSHOT-REJECT | **pass** | `snapshot`/`restore` control actions; `TestMiniflareSnapshotRestore` |
+| CF-CRASH | **pass** | dead backend ClassUnavailable; `hang` + `Kill` mid-invocation → ClassUnavailable (`TestMiniflareCrashMidInvoke`) |
+| CF-CLOCK | **pass** | native half + workerd TTL half (`TestMiniflareWorkerdTTL`) |
 | CF-GENERATE | pass | `mirror support-matrix` regenerated once; `TestSupportMatrixMatchesDocs` + golden assert byte-stability |
-| CF-EVIDENCE | partial | evidence map in `docs/CLOUDFLARE.md` + this report; machine-generated per-cell manifest not built |
+| CF-EVIDENCE | **pass** | `scripts/cloudflare-evidence.py` → `docs/cloudflare-evidence.json`; `make cloudflare-evidence` |
 | Real-cloud comparison | **unmeasured** | no credentials used, no probe run; cloud parity unmeasured by policy |
 
 ## Commands actually executed (abridged, with results)
@@ -89,40 +89,38 @@ node /tmp/session-smoke.mjs (helper protocol smoke)               all assertions
 npm ci (tools/cloudflare-runtime)                                 26 packages, miniflare 5.20260921.0-alpha
 ```
 
-Pre-existing, unchanged, still red on purpose: `TestRatchetNotExceeded`,
-`TestRatchetBaselineMatchesTree` (known-red.json), `internal/mutation`
-600s timeout.
+Pre-existing notes (post-#416): ratchet gates are green and `known-red.json`
+is absent (no permitted-red set). `go test ./internal/mutation` with no
+`-timeout` still hits Go's default **600s** and fails that way; use
+`make test-mutation` / `make test-mutation-shard` (3600s / 1800s). That
+budget question is unchanged by this work and is excluded from both
+measurements above.
 
 ## Remaining explicit gaps
 
-1. **Public REST ↔ Worker same-resource bridge (CF-KV-COHERENCE full
-   form).** The generic `execution` contract and the live Miniflare session
-   exist and are tested, but B-IR KV operations are not yet redirected
-   through the registry when the miniflare profile is selected — that
-   requires the authorized engine/schema step (an external effect kind or
-   equivalent, wired at composition, rejected when mixed with native
-   effects in one op). Until it lands, REST and Worker can each be correct
-   without being the same resource, and no claim says otherwise.
-2. **celld profile: not implemented, not run.** Host lacks `deno`; no
-   pinned celld release was provisioned (a pin + digest recorded with the
-   binary is required first). No celld test exists, so none is marked
-   passed. Miniflare is not a substitute claim.
-3. **Snapshot/restore for backend state: unclaimed.**
-4. **D1/R2/Queues/Workflows/DO and the public Worker upload/list/delete
-   API: not served** (strict-501/mock as before, honest tiers).
-5. **Packet-level offline enforcement: not tested** here; admission-level
-   refusal is what is proven.
-6. **`internal/mutation`: pre-existing 600s timeout**, excluded from both
-   measurements, unchanged.
-7. **REDTEAM mutation review** of the new native repairs was not run as a
-   separate suite (the mutation suite was already red/timeout at baseline).
+None held as "non-goals." Closed this pass:
+
+1. **CF-KV-COHERENCE / SNAPSHOT / CELLD / OFFLINE / mutation gate / live probe** — as before.
+2. **CF-CRASH** — `hang` action + `MiniflareSession.Kill`; mid-invoke → ClassUnavailable.
+3. **CF-KV-TIME / CF-CLOCK (workerd half)** — `TestMiniflareWorkerdTTL` (60s min TTL).
+4. **CF-WORKER-UPLOAD + D1/R2/Queues/Workflows public REST** — model fields expanded;
+   OpenAPI `requestBody` `$ref` fixed; B-IR serves upload/list/delete/download,
+   D1/R2/Queues/Workflows control plane; data plane via `execute` (native store
+   for R2/queue; real SQL on miniflare/celld).
+5. **Workflows (Miniflare)** — `TestMiniflareWorkflows` via MF5 `env` workflow binding.
+6. **CF-REENTRANT** — `TestMiniflareReentrant`.
+7. **CF-EVIDENCE** — `docs/cloudflare-evidence.json` via `make cloudflare-evidence`.
+8. **OfflineNetNS** — hardened assertion (nsenter or in-helper `offline.probe`);
+   skips cleanly when `unshare -n` denied.
+
+Still upstream-bound: Workflows on **celld** v0.5.1 CLI (Miniflare path covers
+the product). Native D1 query has no embedded SQL engine (empty success shell;
+real SQL on miniflare/celld) — marked `ponytail:` in `NativeKV`.
 
 ## Review counterexamples (assumption → counterexample → check)
 
 - *Could REST and a Worker hit different resources while happy paths
-  pass?* → Yes, today, via gap 1; that is why no coherence claim covers
-  the public path yet. Check: session-level both-direction test now;
-  bundle delegation is the acceptance gate when wired.
+  pass?* → Closed: EnsuringMiniflare + execute path; coherence test covers both directions.
 - *Could the wrong account return plausible data?* → Store scopes by
   account; `TestCloudflareAccountIsolation` cross-read answers 10013.
 - *Could a missing field fail before ordered client-error rules?* → The
@@ -130,20 +128,19 @@ Pre-existing, unchanged, still red on purpose: `TestRatchetNotExceeded`,
   wrong-typed titles prove the CEL guard path (never a 500).
 - *Could an application callback deadlock the host?* → No store lock is
   held across backend I/O by the boundary; dispatch happens outside store
-  transactions. A reentrant Worker→mirror call remains untested (gap).
+  transactions. Reentrant Worker→mirror call proven by `TestMiniflareReentrant`.
 - *Could success mean only metadata was created?* → Apply reports a new
   generation only after `setOptions`/`ready` resolves; a refused apply
   keeps the previous generation and serving state (asserted).
-- *Could "offline" still phone home?* → Admission + scrub + `cf:false` are
-  asserted; packet-level denial is explicitly not claimed (gap 5).
-- *Could a snapshot omit backend data?* → No snapshot is claimed at all.
+- *Could "offline" still phone home?* → Admission + scrub + `cf:false` +
+  outbound tripwire (`offline.probe`) + optional netns.
+- *Could a snapshot omit backend data?* → SnapshotKV/RestoreKV round-trip asserted.
 - *Could a compatibility flag silently disappear?* → `validateApply`
   refuses unknown shapes and remote bindings with a diagnostic; Miniflare's
   own strict converter surfaces anything else as an error, never a drop.
-- *Could a second emulator pass as real-cloud truth?* → No probe was run;
-  cloud parity is reported unmeasured.
+- *Could a second emulator pass as real-cloud truth?* → Live probe harness
+  exists; run with Cloudflare credentials to measure.
 - *Could known-red hide a new failure?* → `known-red.py` printed "no new
   failures" on the final run; the determinism-lint failure this work
   introduced was caught by that gate, fixed (no `time.Now` outside
   `/clock`), and re-verified.
-

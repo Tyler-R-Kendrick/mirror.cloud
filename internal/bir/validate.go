@@ -350,6 +350,7 @@ func Validate(s *Service, svc *model.Service) error {
 				compilerFor(append(append([]string{}, scope...), "item")...), &problems)
 		}
 		checkSpreadMember(s, svc, modelOp, where, op.Effects, &problems)
+		checkExecuteNativeMix(s, where, op, &problems)
 
 		if l := op.List; l != nil {
 			if _, ok := s.Resources[l.Resource]; !ok {
@@ -1022,6 +1023,22 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 			compile(where+".primitive.args."+k, e.Args[k])
 		}
 	}
+	if e := eff.Execute; e != nil {
+		set++
+		if e.Action == "" {
+			*problems = append(*problems, fmt.Errorf("%s: %s.execute: no action", s.ServiceID, where))
+		}
+		compile(where+".execute.when", e.When)
+		for _, k := range sortedKeys(e.Args) {
+			compile(where+".execute.args."+k, e.Args[k])
+		}
+		if e.AbsentError != "" {
+			if _, ok := s.Errors[e.AbsentError]; !ok {
+				*problems = append(*problems, fmt.Errorf("%s: %s.execute.absent_error: unknown error %q",
+					s.ServiceID, where, e.AbsentError))
+			}
+		}
+	}
 	if set == 0 {
 		*problems = append(*problems, fmt.Errorf("%s: %s: effect sets no action", s.ServiceID, where))
 	}
@@ -1180,4 +1197,28 @@ func reservedMember(name string) bool {
 		}
 	}
 	return false
+}
+
+// checkExecuteNativeMix refuses an operation that claims both an external
+// execute effect and a native store mutation or list in one atomic step.
+func checkExecuteNativeMix(s *Service, where string, op Operation, problems *Errors) {
+	hasExec, hasNative := false, false
+	for _, eff := range op.Effects {
+		if eff.Execute != nil {
+			hasExec = true
+		}
+		if eff.Create != nil || eff.Put != nil || eff.Patch != nil || eff.Delete != nil ||
+			eff.Counter != nil || eff.Dedup != nil || eff.SendEvent != nil ||
+			eff.Emit != nil || eff.Generate != nil || eff.Primitive != nil {
+			hasNative = true
+		}
+	}
+	if op.List != nil {
+		hasNative = true
+	}
+	if hasExec && hasNative {
+		*problems = append(*problems, fmt.Errorf(
+			"%s: %s: execute may not mix with native store mutations or list in one operation",
+			s.ServiceID, where))
+	}
 }

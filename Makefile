@@ -2,7 +2,7 @@ BIN := bin
 GO  := go
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e test-cloudflare-miniflare test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
+.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
 
 all: build
 
@@ -56,8 +56,15 @@ test-cicd-e2e:
 # the tag, an unprovisioned environment FAILS (the test fatals, it never
 # skips) -- this target must not report success when the backend is absent.
 # Provision once: (cd tools/cloudflare-runtime && npm ci)
+cloudflare-evidence:
+	python3 scripts/cloudflare-evidence.py
+
 test-cloudflare-miniflare:
 	$(GO) test -tags miniflare ./internal/execution/ -run 'TestMiniflare' -count=1 -v
+	$(GO) test -tags miniflare ./test/behavior/cloudflare/ -run 'TestCFKVCoherenceViaExecute' -count=1 -v
+
+test-cloudflare-celld:
+	$(GO) test -tags celld ./internal/execution/ -run 'TestCelld' -count=1 -v
 
 test-fuzz-seeds:
 	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./test/behavior/aws ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql -count=1
@@ -202,7 +209,7 @@ test-fuzz:
 # seen. Lower it when the suite gets cheaper, not to make a slow run fail
 # sooner.
 test-mutation:
-	$(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 3600s
+	MIRROR_MUTATION_FULL=1 $(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 3600s
 
 # One slice of the mutation suite. CI runs these as a matrix because the cost
 # is irreducible per mutant -- each needs its own compile of the mutated

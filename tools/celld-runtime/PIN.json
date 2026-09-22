@@ -1,0 +1,22 @@
+{
+  "name": "celld",
+  "version": "0.5.1",
+  "tag": "v0.5.1",
+  "upstream": "https://github.com/denoland/celld/releases/tag/v0.5.1",
+  "artifacts": {
+    "linux-aarch64": {
+      "asset": "celld-aarch64-unknown-linux-gnu.gz",
+      "url": "https://github.com/denoland/celld/releases/download/v0.5.1/celld-aarch64-unknown-linux-gnu.gz",
+      "gzip_sha256": "375c7cd9446d61e6ee2c263d6be792650153ffd7cd562b2c4b6b644776b4494e",
+      "bin_path": "bin/celld",
+      "bin_sha256": "2a2c853c803f694c104f6b32968bf1601f7dab006bb52eebcca14ce9726c7224"
+    },
+    "linux-amd64": {
+      "asset": "celld-x86_64-unknown-linux-gnu.gz",
+      "url": "https://github.com/denoland/celld/releases/download/v0.5.1/celld-x86_64-unknown-linux-gnu.gz",
+      "gzip_sha256": "b9f205da7365ef4a8b2e16f1f48065a8ddd5cda366edc258fea12a097d8ab4b7",
+      "bin_path": "bin/celld",
+      "bin_sha256": "e3e2a5d645e3484923fa412a8cbe5bb282f58595da304d71456fc4318efd8c37"
+    }
+  }
+}

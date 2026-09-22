@@ -117,6 +117,7 @@ type Descriptor struct {
 type Ref struct {
 	Environment string
 	Account     string
+	Region      string
 	Kind        string
 	ID          string
 	Generation  uint64
@@ -124,7 +125,7 @@ type Ref struct {
 
 // String is a compact identity for journals and errors -- never a dial target.
 func (r Ref) String() string {
-	return r.Environment + "/" + r.Account + "/" + r.Kind + "/" + r.ID + "@" + fmt.Sprint(r.Generation)
+	return r.Environment + "/" + r.Account + "/" + r.Region + "/" + r.Kind + "/" + r.ID + "@" + fmt.Sprint(r.Generation)
 }
 
 // Request is one validated invocation.
@@ -270,7 +271,7 @@ func (r *Registry) Covers(declared map[string]int) error {
 // is missing its trusted scope. The check is here, once, rather than in each
 // backend: a kind mixup is a mirror bug, not a provider behavior.
 func CheckRef(d Descriptor, ref Ref) *Failure {
-	if ref.Environment == "" || ref.Account == "" || ref.ID == "" {
+	if ref.Environment == "" || ref.Account == "" || ref.Region == "" || ref.ID == "" {
 		return &Failure{Class: ClassValidation, Action: d.Name, Detail: "reference missing trusted scope"}
 	}
 	if ref.Kind != d.Resource {
@@ -316,9 +317,13 @@ func typeMatches(want string, v any) bool {
 		_, ok := v.([]byte)
 		return ok
 	case "int":
-		switch v.(type) {
+		switch n := v.(type) {
 		case int, int32, int64:
 			return true
+		case float64:
+			return n == float64(int64(n))
+		case float32:
+			return n == float32(int32(n))
 		}
 		return false
 	case "bool":

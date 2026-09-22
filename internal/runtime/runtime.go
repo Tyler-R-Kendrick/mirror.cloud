@@ -13,12 +13,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/blobs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/execution"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/journal"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
@@ -38,6 +40,8 @@ type Runtime struct {
 	Deps spi.Deps
 	Reg  registry.Registry
 	HTTP *edge.Server
+	// stopExtra closes optional execution backends (e.g. Miniflare session).
+	stopExtra func() error
 }
 
 // Aliases maps CLI names onto canonical service IDs.
@@ -480,6 +484,7 @@ func Boot(cfg config.Config) (*Runtime, error) {
 	for i := range bundle.Services {
 		bundle.Services[i].Operations = append([]model.Operation(nil), base.Services[i].Operations...)
 	}
+	var stopExtra func() error
 	deps := spi.Deps{
 		Store:                     store.NewMemory(cfg.LockSHA),
 		Blobs:                     blobs.NewMemory(),
@@ -492,6 +497,38 @@ func Boot(cfg config.Config) (*Runtime, error) {
 		SQSEndpointStrategy:       cfg.SQSEndpointStrategy,
 	}
 	deps.Authorizer = iam.NewAuthorizer(deps.Store)
+	kvBackend := &execution.NativeKV{Store: deps.Store, Clock: clk}
+	kvReg, err := execution.NewRegistry(kvBackend)
+	if err != nil {
+		return nil, fmt.Errorf("execution registry: %w", err)
+	}
+	deps.Executor = execution.RegistryExecutor{Reg: kvReg}
+	if strings.EqualFold(os.Getenv("MIRROR_CLOUDFLARE_EXECUTOR"), "miniflare") {
+		helper := filepath.Join("tools", "cloudflare-runtime")
+		if root, err := os.Getwd(); err == nil {
+			helper = filepath.Join(root, helper)
+		}
+		spec := execution.MiniflareStartSpec{
+			NodeBin: "node", HelperDir: helper, ReadyDeadline: 45 * time.Second,
+		}
+		if err := execution.MiniflareAvailable(spec); err != nil {
+			return nil, fmt.Errorf("miniflare executor: %w", err)
+		}
+		sess, err := execution.MiniflareStart(context.Background(), spec)
+		if err != nil {
+			return nil, fmt.Errorf("miniflare executor start: %w", err)
+		}
+		mfReg, err := execution.NewRegistry(&execution.MiniflareBackend{Session: sess})
+		if err != nil {
+			_ = sess.Close()
+			return nil, err
+		}
+		deps.Executor = &execution.EnsuringMiniflare{
+			Session: sess,
+			Inner:   execution.RegistryExecutor{Reg: mfReg},
+		}
+		// Stash closer on a temporary; Boot assigns after Runtime is built.
+	}
 	if cfg.PersistDir != "" {
 		if err := os.MkdirAll(cfg.PersistDir, 0o755); err != nil {
 			return nil, err
@@ -518,7 +555,7 @@ func Boot(cfg config.Config) (*Runtime, error) {
 			}
 		}
 	}
-	return &Runtime{Cfg: cfg, Deps: deps, Reg: reg, HTTP: edge.New(cfg, deps, reg, Version)}, nil
+	return &Runtime{Cfg: cfg, Deps: deps, Reg: reg, HTTP: edge.New(cfg, deps, reg, Version), stopExtra: stopExtra}, nil
 }
 
 // Handler is the HTTP handler.
@@ -526,7 +563,11 @@ func (rt *Runtime) Handler() http.Handler { return rt.HTTP }
 
 // Close stops behavior packs before closing shared state.
 func (rt *Runtime) Close() error {
-	return errors.Join(rt.Reg.Close(), rt.Deps.Store.Close())
+	var extra error
+	if rt.stopExtra != nil {
+		extra = rt.stopExtra()
+	}
+	return errors.Join(extra, rt.Reg.Close(), rt.Deps.Store.Close())
 }
 
 // SavePersist writes process state to cfg.PersistDir when set.

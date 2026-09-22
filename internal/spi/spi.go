@@ -112,6 +112,16 @@ type Deps struct {
 	Compute                   ComputeProvider
 	S3AllowNonstandardRegions bool
 	SQSEndpointStrategy       string
+	// Executor runs B-IR execute effects (external authoritative backends).
+	// Nil means those effects answer unavailable.
+	Executor                  Executor
+}
+
+// Executor dispatches one named action with evaluated arguments. Implemented
+// by internal/execution.Registry adapters; kept here so spi stays import-free
+// of the execution package.
+type Executor interface {
+	Execute(ctx context.Context, account, region, action string, args map[string]any) (map[string]any, error)
 }
 
 // Store is account+region namespaced structured state.

@@ -1455,3 +1455,15 @@ The recording is re-cut where the pack answered outside its models:
 - **Model shapes.** Event-source mappings, URL configs, layers and the per-function configurations answer the shapes their models declare, not the request echoed with FunctionName.
 - **Layer versions.** GetLayerVersion answers the version it names, rather than the latest.
 - **Removals.** Untag removes only the named keys.
+
+### GCS: buckets moved; the object plane is Go, and the codec learned labels
+
+GCS buckets are bundle YAML: insert, get, list, patch and delete. A bucket that still holds an object cannot be deleted. The object plane stays Go: multipart and resumable uploads, ranged media reads, and generation preconditions over blob-stored bodies. It reads buckets from the bundle's collection. Resumable sessions move from the pack's struct to a package-level map, marked `ponytail:`, because a native is constructed for each call.
+
+The recording matched the pack on every step with nothing re-cut, because the bundle's buckets answer exactly what the pack's did.
+
+Two things outside the pack moved:
+- **Path labels in gcprest.** The codec never bound path parameters, and only the pack's own path parsing knew which bucket a request named. It now matches the model's URIs below `/storage/v1`, as restJson1 does.
+- **The `project` parameter.** `storage.buckets.insert` and `list` require `project`, which every real client sends. The tests now send it too.
+
+About eighty further operations were one suffix-guessed key-value echo. They are mock tier, as RDS's and SSM's were. This contradicted SUPPORT's own claim that extra GCS operations were named control-plane records.

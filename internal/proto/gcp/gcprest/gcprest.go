@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/httpuri"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -72,6 +73,22 @@ func (Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*
 	}
 	for k, vs := range r.URL.Query() {
 		in[k] = vs[0]
+	}
+	// A path parameter arrives in the path: GET /storage/v1/b/{bucket} names
+	// the bucket nowhere else. The model's URIs are relative to the service
+	// root, so the root is dropped before matching.
+	if op.HTTP.URI != "" {
+		path := r.URL.EscapedPath()
+		if i := strings.Index(path, "/storage/v1/"); i >= 0 {
+			path = path[i+len("/storage/v1"):]
+		}
+		if bound, ok := httpuri.Parse(op.HTTP.URI).Match(path, r.URL.Query()); ok {
+			for k, v := range bound {
+				if _, has := in[k]; !has {
+					in[k] = v
+				}
+			}
+		}
 	}
 	in["_path"] = r.URL.Path
 	req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}

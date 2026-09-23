@@ -1,0 +1,112 @@
+schema: bir/1
+service: gcp.storage
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Buckets are records; objects are Go, in internal/services/gcp/gcs:
+# their bodies live in the blob store, uploads may be multipart or resumable,
+# reads may be ranged, and writes honour generation preconditions. The object
+# natives read buckets from this bundle's collection in this layout.
+#
+# The pack also answered some eighty further operations from one
+# suffix-guessed key-value store that echoed the request back. Those are mock
+# tier now rather than emulate: see docs/CRITIQUE.md.
+provenance: authored
+
+native:
+  - storage.objects.insert
+  - storage.objects.get
+  - storage.objects.list
+  - storage.objects.delete
+  - storage.objects.copy
+  - storage.objects.rewrite
+  - storage.objects.compose
+  - storage.objects.patch
+
+resources:
+  # Objects are written by the natives; the bundle only reads them, to refuse
+  # deleting a bucket that still holds one.
+  object:
+    collection: objects
+    id: { derive: "string(input.bucket) + '/' + string(input.object)" }
+    record: {}
+  bucket:
+    collection: buckets
+    id: { input_members: [bucket] }
+    record: {}
+
+errors:
+  Invalid: { code: invalid, http: 400, fault: client, message: bucket name required }
+  Conflict: { code: conflict, http: 409, fault: client, message: The requested bucket name is not available. }
+  NotEmpty: { code: conflict, http: 409, fault: client, message: bucket not empty }
+  NotFound: { code: notFound, http: 404, fault: client }
+
+operations:
+  storage.buckets.insert:
+    let:
+      name: "'name' in input ? string(input.name) : ''"
+    reads: { b: { resource: bucket, key: "'name' in input ? string(input.name) : ''" } }
+    require:
+      - { cond: "name != ''", error: Invalid }
+      - { cond: "!b_found", error: Conflict }
+    effects:
+      - put:
+          resource: bucket
+          key: name
+          record:
+            name: name
+            metageneration: "'1'"
+            timeCreated: &now "string(now)"
+            updated: *now
+            location: "'US'"
+            storageClass: "'STANDARD'"
+    output: &bucketOut
+      kind: "'storage#bucket'"
+      id: rec.name
+      name: rec.name
+      selfLink: "endpoint + '/storage/v1/b/' + rec.name"
+      metageneration: rec.metageneration
+      timeCreated: rec.timeCreated
+      updated: rec.updated
+      location: rec.location
+      storageClass: rec.storageClass
+
+  storage.buckets.get:
+    reads: { rec: { resource: bucket } }
+    require:
+      - { cond: rec_found, error: NotFound, message_expr: "'bucket ' + string(input.bucket) + ' not found'" }
+    output: *bucketOut
+
+  storage.buckets.list:
+    list: { resource: bucket, member: items }
+    output:
+      kind: "'storage#buckets'"
+      items: >-
+        items.map(b, {'kind': 'storage#bucket', 'id': b.name, 'name': b.name,
+        'selfLink': endpoint + '/storage/v1/b/' + b.name, 'metageneration': b.metageneration,
+        'timeCreated': b.timeCreated, 'updated': b.updated, 'location': b.location,
+        'storageClass': b.storageClass})
+
+  storage.buckets.patch:
+    reads: { b: { resource: bucket } }
+    require:
+      - { cond: b_found, error: NotFound, message_expr: "'bucket ' + string(input.bucket) + ' not found'" }
+    effects:
+      - patch:
+          resource: bucket
+          record:
+            location: "'location' in input && string(input.location) != '' ? input.location : b.location"
+            storageClass: "'storageClass' in input && string(input.storageClass) != '' ? input.storageClass : b.storageClass"
+            metageneration: "string(int(b.metageneration) + 1)"
+            updated: *now
+    output: *bucketOut
+
+  # A bucket with objects in it cannot be deleted.
+  storage.buckets.delete:
+    reads: { b: { resource: bucket } }
+    select: { binding: objects, resource: object, filter: item.bucket == input.bucket }
+    require:
+      - { cond: b_found, error: NotFound, message_expr: "'bucket ' + string(input.bucket) + ' not found'" }
+      - { cond: size(objects) == 0, error: NotEmpty }
+    effects:
+      - delete: { resource: bucket }
+    output: {}

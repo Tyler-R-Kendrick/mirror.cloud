@@ -33,7 +33,7 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs" // natives the GCS bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -7821,7 +7821,7 @@ func TestHostingerConcurrentDNSPutGet(t *testing.T) {
 }
 
 func TestGCSConcurrentDuplicateBuckets(t *testing.T) {
-	p := gcs.New(spitest.Deps(t))
+	p := bundled.Handler("gcp.storage", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7830,7 +7830,7 @@ func TestGCSConcurrentDuplicateBuckets(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "race"}})
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "race"}})
 			errCh <- err
 		}()
 	}
@@ -7853,10 +7853,10 @@ func TestGCSConcurrentDuplicateBuckets(t *testing.T) {
 }
 
 func TestGCSConcurrentObjectPutGet(t *testing.T) {
-	p := gcs.New(spitest.Deps(t))
+	p := bundled.Handler("gcp.storage", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "race"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "race"}}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup

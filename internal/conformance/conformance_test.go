@@ -111,7 +111,7 @@ func requestFor(svc *model.Service, op *model.Operation) *http.Request {
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		return r
 	case model.ProtoGCPRESTSON:
-		return httptest.NewRequest(http.MethodGet, "/storage/v1/b", nil)
+		return httptest.NewRequest(http.MethodGet, "/storage/v1/b?project=p", nil)
 	default:
 		// Build the request from the operation's own binding when it has one.
 		// The fixed `GET /bucket` below predates services whose catalog entry

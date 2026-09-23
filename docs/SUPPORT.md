@@ -164,7 +164,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `cloudflare.api` | `restJson1` | 40 | 4 |
 | `digitalocean.v2` | `restJson1` | 8 | 32 |
 | `fly.machines` | `restJson1` | 8 | 90 |
-| `gcp.storage` | `gcpRestJson` | 87 | 0 |
+| `gcp.storage` | `gcpRestJson` | 13 | 74 |
 | `hetzner.v1` | `restJson1` | 8 | 181 |
 | `hostinger.api` | `restJson1` | 6 | 371 |
 | `railway.graphql` | `graphql` | 7 | 0 |
@@ -264,7 +264,7 @@ API Gateway is REST + Lambda AWS_PROXY; invoke at `/restapis/{id}/{stage}/_user_
 CloudWatch metrics store PutMetricData datapoints in memory; GetMetricStatistics is a sum/min/max/avg of those points, not AWS aggregation windows.
 Route 53 is hosted zones + resource record sets only. ACM issues local untrusted certificates with Status=ISSUED immediately.
 RDS/ECS/ELBv2/ElastiCache/Auto Scaling/ECR store control-plane records listed in Operations() only (no real database, containers, Redis, or registry daemon). ECS service task IPs register with ELBv2 target groups on RUNNING and deregister on STOPPED/FAILED.
-EC2 is control-plane records (VPC/subnet/security group/instance ids) on the ec2Query wire — no hypervisor. Extra IAM/Redshift/API Gateway/GCS ops are named control-plane records, not leftover-KV sold as emulate; RDS and SSM operations beyond those their bundles declare are mock tier.
+EC2 is control-plane records (VPC/subnet/security group/instance ids) on the ec2Query wire — no hypervisor. Extra IAM/Redshift/API Gateway ops are named control-plane records, not leftover-KV sold as emulate; RDS, SSM and GCS operations beyond those their bundles declare are mock tier.
 Firehose preserves disabled data-format-conversion configuration, but enabled JSON-to-Parquet/ORC conversion returns `MirrorNotImplemented` instead of delivering falsely labeled raw bytes.
 Firehose validates and describes MSK source configuration, consumes persisted and future local topic messages from the configured start timestamp, and ignores other clusters and topics; it does not expose or poll a Kafka broker.
 Firehose validates and describes database source endpoint, pattern, Secrets Manager, and VPC configuration, but does not connect to a database or ingest changes.

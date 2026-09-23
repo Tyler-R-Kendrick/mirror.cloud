@@ -1296,14 +1296,15 @@ The harness now fails a mutant whose package does not build, and says so. Each o
 - where the mutant orphaned a variable, it gained a blank use of it;
 - about 50 were rewritten by hand.
 
-**Then 30 of them survived.** Guards the suite claimed to prove were in fact untested, because the test named on the needle failed for a different reason or never reached the guard:
+**Then 32 of them survived.** Guards the suite claimed to prove were in fact untested, because the test named on the needle failed for a different reason or never reached the guard:
 - SNS unsubscribe-from-a-deleted-topic used an email subscription, which has no ARN to unsubscribe.
 - The cross-scope Subscribe case sent an invalid endpoint.
 - The S3 wrong-bucket multipart case named a bucket that doesn't exist.
 - The FIFO missing-group check was backed up by a later check that answers a different code.
 
-Nine needles were pointed at the test that does catch them. Seventeen tests gained the assertion or case that reaches the guard, including a 50-round concurrent create for Firehose's in-transaction duplicate check, which only a race can observe. Two guards turned out to be unreachable or redundant and were deleted:
+Nine needles were pointed at the test that does catch them. Eighteen tests gained the assertion or case that reaches the guard. Two of them are races, and a single ungated round rarely lines two callers up, so CI's slower runners let both mutants through: DynamoDB's TTL expiry and Firehose's create now release their goroutines together, over fifty rounds. Three guards turned out to be unreachable or redundant and were deleted:
 - S3's raw-`Document` encryption reader, which nothing writes since #414.
 - Step Functions' reader bucket-owner comparison, which S3 already enforces. The type check it also did is not redundant and stays, now tested.
+- Firehose's unlocked duplicate-stream pre-check, which repeated the check inside the transaction. Without it, a plain duplicate create reaches the guard that matters.
 
 One gap is left named rather than filled: Firehose's OpenSearch processing-failure envelope has no test that observes it.

@@ -29,7 +29,10 @@ func TestServiceTargetsFollowTaskState(t *testing.T) {
 		t.Fatal(err)
 	}
 	targetGroup := tg.Output["TargetGroups"].([]any)[0].(map[string]any)["TargetGroupArn"].(string)
-	p := New(deps)
+	p, err := bundled.New("aws.ecs", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
 	service, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateService", Input: map[string]any{
 		"cluster": "default", "serviceName": "web", "taskDefinition": "web:1", "desiredCount": 1,
 		"loadBalancers": []any{map[string]any{"targetGroupArn": targetGroup, "containerName": "web", "containerPort": 8080}},
@@ -127,7 +130,7 @@ func TestBootedServerECSClusterTask(t *testing.T) {
 	call("UpdateService", `{"cluster":"c1","service":"svc","desiredCount":2}`)
 	call("UpdateCluster", `{"cluster":"c1"}`)
 	call("UpdateClusterSettings", `{"cluster":"c1","settings":[]}`)
-	call("PutClusterCapacityProviders", `{"cluster":"c1","capacityProviders":["FARGATE"]}`)
+	call("PutClusterCapacityProviders", `{"cluster":"c1","capacityProviders":["FARGATE"],"defaultCapacityProviderStrategy":[{"capacityProvider":"FARGATE"}]}`)
 	call("TagResource", `{"resourceArn":"arn:aws:ecs:us-east-1:000000000000:cluster/c1","tags":[{"key":"k","value":"v"}]}`)
 	call("ListTagsForResource", `{"resourceArn":"arn:aws:ecs:us-east-1:000000000000:cluster/c1"}`)
 	call("UntagResource", `{"resourceArn":"arn:aws:ecs:us-east-1:000000000000:cluster/c1","tagKeys":["k"]}`)
@@ -167,33 +170,23 @@ func TestBootedServerECSClusterTask(t *testing.T) {
 	}
 	call("DescribeCapacityProviders", `{"capacityProviders":["cp1"]}`)
 	call("UpdateCapacityProvider", `{"name":"cp1"}`)
-	call("CreateDaemon", `{"daemonName":"d1"}`)
-	call("DescribeDaemon", `{"daemonName":"d1"}`)
-	call("ListDaemons", `{}`)
-	call("RegisterDaemonTaskDefinition", `{"family":"dd"}`)
-	call("ListDaemonTaskDefinitions", `{}`)
-	call("CreateExpressGatewayService", `{"serviceName":"eg1"}`)
-	call("DescribeExpressGatewayService", `{"serviceName":"eg1"}`)
-	call("ContinueServiceDeployment", `{"service":"svc"}`)
-	call("ListServiceDeployments", `{}`)
-	call("StopServiceDeployment", `{"service":"svc"}`)
 	call("DiscoverPollEndpoint", `{"cluster":"c1"}`)
-	call("ExecuteCommand", `{"cluster":"c1","task":"`+tarn+`","command":"ls"}`)
+	call("ExecuteCommand", `{"cluster":"c1","task":"`+tarn+`","command":"ls","interactive":true}`)
 	call("UpdateTaskProtection", `{"cluster":"c1","tasks":["`+tarn+`"],"protectionEnabled":true}`)
 	call("GetTaskProtection", `{"cluster":"c1","tasks":["`+tarn+`"]}`)
 	call("ListTaskDefinitionFamilies", `{}`)
-	call("ListServicesByNamespace", `{"namespace":"ns"}`)
 	call("SubmitTaskStateChange", `{"cluster":"c1","task":"`+tarn+`","status":"RUNNING"}`)
 	call("UpdateContainerInstancesState", `{"cluster":"c1","containerInstances":["`+ciArn+`"],"status":"DRAINING"}`)
 	call("DeleteCapacityProvider", `{"capacityProvider":"cp1"}`)
-	call("DeleteDaemon", `{"daemonName":"d1"}`)
-	call("DeleteExpressGatewayService", `{"serviceName":"eg1"}`)
 }
 
 func TestECSHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 77 {
-		t.Fatalf("ecs Operations() %d want 77", n)
+	p, err := bundled.New("aws.ecs", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.Operations()); n != 55 {
+		t.Fatalf("ecs Operations() %d want 55", n)
 	}
 }
 
@@ -208,26 +201,6 @@ func TestBootedServerECSExtraOps(t *testing.T) {
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/ecs/aws4_request, SignedHeaders=host, Signature=00"
-	soft := func(op, body string) string {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
-		req.Header.Set("X-Amz-Target", "AmazonEC2ContainerServiceV20141113."+op)
-		req.Header.Set("Authorization", auth)
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		raw, _ := io.ReadAll(res.Body)
-		res.Body.Close()
-		if res.Header.Get("x-mirror-fidelity") != "emulate" {
-			t.Fatalf("%s fidelity %q %s", op, res.Header.Get("x-mirror-fidelity"), raw)
-		}
-		if res.StatusCode >= 500 {
-			t.Fatalf("%s %d %s", op, res.StatusCode, raw)
-		}
-		return string(raw)
-	}
 	hard := func(op, body string) string {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
@@ -258,8 +231,18 @@ func TestBootedServerECSExtraOps(t *testing.T) {
 	if strings.Contains(gone, `"name":"cpboot"`) {
 		t.Fatalf("cp still present %s", gone)
 	}
-	payload := `{"name":"cpboot","capacityProvider":"cpboot","daemonName":"d1","serviceName":"eg1","cluster":"c1","service":"svc","task":"t1","family":"web","namespace":"ns","containerInstance":"i-1","containerInstances":["i-1"],"tasks":["t1"],"taskDefinitions":["web"],"protectionEnabled":true,"status":"ACTIVE"}`
-	for _, op := range extraOps() {
-		soft(op, payload)
+	// Daemons, express gateway services and service deployments read
+	// identifiers the model's inputs do not carry; they are mock tier now.
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"daemonArn":"arn:aws:ecs:us-east-1:000000000000:daemon/d1"}`))
+	req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+	req.Header.Set("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.DescribeDaemon")
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.Header.Get("x-mirror-fidelity") == "emulate" {
+		t.Fatal("DescribeDaemon claims emulate")
 	}
 }

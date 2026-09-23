@@ -1,0 +1,529 @@
+schema: bir/1
+service: aws.ecs
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Clusters, task definitions, services, tasks, task sets, container
+# instances and capacity providers are control-plane records: no container
+# runs, and a task's address is drawn from 10.0.0.0/24. A resource named by
+# ARN or by name is found either way.
+provenance: authored
+
+# Starting and stopping a task registers and deregisters it with ELB, which
+# is a call to another service, so the task lifecycle is Go.
+native: [CreateService, RunTask, StartTask, StopTask, SubmitTaskStateChange, SubmitContainerStateChange, SubmitAttachmentStateChanges]
+
+resources:
+  cluster:
+    collection: ecscluster
+    id: { derive: "'cluster' in input && string(input.cluster) != '' ? lastSegment(string(input.cluster), '/') : ('clusterName' in input ? string(input.clusterName) : 'default')" }
+    record: {}
+  taskdef:
+    collection: taskdef
+    id: { derive: "lastSegment(string(input.taskDefinition), '/')" }
+    record: {}
+  # The latest revision of each family, which a family named without a
+  # revision resolves to.
+  latest:
+    collection: ecstdlatest
+    id: { derive: "string(input.family)" }
+    record: {}
+  service:
+    collection: ecssvc
+    id: { derive: "('cluster' in input && string(input.cluster) != '' ? lastSegment(string(input.cluster), '/') : 'default') + '/' + lastSegment(string(input.service), '/')" }
+    record: {}
+  task:
+    collection: ecstask
+    id: { derive: "('cluster' in input && string(input.cluster) != '' ? lastSegment(string(input.cluster), '/') : 'default') + '/' + lastSegment(string(input.task), '/')" }
+    record: {}
+  taskset:
+    collection: ecsts
+    id: { derive: "lastSegment(string(input.cluster), '/') + '/' + lastSegment(string(input.service), '/') + '/' + lastSegment(string(input.taskSet), '/')" }
+    record: {}
+  attributes:
+    collection: ecsattr
+    id: { derive: "'cluster' in input && string(input.cluster) != '' ? lastSegment(string(input.cluster), '/') : 'default'" }
+    record: {}
+  instance:
+    collection: ecsci
+    id: { derive: "('cluster' in input && string(input.cluster) != '' ? lastSegment(string(input.cluster), '/') : 'default') + '/' + lastSegment(string(input.containerInstance), '/')" }
+    record: {}
+  provider:
+    collection: ecscp
+    id: { derive: "lastSegment(string('capacityProvider' in input ? input.capacityProvider : input.name), '/')" }
+    record: {}
+  tags:
+    collection: ecstags
+    id: { input_members: [resourceArn] }
+    record: {}
+  setting:
+    collection: ecsacct
+    id: { input_members: [name] }
+    record: {}
+
+errors:
+  ClientException: { code: ClientException, http: 400, fault: client }
+  ClusterNotFound: { code: ClusterNotFoundException, http: 400, fault: client }
+  ServiceNotFound: { code: ServiceNotFoundException, http: 400, fault: client }
+  TaskSetNotFound: { code: TaskSetNotFoundException, http: 400, fault: client }
+
+operations:
+  # --- clusters --------------------------------------------------------------
+
+  CreateCluster:
+    let:
+      name: "'clusterName' in input ? string(input.clusterName) : 'default'"
+    effects:
+      - put:
+          resource: cluster
+          record:
+            clusterName: name
+            clusterArn: "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':cluster/' + name"
+            status: "'ACTIVE'"
+    output:
+      cluster: rec
+
+  DescribeClusters:
+    let:
+      names: "'clusters' in input ? input.clusters.map(c, lastSegment(string(c), '/')) : []"
+    list:
+      resource: cluster
+      member: clusters
+      filter: size(names) == 0 || item.clusterName in names
+    output:
+      clusters: items
+      failures: &missing "('clusters' in input ? input.clusters : []).filter(c, !(lastSegment(string(c), '/') in items.map(i, i.clusterName))).map(c, {'arn': c, 'reason': 'MISSING'})"
+
+  ListClusters:
+    list: { resource: cluster, member: clusterArns }
+    output:
+      clusterArns: items.map(c, c.clusterArn)
+
+  UpdateCluster: &updateCluster
+    reads: { c: { resource: cluster } }
+    require:
+      - { cond: c_found, error: ClusterNotFound }
+    effects:
+      - patch:
+          resource: cluster
+          record:
+            settings: "'settings' in input ? input.settings : ('settings' in c ? c.settings : null)"
+            capacityProviders: "'capacityProviders' in input ? input.capacityProviders : ('capacityProviders' in c ? c.capacityProviders : null)"
+    output:
+      cluster: rec
+  UpdateClusterSettings: *updateCluster
+  PutClusterCapacityProviders: *updateCluster
+
+  DeleteCluster:
+    reads: { c: { resource: cluster } }
+    require:
+      - { cond: c_found, error: ClusterNotFound }
+    effects:
+      - delete: { resource: cluster }
+    output:
+      cluster: "merge(c, {'status': 'INACTIVE'})"
+
+  # --- task definitions --------------------------------------------------------
+
+  RegisterTaskDefinition:
+    reads: { l: { resource: latest } }
+    let:
+      family: string(input.family)
+      revision: "l_found ? int(l.revision) + 1 : 1"
+    effects:
+      - put:
+          resource: taskdef
+          key: "family + ':' + string(revision)"
+          record: &taskdef
+            family: family
+            revision: revision
+            taskDefinitionArn: "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':task-definition/' + family + ':' + string(revision)"
+            containerDefinitions: input.containerDefinitions
+            status: "'ACTIVE'"
+      - put: { resource: latest, record: *taskdef }
+    output:
+      taskDefinition: rec
+
+  DescribeTaskDefinition:
+    reads:
+      r: { resource: taskdef }
+      l: { resource: latest, key: "lastSegment(string(input.taskDefinition), '/')" }
+    require:
+      - { cond: r_found || l_found, error: ClientException }
+    output:
+      taskDefinition: "r_found ? r : l"
+
+  ListTaskDefinitions:
+    list:
+      resource: taskdef
+      member: taskDefinitionArns
+      filter: "item.status == ('status' in input ? string(input.status) : 'ACTIVE')"
+    output:
+      taskDefinitionArns: items.map(t, t.taskDefinitionArn)
+
+  ListTaskDefinitionFamilies:
+    list: { resource: latest, member: families }
+    output:
+      families: items.map(t, t.family)
+
+  DeregisterTaskDefinition:
+    reads: { r: { resource: taskdef } }
+    require:
+      - { cond: r_found, error: ClientException }
+    effects:
+      - patch: { resource: taskdef, record: { status: "'INACTIVE'" } }
+    output:
+      taskDefinition: rec
+
+  DeleteTaskDefinitions:
+    let:
+      names: input.taskDefinitions.map(t, lastSegment(string(t), '/'))
+    select: { binding: found, resource: taskdef, filter: "(item.family + ':' + string(item.revision)) in names" }
+    effects:
+      - delete: { resource: taskdef, where: "(item.family + ':' + string(item.revision)) in names" }
+    output:
+      taskDefinitions: "found.map(t, merge(t, {'status': 'DELETE_IN_PROGRESS'}))"
+      failures: "[]"
+
+  # --- services, tasks and task sets -------------------------------------------
+
+  UpdateService:
+    reads: { s: { resource: service } }
+    require:
+      - { cond: s_found, error: ServiceNotFound }
+    effects:
+      - patch:
+          resource: service
+          record:
+            desiredCount: "'desiredCount' in input ? input.desiredCount : s.desiredCount"
+            taskDefinition: "'taskDefinition' in input ? input.taskDefinition : s.taskDefinition"
+            loadBalancers: "'loadBalancers' in input ? input.loadBalancers : s.loadBalancers"
+    output:
+      service: rec
+
+  DescribeServices:
+    let:
+      clusterArn: &clusterArn "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':cluster/' + ('cluster' in input && string(input.cluster) != '' ? lastSegment(string(input.cluster), '/') : 'default')"
+      names: input.services.map(s, lastSegment(string(s), '/'))
+    list:
+      resource: service
+      member: services
+      filter: item.clusterArn == clusterArn && item.serviceName in names
+    output:
+      services: items
+      failures: "input.services.filter(s, !(lastSegment(string(s), '/') in items.map(i, i.serviceName))).map(s, {'arn': s, 'reason': 'MISSING'})"
+
+  ListServices:
+    let:
+      clusterArn: *clusterArn
+    list:
+      resource: service
+      member: serviceArns
+      filter: item.clusterArn == clusterArn
+    output:
+      serviceArns: items.map(s, s.serviceArn)
+
+  DeleteService:
+    reads: { s: { resource: service } }
+    require:
+      - { cond: s_found, error: ServiceNotFound }
+    effects:
+      - delete: { resource: service }
+    output:
+      service: "merge(s, {'status': 'DRAINING'})"
+
+  DescribeTasks:
+    let:
+      clusterArn: *clusterArn
+      ids: input.tasks.map(t, lastSegment(string(t), '/'))
+    list:
+      resource: task
+      member: tasks
+      filter: item.clusterArn == clusterArn && lastSegment(item.taskArn, '/') in ids
+    output:
+      tasks: items
+      failures: "input.tasks.filter(t, !(lastSegment(string(t), '/') in items.map(i, lastSegment(i.taskArn, '/')))).map(t, {'arn': t, 'reason': 'MISSING'})"
+
+  ListTasks:
+    let:
+      clusterArn: *clusterArn
+    list:
+      resource: task
+      member: taskArns
+      filter: item.clusterArn == clusterArn
+    output:
+      taskArns: items.map(t, t.taskArn)
+
+  GetTaskProtection:
+    let:
+      clusterArn: *clusterArn
+      ids: "'tasks' in input ? input.tasks.map(t, lastSegment(string(t), '/')) : []"
+    list:
+      resource: task
+      member: protectedTasks
+      filter: item.clusterArn == clusterArn && (size(ids) == 0 || lastSegment(item.taskArn, '/') in ids)
+    output:
+      protectedTasks: &protected "items.map(t, {'taskArn': t.taskArn, 'protectionEnabled': 'protectionEnabled' in t ? t.protectionEnabled : false})"
+      failures: "[]"
+
+  UpdateTaskProtection:
+    let:
+      clusterArn: *clusterArn
+      ids: input.tasks.map(t, lastSegment(string(t), '/'))
+    effects:
+      - patch:
+          resource: task
+          where: item.clusterArn == clusterArn && lastSegment(item.taskArn, '/') in ids
+          record: { protectionEnabled: input.protectionEnabled }
+    list:
+      resource: task
+      member: protectedTasks
+      filter: item.clusterArn == clusterArn && lastSegment(item.taskArn, '/') in ids
+    output:
+      protectedTasks: *protected
+      failures: "[]"
+
+  ExecuteCommand:
+    reads: { t: { resource: task } }
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+    output:
+      clusterArn: *clusterArn
+      taskArn: "t_found ? t.taskArn : input.task"
+      interactive: input.interactive
+      session: "{'sessionId': fx.id, 'streamUrl': 'http://127.0.0.1/ecs-exec/' + fx.id}"
+
+  DiscoverPollEndpoint:
+    output:
+      endpoint: "'http://127.0.0.1/ecs-agent'"
+      telemetryEndpoint: "'http://127.0.0.1/ecs-telemetry'"
+
+  CreateTaskSet:
+    let:
+      cluster: lastSegment(string(input.cluster), '/')
+      svc: lastSegment(string(input.service), '/')
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: taskset
+          key: "cluster + '/' + svc + '/' + fx.id"
+          record:
+            id: fx.id
+            taskSetArn: "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':task-set/' + cluster + '/' + svc + '/' + fx.id"
+            clusterArn: "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':cluster/' + cluster"
+            serviceArn: "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':service/' + cluster + '/' + svc"
+            taskDefinition: input.taskDefinition
+            status: "'ACTIVE'"
+    output:
+      taskSet: rec
+
+  DescribeTaskSets:
+    let:
+      serviceArn: "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':service/' + lastSegment(string(input.cluster), '/') + '/' + lastSegment(string(input.service), '/')"
+      ids: "'taskSets' in input ? input.taskSets.map(t, lastSegment(string(t), '/')) : []"
+    list:
+      resource: taskset
+      member: taskSets
+      filter: item.serviceArn == serviceArn && (size(ids) == 0 || item.id in ids)
+    output:
+      taskSets: items
+      failures: "[]"
+
+  UpdateTaskSet:
+    reads: { ts: { resource: taskset } }
+    require:
+      - { cond: ts_found, error: TaskSetNotFound }
+    effects:
+      - patch: { resource: taskset, record: { scale: input.scale } }
+    output:
+      taskSet: rec
+
+  UpdateServicePrimaryTaskSet:
+    reads: { ts: { resource: taskset, key: "lastSegment(string(input.cluster), '/') + '/' + lastSegment(string(input.service), '/') + '/' + lastSegment(string(input.primaryTaskSet), '/')" } }
+    require:
+      - { cond: ts_found, error: TaskSetNotFound }
+    effects:
+      - patch:
+          resource: taskset
+          key: "lastSegment(string(input.cluster), '/') + '/' + lastSegment(string(input.service), '/') + '/' + lastSegment(string(input.primaryTaskSet), '/')"
+          record: { status: "'PRIMARY'" }
+    output:
+      taskSet: rec
+
+  DeleteTaskSet:
+    reads: { ts: { resource: taskset } }
+    require:
+      - { cond: ts_found, error: TaskSetNotFound }
+    effects:
+      - delete: { resource: taskset }
+    output:
+      taskSet: "merge(ts, {'status': 'DRAINING'})"
+
+  # --- attributes, container instances and capacity providers -------------------
+
+  PutAttributes:
+    reads: { a: { resource: attributes } }
+    effects:
+      - put:
+          resource: attributes
+          record:
+            attributes: "(a_found ? a.attributes.filter(x, !(x.name in input.attributes.map(y, y.name))) : []) + input.attributes"
+    output:
+      attributes: input.attributes
+  ListAttributes:
+    reads: { a: { resource: attributes } }
+    output:
+      attributes: "a_found ? a.attributes : []"
+  DeleteAttributes:
+    reads: { a: { resource: attributes } }
+    effects:
+      - patch:
+          resource: attributes
+          when: a_found
+          record:
+            attributes: "a.attributes.filter(x, !(x.name in input.attributes.map(y, y.name)))"
+    output:
+      attributes: input.attributes
+
+  RegisterContainerInstance:
+    let:
+      cluster: "'cluster' in input && string(input.cluster) != '' ? lastSegment(string(input.cluster), '/') : 'default'"
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: instance
+          key: "cluster + '/' + fx.id"
+          record:
+            containerInstanceArn: "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':container-instance/' + cluster + '/' + fx.id"
+            ec2InstanceId: "'i-' + fx.id"
+            status: "'ACTIVE'"
+    output:
+      containerInstance: rec
+
+  DescribeContainerInstances:
+    let:
+      prefix: &instancePrefix "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':container-instance/' + ('cluster' in input && string(input.cluster) != '' ? lastSegment(string(input.cluster), '/') : 'default') + '/'"
+      ids: input.containerInstances.map(c, lastSegment(string(c), '/'))
+    list:
+      resource: instance
+      member: containerInstances
+      filter: item.containerInstanceArn.startsWith(prefix) && lastSegment(item.containerInstanceArn, '/') in ids
+    output:
+      containerInstances: items
+      failures: "input.containerInstances.filter(c, !(lastSegment(string(c), '/') in items.map(i, lastSegment(i.containerInstanceArn, '/')))).map(c, {'arn': c, 'reason': 'MISSING'})"
+
+  ListContainerInstances:
+    let:
+      prefix: *instancePrefix
+    list:
+      resource: instance
+      member: containerInstanceArns
+      filter: item.containerInstanceArn.startsWith(prefix)
+    output:
+      containerInstanceArns: items.map(c, c.containerInstanceArn)
+
+  UpdateContainerInstancesState:
+    let:
+      prefix: *instancePrefix
+      ids: input.containerInstances.map(c, lastSegment(string(c), '/'))
+    effects:
+      - patch:
+          resource: instance
+          where: item.containerInstanceArn.startsWith(prefix) && lastSegment(item.containerInstanceArn, '/') in ids
+          record: { status: input.status }
+    list:
+      resource: instance
+      member: containerInstances
+      filter: item.containerInstanceArn.startsWith(prefix) && lastSegment(item.containerInstanceArn, '/') in ids
+    output:
+      containerInstances: items
+      failures: "[]"
+
+  UpdateContainerAgent:
+    reads: { c: { resource: instance } }
+    require:
+      - { cond: c_found, error: ClientException }
+    effects:
+      - patch: { resource: instance, record: { agentUpdateStatus: "'UPDATED'" } }
+    output:
+      containerInstance: rec
+
+  DeregisterContainerInstance:
+    reads: { c: { resource: instance } }
+    require:
+      - { cond: c_found, error: ClientException }
+    effects:
+      - delete: { resource: instance }
+    output:
+      containerInstance: "merge(c, {'status': 'INACTIVE'})"
+
+  CreateCapacityProvider: &putProvider
+    effects:
+      - put:
+          resource: provider
+          spread: input
+          record:
+            name: input.name
+            capacityProviderArn: "'arn:aws:ecs:' + identity.region + ':' + identity.account + ':capacity-provider/' + string(input.name)"
+            status: "'ACTIVE'"
+    output:
+      capacityProvider: rec
+  UpdateCapacityProvider: *putProvider
+
+  DescribeCapacityProviders:
+    let:
+      names: "'capacityProviders' in input ? input.capacityProviders.map(c, lastSegment(string(c), '/')) : []"
+    list:
+      resource: provider
+      member: capacityProviders
+      filter: size(names) == 0 || item.name in names
+    output:
+      capacityProviders: items
+      failures: "[]"
+
+  DeleteCapacityProvider:
+    reads: { p: { resource: provider } }
+    require:
+      - { cond: p_found, error: ClientException }
+    effects:
+      - delete: { resource: provider }
+    output:
+      capacityProvider: "merge(p, {'status': 'INACTIVE'})"
+
+  # --- tags and account settings ---------------------------------------------
+
+  TagResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - put:
+          resource: tags
+          record:
+            tags: "(t_found ? t.tags.filter(x, !(x.key in input.tags.map(y, y.key))) : []) + input.tags"
+    output: {}
+  UntagResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - patch:
+          resource: tags
+          when: t_found
+          record:
+            tags: "t.tags.filter(x, !(x.key in input.tagKeys))"
+    output: {}
+  ListTagsForResource:
+    reads: { t: { resource: tags } }
+    output:
+      tags: "t_found ? t.tags : []"
+
+  PutAccountSetting: &putSetting
+    effects:
+      - put: { resource: setting, record: { name: input.name, value: input.value } }
+    output:
+      setting: rec
+  PutAccountSettingDefault: *putSetting
+  ListAccountSettings:
+    list: { resource: setting, member: settings }
+  DeleteAccountSetting:
+    reads: { s: { resource: setting } }
+    effects:
+      - delete: { resource: setting, missing: ignore }
+    output:
+      setting: "s_found ? s : {'name': input.name}"

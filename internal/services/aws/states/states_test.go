@@ -28,7 +28,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs" // natives the ECS bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
@@ -2902,7 +2902,7 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 	var ecsOutput map[string]any
 	_ = json.Unmarshal([]byte(ecsExecution["output"].(string)), &ecsOutput)
 	task := ecsOutput["tasks"].([]any)[0].(map[string]any)
-	storedTasks := must(ecs.New(deps), "DescribeTasks", map[string]any{"cluster": "default", "tasks": []any{task["taskArn"]}})["tasks"].([]any)
+	storedTasks := must(bundled.Handler("aws.ecs", deps), "DescribeTasks", map[string]any{"cluster": "default", "tasks": []any{task["taskArn"]}})["tasks"].([]any)
 	if ecsExecution["status"] != "SUCCEEDED" || task["lastStatus"] != "STOPPED" || task["taskDefinitionArn"] != "web" || len(storedTasks) != 1 || storedTasks[0].(map[string]any)["lastStatus"] != "STOPPED" {
 		t.Fatalf("ECS sync execution %#v stored=%#v", ecsExecution, storedTasks)
 	}

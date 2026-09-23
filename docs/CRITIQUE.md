@@ -1402,3 +1402,23 @@ Parameter Store changed where the model or AWS's documented behavior disagreed w
 Several deletes and deregistrations now answer the identifiers their model outputs declare.
 
 The spine and conformance tests had been sending requests that the model rejects: missing required members, and an overwrite without `Overwrite`. They now send what an SDK would send.
+
+### ECS: extras that a valid request could not reach
+
+ECS's records are bundle YAML. The task lifecycle stays Go: CreateService, RunTask, StartTask, StopTask and the three Submit*StateChange operations. A task behind a load balancer registers with ELB as it runs and deregisters as it stops, and a bundle cannot call another service yet: `emit` is declared in the B-IR but not implemented.
+
+Unlike RDS and SSM, most of ECS's extras were written per operation. Twenty-two of them could not be reached by a request the model accepts:
+- **Daemon operations.** DescribeDaemon, DeleteDaemon and UpdateDaemon require `daemonArn`, but the pack keyed daemons by a `daemonName` the inputs do not carry. CreateDaemon answered a `daemon` member its output does not declare.
+- **Express gateway services.** Describe and Delete read a `serviceName` their inputs do not have.
+- **Service deployments and revisions.** Nothing creates them except Continue and Stop, which keyed them by whatever identifier was at hand.
+- **ListServicesByNamespace.** It listed every service regardless of namespace.
+
+Those 22 are mock tier now, which at least answers the declared shapes.
+
+The recording is re-cut where the pack answered something other than the model's output:
+- **Deletes and deregistrations.** Delete and Deregister operations answer the resource they removed. A deregistered task definition stays describable as INACTIVE.
+- **Updates.** UpdateService changes only the members the request names. The pack dropped the service's task definition.
+- **Task sets.** A task set's `serviceArn` is an ARN. UpdateServicePrimaryTaskSet answers the task set it made PRIMARY.
+- **Protection and agents.** Task protection answers ProtectedTask shapes. UpdateContainerAgent answers one instance and leaves its status alone.
+- **Removals.** Untag and DeleteAttributes remove only what they name.
+- **DescribeClusters.** DescribeClusters reports missing clusters in `failures`.

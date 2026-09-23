@@ -1539,3 +1539,16 @@ Step Functions is a hybrid bundle. DescribeStateMachineAlias, DeleteStateMachine
 **Tests.** The tests that zeroed retry jitter did it by swapping the random source on a pack mid-test. Natives run on the bundle's dependencies, so those tests now set it before building the service.
 
 **Re-cut.** One step of the recording is re-cut. DescribeMapRun answered its stored record whole, including a `stateMachineArn` that `DescribeMapRunOutput` does not declare.
+
+### S3: a bundle that declares the surface and serves none of it as records
+
+S3 is the last hand-written pack, and the ratchet now counts zero. Its bundle lists all 115 operations as natives. None of them are records yet, because three things S3 does sit outside what the engine expresses:
+- **Routing.** It re-derives the operation from the request's host, path, method, query and headers rather than trusting the decoded one.
+- **CORS.** It answers a bucket's CORS rules on every response, as well as on preflight.
+- **Objects.** Its objects are streamed blobs with versions, multipart uploads, checksums, encryption, object lock and notifications.
+
+Moving S3's configuration surface into YAML first needs a response hook in the engine that a bundle can declare, for CORS. Without one, the configuration operations would stop carrying CORS headers.
+
+**Multipart state.** Multipart uploads in flight live in memory. Natives build a pack per call, so that state and its locks are kept per store in a package-level map. The map is marked `ponytail:`, because an entry is never freed.
+
+**Recording.** The recording covers the bucket surface. It exists so that when an operation does move to YAML, it has a pack answer to meet.

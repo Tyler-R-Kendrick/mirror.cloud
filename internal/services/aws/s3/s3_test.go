@@ -50,11 +50,11 @@ func ident() spi.Identity {
 	return spi.Identity{Account: "123456789012", Region: "us-east-1"}
 }
 
-func invoke(t *testing.T, p *s3.Pack, op string, in map[string]any, body []byte) (*spi.Response, error) {
+func invoke(t *testing.T, p spi.BehaviorPack, op string, in map[string]any, body []byte) (*spi.Response, error) {
 	return invokeAs(t, p, ident(), op, in, body)
 }
 
-func invokeAs(t *testing.T, p *s3.Pack, id spi.Identity, op string, in map[string]any, body []byte) (*spi.Response, error) {
+func invokeAs(t *testing.T, p spi.BehaviorPack, id spi.Identity, op string, in map[string]any, body []byte) (*spi.Response, error) {
 	t.Helper()
 	var rc io.ReadCloser
 	if body != nil {
@@ -72,7 +72,7 @@ func invokeAs(t *testing.T, p *s3.Pack, id spi.Identity, op string, in map[strin
 	})
 }
 
-func mustInvokeAs(t *testing.T, p *s3.Pack, id spi.Identity, op string, in map[string]any, body []byte) *spi.Response {
+func mustInvokeAs(t *testing.T, p spi.BehaviorPack, id spi.Identity, op string, in map[string]any, body []byte) *spi.Response {
 	t.Helper()
 	resp, err := invokeAs(t, p, id, op, in, body)
 	if err != nil {
@@ -81,7 +81,7 @@ func mustInvokeAs(t *testing.T, p *s3.Pack, id spi.Identity, op string, in map[s
 	return resp
 }
 
-func mustInvoke(t *testing.T, p *s3.Pack, op string, in map[string]any, body []byte) *spi.Response {
+func mustInvoke(t *testing.T, p spi.BehaviorPack, op string, in map[string]any, body []byte) *spi.Response {
 	t.Helper()
 	resp, err := invoke(t, p, op, in, body)
 	if err != nil {

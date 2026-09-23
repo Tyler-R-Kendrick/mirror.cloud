@@ -1,0 +1,321 @@
+{
+  "schema": "trace/1",
+  "service": "aws.s3",
+  "source": "pack:internal/services/aws/s3@05deb58c",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateBucket",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BucketArn": "arn:aws:s3:::bucket-one"
+      }
+    },
+    {
+      "operation": "CreateBucket",
+      "input": {
+        "Bucket": "bucket-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BucketArn": "arn:aws:s3:::bucket-two"
+      }
+    },
+    {
+      "operation": "HeadBucket",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "HeadBucket",
+      "input": {
+        "Bucket": "bucket-missing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchBucket",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetBucketLocation",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LocationConstraint": ""
+      }
+    },
+    {
+      "operation": "PutBucketTagging",
+      "input": {
+        "Bucket": "bucket-one",
+        "Tagging": {
+          "TagSet": [
+            {
+              "Key": "a",
+              "Value": "1"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "MalformedXML",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetBucketTagging",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchTagSet",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteBucketTagging",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetBucketTagging",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchTagSet",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutBucketVersioning",
+      "input": {
+        "Bucket": "bucket-one",
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "IllegalVersioningConfigurationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetBucketVersioning",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutPublicAccessBlock",
+      "input": {
+        "Bucket": "bucket-one",
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": false,
+          "IgnorePublicAcls": false,
+          "RestrictPublicBuckets": false
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetPublicAccessBlock",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": false,
+          "IgnorePublicAcls": false,
+          "RestrictPublicBuckets": false
+        }
+      }
+    },
+    {
+      "operation": "DeletePublicAccessBlock",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetPublicAccessBlock",
+      "input": {
+        "Bucket": "bucket-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchPublicAccessBlockConfiguration",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListObjectsV2",
+      "input": {
+        "Bucket": "bucket-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CommonPrefixes": null,
+        "Contents": null,
+        "Delimiter": "",
+        "IsTruncated": false,
+        "KeyCount": 0,
+        "MaxKeys": 1000,
+        "Name": "bucket-two",
+        "Prefix": ""
+      }
+    },
+    {
+      "operation": "DeleteBucket",
+      "input": {
+        "Bucket": "bucket-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteBucket",
+      "input": {
+        "Bucket": "bucket-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NoSuchBucket",
+        "http_status": 404,
+        "fault": "client"
+      }
+    }
+  ]
+}

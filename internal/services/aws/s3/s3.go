@@ -31,8 +31,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/identity"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -40,17 +38,77 @@ import (
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.s3", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range natives {
+		bundled.RegisterNative("aws.s3", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return packFor(deps).Invoke(ctx, req)
+		})
+	}
 }
 
-// Pack implements spi.BehaviorPack for S3.
+// natives are the operations behavior/aws/s3 declares native: all of them.
+var natives = []string{
+	"CreateBucket", "DeleteBucket", "HeadBucket", "ListBuckets", "GetBucketLocation",
+	"GetBucketVersioning", "PutBucketVersioning", "GetBucketTagging", "PutBucketTagging",
+	"GetBucketNotificationConfiguration", "PutBucketNotificationConfiguration",
+	"GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
+	"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
+	"GetBucketCors", "PutBucketCors", "DeleteBucketCors",
+	"GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
+	"GetBucketLogging", "PutBucketLogging",
+	"GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
+	"GetBucketReplication", "PutBucketReplication",
+	"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
+	"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
+	"GetBucketRequestPayment", "PutBucketRequestPayment",
+	"GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
+	"PutObject", "PostObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
+	"ListObjects", "ListObjectsV2", "ListObjectVersions",
+	"CreateMultipartUpload", "UploadPart", "UploadPartCopy", "CompleteMultipartUpload",
+	"AbortMultipartUpload", "ListParts", "ListMultipartUploads",
+	"GetObjectTagging", "PutObjectTagging",
+	"PutPublicAccessBlock", "GetPublicAccessBlock", "DeletePublicAccessBlock",
+	"PutBucketOwnershipControls", "GetBucketOwnershipControls", "DeleteBucketOwnershipControls",
+	"GetBucketPolicyStatus", "GetObjectAttributes",
+	"DeleteBucketTagging", "DeleteObjectTagging",
+	"PutObjectLegalHold", "GetObjectLegalHold", "PutObjectRetention", "GetObjectRetention",
+	"RestoreObject",
+	"PutBucketAnalyticsConfiguration", "GetBucketAnalyticsConfiguration", "DeleteBucketAnalyticsConfiguration", "ListBucketAnalyticsConfigurations",
+	"PutBucketInventoryConfiguration", "GetBucketInventoryConfiguration", "DeleteBucketInventoryConfiguration", "ListBucketInventoryConfigurations",
+	"PutBucketMetricsConfiguration", "GetBucketMetricsConfiguration", "DeleteBucketMetricsConfiguration", "ListBucketMetricsConfigurations",
+	"PutBucketIntelligentTieringConfiguration", "GetBucketIntelligentTieringConfiguration", "DeleteBucketIntelligentTieringConfiguration", "ListBucketIntelligentTieringConfigurations",
+	"CreateBucketMetadataConfiguration", "CreateBucketMetadataTableConfiguration", "CreateSession",
+	"DeleteBucketMetadataConfiguration", "DeleteBucketMetadataTableConfiguration", "DeleteBucketReplication",
+	"DeleteObjectAnnotation", "GetBucketAbac", "GetBucketMetadataConfiguration",
+	"GetBucketMetadataTableConfiguration", "GetObjectAnnotation", "GetObjectLockConfiguration",
+	"GetObjectTorrent", "ListDirectoryBuckets", "ListObjectAnnotations",
+	"PutBucketAbac", "PutObjectAnnotation", "PutObjectLockConfiguration",
+	"RenameObject", "SelectObjectContent", "UpdateBucketMetadataAnnotationTableConfiguration",
+	"UpdateBucketMetadataInventoryTableConfiguration", "UpdateBucketMetadataJournalTableConfiguration",
+	"UpdateObjectEncryption", "WriteGetObjectResponse",
+}
+
+// Pack is the receiver the natives run on; it is built per call around the
+// in-memory state of its store.
 type Pack struct {
-	deps      spi.Deps
+	deps spi.Deps
+	*uploads
+}
+
+// uploads is what S3 holds in memory rather than in the store: multipart
+// uploads in flight, and the locks that order writes.
+type uploads struct {
 	mu        sync.Mutex
 	versionMu sync.Mutex // ponytail: global lock; use per-object locks if versioned write throughput matters.
 	mpu       map[string]*mpu
+}
+
+// ponytail: one entry per store, never freed; a process that builds many
+// stores (a test binary) keeps each one's multipart state until exit.
+var inMemory sync.Map // spi.Store -> *uploads
+
+func packFor(d spi.Deps) *Pack {
+	u, _ := inMemory.LoadOrStore(d.Store, &uploads{mpu: map[string]*mpu{}})
+	return &Pack{deps: d, uploads: u.(*uploads)}
 }
 
 type mpu struct {
@@ -174,55 +232,8 @@ func looksLikeIPv4(name string) bool {
 	return true
 }
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d, mpu: map[string]*mpu{}} }
-
-func (p *Pack) ServiceID() string { return "aws.s3" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-
-func (p *Pack) Operations() []string {
-	core := []string{
-		"CreateBucket", "DeleteBucket", "HeadBucket", "ListBuckets", "GetBucketLocation",
-		"GetBucketVersioning", "PutBucketVersioning", "GetBucketTagging", "PutBucketTagging",
-		"GetBucketNotificationConfiguration", "PutBucketNotificationConfiguration",
-		"GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
-		"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
-		"GetBucketCors", "PutBucketCors", "DeleteBucketCors",
-		"GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
-		"GetBucketLogging", "PutBucketLogging",
-		"GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
-		"GetBucketReplication", "PutBucketReplication",
-		"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
-		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
-		"GetBucketRequestPayment", "PutBucketRequestPayment",
-		"GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
-		"PutObject", "PostObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
-		"ListObjects", "ListObjectsV2", "ListObjectVersions",
-		"CreateMultipartUpload", "UploadPart", "UploadPartCopy", "CompleteMultipartUpload",
-		"AbortMultipartUpload", "ListParts", "ListMultipartUploads",
-		"GetObjectTagging", "PutObjectTagging",
-		"PutPublicAccessBlock", "GetPublicAccessBlock", "DeletePublicAccessBlock",
-		"PutBucketOwnershipControls", "GetBucketOwnershipControls", "DeleteBucketOwnershipControls",
-		"GetBucketPolicyStatus", "GetObjectAttributes",
-		"DeleteBucketTagging", "DeleteObjectTagging",
-		"PutObjectLegalHold", "GetObjectLegalHold", "PutObjectRetention", "GetObjectRetention",
-		"RestoreObject",
-		"PutBucketAnalyticsConfiguration", "GetBucketAnalyticsConfiguration", "DeleteBucketAnalyticsConfiguration", "ListBucketAnalyticsConfigurations",
-		"PutBucketInventoryConfiguration", "GetBucketInventoryConfiguration", "DeleteBucketInventoryConfiguration", "ListBucketInventoryConfigurations",
-		"PutBucketMetricsConfiguration", "GetBucketMetricsConfiguration", "DeleteBucketMetricsConfiguration", "ListBucketMetricsConfigurations",
-		"PutBucketIntelligentTieringConfiguration", "GetBucketIntelligentTieringConfiguration", "DeleteBucketIntelligentTieringConfiguration", "ListBucketIntelligentTieringConfigurations",
-		"CreateBucketMetadataConfiguration", "CreateBucketMetadataTableConfiguration", "CreateSession",
-		"DeleteBucketMetadataConfiguration", "DeleteBucketMetadataTableConfiguration", "DeleteBucketReplication",
-		"DeleteObjectAnnotation", "GetBucketAbac", "GetBucketMetadataConfiguration",
-		"GetBucketMetadataTableConfiguration", "GetObjectAnnotation", "GetObjectLockConfiguration",
-		"GetObjectTorrent", "ListDirectoryBuckets", "ListObjectAnnotations",
-		"PutBucketAbac", "PutObjectAnnotation", "PutObjectLockConfiguration",
-		"RenameObject", "SelectObjectContent", "UpdateBucketMetadataAnnotationTableConfiguration",
-		"UpdateBucketMetadataInventoryTableConfiguration", "UpdateBucketMetadataJournalTableConfiguration",
-		"UpdateObjectEncryption", "WriteGetObjectResponse",
-	}
-	return core
-}
+// New answers with the S3 service, served through its bundle.
+func New(d spi.Deps) spi.BehaviorPack { return bundled.Handler("aws.s3", d) }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	if req.HTTP != nil && req.Operation != "" {

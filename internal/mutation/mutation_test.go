@@ -8813,7 +8813,7 @@ var mutants = []mutant{
 		old:  `} else if ok {`,
 		new:  `} else if (false && (ok)) {`,
 		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseConcurrentCreateKeepsOneStream",
+		run:  "TestFirehoseControlPlaneAndBatch$|TestFirehoseConcurrentCreateKeepsOneStream",
 	},
 	{
 		name: "firehose-accept-stale-stream-version",

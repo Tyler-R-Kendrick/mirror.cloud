@@ -5233,10 +5233,12 @@ func TestFirehoseConcurrentCreateKeepsOneStream(t *testing.T) {
 		name := fmt.Sprintf("raced-%d", round)
 		var wg sync.WaitGroup
 		var created atomic.Int32
+		start := make(chan struct{})
 		for range 16 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				<-start
 				if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
 					"DeliveryStreamName": name, "S3DestinationConfiguration": testS3Destination(),
 				}}); err == nil {
@@ -5244,6 +5246,7 @@ func TestFirehoseConcurrentCreateKeepsOneStream(t *testing.T) {
 				}
 			}()
 		}
+		close(start)
 		wg.Wait()
 		if n := created.Load(); n != 1 {
 			t.Fatalf("round %d: %d concurrent creates of one stream succeeded, want 1", round, n)

@@ -476,9 +476,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
-		if _, ok, _ := p.col(req, "fh").Get(ctx, name); ok {
-			return nil, &spi.Fault{Code: "ResourceInUseException", HTTPStatus: 400, Fault: "client"}
-		}
 		if _, err := p.ensureEncryptionKey(ctx, req, encryption); err != nil {
 			return nil, err
 		}

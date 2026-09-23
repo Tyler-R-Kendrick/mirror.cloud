@@ -26,6 +26,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
 	graphqlproto "github.com/tyler-r-kendrick/mirror.cloud/internal/proto/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -713,14 +714,14 @@ func (s *Server) expireDynamoDBItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.internalIdentity(r)
-	response, err := pack.Invoke(r.Context(), &spi.Request{Identity: id, ServiceID: serviceID, Operation: "ExpireItems", HTTP: r})
+	expired, err := dynamodb.ExpireItems(r.Context(), s.deps, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("x-mirror-fidelity", string(pack.Tier()))
-	_ = json.NewEncoder(w).Encode(response.Output)
+	_ = json.NewEncoder(w).Encode(map[string]any{"ExpiredItems": expired})
 }
 
 func (s *Server) internalIdentity(r *http.Request) spi.Identity {

@@ -1,12 +1,11 @@
 {
-  "packs": 3,
-  "case_labels": 513,
+  "packs": 2,
+  "case_labels": 494,
   "services_files": 38,
-  "services_loc": 34228,
-  "fault_sites": 667,
-  "register_sites": 3,
+  "services_loc": 33964,
+  "fault_sites": 661,
+  "register_sites": 2,
   "pack_dirs": [
-    "aws/dynamodb",
     "aws/s3",
     "aws/states"
   ],

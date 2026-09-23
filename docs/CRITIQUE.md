@@ -1513,3 +1513,19 @@ Natives wake the worker through the bus, because they build a pack per call and 
 - **OpenSearch lock.** The OpenSearch work lock.
 
 The worker runs its loop from the start rather than probing the store for persisted work first. The probe had existed so that a pack with nothing to deliver ran no goroutine, and a worker is exactly that goroutine.
+
+### DynamoDB: the configuration surface is records; the data plane is Go
+
+DynamoDB is a hybrid bundle. About twenty operations are YAML: TTL, point-in-time recovery, resource policies, tags, contributor insights, the backup, export and import listings, ListTables, DescribeLimits and DescribeEndpoints. The rest are natives: tables, items, expressions, transactions, PartiQL, streams, global tables and the operations that copy a table's items.
+
+Four layouts changed so a bundle could read them:
+- **Tags.** Tags were a bare array and are now `{Tags}`.
+- **Point-in-time recovery.** Recovery settings are now `{Recovery}`.
+- **Resource policies.** A policy was stored as its raw string and is now `{Policy}`.
+- **Contributor insights.** Nothing else reads them, so their layout is unchanged.
+
+The replica auto-scaling pair echoed its request back as a description, so it drops to mock tier, following the echo-KV precedent.
+
+TTL expiry is not an operation. The edge's `/_aws/dynamodb/expired` reached it as a pseudo-operation named ExpireItems, which a bundle cannot serve, so it is now an exported function the edge calls. The booted-server stream test moved to an external test package, because the edge now imports this package.
+
+One step of the recording is re-cut. DescribeBackup answered the backup's snapshot, meaning the table as a JSON string and its items, inside `BackupDetails`, which has no such members.

@@ -1,0 +1,294 @@
+schema: bir/1
+service: aws.dynamodb
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Time to live, point-in-time recovery, resource policies, tags,
+# contributor insights and the backup, export and import listings are
+# records. Tables, items, queries, transactions, PartiQL, streams, global
+# tables and the operations that copy a table's items (backup, restore,
+# export, import) are Go, in internal/services/aws/dynamodb: they evaluate
+# key conditions and update expressions and emit stream records, which
+# records cannot do.
+provenance: authored
+
+native:
+  - CreateTable
+  - DeleteTable
+  - DescribeTable
+  - UpdateTable
+  - PutItem
+  - GetItem
+  - DeleteItem
+  - UpdateItem
+  - BatchGetItem
+  - BatchWriteItem
+  - Query
+  - Scan
+  - TransactGetItems
+  - TransactWriteItems
+  - ExecuteStatement
+  - BatchExecuteStatement
+  - ExecuteTransaction
+  - CreateBackup
+  - RestoreTableFromBackup
+  - RestoreTableToPointInTime
+  - ExportTableToPointInTime
+  - ImportTable
+  - SearchVectors
+  - CreateGlobalTable
+  - DescribeGlobalTable
+  - ListGlobalTables
+  - UpdateGlobalTable
+  - DescribeGlobalTableSettings
+  - UpdateGlobalTableSettings
+  - EnableKinesisStreamingDestination
+  - DisableKinesisStreamingDestination
+  - DescribeKinesisStreamingDestination
+  - UpdateKinesisStreamingDestination
+  - ListStreams
+  - DescribeStream
+  - GetShardIterator
+  - GetRecords
+
+resources:
+  table:
+    collection: tables
+    id: { input_members: [TableName] }
+    record: {}
+  # The TTL sweep reads Enabled and AttributeName from this layout.
+  ttl:
+    collection: ttl
+    id: { input_members: [TableName] }
+    record: {}
+  pitr:
+    collection: pitr
+    id: { input_members: [TableName] }
+    record: {}
+  policy:
+    collection: ddbpolicy
+    id: { input_members: [ResourceArn] }
+    record: {}
+  # CreateBackup writes these, keyed by the ARN's last segment.
+  backup:
+    collection: backups
+    id: { derive: "lastSegment(string(input.BackupArn), '/')" }
+    record: {}
+  tags:
+    collection: tags
+    id: { input_members: [ResourceArn] }
+    record: {}
+  insights:
+    collection: insights
+    id: { input_members: [TableName] }
+    record: {}
+  export:
+    collection: exports
+    id: { input_members: [ExportArn] }
+    record: {}
+  import:
+    collection: imports
+    id: { input_members: [ImportArn] }
+    record: {}
+
+errors:
+  TableNotFound: { code: ResourceNotFoundException, http: 400, fault: client, message: Requested resource not found }
+  NoTable: { code: ResourceNotFoundException, http: 400, fault: client, message: Cannot do operations on a non-existent table }
+  PolicyNotFound: { code: PolicyNotFoundException, http: 400, fault: client }
+  BackupNotFound: { code: BackupNotFoundException, http: 400, fault: client }
+  ExportNotFound: { code: ExportNotFoundException, http: 400, fault: client }
+  ImportNotFound: { code: ImportNotFoundException, http: 400, fault: client }
+
+operations:
+  ListTables:
+    list: { resource: table, member: TableNames }
+    output:
+      TableNames: "size(items) == 0 ? dyn(null) : items.map(t, t.TableName)"
+
+  DescribeLimits:
+    output:
+      AccountMaxReadCapacityUnits: "80000"
+      AccountMaxWriteCapacityUnits: "80000"
+      TableMaxReadCapacityUnits: "40000"
+      TableMaxWriteCapacityUnits: "40000"
+
+  DescribeEndpoints:
+    output:
+      Endpoints: "[{'Address': endpoint, 'CachePeriodInMinutes': 1440}]"
+
+  # --- time to live ------------------------------------------------------------
+
+  UpdateTimeToLive:
+    reads: { ut: { resource: table } }
+    require:
+      - { cond: ut_found, error: NoTable }
+    effects:
+      - put:
+          resource: ttl
+          record:
+            Enabled: input.TimeToLiveSpecification.Enabled
+            AttributeName: input.TimeToLiveSpecification.AttributeName
+    output:
+      TimeToLiveSpecification: input.TimeToLiveSpecification
+
+  DescribeTimeToLive:
+    reads: { dt: { resource: table }, r: { resource: ttl } }
+    require:
+      - { cond: dt_found, error: NoTable }
+    output:
+      TimeToLiveDescription: >-
+        r_found
+        ? {'TimeToLiveStatus': r.Enabled == true ? 'ENABLED' : 'DISABLED', 'AttributeName': r.AttributeName}
+        : {'TimeToLiveStatus': 'DISABLED'}
+
+  # --- point-in-time recovery --------------------------------------------------
+
+  UpdateContinuousBackups:
+    reads: { uc: { resource: table }, r: { resource: pitr } }
+    require:
+      - { cond: uc_found, error: TableNotFound }
+    let:
+      recovery: >-
+        input.PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled == true
+        ? {'PointInTimeRecoveryStatus': 'ENABLED',
+           'EarliestRestorableDateTime': r_found && r.Recovery.PointInTimeRecoveryStatus == 'ENABLED' ? r.Recovery.EarliestRestorableDateTime : int(now),
+           'LatestRestorableDateTime': int(now), 'RecoveryPeriodInDays': 35}
+        : {'PointInTimeRecoveryStatus': 'DISABLED'}
+    effects:
+      - put: { resource: pitr, record: { Recovery: recovery } }
+    output:
+      ContinuousBackupsDescription: "{'ContinuousBackupsStatus': 'ENABLED', 'PointInTimeRecoveryDescription': recovery}"
+
+  DescribeContinuousBackups:
+    reads: { dc: { resource: table }, r: { resource: pitr } }
+    require:
+      - { cond: dc_found, error: TableNotFound }
+    output:
+      ContinuousBackupsDescription: >-
+        {'ContinuousBackupsStatus': 'ENABLED', 'PointInTimeRecoveryDescription':
+        !r_found ? {'PointInTimeRecoveryStatus': 'DISABLED'}
+        : r.Recovery.PointInTimeRecoveryStatus == 'ENABLED' ? merge(r.Recovery, {'LatestRestorableDateTime': int(now)})
+        : r.Recovery}
+
+  # --- resource policies -------------------------------------------------------
+
+  PutResourcePolicy:
+    effects:
+      - put: { resource: policy, record: { Policy: input.Policy } }
+    output: { RevisionId: "'1'" }
+
+  GetResourcePolicy:
+    reads: { r: { resource: policy } }
+    require:
+      - { cond: r_found, error: PolicyNotFound }
+    output: { Policy: r.Policy, RevisionId: "'1'" }
+
+  DeleteResourcePolicy:
+    effects:
+      - delete: { resource: policy, missing: ignore }
+    output: { RevisionId: "'1'" }
+
+  # --- backups, exports and imports --------------------------------------------
+
+  ListBackups:
+    list: { resource: backup, member: BackupSummaries }
+    output:
+      BackupSummaries: >-
+        size(items) == 0 ? dyn(null)
+        : items.map(b, {'BackupArn': b.BackupArn, 'BackupName': b.BackupName, 'BackupStatus': b.BackupStatus, 'TableName': b.TableName})
+
+  DescribeBackup:
+    reads: { b: { resource: backup } }
+    require:
+      - { cond: b_found, error: BackupNotFound }
+    output:
+      BackupDescription: >-
+        {'BackupDetails': {'BackupArn': b.BackupArn, 'BackupName': b.BackupName, 'BackupStatus': b.BackupStatus},
+         'SourceTableDetails': {'TableName': b.TableName}}
+
+  DeleteBackup:
+    effects:
+      - delete: { resource: backup, missing: ignore }
+    output:
+      BackupDescription: "{'BackupDetails': {'BackupStatus': 'DELETED'}}"
+
+  ListExports:
+    list: { resource: export, member: ExportSummaries }
+    output:
+      ExportSummaries: "size(items) == 0 ? dyn(null) : items"
+
+  DescribeExport:
+    reads: { r: { resource: export } }
+    require:
+      - { cond: r_found, error: ExportNotFound }
+    output: { ExportDescription: r }
+
+  ListImports:
+    list: { resource: import, member: ImportSummaryList }
+    output:
+      ImportSummaryList: "size(items) == 0 ? dyn(null) : items"
+
+  DescribeImport:
+    reads: { r: { resource: import } }
+    require:
+      - { cond: r_found, error: ImportNotFound }
+    output: { ImportTableDescription: r }
+
+  # --- tags ----------------------------------------------------------------------
+
+  # A tag with a key already present replaces it in place; new keys append.
+  TagResource:
+    reads: { r: { resource: tags } }
+    let:
+      old: "r_found ? r.Tags : []"
+    effects:
+      - put:
+          resource: tags
+          record:
+            Tags: >-
+              old.map(t, input.Tags.exists(x, x.Key == t.Key) ? input.Tags.filter(x, x.Key == t.Key)[0] : t)
+              + input.Tags.filter(x, !old.exists(t, t.Key == x.Key))
+    output: {}
+
+  UntagResource:
+    reads: { r: { resource: tags } }
+    effects:
+      - put:
+          resource: tags
+          record:
+            Tags: "(r_found ? r.Tags : []).filter(t, !(t.Key in input.TagKeys))"
+    output: {}
+
+  ListTagsOfResource:
+    reads: { r: { resource: tags } }
+    output:
+      Tags: "r_found ? r.Tags : []"
+
+  # --- contributor insights ----------------------------------------------------
+
+  UpdateContributorInsights:
+    reads: { ui: { resource: table } }
+    require:
+      - { cond: ui_found, error: TableNotFound }
+    let:
+      status: >-
+        string(input.ContributorInsightsAction) == 'ENABLE' ? 'ENABLED'
+        : string(input.ContributorInsightsAction) == 'DISABLE' ? 'DISABLED'
+        : string(input.ContributorInsightsAction)
+    effects:
+      - put: { resource: insights, record: { TableName: input.TableName, ContributorInsightsStatus: status } }
+    output:
+      TableName: input.TableName
+      ContributorInsightsStatus: status
+
+  DescribeContributorInsights:
+    reads: { di: { resource: table }, r: { resource: insights } }
+    require:
+      - { cond: di_found, error: TableNotFound }
+    output:
+      TableName: input.TableName
+      ContributorInsightsStatus: "r_found ? r.ContributorInsightsStatus : 'DISABLED'"
+
+  ListContributorInsights:
+    list: { resource: insights, member: ContributorInsightsSummaries }
+    output:
+      ContributorInsightsSummaries: "size(items) == 0 ? dyn(null) : items"

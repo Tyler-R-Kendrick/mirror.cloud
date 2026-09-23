@@ -219,7 +219,7 @@ func TestDynamoDBTTLExpiration(t *testing.T) {
 	must("PutItem", map[string]any{"TableName": "range", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "range": map[string]any{"S": "one"}, "ttl": map[string]any{"N": past}}})
 	must("PutItem", map[string]any{"TableName": "range", "Item": map[string]any{"id": map[string]any{"S": "future"}, "range": map[string]any{"S": "two"}, "ttl": map[string]any{"N": future}}})
 	must("PutItem", map[string]any{"TableName": "disabled", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": past}}})
-	if got := must("ExpireItems", nil).Output["ExpiredItems"]; got != 2 {
+	if got := expire(t, deps, id); got != 2 {
 		t.Fatalf("expired count %v", got)
 	}
 	for _, tc := range []struct {
@@ -241,7 +241,8 @@ func TestDynamoDBTTLExpiration(t *testing.T) {
 }
 
 func TestDynamoDBTTLExpirationCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	must := func(operation string, input map[string]any) *spi.Response {
@@ -263,7 +264,7 @@ func TestDynamoDBTTLExpirationCharacterization(t *testing.T) {
 		must("PutItem", map[string]any{"TableName": "T", "Item": item})
 	}
 	golden.AssertJSON(t, map[string]any{
-		"expiration": must("ExpireItems", nil).Output,
+		"expiration": map[string]any{"ExpiredItems": expire(t, deps, id)},
 		"expired":    must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "expired"}}}).Output,
 		"remaining":  must("Scan", map[string]any{"TableName": "T"}).Output,
 	})
@@ -1047,13 +1048,6 @@ func TestDynamoDBExtendedOperations(t *testing.T) {
 	if item := must("GetItem", map[string]any{"TableName": "Restored", "Key": map[string]any{"id": map[string]any{"S": "vector-hit"}}}).Output["Item"]; item == nil {
 		t.Fatal("point-in-time restore omitted items")
 	}
-	if description := must("DescribeTableReplicaAutoScaling", map[string]any{"TableName": "T"}).Output["TableAutoScalingDescription"].(map[string]any); description["TableName"] != "T" {
-		t.Fatalf("default scaling %#v", description)
-	}
-	must("UpdateTableReplicaAutoScaling", map[string]any{"TableName": "T", "ProvisionedWriteCapacityAutoScalingSettingsUpdate": map[string]any{"MinimumUnits": 1}})
-	if description := must("DescribeTableReplicaAutoScaling", map[string]any{"TableName": "T"}).Output["TableAutoScalingDescription"].(map[string]any); description["ProvisionedWriteCapacityAutoScalingSettingsUpdate"] == nil {
-		t.Fatalf("updated scaling %#v", description)
-	}
 	if hits := must("SearchVectors", map[string]any{"TableName": "T", "Query": "vector-hit"}).Output["Items"].([]any); len(hits) != 1 {
 		t.Fatalf("vector hits %#v", hits)
 	}
@@ -1068,4 +1062,13 @@ func TestDynamoDBExtendedOperations(t *testing.T) {
 	if _, err := call("Unknown", nil); err == nil {
 		t.Fatal("unknown operation succeeded")
 	}
+}
+
+func expire(t *testing.T, deps spi.Deps, id spi.Identity) int {
+	t.Helper()
+	n, err := ExpireItems(context.Background(), deps, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

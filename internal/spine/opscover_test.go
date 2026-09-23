@@ -23,11 +23,11 @@ func TestHTTPProvenOpsMatchPackOperations(t *testing.T) {
 		"CreateBackup", "ListBackups", "DescribeBackup", "DeleteBackup", "RestoreTableFromBackup",
 		"EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination", "DescribeKinesisStreamingDestination",
 		"BatchExecuteStatement", "CreateGlobalTable", "DescribeContributorInsights", "DescribeExport",
-		"DescribeGlobalTable", "DescribeGlobalTableSettings", "DescribeImport", "DescribeTableReplicaAutoScaling",
+		"DescribeGlobalTable", "DescribeGlobalTableSettings", "DescribeImport",
 		"ExecuteStatement", "ExecuteTransaction", "ExportTableToPointInTime", "ImportTable",
 		"ListContributorInsights", "ListExports", "ListGlobalTables", "ListImports",
 		"RestoreTableToPointInTime", "SearchVectors", "UpdateContributorInsights", "UpdateGlobalTable",
-		"UpdateGlobalTableSettings", "UpdateKinesisStreamingDestination", "UpdateTableReplicaAutoScaling",
+		"UpdateGlobalTableSettings", "UpdateKinesisStreamingDestination",
 		"ListStreams", "DescribeStream", "GetShardIterator", "GetRecords",
 	}
 

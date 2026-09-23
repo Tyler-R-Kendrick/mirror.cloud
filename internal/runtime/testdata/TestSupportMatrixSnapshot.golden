@@ -48,7 +48,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.docdb` | `awsQuery` | 14 | 41 |
 | `aws.ds` | `awsJson1_1` | 6 | 74 |
 | `aws.dsql` | `restJson1` | 6 | 10 |
-| `aws.dynamodb` | `awsJson1_0` | 62 | 0 |
+| `aws.dynamodb` | `awsJson1_0` | 60 | 2 |
 | `aws.ec2` | `ec2Query` | 12 | 789 |
 | `aws.ecs` | `awsJson1_1` | 55 | 22 |
 | `aws.eks` | `restJson1` | 70 | 0 |

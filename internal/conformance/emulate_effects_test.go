@@ -205,7 +205,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		}
 		inv("UpdateTable", map[string]any{"TableName": "T", "GlobalSecondaryIndexUpdates": []any{}})
 		inv("TagResource", map[string]any{"ResourceArn": "arn:t", "Tags": []any{map[string]any{"Key": "k", "Value": "v"}}})
-		inv("UntagResource", map[string]any{"ResourceArn": "arn:t"})
+		inv("UntagResource", map[string]any{"ResourceArn": "arn:t", "TagKeys": []any{"k"}})
 		inv("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "exp"}})
 		inv("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})
 		inv("PutResourcePolicy", map[string]any{"ResourceArn": "arn:t", "Policy": "{}"})

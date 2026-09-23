@@ -96,7 +96,8 @@ func TestConcurrentDynamoDBTableCreatesHaveOneWinner(t *testing.T) {
 }
 
 func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
-	p := dynamodb.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := dynamodb.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -119,7 +120,11 @@ func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				counts <- call("ExpireItems", nil).Output["ExpiredItems"].(int)
+				n, err := dynamodb.ExpireItems(ctx, deps, id)
+				if err != nil {
+					t.Error(err)
+				}
+				counts <- n
 			}()
 		}
 		close(start)
@@ -1664,7 +1669,7 @@ func TestConcurrentDynamoDBBackupsRemainConsistent(t *testing.T) {
 			}
 			if err == nil && operation == "UpdateContinuousBackups" {
 				recovery := response.Output["ContinuousBackupsDescription"].(map[string]any)["PointInTimeRecoveryDescription"].(map[string]any)
-				if recovery["PointInTimeRecoveryStatus"] != "ENABLED" || recovery["EarliestRestorableDateTime"] != int64(0) || recovery["LatestRestorableDateTime"] != int64(3600) {
+				if recovery["PointInTimeRecoveryStatus"] != "ENABLED" || fmt.Sprint(recovery["EarliestRestorableDateTime"]) != "0" || fmt.Sprint(recovery["LatestRestorableDateTime"]) != "3600" {
 					err = fmt.Errorf("inconsistent recovery window %#v", recovery)
 				}
 			}

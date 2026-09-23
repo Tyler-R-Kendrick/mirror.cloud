@@ -28,12 +28,6 @@ func TestEveryServedServiceCouldBeABundle(t *testing.T) {
 	var unbuildable []string
 	for i := range served.Services {
 		svc := &served.Services[i]
-		// A service with no shapes has no specification behind it at all --
-		// AWS publishes no model for three of them -- and a bundle could not
-		// be validated against it. That is a missing spec, not a lookup fault.
-		if len(svc.Shapes) == 0 {
-			continue
-		}
 		if _, err := servedModel(svc.ID); err != nil {
 			unbuildable = append(unbuildable, svc.ID)
 		}

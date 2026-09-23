@@ -1308,3 +1308,15 @@ Nine needles were pointed at the test that does catch them. Eighteen tests gaine
 - Firehose's unlocked duplicate-stream pre-check, which repeated the check inside the transaction. Without it, a plain duplicate create reaches the guard that matters.
 
 One gap was left named at first: nothing observed Firehose writing an OpenSearch stream's processing failures, so skipping them entirely passed. The OpenSearch destination test now sends a record that fails decompression and reads its envelope back from the error prefix, and a needle drops the write.
+
+### "No model published" was a model deleted, and the packs it excused spoke the wrong protocol
+
+Three services, `aws.qldb`, `aws.lookoutmetrics` and `aws.elastictranscoder`, were recorded in `specs/aws-dirs.json` as having "no model published in aws/api-models-aws". Because of that, `internal/specboot` described them by hand: `awsJson1_1`, a POST to `/`, invented target prefixes and no shapes.
+
+The claim was wrong. api-models-aws had published all three and then deleted them when AWS deprecated the services: QLDB and Lookout for Metrics in `45aa0c8`, Elastic Transcoder in `312fb32`. The last published model for each is still at the parent commit.
+
+`specs/urls.tsv` now serves each model from that commit, under `specs/aws-retired/`. `specs/aws-dirs.json` says why they are there, and the hand table is gone.
+
+The models answer something the hand table could not: **all three are `restJson1`**. The emulator had been accepting a wire format no SDK sends to these services. Their packs are still the hand-written ones. Two of them name operations that match the models. The QLDB pack also serves `SendCommand`, which belongs to a separate service, QLDB Session, and no request to QLDB can reach it now. Moving the three to bundles against their real models is the next step.
+
+The lesson is the one C24 records for exemptions: a reason is a claim, and this one was never checked against the upstream history, where it was false.

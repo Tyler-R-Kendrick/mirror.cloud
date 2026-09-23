@@ -79,22 +79,6 @@ native:
   - PutObjectRetention
   - GetObjectRetention
   - RestoreObject
-  - PutBucketAnalyticsConfiguration
-  - GetBucketAnalyticsConfiguration
-  - DeleteBucketAnalyticsConfiguration
-  - ListBucketAnalyticsConfigurations
-  - PutBucketInventoryConfiguration
-  - GetBucketInventoryConfiguration
-  - DeleteBucketInventoryConfiguration
-  - ListBucketInventoryConfigurations
-  - PutBucketMetricsConfiguration
-  - GetBucketMetricsConfiguration
-  - DeleteBucketMetricsConfiguration
-  - ListBucketMetricsConfigurations
-  - PutBucketIntelligentTieringConfiguration
-  - GetBucketIntelligentTieringConfiguration
-  - DeleteBucketIntelligentTieringConfiguration
-  - ListBucketIntelligentTieringConfigurations
   - CreateBucketMetadataConfiguration
   - CreateBucketMetadataTableConfiguration
   - CreateSession
@@ -145,6 +129,25 @@ resources:
     id: { derive: "string(input.Bucket) + '/ownershipcontrols'" }
     record: {}
 
+  # Named configurations are keyed bucket/kind/id; a listing reads a
+  # bucket's kind by that prefix, which is also Id order.
+  analyticsconfig:
+    collection: namedcfg
+    id: { derive: "string(input.Bucket) + '/analytics/' + string(input.Id)" }
+    record: {}
+  inventoryconfig:
+    collection: namedcfg
+    id: { derive: "string(input.Bucket) + '/inventory/' + string(input.Id)" }
+    record: {}
+  metricsconfig:
+    collection: namedcfg
+    id: { derive: "string(input.Bucket) + '/metrics/' + string(input.Id)" }
+    record: {}
+  intelligentconfig:
+    collection: namedcfg
+    id: { derive: "string(input.Bucket) + '/intelligent/' + string(input.Id)" }
+    record: {}
+
 errors:
   NoSuchBucket: { code: NoSuchBucket, http: 404, fault: client, message: The specified bucket does not exist }
   InvalidOwner: { code: InvalidBucketOwnerAWSAccountID, http: 400, fault: client, message: The value of the expected bucket owner parameter must be an AWS Account ID }
@@ -152,6 +155,12 @@ errors:
   MalformedXML: { code: MalformedXML, http: 400, fault: client }
   InvalidRequest: { code: InvalidRequest, http: 400, fault: client }
   NoPublicAccessBlock: { code: NoSuchPublicAccessBlockConfiguration, http: 404, fault: client, message: The public access block configuration was not found }
+  NoConfiguration: { code: NoSuchConfiguration, http: 404, fault: client, message: The specified configuration does not exist. }
+  IdRequired: { code: InvalidArgument, http: 400, fault: client, message: The configuration ID is required }
+  IdMismatch: { code: IdMismatch, http: 400, fault: client, message: Document ID does not match the specified configuration ID. }
+  InvalidDestination: { code: InvalidS3DestinationBucket, http: 400, fault: client, message: Invalid bucket ARN. }
+  TooManyConfigurations: { code: TooManyConfigurations, http: 400, fault: client, message: Too many metrics configurations }
+  InvalidToken: { code: InvalidToken, http: 400, fault: client, message: The continuation token provided is incorrect }
   NoOwnershipControls: { code: OwnershipControlsNotFoundError, http: 404, fault: client, message: The bucket ownership controls were not found }
 
 operations:
@@ -275,3 +284,216 @@ operations:
     effects:
       - delete: { resource: ownershipcontrols, missing: ignore }
     output: {}
+
+  # --- named configurations --------------------------------------------------
+  # Analytics, inventory, metrics and Intelligent-Tiering configurations are
+  # each a document per id. Intelligent-Tiering does not check the expected
+  # owner, as the pack did not.
+
+  PutBucketAnalyticsConfiguration:
+    reads: { b: { resource: bucket } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - cond: "type(input.AnalyticsConfiguration) == map && 'Id' in input.AnalyticsConfiguration && string(input.AnalyticsConfiguration.Id) == string(input.Id)"
+        error: MalformedXML
+    effects:
+      - put: { resource: analyticsconfig, record: { Bucket: input.Bucket, Kind: "'analytics'", Configuration: input.AnalyticsConfiguration } }
+    output: {}
+
+  GetBucketAnalyticsConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: analyticsconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: r_found, error: NoConfiguration }
+    output:
+      AnalyticsConfiguration: r.Configuration
+
+  DeleteBucketAnalyticsConfiguration:
+    reads: { b: { resource: bucket }, delA: { resource: analyticsconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: delA_found, error: NoConfiguration }
+    effects:
+      - delete: { resource: analyticsconfig }
+    output: {}
+
+  ListBucketAnalyticsConfigurations:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    list: { resource: analyticsconfig, member: AnalyticsConfigurationList, prefix: "string(input.Bucket) + '/analytics/'" }
+    output:
+      IsTruncated: "false"
+      AnalyticsConfigurationList: "items.map(i, i.Configuration)"
+
+  PutBucketInventoryConfiguration:
+    reads: { b: { resource: bucket } }
+    let:
+      c: "'InventoryConfiguration' in input ? input.InventoryConfiguration : null"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - cond: >-
+          type(c) == map
+          && ['Destination', 'Id', 'IncludedObjectVersions', 'IsEnabled', 'Schedule'].all(f, f in c)
+          && c.all(f, f in ['Destination', 'Id', 'IncludedObjectVersions', 'IsEnabled', 'Schedule', 'Filter', 'OptionalFields'])
+          && type(c.Destination) == map && 'S3BucketDestination' in c.Destination && type(c.Destination.S3BucketDestination) == map
+          && ['Bucket', 'Format'].all(f, f in c.Destination.S3BucketDestination)
+          && c.Destination.S3BucketDestination.all(f, f in ['Bucket', 'Format', 'AccountId', 'Encryption', 'Prefix'])
+          && string(c.Destination.S3BucketDestination.Format) in ['CSV', 'ORC', 'Parquet']
+          && type(c.Schedule) == map && 'Frequency' in c.Schedule && string(c.Schedule.Frequency) in ['Daily', 'Weekly']
+          && string(c.IncludedObjectVersions) in ['All', 'Current']
+          && (!('OptionalFields' in c) || c.OptionalFields.all(f, string(f) in ['Size', 'LastModifiedDate', 'StorageClass', 'ETag',
+             'IsMultipartUploaded', 'ReplicationStatus', 'EncryptionStatus', 'ObjectLockRetainUntilDate', 'ObjectLockMode',
+             'ObjectLockLegalHoldStatus', 'IntelligentTieringAccessTier', 'BucketKeyStatus', 'ChecksumAlgorithm']))
+        error: MalformedXML
+      - cond: "string(c.Id) == string(input.Id)"
+        error: IdMismatch
+      - cond: "string(c.Destination.S3BucketDestination.Bucket).matches('^arn:[^:]*:s3:[^:]*:[^:]*:.+$')"
+        error: InvalidDestination
+    effects:
+      - put: { resource: inventoryconfig, record: { Bucket: input.Bucket, Kind: "'inventory'", Configuration: input.InventoryConfiguration } }
+    output: {}
+
+  GetBucketInventoryConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: inventoryconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: r_found, error: NoConfiguration }
+    output:
+      InventoryConfiguration: r.Configuration
+
+  DeleteBucketInventoryConfiguration:
+    reads: { b: { resource: bucket }, delI: { resource: inventoryconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: delI_found, error: NoConfiguration }
+    effects:
+      - delete: { resource: inventoryconfig }
+    output: {}
+
+  ListBucketInventoryConfigurations:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    list: { resource: inventoryconfig, member: InventoryConfigurationList, prefix: "string(input.Bucket) + '/inventory/'" }
+    output:
+      IsTruncated: "false"
+      InventoryConfigurationList: "items.map(i, i.Configuration)"
+
+  PutBucketMetricsConfiguration:
+    reads: { b: { resource: bucket }, e: { resource: metricsconfig } }
+    select:
+      binding: same
+      resource: metricsconfig
+      filter: "item.Bucket == input.Bucket && item.Kind == 'metrics'"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - cond: "type(input.MetricsConfiguration) == map"
+        error: MalformedXML
+      - cond: "e_found || size(same) < 1000"
+        error: TooManyConfigurations
+    effects:
+      - put: { resource: metricsconfig, record: { Bucket: input.Bucket, Kind: "'metrics'", Configuration: input.MetricsConfiguration } }
+    output: {}
+
+  GetBucketMetricsConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: metricsconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: r_found, error: NoConfiguration }
+    output:
+      MetricsConfiguration: r.Configuration
+
+  DeleteBucketMetricsConfiguration:
+    reads: { b: { resource: bucket }, delM: { resource: metricsconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: delM_found, error: NoConfiguration }
+    effects:
+      - delete: { resource: metricsconfig }
+    output: {}
+
+  # Metrics listings page by 100; the token is the next page's first id.
+  ListBucketMetricsConfigurations:
+    reads: { b: { resource: bucket } }
+    let:
+      token: "'ContinuationToken' in input ? string(input.ContinuationToken) : ''"
+      marker: "token == '' ? '' : b64decode(token)"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "token == '' || marker != ''", error: InvalidToken }
+    list: { resource: metricsconfig, member: MetricsConfigurationList, prefix: "string(input.Bucket) + '/metrics/'" }
+    output:
+      IsTruncated: "size(items.filter(i, string(i.Configuration.Id) >= marker)) > 100"
+      ContinuationToken: "token == '' ? dyn(null) : token"
+      NextContinuationToken: >-
+        size(items.filter(i, string(i.Configuration.Id) >= marker)) > 100
+        ? dyn(b64(string(items.filter(i, string(i.Configuration.Id) >= marker)[100].Configuration.Id))) : null
+      MetricsConfigurationList: "slice(items.filter(i, string(i.Configuration.Id) >= marker).map(i, i.Configuration), 0, 100)"
+    omit_null: [ContinuationToken, NextContinuationToken]
+
+  PutBucketIntelligentTieringConfiguration:
+    reads: { b: { resource: bucket } }
+    require:
+      - *bucketExists
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - cond: "type(input.IntelligentTieringConfiguration) == map && 'Id' in input.IntelligentTieringConfiguration && string(input.IntelligentTieringConfiguration.Id) == string(input.Id)"
+        error: MalformedXML
+    effects:
+      - put: { resource: intelligentconfig, record: { Bucket: input.Bucket, Kind: "'intelligent'", Configuration: input.IntelligentTieringConfiguration } }
+    output: {}
+
+  GetBucketIntelligentTieringConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: intelligentconfig } }
+    require:
+      - *bucketExists
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: r_found, error: NoConfiguration }
+    output:
+      IntelligentTieringConfiguration: r.Configuration
+
+  DeleteBucketIntelligentTieringConfiguration:
+    reads: { b: { resource: bucket }, delT: { resource: intelligentconfig } }
+    require:
+      - *bucketExists
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: delT_found, error: NoConfiguration }
+    effects:
+      - delete: { resource: intelligentconfig }
+    output: {}
+
+  ListBucketIntelligentTieringConfigurations:
+    reads: { b: { resource: bucket } }
+    require: [*bucketExists]
+    list: { resource: intelligentconfig, member: IntelligentTieringConfigurationList, prefix: "string(input.Bucket) + '/intelligent/'" }
+    output:
+      IsTruncated: "false"
+      IntelligentTieringConfigurationList: "items.map(i, i.Configuration)"
+

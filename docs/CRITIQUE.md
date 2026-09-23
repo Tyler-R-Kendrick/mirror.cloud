@@ -1566,3 +1566,7 @@ Ten configuration operations are now YAML: request payment, transfer acceleratio
 Two engine defects surfaced along the way:
 - **Shared collections.** A resource was found by its collection name alone. Four S3 resources share `bktcfg`, so a read could evaluate another resource's key. The lookup now matches the key derivation too.
 - **Status codes.** An engine answer carried status 0, and only the codec filled in the model's code. A delete answered 204 on the wire but 0 to a caller in Go. The engine now sets the model's code itself.
+
+**Named configurations.** Analytics, inventory, metrics and Intelligent-Tiering configurations moved to YAML: sixteen operations. Each is a document keyed `bucket/kind/id`. A listing reads its kind by prefix, and the key order is the Id order the pack sorted into. The inventory validation is one `require` rule. Metrics listings page by 100, with the next page's first Id as the token.
+
+The token is now standard base64 rather than URL-safe. It only has to survive a round trip, and callers already escape it in the query string. As the pack did, Intelligent-Tiering does not check the expected owner.

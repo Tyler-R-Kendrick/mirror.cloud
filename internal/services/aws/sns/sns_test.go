@@ -1057,9 +1057,15 @@ func TestTopicValidationAndPublishTargetCharacterization(t *testing.T) {
 	_, crossScopeDeleteARNFault := call("DeleteTopic", map[string]any{"TopicArn": "arn:aws:sns:us-west-2:123456789012:characterized-topic"})
 	_, missingSubscriptionFault := call("Subscribe", map[string]any{"TopicArn": arn + "-missing", "Protocol": "sqs", "Endpoint": "q"})
 	_, malformedSubscriptionARNFault := call("Subscribe", map[string]any{"TopicArn": "characterized-topic", "Protocol": "sqs", "Endpoint": "q"})
-	_, crossScopeSubscriptionARNFault := call("Subscribe", map[string]any{"TopicArn": "arn:aws:sns:us-west-2:123456789012:characterized-topic", "Protocol": "sqs", "Endpoint": "q"})
+	_, crossScopeSubscriptionARNFault := call("Subscribe", map[string]any{"TopicArn": "arn:aws:sns:us-west-2:123456789012:characterized-topic", "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:123456789012:q"})
 	_, malformedConfirmTopicARNFault := call("ConfirmSubscription", map[string]any{"TopicArn": "characterized-topic", "Token": "random-token"})
 	_, crossScopeConfirmTopicARNFault := call("ConfirmSubscription", map[string]any{"TopicArn": "arn:aws:sns:us-west-2:123456789012:characterized-topic", "Token": "random-token"})
+	// Another region's ARN for a name that exists here is still not found here.
+	for name, fault := range map[string]*spi.Fault{"Subscribe": crossScopeSubscriptionARNFault, "ConfirmSubscription": crossScopeConfirmTopicARNFault} {
+		if fault == nil || fault.Code != "NotFound" {
+			t.Errorf("cross-scope %s answered %v, want NotFound", name, fault)
+		}
+	}
 	_, missingTagFault := call("TagResource", map[string]any{"ResourceArn": arn + "-missing", "Tags": []any{map[string]any{"Key": "a", "Value": "b"}}})
 	_, _ = call("CreateTopic", map[string]any{"Name": "untagged-topic"})
 	_, moreTagsFault := call("CreateTopic", map[string]any{
@@ -1250,8 +1256,8 @@ func TestSNSFIFOPublishValidationAndTopicDeduplication(t *testing.T) {
 		return str(response.Output["TopicArn"])
 	}
 	fifo := create("events.fifo", map[string]any{"FifoTopic": "true", "ContentBasedDeduplication": "true"})
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": fifo, "Message": "missing-group"}}); err == nil {
-		t.Fatal("FIFO publish without MessageGroupId succeeded")
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": fifo, "Message": "missing-group"}}); err == nil || err.(*spi.Fault).Code != "InvalidParameter" {
+		t.Fatalf("FIFO publish without MessageGroupId answered %v, want InvalidParameter", err)
 	}
 	seen := 0
 	cancel := deps.Bus.Subscribe("sns:"+fifo, func(context.Context, []byte) { seen++ })
@@ -2587,7 +2593,9 @@ func TestSNSUnsubscribeDeletedTopic(t *testing.T) {
 	}
 	topic := str(created.Output["TopicArn"])
 	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
-		"TopicArn": topic, "Protocol": "email", "Endpoint": "user@example.com",
+		// A confirmed subscription, so Unsubscribe gets past the ARN check;
+		// an email subscription answers "pending confirmation" instead.
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:q",
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -2596,8 +2604,8 @@ func TestSNSUnsubscribeDeletedTopic(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteTopic", Input: map[string]any{"TopicArn": topic}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Unsubscribe", Input: map[string]any{"SubscriptionArn": subARN}}); err == nil {
-		t.Fatal("unsubscribed from a deleted topic")
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Unsubscribe", Input: map[string]any{"SubscriptionArn": subARN}}); err == nil || err.(*spi.Fault).Code != "NotFound" {
+		t.Fatalf("unsubscribe from a deleted topic answered %v, want NotFound", err)
 	}
 }
 
@@ -3331,6 +3339,9 @@ func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
 	}
 	if set("FilterPolicy", "invalid-json") == nil {
 		t.Fatal("accepted invalid filter policy")
+	}
+	if set("FilterPolicy", `{"a":["1"],"b":["1"],"c":["1"],"d":["1"],"e":["1"],"f":["1"]}`) == nil {
+		t.Fatal("accepted a filter policy with six keys; the limit is five")
 	}
 	for _, tc := range []struct{ name, value string }{
 		{"FakeAttribute", "test-value"},

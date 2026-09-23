@@ -746,11 +746,16 @@ func TestS3MalformedAWSChunkedCharacterization(t *testing.T) {
 		body    string
 	}{
 		"missing decoded length": {body: valid},
-		"non-integer length":     {decoded: "test", body: valid},
-		"negative length":        {decoded: "-1", body: valid},
-		"mismatched length":      {decoded: "4", body: valid},
-		"truncated chunk":        {decoded: "5", body: "5\r\nhello"},
-		"missing terminal chunk": {decoded: "5", body: "5\r\nhello\r\n"},
+		// An empty payload decodes to zero bytes, which is also what an
+		// absent or unparsable length reads as, so only the length check
+		// itself can reject these.
+		"missing length, empty payload":     {body: "0\r\n\r\n"},
+		"non-integer length, empty payload": {decoded: "x", body: "0\r\n\r\n"},
+		"non-integer length":                {decoded: "test", body: valid},
+		"negative length":                   {decoded: "-1", body: valid},
+		"mismatched length":                 {decoded: "4", body: valid},
+		"truncated chunk":                   {decoded: "5", body: "5\r\nhello"},
+		"missing terminal chunk":            {decoded: "5", body: "5\r\nhello\r\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPut, "/chunk-errors/"+strings.ReplaceAll(name, " ", "-"), strings.NewReader(tc.body))

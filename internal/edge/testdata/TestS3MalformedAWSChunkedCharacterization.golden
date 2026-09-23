@@ -7,6 +7,10 @@
     "code": "SignatureDoesNotMatch",
     "status": 403
   },
+  "missing length, empty payload": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
   "missing terminal chunk": {
     "code": "SignatureDoesNotMatch",
     "status": 403
@@ -16,6 +20,10 @@
     "status": 403
   },
   "non-integer length": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "non-integer length, empty payload": {
     "code": "SignatureDoesNotMatch",
     "status": 403
   },

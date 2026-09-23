@@ -7475,11 +7475,15 @@ func TestListMultipartUploadsCharacterization(t *testing.T) {
 func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "other"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "k"}, nil)
 	uploadID := created.Output["UploadId"].(string)
 	for _, operation := range []string{"UploadPart", "CompleteMultipartUpload", "ListParts", "AbortMultipartUpload"} {
 		for _, input := range []map[string]any{
 			{"Bucket": "bucket", "Key": "k", "UploadId": "missing", "PartNumber": 1},
+			// An upload belongs to its bucket: the same id and key in another
+			// bucket that exists is still no such upload.
+			{"Bucket": "other", "Key": "k", "UploadId": uploadID, "PartNumber": 1},
 			{"Bucket": "bucket", "Key": "wrong", "UploadId": uploadID, "PartNumber": 1},
 			{"Bucket": "wrong", "Key": "k", "UploadId": uploadID, "PartNumber": 1},
 		} {

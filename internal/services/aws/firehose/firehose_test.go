@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2936,6 +2937,10 @@ func TestFirehoseCloudWatchMessageExtraction(t *testing.T) {
 		{"Enabled": true, "Processors": []any{decompression, map[string]any{"Type": "CloudWatchLogProcessing"}}},
 		{"Enabled": true, "Processors": []any{decompression, map[string]any{"Type": "CloudWatchLogProcessing", "Parameters": []any{map[string]any{"ParameterName": "DataMessageExtraction", "ParameterValue": "false"}}}}},
 		{"Enabled": true, "Processors": []any{decompression, map[string]any{"Type": "CloudWatchLogProcessing", "Parameters": []any{map[string]any{"ParameterName": "CompressionFormat", "ParameterValue": "GZIP"}}}}},
+		{"Enabled": true, "Processors": []any{decompression, map[string]any{"Type": "CloudWatchLogProcessing", "Parameters": []any{
+			map[string]any{"ParameterName": "DataMessageExtraction", "ParameterValue": "true"},
+			map[string]any{"ParameterName": "CompressionFormat", "ParameterValue": "GZIP"},
+		}}}},
 	} {
 		if err := validateProcessingConfiguration(configuration); err == nil {
 			t.Errorf("accepted invalid CloudWatch Logs processing %#v", configuration)
@@ -3044,6 +3049,7 @@ func TestFirehoseRecordDeAggregation(t *testing.T) {
 		processor("DELIMITED", ""),
 		processor("DELIMITED", "not base64"),
 		{"Type": "RecordDeAggregation", "Parameters": []any{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": "ignored"}}},
+		{"Type": "RecordDeAggregation", "Parameters": append(processor("JSON", "")["Parameters"].([]any), map[string]any{"ParameterName": "LambdaArn", "ParameterValue": "ignored"})},
 	} {
 		configuration := map[string]any{"Enabled": true, "Processors": []any{invalidProcessor}}
 		if err := validateProcessingConfiguration(configuration); err == nil {
@@ -4145,6 +4151,7 @@ func TestFirehoseCreateConfiguration(t *testing.T) {
 		{"malformed Kinesis role", map[string]any{"DeliveryStreamName": "bad-source-role", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": testKinesisSource()["KinesisStreamARN"], "RoleARN": "role"}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"missing MSK source", map[string]any{"DeliveryStreamName": "msk", "DeliveryStreamType": "MSKAsSource", "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"missing database source", map[string]any{"DeliveryStreamName": "database", "DeliveryStreamType": "DatabaseAsSource", "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
+		{"unserved destination family", map[string]any{"DeliveryStreamName": "unserved", "UnservedDestinationConfiguration": map[string]any{}}, "MirrorNotImplemented"},
 	} {
 		_, err := call("CreateDeliveryStream", test.input)
 		fault, ok := err.(*spi.Fault)
@@ -5069,6 +5076,7 @@ func TestFirehoseHTTPEndpointValidation(t *testing.T) {
 	for i, patch := range []map[string]any{
 		{"BufferingHints": map[string]any{"SizeInMBs": 1}},
 		{"BufferingHints": map[string]any{"SizeInMBs": 65, "IntervalInSeconds": 1}},
+		{"BufferingHints": "not an object"},
 		{"RetryOptions": map[string]any{"DurationInSeconds": 7201}},
 		{"S3BackupMode": "Unknown"},
 		{"RequestConfiguration": map[string]any{"ContentEncoding": "ZIP"}},
@@ -5210,6 +5218,38 @@ func TestFirehoseDescribeDestinationPagination(t *testing.T) {
 	} {
 		if _, err := call(input); err == nil {
 			t.Fatalf("accepted invalid describe input %#v", input)
+		}
+	}
+}
+
+// The existence check before key setup is not the guard: creates racing past
+// it must still leave exactly one stream, which the transaction decides.
+func TestFirehoseConcurrentCreateKeepsOneStream(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	// A lost race is timing-dependent, so one round proves little; fifty make
+	// an unguarded transaction all but certain to double-create somewhere.
+	for round := range 50 {
+		name := fmt.Sprintf("raced-%d", round)
+		var wg sync.WaitGroup
+		var created atomic.Int32
+		start := make(chan struct{})
+		for range 16 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+					"DeliveryStreamName": name, "S3DestinationConfiguration": testS3Destination(),
+				}}); err == nil {
+					created.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if n := created.Load(); n != 1 {
+			t.Fatalf("round %d: %d concurrent creates of one stream succeeded, want 1", round, n)
 		}
 	}
 }

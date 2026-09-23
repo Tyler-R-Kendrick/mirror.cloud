@@ -5,7 +5,7 @@
     "message": "The specified bucket does not have a website configuration",
     "status": 404
   },
-  "delete": null,
+  "delete": {},
   "deleted": {
     "bucket": "website-characterization",
     "code": "NoSuchWebsiteConfiguration",
@@ -35,5 +35,5 @@
       "Suffix": "index.html"
     }
   },
-  "put": null
+  "put": {}
 }

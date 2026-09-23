@@ -33,14 +33,6 @@ native:
   - GetBucketPolicy
   - PutBucketPolicy
   - DeleteBucketPolicy
-  - GetBucketCors
-  - PutBucketCors
-  - DeleteBucketCors
-  - GetBucketWebsite
-  - PutBucketWebsite
-  - DeleteBucketWebsite
-  - GetBucketLogging
-  - PutBucketLogging
   - GetBucketLifecycleConfiguration
   - PutBucketLifecycleConfiguration
   - DeleteBucketLifecycle
@@ -86,7 +78,6 @@ native:
   - DeleteBucketMetadataTableConfiguration
   - DeleteBucketReplication
   - DeleteObjectAnnotation
-  - GetBucketAbac
   - GetBucketMetadataConfiguration
   - GetBucketMetadataTableConfiguration
   - GetObjectAnnotation
@@ -94,7 +85,6 @@ native:
   - GetObjectTorrent
   - ListDirectoryBuckets
   - ListObjectAnnotations
-  - PutBucketAbac
   - PutObjectAnnotation
   - PutObjectLockConfiguration
   - RenameObject
@@ -129,6 +119,28 @@ resources:
     id: { derive: "string(input.Bucket) + '/ownershipcontrols'" }
     record: {}
 
+  cors:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/cors'" }
+    record: {}
+  website:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/website'" }
+    record: {}
+  logging:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/logging'" }
+    record: {}
+  abac:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/abac'" }
+    record: {}
+  # Where every bucket lives, by name, across accounts and regions.
+  bucketlocation:
+    collection: s3buckets
+    global: true
+    id: { input_members: [Bucket] }
+    record: {}
   # Named configurations are keyed bucket/kind/id; a listing reads a
   # bucket's kind by that prefix, which is also Id order.
   analyticsconfig:
@@ -161,6 +173,13 @@ errors:
   InvalidDestination: { code: InvalidS3DestinationBucket, http: 400, fault: client, message: Invalid bucket ARN. }
   TooManyConfigurations: { code: TooManyConfigurations, http: 400, fault: client, message: Too many metrics configurations }
   InvalidToken: { code: InvalidToken, http: 400, fault: client, message: The continuation token provided is incorrect }
+  NoCORS: { code: NoSuchCORSConfiguration, http: 404, fault: client, message: The CORS configuration does not exist }
+  NoWebsite: { code: NoSuchWebsiteConfiguration, http: 404, fault: client, message: The specified bucket does not have a website configuration }
+  NoAbac: { code: NoSuchAbacConfiguration, http: 404, fault: client, message: The ABAC configuration does not exist }
+  InvalidArgument: { code: InvalidArgument, http: 400, fault: client }
+  TooManyRoutingRules: { code: InternalError, http: 500, fault: server, message: Too many routing rules }
+  CrossLocationLogging: { code: CrossLocationLoggingProhibitted, http: 400, fault: client, message: "Cross S3 location logging not allowed. " }
+  InvalidLoggingTarget: { code: InvalidTargetBucketForLogging, http: 400, fault: client, message: The target bucket for logging does not exist }
   NoOwnershipControls: { code: OwnershipControlsNotFoundError, http: 404, fault: client, message: The bucket ownership controls were not found }
 
 operations:
@@ -497,3 +516,193 @@ operations:
       IsTruncated: "false"
       IntelligentTieringConfigurationList: "items.map(i, i.Configuration)"
 
+  # --- configurations the Go reads -------------------------------------------
+  # The wrap answers a bucket's CORS rules from bktcfg/cors, and the website
+  # endpoint serves from bktcfg/website; both read the layout written here.
+  # A body the codec could not bind arrives as _body and is malformed.
+
+  PutBucketCors:
+    reads: { b: { resource: bucket } }
+    let:
+      rules: >-
+        'CORSConfiguration' in input && type(input.CORSConfiguration) == map && 'CORSRules' in input.CORSConfiguration
+        ? input.CORSConfiguration.CORSRules : ('CORSRules' in input ? input.CORSRules : [])
+      methods: "['GET', 'PUT', 'HEAD', 'POST', 'DELETE']"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - &unboundBody { cond: "!('_body' in input) || string(input._body) == ''", error: MalformedXML }
+      - cond: "type(rules) == list && size(rules) >= 1 && size(rules) <= 100"
+        error: MalformedXML
+      - cond: >-
+          rules.all(r, type(r) == map && 'AllowedMethods' in r && 'AllowedOrigins' in r
+          && r.all(f, f in ['AllowedMethods', 'AllowedOrigins', 'AllowedHeaders', 'ExposeHeaders', 'MaxAgeSeconds', 'ID']))
+        error: MalformedXML
+      - cond: "rules.all(r, r.AllowedMethods.all(m, string(m) in methods))"
+        error: InvalidRequest
+        message_expr: >-
+          'Found unsupported HTTP method in CORS config. Unsupported method is '
+          + string(rules.filter(r, r.AllowedMethods.exists(m, !(string(m) in methods)))[0].AllowedMethods.filter(m, !(string(m) in methods))[0])
+    effects:
+      - put: { resource: cors, record: { CORSConfiguration: "{'CORSRules': rules}" } }
+    output: {}
+
+  GetBucketCors:
+    reads: { b: { resource: bucket }, cors: { resource: cors } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: cors_found, error: NoCORS, fields: { BucketName: input.Bucket } }
+    output:
+      CORSRules: cors.CORSConfiguration.CORSRules
+
+  DeleteBucketCors:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: cors, missing: ignore }
+    output: {}
+
+  # A website either redirects every request or serves an index document;
+  # the checks for the second apply only when it does not redirect.
+  PutBucketWebsite:
+    reads: { b: { resource: bucket } }
+    let:
+      c: "'WebsiteConfiguration' in input ? input.WebsiteConfiguration : null"
+      redirect: "type(c) == map && 'RedirectAllRequestsTo' in c && type(c.RedirectAllRequestsTo) == map && size(c.RedirectAllRequestsTo) != 0"
+      suffix: >-
+        type(c) == map && 'IndexDocument' in c && type(c.IndexDocument) == map && 'Suffix' in c.IndexDocument
+        ? string(c.IndexDocument.Suffix) : ''
+      routing: "type(c) == map && 'RoutingRules' in c && type(c.RoutingRules) == list ? c.RoutingRules : []"
+      protocols: "['', 'http', 'https']"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - *unboundBody
+      - { cond: "type(c) == map", error: MalformedXML }
+      - cond: "!redirect || size(c) == 1"
+        error: InvalidArgument
+        message: RedirectAllRequestsTo cannot be provided in conjunction with other Routing Rules.
+        fields: { ArgumentName: "'RedirectAllRequestsTo'", ArgumentValue: "'not null'" }
+      - { cond: "!redirect || 'HostName' in c.RedirectAllRequestsTo", error: MalformedXML }
+      - cond: "!redirect || !('Protocol' in c.RedirectAllRequestsTo) || string(c.RedirectAllRequestsTo.Protocol) in protocols"
+        error: InvalidRequest
+        message: &badProtocol Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.
+      - cond: "redirect || ('IndexDocument' in c && type(c.IndexDocument) == map && size(c.IndexDocument) != 0)"
+        error: InvalidArgument
+        message: A value for IndexDocument Suffix must be provided if RedirectAllRequestsTo is empty
+        fields: { ArgumentName: "'IndexDocument'", ArgumentValue: "null" }
+      - cond: "redirect || (suffix != '' && !suffix.contains('/'))"
+        error: InvalidArgument
+        message: The IndexDocument Suffix is not well formed
+        fields: { ArgumentName: "'IndexDocument'", ArgumentValue: "suffix == '' ? dyn(null) : suffix" }
+      - cond: "redirect || !('ErrorDocument' in c) || (type(c.ErrorDocument) == map && 'Key' in c.ErrorDocument && string(c.ErrorDocument.Key) != '')"
+        error: MalformedXML
+      - { cond: "redirect || !('RoutingRules' in c) || size(routing) != 0", error: MalformedXML }
+      - { cond: "redirect || size(routing) <= 50", error: TooManyRoutingRules }
+      - cond: >-
+          redirect || routing.all(r, !(type(r) == map && 'Redirect' in r && type(r.Redirect) == map
+          && 'ReplaceKeyPrefixWith' in r.Redirect && 'ReplaceKeyWith' in r.Redirect))
+        error: InvalidRequest
+        message: You can only define ReplaceKeyPrefix or ReplaceKey but not both.
+      - cond: "redirect || routing.all(r, !(type(r) == map && 'Condition' in r) || (type(r.Condition) == map && size(r.Condition) != 0))"
+        error: InvalidRequest
+        message: Condition cannot be empty. To redirect all requests without a condition, the condition element shouldn't be present.
+      - cond: >-
+          redirect || routing.all(r, !(type(r) == map && 'Redirect' in r && type(r.Redirect) == map && 'Protocol' in r.Redirect)
+          || string(r.Redirect.Protocol) in protocols)
+        error: InvalidRequest
+        message: *badProtocol
+    effects:
+      - put: { resource: website, record: { WebsiteConfiguration: c } }
+    output: {}
+
+  GetBucketWebsite:
+    reads: { b: { resource: bucket }, site: { resource: website } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: site_found, error: NoWebsite, fields: { BucketName: input.Bucket } }
+    output:
+      RedirectAllRequestsTo: "'RedirectAllRequestsTo' in site.WebsiteConfiguration ? site.WebsiteConfiguration.RedirectAllRequestsTo : null"
+      IndexDocument: "'IndexDocument' in site.WebsiteConfiguration ? site.WebsiteConfiguration.IndexDocument : null"
+      ErrorDocument: "'ErrorDocument' in site.WebsiteConfiguration ? site.WebsiteConfiguration.ErrorDocument : null"
+      RoutingRules: "'RoutingRules' in site.WebsiteConfiguration ? site.WebsiteConfiguration.RoutingRules : null"
+    omit_null: [RedirectAllRequestsTo, IndexDocument, ErrorDocument, RoutingRules]
+
+  DeleteBucketWebsite:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: website, missing: ignore }
+    output: {}
+
+  # Logging with no LoggingEnabled turns logging off. A target bucket must
+  # exist in the caller's region; one the caller owns elsewhere is a
+  # cross-location target, anything else does not exist.
+  PutBucketLogging:
+    reads:
+      b: { resource: bucket }
+      target:
+        resource: bucket
+        key: &target >-
+          'BucketLoggingStatus' in input && type(input.BucketLoggingStatus) == map && 'LoggingEnabled' in input.BucketLoggingStatus
+          && type(input.BucketLoggingStatus.LoggingEnabled) == map && 'TargetBucket' in input.BucketLoggingStatus.LoggingEnabled
+          ? string(input.BucketLoggingStatus.LoggingEnabled.TargetBucket) : ''
+
+      where: { resource: bucketlocation, key: *target }
+    let:
+      logging: >-
+        'BucketLoggingStatus' in input && type(input.BucketLoggingStatus) == map && 'LoggingEnabled' in input.BucketLoggingStatus
+        && type(input.BucketLoggingStatus.LoggingEnabled) == map ? input.BucketLoggingStatus.LoggingEnabled : {}
+      enabled: "size(logging) != 0"
+      elsewhere: "where_found && where.account == identity.account && string(where.region) != '' && where.region != identity.region"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - *unboundBody
+      - { cond: "!enabled || ('TargetBucket' in logging && string(logging.TargetBucket) != '')", error: MalformedXML }
+      - cond: "!enabled || target_found || !elsewhere"
+        error: CrossLocationLogging
+        fields:
+          TargetBucketLocation: where.region
+          SourceBucketLocation: "identity.region == 'us-east-1' ? dyn(null) : identity.region"
+      - cond: "!enabled || target_found"
+        error: InvalidLoggingTarget
+        fields: { TargetBucket: logging.TargetBucket }
+    effects:
+      - delete: { resource: logging, missing: ignore, when: "!enabled" }
+      - put:
+          resource: logging
+          when: enabled
+          record: { BucketLoggingStatus: "{'LoggingEnabled': merge(logging, {'TargetPrefix': 'TargetPrefix' in logging ? string(logging.TargetPrefix) : ''})}" }
+    output: {}
+
+  GetBucketLogging:
+    reads: { b: { resource: bucket }, log: { resource: logging } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    output:
+      LoggingEnabled: "log_found ? log.BucketLoggingStatus.LoggingEnabled : null"
+    omit_null: [LoggingEnabled]
+
+  PutBucketAbac:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - put: { resource: abac, record: { AbacStatus: "'AbacStatus' in input ? input.AbacStatus : null" } }
+    output: {}
+
+  GetBucketAbac:
+    reads: { b: { resource: bucket }, abac: { resource: abac } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: abac_found, error: NoAbac }
+    output:
+      AbacStatus: abac.AbacStatus

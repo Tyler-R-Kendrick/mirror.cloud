@@ -2285,6 +2285,18 @@ func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
 	})
 }
 
+func TestBucketAbac(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "abac-bucket"}, nil)
+	if _, err := invoke(t, p, "GetBucketAbac", map[string]any{"Bucket": "abac-bucket"}, nil); asFault(t, err).Code != "NoSuchAbacConfiguration" {
+		t.Fatalf("unset abac = %v", err)
+	}
+	mustInvoke(t, p, "PutBucketAbac", map[string]any{"Bucket": "abac-bucket", "AbacStatus": map[string]any{"Status": "Enabled"}}, nil)
+	if got := asMapForTest(mustInvoke(t, p, "GetBucketAbac", map[string]any{"Bucket": "abac-bucket"}, nil).Output["AbacStatus"]); got["Status"] != "Enabled" {
+		t.Fatalf("abac = %#v", got)
+	}
+}
+
 func TestBucketLoggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	for _, bucket := range []string{"logging-characterization-source", "logging-characterization-target"} {

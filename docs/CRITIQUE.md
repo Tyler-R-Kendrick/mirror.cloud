@@ -1570,3 +1570,11 @@ Two engine defects surfaced along the way:
 **Named configurations.** Analytics, inventory, metrics and Intelligent-Tiering configurations moved to YAML: sixteen operations. Each is a document keyed `bucket/kind/id`. A listing reads its kind by prefix, and the key order is the Id order the pack sorted into. The inventory validation is one `require` rule. Metrics listings page by 100, with the next page's first Id as the token.
 
 The token is now standard base64 rather than URL-safe. It only has to survive a round trip, and callers already escape it in the query string. As the pack did, Intelligent-Tiering does not check the expected owner.
+
+**CORS, website, logging and ABAC.** These configurations moved to YAML: ten operations, including the two the Go reads back. The wrap reads the CORS rules from `bktcfg/cors`, and the website endpoint reads its configuration from `bktcfg/website`. Both read the layout the YAML writes.
+
+Website validation is one `require` rule per check. The index-document checks apply only when the site does not redirect everything.
+
+The logging target check reads the target bucket twice: once in the caller's region, and once in the global `s3buckets` registry to tell a cross-location target from a missing one.
+
+ABAC had no test, so it has one now.

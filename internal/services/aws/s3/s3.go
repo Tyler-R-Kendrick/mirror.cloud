@@ -56,9 +56,6 @@ var natives = []string{
 	"GetBucketNotificationConfiguration", "PutBucketNotificationConfiguration",
 	"GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
 	"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
-	"GetBucketCors", "PutBucketCors", "DeleteBucketCors",
-	"GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
-	"GetBucketLogging", "PutBucketLogging",
 	"GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
 	"GetBucketReplication", "PutBucketReplication",
 	"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
@@ -74,10 +71,10 @@ var natives = []string{
 	"RestoreObject",
 	"CreateBucketMetadataConfiguration", "CreateBucketMetadataTableConfiguration", "CreateSession",
 	"DeleteBucketMetadataConfiguration", "DeleteBucketMetadataTableConfiguration", "DeleteBucketReplication",
-	"DeleteObjectAnnotation", "GetBucketAbac", "GetBucketMetadataConfiguration",
+	"DeleteObjectAnnotation", "GetBucketMetadataConfiguration",
 	"GetBucketMetadataTableConfiguration", "GetObjectAnnotation", "GetObjectLockConfiguration",
 	"GetObjectTorrent", "ListDirectoryBuckets", "ListObjectAnnotations",
-	"PutBucketAbac", "PutObjectAnnotation", "PutObjectLockConfiguration",
+	"PutObjectAnnotation", "PutObjectLockConfiguration",
 	"RenameObject", "SelectObjectContent", "UpdateBucketMetadataAnnotationTableConfiguration",
 	"UpdateBucketMetadataInventoryTableConfiguration", "UpdateBucketMetadataJournalTableConfiguration",
 	"UpdateObjectEncryption", "WriteGetObjectResponse",
@@ -299,14 +296,10 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.bucketLifecycle(ctx, req)
 	case "GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
 		"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
-		"GetBucketCors", "PutBucketCors", "DeleteBucketCors",
-		"GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
-		"GetBucketLogging", "PutBucketLogging",
 		"GetBucketReplication", "PutBucketReplication", "DeleteBucketReplication",
 		"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
-		"GetObjectLockConfiguration", "PutObjectLockConfiguration",
-		"GetBucketAbac", "PutBucketAbac":
+		"GetObjectLockConfiguration", "PutObjectLockConfiguration":
 		return p.bucketCfg(ctx, req)
 	case "GetObjectAttributes":
 		return p.objectAttributes(ctx, req)
@@ -3572,88 +3565,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			}
 			return &spi.Response{Status: http.StatusOK}, nil
 		}
-		if req.Operation == "PutBucketWebsite" {
-			if str(req.Input["_body"]) != "" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			if err := validateWebsiteConfiguration(req.Input["WebsiteConfiguration"]); err != nil {
-				return nil, err
-			}
-		}
-		if req.Operation == "PutBucketCors" {
-			if str(req.Input["_body"]) != "" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			configuration := asMap(req.Input["CORSConfiguration"])
-			rules := asSlice(configuration["CORSRules"])
-			if len(rules) == 0 {
-				rules = asSlice(req.Input["CORSRules"])
-			}
-			if len(rules) == 0 || len(rules) > 100 {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			for _, value := range rules {
-				rule, ok := value.(map[string]any)
-				if !ok {
-					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-				}
-				if _, ok := rule["AllowedMethods"]; !ok {
-					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-				}
-				if _, ok := rule["AllowedOrigins"]; !ok {
-					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-				}
-				for field := range rule {
-					switch field {
-					case "AllowedMethods", "AllowedOrigins", "AllowedHeaders", "ExposeHeaders", "MaxAgeSeconds", "ID":
-					default:
-						return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-					}
-				}
-				for _, value := range asSlice(rule["AllowedMethods"]) {
-					method := str(value)
-					if method != "GET" && method != "PUT" && method != "HEAD" && method != "POST" && method != "DELETE" {
-						return nil, &spi.Fault{Code: "InvalidRequest", Message: "Found unsupported HTTP method in CORS config. Unsupported method is " + method, HTTPStatus: http.StatusBadRequest, Fault: "client"}
-					}
-				}
-			}
-			delete(req.Input, "CORSRules")
-			req.Input["CORSConfiguration"] = map[string]any{"CORSRules": rules}
-		}
-		if req.Operation == "PutBucketLogging" {
-			if str(req.Input["_body"]) != "" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			logging := asMap(asMap(req.Input["BucketLoggingStatus"])["LoggingEnabled"])
-			if len(logging) == 0 {
-				_ = col.Delete(ctx, key)
-				return &spi.Response{Status: 200}, nil
-			}
-			target := str(logging["TargetBucket"])
-			if target == "" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			if _, exists, _ := p.col(req, "buckets").Get(ctx, target); !exists {
-				raw, found, _ := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, target)
-				var location struct {
-					Account string `json:"account"`
-					Region  string `json:"region"`
-				}
-				if found {
-					_ = json.Unmarshal(raw, &location)
-				}
-				if location.Account == req.Identity.Account && location.Region != "" && location.Region != req.Identity.Region {
-					fields := map[string]any{"TargetBucketLocation": location.Region}
-					if req.Identity.Region != "us-east-1" {
-						fields["SourceBucketLocation"] = req.Identity.Region
-					}
-					return nil, &spi.Fault{Code: "CrossLocationLoggingProhibitted", Message: "Cross S3 location logging not allowed. ", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: fields}
-				}
-				return nil, &spi.Fault{Code: "InvalidTargetBucketForLogging", Message: "The target bucket for logging does not exist", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TargetBucket": target}}
-			}
-			logging["TargetPrefix"] = str(logging["TargetPrefix"])
-			req.Input["BucketLoggingStatus"] = map[string]any{"LoggingEnabled": logging}
-		}
 		if req.Operation == "PutBucketReplication" {
 			if !p.versioningEnabled(ctx, req, b) {
 				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Versioning must be 'Enabled' on the bucket to apply a replication configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -3703,17 +3614,8 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 				"Grants": []any{map[string]any{"Grantee": map[string]any{"ID": req.Identity.Account, "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}},
 			}}, nil
 		}
-		if req.Operation == "GetBucketLogging" {
-			return &spi.Response{Output: map[string]any{}}, nil
-		}
 		if req.Operation == "GetBucketEncryption" {
 			return &spi.Response{Output: map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}}}, nil
-		}
-		if req.Operation == "GetBucketCors" {
-			return nil, &spi.Fault{Code: "NoSuchCORSConfiguration", Message: "The CORS configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
-		}
-		if req.Operation == "GetBucketWebsite" {
-			return nil, &spi.Fault{Code: "NoSuchWebsiteConfiguration", Message: "The specified bucket does not have a website configuration", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
 		if miss != nil {
 			if req.Operation == "GetBucketPolicy" {
@@ -3730,15 +3632,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	_ = json.Unmarshal(raw, &doc)
 	if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
 		return &spi.Response{Status: http.StatusOK, Output: doc}, nil
-	}
-	if req.Operation == "GetBucketLogging" {
-		return &spi.Response{Status: 200, Output: map[string]any{"LoggingEnabled": asMap(doc["BucketLoggingStatus"])["LoggingEnabled"]}}, nil
-	}
-	if req.Operation == "GetBucketCors" {
-		return &spi.Response{Status: 200, Output: map[string]any{"CORSRules": asMap(doc["CORSConfiguration"])["CORSRules"]}}, nil
-	}
-	if req.Operation == "GetBucketWebsite" {
-		return &spi.Response{Status: 200, Output: asMap(doc["WebsiteConfiguration"])}, nil
 	}
 	if req.Operation == "GetBucketEncryption" {
 		return &spi.Response{Status: 200, Output: map[string]any{"Rules": asMap(doc["ServerSideEncryptionConfiguration"])["Rules"]}}, nil
@@ -3962,65 +3855,6 @@ func invalidACLArgument(name, value, message string) *spi.Fault {
 	return &spi.Fault{Code: "InvalidArgument", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": name, "ArgumentValue": value}}
 }
 
-func validateWebsiteConfiguration(value any) error {
-	configuration, ok := value.(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	if redirect := asMap(configuration["RedirectAllRequestsTo"]); len(redirect) != 0 {
-		if len(configuration) > 1 {
-			return &spi.Fault{Code: "InvalidArgument", Message: "RedirectAllRequestsTo cannot be provided in conjunction with other Routing Rules.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "RedirectAllRequestsTo", "ArgumentValue": "not null"}}
-		}
-		if _, ok := redirect["HostName"]; !ok {
-			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
-			return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		return nil
-	}
-	index := asMap(configuration["IndexDocument"])
-	if len(index) == 0 {
-		return &spi.Fault{Code: "InvalidArgument", Message: "A value for IndexDocument Suffix must be provided if RedirectAllRequestsTo is empty", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "IndexDocument", "ArgumentValue": nil}}
-	}
-	suffix := str(index["Suffix"])
-	if suffix == "" || strings.Contains(suffix, "/") {
-		argumentValue := any(suffix)
-		if suffix == "" {
-			argumentValue = nil
-		}
-		return &spi.Fault{Code: "InvalidArgument", Message: "The IndexDocument Suffix is not well formed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "IndexDocument", "ArgumentValue": argumentValue}}
-	}
-	if _, exists := configuration["ErrorDocument"]; exists && str(asMap(configuration["ErrorDocument"])["Key"]) == "" {
-		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	if _, exists := configuration["RoutingRules"]; exists {
-		rules := asSlice(configuration["RoutingRules"])
-		if len(rules) == 0 {
-			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		if len(rules) > 50 {
-			return &spi.Fault{Code: "InternalError", Message: "Too many routing rules", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
-		}
-		for _, value := range rules {
-			rule := asMap(value)
-			redirect := asMap(rule["Redirect"])
-			_, prefix := redirect["ReplaceKeyPrefixWith"]
-			_, key := redirect["ReplaceKeyWith"]
-			if prefix && key {
-				return &spi.Fault{Code: "InvalidRequest", Message: "You can only define ReplaceKeyPrefix or ReplaceKey but not both.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			if _, exists := rule["Condition"]; exists && len(asMap(rule["Condition"])) == 0 {
-				return &spi.Fault{Code: "InvalidRequest", Message: "Condition cannot be empty. To redirect all requests without a condition, the condition element shouldn't be present.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
-				return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-		}
-	}
-	return nil
-}
-
 func validateObjectLockConfiguration(value any) error {
 	configuration := asMap(value)
 	malformed := func() error {
@@ -4050,10 +3884,6 @@ func cfgKind(op string) (string, *spi.Fault) {
 	switch {
 	case strings.Contains(op, "Policy"):
 		return "policy", n("NoSuchBucketPolicy", "The bucket policy does not exist")
-	case strings.Contains(op, "Cors"):
-		return "cors", n("NoSuchCORSConfiguration", "The CORS configuration does not exist")
-	case strings.Contains(op, "Website"):
-		return "website", n("NoSuchWebsiteConfiguration", "The specified bucket does not have a website configuration")
 	case strings.Contains(op, "Notification"):
 		return "notification", nil
 	case strings.Contains(op, "Lifecycle"):
@@ -4064,10 +3894,6 @@ func cfgKind(op string) (string, *spi.Fault) {
 		return "replication", n("ReplicationConfigurationNotFoundError", "The replication configuration was not found")
 	case strings.Contains(op, "ObjectLock"):
 		return "objectlock", n("ObjectLockConfigurationNotFoundError", "Object Lock configuration does not exist for this bucket")
-	case strings.Contains(op, "Abac"):
-		return "abac", n("NoSuchAbacConfiguration", "The ABAC configuration does not exist")
-	case strings.Contains(op, "Logging"):
-		return "logging", nil
 	case strings.Contains(op, "Acl"):
 		return "acl", nil
 	}

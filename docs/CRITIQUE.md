@@ -1503,3 +1503,13 @@ Two changes came with the move:
 The opt-out and phone-number operations bind only the model's `phoneNumber`. The pack also accepted `PhoneNumber`, which no client sends.
 
 One step of the recording is re-cut. GetSMSSandboxAccountStatus answered a `Verified` count, but `GetSMSSandboxAccountStatusResult` has no such member.
+
+### Firehose: a delivery engine with one record operation
+
+Firehose is a hybrid bundle. ListDeliveryStreams is YAML. The other eleven operations are natives, because creating or updating a stream validates nested source and destination shapes, and putting a record buffers, transforms and delivers it. Kinesis and MSK consumption and the buffer and retry loop are the bundle's worker.
+
+Natives wake the worker through the bus, because they build a pack per call and hold no channel. Two things moved to package level for the same reason:
+- **HTTP client.** Tests swap the HTTP client for their TLS server's.
+- **OpenSearch lock.** The OpenSearch work lock.
+
+The worker runs its loop from the start rather than probing the store for persisted work first. The probe had existed so that a pack with nothing to deliver ran no goroutine, and a worker is exactly that goroutine.

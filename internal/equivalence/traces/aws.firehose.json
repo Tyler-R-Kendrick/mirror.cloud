@@ -1,0 +1,355 @@
+{
+  "schema": "trace/1",
+  "service": "aws.firehose",
+  "source": "pack:internal/services/aws/firehose@c1d0c9ad",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateDeliveryStream",
+      "input": {
+        "DeliveryStreamName": "alpha",
+        "S3DestinationConfiguration": {
+          "BucketARN": "arn:aws:s3:::out",
+          "RoleARN": "arn:aws:iam::000000000000:role/fh"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamARN": "arn:aws:firehose:us-east-1:000000000000:deliverystream/alpha"
+      }
+    },
+    {
+      "operation": "CreateDeliveryStream",
+      "input": {
+        "DeliveryStreamName": "bravo",
+        "S3DestinationConfiguration": {
+          "BucketARN": "arn:aws:s3:::out",
+          "RoleARN": "arn:aws:iam::000000000000:role/fh"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamARN": "arn:aws:firehose:us-east-1:000000000000:deliverystream/bravo"
+      }
+    },
+    {
+      "operation": "CreateDeliveryStream",
+      "input": {
+        "DeliveryStreamName": "charlie",
+        "S3DestinationConfiguration": {
+          "BucketARN": "arn:aws:s3:::out",
+          "RoleARN": "arn:aws:iam::000000000000:role/fh"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamARN": "arn:aws:firehose:us-east-1:000000000000:deliverystream/charlie"
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamNames": [
+          "alpha",
+          "bravo",
+          "charlie"
+        ],
+        "HasMoreDeliveryStreams": false
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "Limit": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamNames": [
+          "alpha",
+          "bravo"
+        ],
+        "HasMoreDeliveryStreams": true
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "ExclusiveStartDeliveryStreamName": "alpha"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamNames": [
+          "bravo",
+          "charlie"
+        ],
+        "HasMoreDeliveryStreams": false
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "ExclusiveStartDeliveryStreamName": "bravo",
+        "Limit": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamNames": [
+          "charlie"
+        ],
+        "HasMoreDeliveryStreams": false
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "DeliveryStreamType": "DirectPut"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamNames": [
+          "alpha",
+          "bravo",
+          "charlie"
+        ],
+        "HasMoreDeliveryStreams": false
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "DeliveryStreamType": "KinesisStreamAsSource"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamNames": [],
+        "HasMoreDeliveryStreams": false
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "Limit": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidArgumentException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "Limit": 10001
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidArgumentException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "DeliveryStreamType": "Nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidArgumentException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {
+        "ExclusiveStartDeliveryStreamName": "bad name!"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidArgumentException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "TagDeliveryStream",
+      "input": {
+        "DeliveryStreamName": "alpha",
+        "Tags": [
+          {
+            "Key": "b",
+            "Value": "2"
+          },
+          {
+            "Key": "a",
+            "Value": "1"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForDeliveryStream",
+      "input": {
+        "DeliveryStreamName": "alpha"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "HasMoreTags": false,
+        "Tags": [
+          {
+            "Key": "a",
+            "Value": "1"
+          },
+          {
+            "Key": "b",
+            "Value": "2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDeliveryStream",
+      "input": {
+        "DeliveryStreamName": "bravo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDeliveryStreams",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryStreamNames": [
+          "alpha",
+          "charlie"
+        ],
+        "HasMoreDeliveryStreams": false
+      }
+    },
+    {
+      "operation": "DeleteDeliveryStream",
+      "input": {
+        "DeliveryStreamName": "bravo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+schema: bir/1
+service: aws.firehose
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Listing delivery streams is records. The rest is Go, in
+# internal/services/aws/firehose: creating and updating a stream validates
+# its source and destination shapes, putting a record buffers, transforms and
+# delivers it to S3, HTTP, OpenSearch, Splunk, Redshift, Snowflake or
+# Iceberg, and a worker drains Kinesis and MSK sources and retries failed
+# deliveries.
+provenance: authored
+
+native:
+  - CreateDeliveryStream
+  - DeleteDeliveryStream
+  - DescribeDeliveryStream
+  - PutRecord
+  - PutRecordBatch
+  - UpdateDestination
+  - ListTagsForDeliveryStream
+  - TagDeliveryStream
+  - UntagDeliveryStream
+  - StartDeliveryStreamEncryption
+  - StopDeliveryStreamEncryption
+worker: drains Kinesis and MSK sources and retries failed deliveries
+
+resources:
+  stream:
+    collection: fh
+    id: { input_members: [DeliveryStreamName] }
+    record: {}
+
+errors:
+  InvalidArgument: { code: InvalidArgumentException, http: 400, fault: client }
+
+operations:
+  ListDeliveryStreams:
+    let:
+      numeric: "'Limit' in input && (type(input.Limit) == int || type(input.Limit) == double)"
+      limit: "numeric ? int(input.Limit) : 10"
+    require:
+      - cond: >-
+          !('Limit' in input) || (numeric && double(input.Limit) == double(limit) && limit >= 1 && limit <= 10000)
+        error: InvalidArgument
+      - cond: >-
+          !('ExclusiveStartDeliveryStreamName' in input) || string(input.ExclusiveStartDeliveryStreamName) == ''
+          || (size(string(input.ExclusiveStartDeliveryStreamName)) <= 64 && string(input.ExclusiveStartDeliveryStreamName).matches('^[a-zA-Z0-9_.-]+$'))
+        error: InvalidArgument
+      - cond: >-
+          !('DeliveryStreamType' in input) || string(input.DeliveryStreamType) == ''
+          || string(input.DeliveryStreamType) in ['DirectPut', 'KinesisStreamAsSource', 'MSKAsSource', 'DatabaseAsSource']
+        error: InvalidArgument
+    list:
+      resource: stream
+      member: DeliveryStreamNames
+      filter: >-
+        (!('DeliveryStreamType' in input) || string(input.DeliveryStreamType) == '' || item.DeliveryStreamType == input.DeliveryStreamType)
+        && (!('ExclusiveStartDeliveryStreamName' in input) || string(item.DeliveryStreamName) > string(input.ExclusiveStartDeliveryStreamName))
+    output:
+      DeliveryStreamNames: "slice(items.map(r, r.DeliveryStreamName), 0, limit)"
+      HasMoreDeliveryStreams: "size(items) > limit"

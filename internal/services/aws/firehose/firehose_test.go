@@ -1972,7 +1972,7 @@ func TestFirehoseSplunkDestination(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		t.Helper()
@@ -2035,7 +2035,7 @@ func TestFirehoseSplunkFailureBackup(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	destination := map[string]any{
 		"HECEndpoint": server.URL, "HECEndpointType": "Event", "HECToken": "token", "S3BackupMode": "AllEvents",
@@ -2109,7 +2109,7 @@ func TestFirehoseSplunkSecretAndPersistentRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := New(deps)
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	destination := map[string]any{
 		"HECEndpoint": server.URL, "HECEndpointType": "Raw", "BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1},
 		"RetryOptions": map[string]any{"DurationInSeconds": 10}, "S3Configuration": testS3Destination(),
@@ -2147,7 +2147,7 @@ func TestFirehoseSplunkSecretAndPersistentRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	p = New(deps)
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	defer func() { _ = p.Close() }()
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)
@@ -2189,7 +2189,7 @@ func TestFirehoseSplunkAcknowledgmentTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	destination := map[string]any{
 		"HECEndpoint": server.URL, "HECEndpointType": "Raw", "HECToken": "token", "HECAcknowledgmentTimeoutInSeconds": 180,
@@ -4459,7 +4459,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	p := New(deps)
 	defer func() { _ = p.Close() }()
 	defer close(releaseBlocked)
-	checkRedirect := p.httpClient.CheckRedirect
+	checkRedirect := defaultHTTPClient.CheckRedirect
 	httpClient := &http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			clone := request.Clone(request.Context())
@@ -4470,7 +4470,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		}),
 		CheckRedirect: checkRedirect,
 	}
-	p.httpClient = httpClient
+	useHTTPClient(t, httpClient)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		t.Helper()
@@ -4806,7 +4806,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	p = New(deps)
-	p.httpClient = httpClient
+	useHTTPClient(t, httpClient)
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -4923,14 +4923,11 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			t.Fatalf("unencrypted HTTP buffer payload %q", payload)
 		}
 	}
-	if !p.hasHTTPWork(context.Background()) {
-		t.Fatal("persisted HTTP buffer was not discoverable for restart")
-	}
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}
 	p = New(deps)
-	p.httpClient = httpClient
+	useHTTPClient(t, httpClient)
 	if err := deps.Clock.Advance(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -5280,4 +5277,12 @@ func TestFirehoseConcurrentCreateKeepsOneStream(t *testing.T) {
 			t.Fatalf("round %d: %d concurrent creates of one stream succeeded, want 1", round, n)
 		}
 	}
+}
+
+var defaultHTTPClient = httpClient
+
+// useHTTPClient points deliveries at c for the rest of the test.
+func useHTTPClient(t *testing.T, c *http.Client) {
+	httpClient = c
+	t.Cleanup(func() { httpClient = defaultHTTPClient })
 }

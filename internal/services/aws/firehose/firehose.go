@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,8 +29,6 @@ import (
 	"github.com/golang/snappy"
 	"github.com/itchyny/gojq"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
@@ -41,24 +38,43 @@ import (
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.firehose", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range []string{
+		"CreateDeliveryStream", "DeleteDeliveryStream", "DescribeDeliveryStream",
+		"PutRecord", "PutRecordBatch", "UpdateDestination",
+		"ListTagsForDeliveryStream", "TagDeliveryStream", "UntagDeliveryStream",
+		"StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption",
+	} {
+		bundled.RegisterNative("aws.firehose", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return (&Pack{deps: deps}).Invoke(ctx, req)
+		})
+	}
+	bundled.RegisterWorker("aws.firehose", func(d spi.Deps) func() error { return Start(d).Close })
 }
 
-// Pack implements Firehose-lite.
+// Pack is both the receiver the natives run on, built per call, and the
+// worker, which alone owns the wake channel.
 type Pack struct {
-	deps          spi.Deps
-	httpClient    *http.Client
-	wake          chan struct{}
-	stop          chan struct{}
-	done          chan struct{}
-	retryOnce     sync.Once
-	closeOnce     sync.Once
-	searchMu      sync.Mutex
-	cancelKinesis func()
-	cancelMSK     func()
+	deps      spi.Deps
+	wake      chan struct{}
+	stop      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
+	cancels   []func()
 }
+
+// httpClient delivers to HTTP endpoints; tests swap it for a TLS server's.
+var httpClient = &http.Client{
+	Timeout: 3 * time.Minute,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+// searchMu serialises OpenSearch work across the per-call packs.
+var searchMu sync.Mutex
+
+// wakeTopic is published by a native that queued work for the worker.
+const wakeTopic = "firehose:wake"
 
 type httpRetry struct {
 	Stream       string
@@ -138,39 +154,43 @@ const (
 	maxBatchBytes  = 4 * 1024 * 1024
 )
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack {
-	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), httpClient: &http.Client{
-		Timeout: 3 * time.Minute,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}}
+// Start runs the worker against d: it drains Kinesis and MSK sources and
+// retries buffered and failed deliveries.
+func Start(d spi.Deps) *Pack {
+	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
 	if d.Bus != nil {
-		p.cancelKinesis = d.Bus.Subscribe("kinesis", p.consumeKinesis)
-		p.cancelMSK = d.Bus.Subscribe("kafka", p.consumeMSK)
+		p.cancels = append(p.cancels, d.Bus.Subscribe("kinesis", p.consumeKinesis), d.Bus.Subscribe("kafka", p.consumeMSK),
+			d.Bus.Subscribe(wakeTopic, func(context.Context, []byte) { p.notifyRetryLoop() }))
 	}
-	if p.hasHTTPWork(context.Background()) {
-		p.startRetryLoop()
-	}
+	go p.httpRetryLoop()
 	return p
 }
 
-// Close stops the HTTP retry worker.
+// Close stops the worker.
 func (p *Pack) Close() error {
-	p.startRetryLoop()
 	p.closeOnce.Do(func() {
-		if p.cancelKinesis != nil {
-			p.cancelKinesis()
-		}
-		if p.cancelMSK != nil {
-			p.cancelMSK()
+		for _, cancel := range p.cancels {
+			cancel()
 		}
 		close(p.stop)
 	})
 	<-p.done
 	return nil
 }
+
+// Served is the service with its worker running.
+type Served struct {
+	spi.BehaviorPack
+	*Pack
+}
+
+// Invoke answers through the bundle.
+func (s Served) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	return s.BehaviorPack.Invoke(ctx, req)
+}
+
+// New builds the served service for tests that need delivery running.
+func New(d spi.Deps) Served { return Served{bundled.Handler("aws.firehose", d), Start(d)} }
 
 func (p *Pack) consumeMSK(ctx context.Context, payload []byte) {
 	var event struct {
@@ -358,24 +378,13 @@ func eachProtoField(message []byte, visit func(field, wire int, value []byte) bo
 	return true
 }
 
-func (p *Pack) ServiceID() string { return "aws.firehose" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return []string{
-		"CreateDeliveryStream", "DeleteDeliveryStream", "DescribeDeliveryStream", "ListDeliveryStreams",
-		"PutRecord", "PutRecordBatch", "UpdateDestination",
-		"ListTagsForDeliveryStream", "TagDeliveryStream", "UntagDeliveryStream",
-		"StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption",
-	}
-}
-
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
 }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := first(req.Input, "DeliveryStreamName", "deliveryStreamName")
-	if req.Operation != "ListDeliveryStreams" && slices.Contains(p.Operations(), req.Operation) && (len(name) > 64 || !firehoseStreamName.MatchString(name)) {
+	if len(name) > 64 || !firehoseStreamName.MatchString(name) {
 		return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	switch req.Operation {
@@ -528,42 +537,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
 		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": describeRecord(rec, after)}}, nil
-	case "ListDeliveryStreams":
-		limit, valid := inputLimit(req.Input["Limit"], 10, 10000)
-		if !valid {
-			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		after := first(req.Input, "ExclusiveStartDeliveryStreamName")
-		if after != "" && (len(after) > 64 || !firehoseStreamName.MatchString(after)) {
-			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		streamType := first(req.Input, "DeliveryStreamType")
-		switch streamType {
-		case "", "DirectPut", "KinesisStreamAsSource", "MSKAsSource", "DatabaseAsSource":
-		default:
-			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		kvs, _, err := p.col(req, "fh").List(ctx, "", after, 0)
-		if err != nil {
-			return nil, err
-		}
-		names := make([]any, 0, min(limit, len(kvs)))
-		more := false
-		// ponytail: scan at most the regional 5,000-stream ceiling; add indexed type pages if that ceiling becomes hot.
-		for _, kv := range kvs {
-			if streamType != "" {
-				var rec map[string]any
-				if json.Unmarshal(kv.Value, &rec) != nil || first(rec, "DeliveryStreamType") != streamType {
-					continue
-				}
-			}
-			if len(names) == limit {
-				more = true
-				break
-			}
-			names = append(names, kv.Key)
-		}
-		return &spi.Response{Output: map[string]any{"DeliveryStreamNames": names, "HasMoreDeliveryStreams": more}}, nil
 	case "PutRecord":
 		stream, ok, _ := p.col(req, "fh").Get(ctx, name)
 		if !ok {
@@ -2795,7 +2768,6 @@ func (p *Pack) scheduleRedshiftRetry(ctx context.Context, req *spi.Request, stre
 		_ = p.deps.Blobs.Delete(ctx, dataKey)
 		return false
 	}
-	p.startRetryLoop()
 	p.notifyRetryLoop()
 	return true
 }
@@ -3158,7 +3130,6 @@ func (p *Pack) bufferSearch(ctx context.Context, req *spi.Request, stream, desti
 		p.runSearchWork(ctx)
 		return true
 	}
-	p.startRetryLoop()
 	p.notifyRetryLoop()
 	return true
 }
@@ -3193,8 +3164,8 @@ func (p *Pack) writeSearchPayload(ctx context.Context, req *spi.Request, stream,
 }
 
 func (p *Pack) runSearchWork(ctx context.Context) time.Time {
-	p.searchMu.Lock()
-	defer p.searchMu.Unlock()
+	searchMu.Lock()
+	defer searchMu.Unlock()
 	if p.deps.Store == nil || p.deps.Clock == nil {
 		return time.Time{}
 	}
@@ -3346,7 +3317,6 @@ func (p *Pack) retryOrBackupSearch(ctx context.Context, req *spi.Request, stream
 		work := searchWork{Stream: name, Destination: destinationKey, DataKey: dataKey, State: "retry", Next: next, Expires: expires, ErrorCode: code, ErrorMessage: message}
 		stored, err := json.Marshal(work)
 		if err == nil && p.col(req, "fh-search-work").Put(ctx, name+"/retry/"+key, stored) == nil {
-			p.startRetryLoop()
 			p.notifyRetryLoop()
 			return
 		}
@@ -3491,34 +3461,18 @@ func (p *Pack) bufferEndpoint(ctx context.Context, req *spi.Request, stream, des
 		_ = p.deps.Blobs.Delete(ctx, dataKey)
 		return false
 	}
-	p.startRetryLoop()
 	p.notifyRetryLoop()
 	return true
 }
 
-func (p *Pack) hasHTTPWork(ctx context.Context) bool {
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return false
-	}
-	scopes, err := p.deps.Store.Scopes(ctx)
-	if err != nil {
-		return false
-	}
-	for _, identity := range scopes {
-		for _, name := range []string{"fh-http-buffers", "fh-http-retries", "fh-search-work", "fh-redshift-work"} {
-			if work, _, _ := p.deps.Store.Scope(identity.Account, identity.Region).Collection(name).List(ctx, "", "", 1); len(work) != 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (p *Pack) startRetryLoop() {
-	p.retryOnce.Do(func() { go p.httpRetryLoop() })
-}
-
 func (p *Pack) notifyRetryLoop() {
+	if p.wake == nil {
+		// A native: wake the worker, which owns the channel.
+		if p.deps.Bus != nil {
+			_ = p.deps.Bus.Publish(context.Background(), wakeTopic, nil)
+		}
+		return
+	}
 	select {
 	case p.wake <- struct{}{}:
 	default:
@@ -3561,7 +3515,6 @@ func (p *Pack) scheduleEndpointRetryPayload(ctx context.Context, req *spi.Reques
 		_ = p.deps.Blobs.Delete(ctx, dataKey)
 		return false
 	}
-	p.startRetryLoop()
 	p.notifyRetryLoop()
 	return true
 }
@@ -4020,7 +3973,7 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 	request.Header.Set("Authorization", "Splunk "+token)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Splunk-Request-Channel", requestID)
-	response, err := p.httpClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return false, false, "Splunk.InvalidEndpoint", err.Error()
 	}
@@ -4052,7 +4005,7 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 		ackRequest.Header.Set("Authorization", "Splunk "+token)
 		ackRequest.Header.Set("Content-Type", "application/json")
 		ackRequest.Header.Set("X-Splunk-Request-Channel", requestID)
-		ackResponse, err := p.httpClient.Do(ackRequest)
+		ackResponse, err := httpClient.Do(ackRequest)
 		if err != nil {
 			return false, false, "Splunk.InvalidEndpoint", err.Error()
 		}
@@ -4179,7 +4132,7 @@ func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destin
 		encoded, _ := json.Marshal(map[string]any{"commonAttributes": common})
 		request.Header.Set("X-Amz-Firehose-Common-Attributes", string(encoded))
 	}
-	response, err := p.httpClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return false, false, err.Error()
 	}

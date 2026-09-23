@@ -13140,6 +13140,14 @@ var mutants = []mutant{
 		run:  "TestOpenSearchBufferRetryPersistence",
 	},
 	{
+		name: "firehose-drop-opensearch-processing-failures",
+		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+		old:  "records, failures := p.processData(ctx, req, destination, stream, recIDs[i], data[i], now)\n\t\t\tfor _, failure := range failures {\n\t\t\t\tp.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)",
+		new:  "records, failures := p.processData(ctx, req, destination, stream, recIDs[i], data[i], now)\n\t\t\tfor _, failure := range failures[:0] {\n\t\t\t\tp.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)",
+		pkg:  "./internal/services/aws/firehose",
+		run:  "TestFirehoseOpenSearchDestination$",
+	},
+	{
 		name: "firehose-lose-opensearch-arrival-time",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 		old:  `arrival: payload.Arrivals[index], searchIndex: searchFailureIndex(destination, payload.Arrivals[index]), searchType: first(destination, "TypeName"),`,
@@ -20983,6 +20991,10 @@ func TestMutantsAreKilled(t *testing.T) {
 			if err := os.WriteFile(overlay, enc, 0o644); err != nil {
 				t.Fatal(err)
 			}
+			// ponytail: a mutant that makes its test hang past 30s counts as killed, as in
+			// PIT; a hang is a change the test observed. The ceiling is a test that already
+			// runs near 30s unmutated, which would "kill" anything; the upgrade is timing the
+			// unmutated run and failing a timeout that lands within its margin.
 			cmd := exec.Command("go", "test", m.pkg, "-count=1", "-run", m.run, "-timeout", "30s", "-overlay", overlay)
 			cmd.Dir = root
 			out, err := cmd.CombinedOutput()

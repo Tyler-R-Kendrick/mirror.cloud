@@ -687,6 +687,34 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	if first(described, "IndexRotationPeriod") != "OneDay" || first(described, "S3BackupMode") != "AllDocuments" {
 		t.Fatalf("OpenSearch description %#v", described)
 	}
+
+	// A record that fails processing lands under the backup's error prefix.
+	failing := map[string]any{
+		"DomainARN": "arn:aws:es:us-east-1:123456789012:domain/logs", "IndexName": "failing", "RoleARN": testRoleARN,
+		"BufferingHints":          map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1},
+		"ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Decompression"}}},
+		"S3Configuration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/",
+		},
+	}
+	invoke(firehose, "CreateDeliveryStream", map[string]any{"DeliveryStreamName": "search-failing", "ElasticsearchDestinationConfiguration": failing})
+	failedPut, err := firehose.Invoke(context.Background(), &spi.Request{Identity: id, SourceService: "aws.logs", Operation: "PutRecord", Input: map[string]any{
+		"DeliveryStreamName": "search-failing", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("not-gzip"))},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedID := first(failedPut.Output, "RecordId")
+	reader, _, err = deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/errors/decompression-failed/1970/01/01/00/search-failing-1-1970-01-01-00-00-00-"+failedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureBody, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	failure := map[string]any{}
+	if json.Unmarshal(failureBody, &failure) != nil || first(failure, "errorCode") != "Decompression.Failed" || first(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte("not-gzip")) {
+		t.Fatalf("OpenSearch processing failure %s", failureBody)
+	}
 }
 
 func TestFirehoseAmazonOpenSearchServiceDestination(t *testing.T) {

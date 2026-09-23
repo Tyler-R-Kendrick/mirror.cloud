@@ -1,4 +1,6 @@
-// Package pipes emulates EventBridge Pipes control plane and source delivery.
+// Package pipes is EventBridge Pipes' delivery worker: the loop
+// behavior/aws/pipes declares under worker:. Pipes are the bundle's; this
+// polls their sources and delivers to their targets.
 package pipes
 
 import (
@@ -17,8 +19,6 @@ import (
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
@@ -29,13 +29,12 @@ import (
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.pipes", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	bundled.RegisterWorker("aws.pipes", func(d spi.Deps) func() error { return Start(d).Close })
+	bundled.RegisterNative("aws.pipes", "DeletePipe", deletePipe)
 }
 
-// Pack implements EventBridge Pipes.
-type Pack struct {
+// worker delivers the pipes behavior/aws/pipes stores.
+type worker struct {
 	deps      spi.Deps
 	wake      chan struct{}
 	stop      chan struct{}
@@ -48,32 +47,23 @@ type Pack struct {
 	draining sync.Mutex
 }
 
-// New constructs the pack and resumes running pipes.
-func New(d spi.Deps) *Pack {
-	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
+// Start runs the delivery loop against d. It wakes on source activity and on
+// the bundle's writes to the pipe collection, and resumes running pipes.
+func Start(d spi.Deps) *worker {
+	p := &worker{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
 	if d.Store == nil || d.Clock == nil || d.Bus == nil {
 		close(p.done)
 		return p
 	}
-	for _, topic := range []string{"sqs", "kinesis", "dynamodb-stream"} {
+	for _, topic := range []string{"sqs", "kinesis", "dynamodb-stream", "collection:pipe"} {
 		p.cancels = append(p.cancels, d.Bus.Subscribe(topic, func(context.Context, []byte) { p.notify() }))
 	}
 	go p.loop()
 	return p
 }
 
-func (p *Pack) ServiceID() string { return "aws.pipes" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return []string{
-		"CreatePipe", "DescribePipe", "ListPipes", "UpdatePipe", "DeletePipe",
-		"StartPipe", "StopPipe",
-		"TagResource", "UntagResource", "ListTagsForResource",
-	}
-}
-
 // Close stops source polling.
-func (p *Pack) Close() error {
+func (p *worker) Close() error {
 	p.closeOnce.Do(func() {
 		for _, cancel := range p.cancels {
 			cancel()
@@ -84,198 +74,32 @@ func (p *Pack) Close() error {
 	return nil
 }
 
-func (p *Pack) col(req *spi.Request, name string) spi.Collection {
-	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(name)
-}
-
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+// deletePipe removes the pipe and the checkpoint and retry counts the worker
+// kept for it, which a pipe created again under the name must not inherit.
+func deletePipe(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+	scope := deps.Store.Scope(req.Identity.Account, req.Identity.Region)
 	name := first(req.Input, "Name")
-	switch req.Operation {
-	case "CreatePipe":
-		if name == "" || first(req.Input, "Source") == "" || first(req.Input, "Target") == "" || first(req.Input, "RoleArn") == "" {
-			return nil, validation("Name, Source, Target, and RoleArn are required.")
-		}
-		if err := validateSource(req.Input); err != nil {
-			return nil, err
-		}
-		if err := validateTarget(req.Input); err != nil {
-			return nil, err
-		}
-		if _, ok, err := p.col(req, "pipe").Get(ctx, name); err != nil {
-			return nil, err
-		} else if ok {
-			return nil, conflict("Pipe already exists.")
-		}
-		arn := "arn:aws:pipes:" + req.Identity.Region + ":" + req.Identity.Account + ":pipe/" + name
-		rec := clone(req.Input)
-		state := first(req.Input, "DesiredState")
-		if state == "" {
-			state = "RUNNING"
-		}
-		if state != "RUNNING" && state != "STOPPED" {
-			return nil, validation("DesiredState must be RUNNING or STOPPED.")
-		}
-		rec["Name"], rec["Arn"], rec["CurrentState"], rec["DesiredState"] = name, arn, state, state
-		if err := putRecord(ctx, p.col(req, "pipe"), name, rec); err != nil {
-			return nil, err
-		}
-		p.notify()
-		return &spi.Response{Output: map[string]any{"Name": name, "Arn": arn, "CurrentState": state}}, nil
-	case "DescribePipe":
-		rec, ok, err := getRecord(ctx, p.col(req, "pipe"), name)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, notFound()
-		}
-		return &spi.Response{Output: rec}, nil
-	case "ListPipes":
-		kvs, _, err := p.col(req, "pipe").List(ctx, "", "", 0)
-		if err != nil {
-			return nil, err
-		}
-		items := make([]any, 0, len(kvs))
-		for _, kv := range kvs {
-			var rec map[string]any
-			if json.Unmarshal(kv.Value, &rec) == nil {
-				items = append(items, rec)
-			}
-		}
-		return &spi.Response{Output: map[string]any{"Pipes": items}}, nil
-	case "UpdatePipe":
-		rec, ok, err := getRecord(ctx, p.col(req, "pipe"), name)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, notFound()
-		}
-		if source, exists := req.Input["Source"]; exists && stringValue(source) != stringValue(rec["Source"]) {
-			return nil, validation("Source cannot be updated.")
-		}
-		for key, value := range req.Input {
-			if key != "Name" {
-				rec[key] = value
-			}
-		}
-		if state := first(req.Input, "DesiredState"); state != "" {
-			if state != "RUNNING" && state != "STOPPED" {
-				return nil, validation("DesiredState must be RUNNING or STOPPED.")
-			}
-			rec["CurrentState"] = state
-		}
-		if err := validateSource(rec); err != nil {
-			return nil, err
-		}
-		if err := validateTarget(rec); err != nil {
-			return nil, err
-		}
-		if err := putRecord(ctx, p.col(req, "pipe"), name, rec); err != nil {
-			return nil, err
-		}
-		p.notify()
-		return &spi.Response{Output: map[string]any{"Name": name, "Arn": rec["Arn"], "CurrentState": rec["CurrentState"]}}, nil
-	case "DeletePipe":
-		if _, ok, err := p.col(req, "pipe").Get(ctx, name); err != nil {
-			return nil, err
-		} else if !ok {
-			return nil, notFound()
-		}
-		if err := p.col(req, "pipe").Delete(ctx, name); err != nil {
-			return nil, err
-		}
-		_ = p.col(req, "pipecheckpoint").Delete(ctx, name)
-		attempts := p.col(req, "pipeattempt:"+name)
-		if kvs, _, listErr := attempts.List(ctx, "", "", 0); listErr == nil {
-			for _, kv := range kvs {
-				_ = attempts.Delete(ctx, kv.Key)
-			}
-		}
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "StartPipe", "StopPipe":
-		rec, ok, err := getRecord(ctx, p.col(req, "pipe"), name)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, notFound()
-		}
-		state := "RUNNING"
-		if req.Operation == "StopPipe" {
-			state = "STOPPED"
-		}
-		rec["CurrentState"], rec["DesiredState"] = state, state
-		if err := putRecord(ctx, p.col(req, "pipe"), name, rec); err != nil {
-			return nil, err
-		}
-		p.notify()
-		return &spi.Response{Output: map[string]any{"Name": name, "Arn": rec["Arn"], "CurrentState": state}}, nil
-	case "TagResource":
-		arn := first(req.Input, "resourceArn", "ResourceArn")
-		tags := map[string]any{}
-		if b, ok, err := p.col(req, "pipetag").Get(ctx, arn); err != nil {
-			return nil, err
-		} else if ok {
-			_ = json.Unmarshal(b, &tags)
-		}
-		incoming, _ := req.Input["tags"].(map[string]any)
-		if incoming == nil {
-			incoming, _ = req.Input["Tags"].(map[string]any)
-		}
-		for key, value := range incoming {
-			tags[key] = value
-		}
-		b, _ := json.Marshal(tags)
-		if err := p.col(req, "pipetag").Put(ctx, arn, b); err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "UntagResource":
-		arn := first(req.Input, "resourceArn", "ResourceArn")
-		b, ok, err := p.col(req, "pipetag").Get(ctx, arn)
-		if err != nil {
-			return nil, err
-		}
-		tags := map[string]any{}
-		if ok {
-			_ = json.Unmarshal(b, &tags)
-		}
-		keys := req.Input["tagKeys"]
-		if keys == nil {
-			keys = req.Input["TagKeys"]
-		}
-		switch keys := keys.(type) {
-		case []any:
-			for _, key := range keys {
-				delete(tags, stringValue(key))
-			}
-		case []string:
-			for _, key := range keys {
-				delete(tags, key)
-			}
-		}
-		b, _ = json.Marshal(tags)
-		if err := p.col(req, "pipetag").Put(ctx, arn, b); err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "ListTagsForResource":
-		b, ok, err := p.col(req, "pipetag").Get(ctx, first(req.Input, "resourceArn", "ResourceArn"))
-		if err != nil {
-			return nil, err
-		}
-		var tags any = map[string]any{}
-		if ok {
-			_ = json.Unmarshal(b, &tags)
-		}
-		return &spi.Response{Output: map[string]any{"tags": tags}}, nil
-	default:
-		return nil, spi.NotImplemented("aws.pipes", req.Operation, "emulate")
+	rec, ok, err := getRecord(ctx, scope.Collection("pipe"), name)
+	if err != nil {
+		return nil, err
 	}
+	if !ok {
+		return nil, notFound()
+	}
+	if err := scope.Collection("pipe").Delete(ctx, name); err != nil {
+		return nil, err
+	}
+	_ = scope.Collection("pipecheckpoint").Delete(ctx, name)
+	attempts := scope.Collection("pipeattempt:" + name)
+	if kvs, _, listErr := attempts.List(ctx, "", "", 0); listErr == nil {
+		for _, kv := range kvs {
+			_ = attempts.Delete(ctx, kv.Key)
+		}
+	}
+	return &spi.Response{Output: map[string]any{"Name": name, "Arn": rec["Arn"], "DesiredState": rec["DesiredState"], "CurrentState": "DELETING"}}, nil
 }
 
-func (p *Pack) loop() {
+func (p *worker) loop() {
 	defer close(p.done)
 	for {
 		tick := p.deps.Clock.Now().Add(time.Second) // fixed before the work; see spi.Clock.AfterTime
@@ -292,7 +116,7 @@ func (p *Pack) loop() {
 	}
 }
 
-func (p *Pack) drain(ctx context.Context) bool {
+func (p *worker) drain(ctx context.Context) bool {
 	p.draining.Lock()
 	defer p.draining.Unlock()
 	more := false
@@ -327,7 +151,7 @@ func (p *Pack) drain(ctx context.Context) bool {
 	return more
 }
 
-func (p *Pack) drainSQS(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
+func (p *worker) drainSQS(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
 	queue := source[strings.LastIndex(source, ":")+1:]
 	batchSize := sourceBatchSize(pipe)
 	response, err := bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{
@@ -341,7 +165,7 @@ func (p *Pack) drainSQS(ctx context.Context, identity spi.Identity, pipe map[str
 	return len(messages) == batchSize
 }
 
-func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
+func (p *worker) drainKinesis(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
 	stream := source[strings.LastIndex(source, "/")+1:]
 	return p.drainStream(ctx, identity, pipe, bundled.Handler("aws.kinesis", p.deps), map[string]any{
 		"StreamName": stream, "ShardId": "shardId-000000000000",
@@ -352,7 +176,7 @@ func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map
 	})
 }
 
-func (p *Pack) drainDynamoDB(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
+func (p *worker) drainDynamoDB(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
 	return p.drainStream(ctx, identity, pipe, dynamodb.New(p.deps), map[string]any{
 		"StreamArn": source, "ShardId": "shardId-000000000000",
 	}, "DynamoDBStreamParameters", "SequenceNumber", func(record map[string]any) string {
@@ -362,7 +186,7 @@ func (p *Pack) drainDynamoDB(ctx context.Context, identity spi.Identity, pipe ma
 	})
 }
 
-func (p *Pack) drainStream(ctx context.Context, identity spi.Identity, pipe map[string]any, client spi.BehaviorPack, iteratorInput map[string]any, parameterName, sequenceField string, sequence func(map[string]any) string, eventFor func(map[string]any) map[string]any) bool {
+func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe map[string]any, client spi.BehaviorPack, iteratorInput map[string]any, parameterName, sequenceField string, sequence func(map[string]any) string, eventFor func(map[string]any) map[string]any) bool {
 	request := &spi.Request{Identity: identity, Input: iteratorInput}
 	scope := p.deps.Store.Scope(identity.Account, identity.Region)
 	name := stringValue(pipe["Name"])
@@ -460,7 +284,7 @@ func (p *Pack) drainStream(ctx context.Context, identity spi.Identity, pipe map[
 	return len(records) == streamBatchSize(pipe, parameterName)
 }
 
-func (p *Pack) deadLetterStreamRecord(ctx context.Context, identity spi.Identity, parameters map[string]any, event map[string]any) bool {
+func (p *worker) deadLetterStreamRecord(ctx context.Context, identity spi.Identity, parameters map[string]any, event map[string]any) bool {
 	config, _ := parameters["DeadLetterConfig"].(map[string]any)
 	arn := stringValue(config["Arn"])
 	if arn == "" {
@@ -483,7 +307,7 @@ func streamRecordExpired(now time.Time, event, parameters map[string]any) bool {
 	return ok && now.Sub(time.UnixMilli(int64(timestamp*1000))) > time.Duration(maximumAge)*time.Second
 }
 
-func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) map[string]bool {
+func (p *worker) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) map[string]bool {
 	records, ids := make([]any, 0, len(messages)), make([]string, 0, len(messages))
 	byID := map[string]map[string]any{}
 	for _, raw := range messages {
@@ -498,7 +322,7 @@ func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map
 	return succeeded
 }
 
-func (p *Pack) processRecords(ctx context.Context, identity spi.Identity, pipe map[string]any, records []any, ids []string) map[string]bool {
+func (p *worker) processRecords(ctx context.Context, identity spi.Identity, pipe map[string]any, records []any, ids []string) map[string]bool {
 	succeeded := map[string]bool{}
 	matchedRecords, matchedIDs := make([]any, 0, len(records)), make([]string, 0, len(ids))
 	for i, record := range records {
@@ -578,7 +402,7 @@ func (p *Pack) processRecords(ctx context.Context, identity spi.Identity, pipe m
 	return succeeded
 }
 
-func (p *Pack) enrich(ctx context.Context, identity spi.Identity, pipe map[string]any, inputs [][]byte, fallback []any) ([]any, bool, bool) {
+func (p *worker) enrich(ctx context.Context, identity spi.Identity, pipe map[string]any, inputs [][]byte, fallback []any) ([]any, bool, bool) {
 	arn := stringValue(pipe["Enrichment"])
 	if arn == "" {
 		return fallback, false, true
@@ -636,7 +460,7 @@ func (p *Pack) enrich(ctx context.Context, identity spi.Identity, pipe map[strin
 	return []any{output}, true, true
 }
 
-func (p *Pack) invokeAPIGateway(ctx context.Context, identity spi.Identity, pipe map[string]any, arn string, payload []byte, event any) ([]byte, error) {
+func (p *worker) invokeAPIGateway(ctx context.Context, identity spi.Identity, pipe map[string]any, arn string, payload []byte, event any) ([]byte, error) {
 	parts := strings.SplitN(arn, ":", 6)
 	if len(parts) != 6 {
 		return nil, validation("Invalid API Gateway enrichment ARN.")
@@ -720,7 +544,7 @@ func httpParameter(value, event any) string {
 	return parameter
 }
 
-func (p *Pack) inputPayload(pipe map[string]any, parameterName string, event any) []byte {
+func (p *worker) inputPayload(pipe map[string]any, parameterName string, event any) []byte {
 	parameters, _ := pipe[parameterName].(map[string]any)
 	template := stringValue(parameters["InputTemplate"])
 	if template == "" {
@@ -791,7 +615,7 @@ func decodedEvent(event any) any {
 	return decoded
 }
 
-func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn string, payload []byte, ids []string) (map[string]bool, bool) {
+func (p *worker) invokeLambda(ctx context.Context, identity spi.Identity, arn string, payload []byte, ids []string) (map[string]bool, bool) {
 	raw, err := p.invokeLambdaPayload(ctx, identity, arn, payload)
 	if err != nil {
 		return nil, false
@@ -820,7 +644,7 @@ func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn stri
 	return failed, true
 }
 
-func (p *Pack) invokeLambdaPayload(ctx context.Context, identity spi.Identity, arn string, payload []byte) (json.RawMessage, error) {
+func (p *worker) invokeLambdaPayload(ctx context.Context, identity spi.Identity, arn string, payload []byte) (json.RawMessage, error) {
 	_, name, ok := strings.Cut(arn, ":function:")
 	if !ok {
 		return nil, validation("Invalid Lambda ARN.")
@@ -867,7 +691,7 @@ func insideJSONString(value string, end int) bool {
 	return quoted
 }
 
-func (p *Pack) deleteMessage(ctx context.Context, identity spi.Identity, queue, handle string) {
+func (p *worker) deleteMessage(ctx context.Context, identity spi.Identity, queue, handle string) {
 	_, _ = bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteMessage", Input: map[string]any{"QueueName": queue, "ReceiptHandle": handle}})
 }
 
@@ -950,67 +774,7 @@ func sourceParameters(pipe map[string]any, name string) map[string]any {
 	return result
 }
 
-func validateSource(pipe map[string]any) error {
-	source := stringValue(pipe["Source"])
-	parameterName, positions := "", map[string]bool{}
-	switch {
-	case strings.Contains(source, ":kinesis:"):
-		parameterName, positions = "KinesisStreamParameters", map[string]bool{"TRIM_HORIZON": true, "LATEST": true, "AT_TIMESTAMP": true}
-	case strings.Contains(source, ":dynamodb:") && strings.Contains(source, "/stream/"):
-		parameterName, positions = "DynamoDBStreamParameters", map[string]bool{"TRIM_HORIZON": true, "LATEST": true}
-	default:
-		return nil
-	}
-	parameters := sourceParameters(pipe, parameterName)
-	position := stringValue(parameters["StartingPosition"])
-	if !positions[position] {
-		return validation(parameterName + ".StartingPosition is invalid.")
-	}
-	if _, exists := parameters["BatchSize"]; exists {
-		size := intValue(parameters["BatchSize"])
-		if size < 1 || size > 10000 {
-			return validation(parameterName + ".BatchSize must be between 1 and 10000.")
-		}
-	}
-	for key, limits := range map[string][2]int{
-		"MaximumBatchingWindowInSeconds": {0, 300},
-		"MaximumRecordAgeInSeconds":      {-1, 604800},
-		"MaximumRetryAttempts":           {-1, 10000},
-		"ParallelizationFactor":          {1, 10},
-	} {
-		if _, exists := parameters[key]; exists {
-			value := intValue(parameters[key])
-			if value < limits[0] || value > limits[1] {
-				return validation(fmt.Sprintf("%s.%s must be between %d and %d.", parameterName, key, limits[0], limits[1]))
-			}
-		}
-	}
-	if value := stringValue(parameters["OnPartialBatchItemFailure"]); value != "" && value != "AUTOMATIC_BISECT" {
-		return validation(parameterName + ".OnPartialBatchItemFailure is invalid.")
-	}
-	if config, ok := parameters["DeadLetterConfig"].(map[string]any); ok {
-		arn := stringValue(config["Arn"])
-		if (!strings.Contains(arn, ":sqs:") && !strings.Contains(arn, ":sns:")) || strings.HasSuffix(arn, ".fifo") {
-			return validation(parameterName + ".DeadLetterConfig.Arn must be a standard SQS queue or SNS topic ARN.")
-		}
-	}
-	return nil
-}
-
-func validateTarget(pipe map[string]any) error {
-	if !strings.Contains(stringValue(pipe["Target"]), ":states:") {
-		return nil
-	}
-	parameters, _ := pipe["TargetParameters"].(map[string]any)
-	stateMachine, _ := parameters["StateMachineParameters"].(map[string]any)
-	invocation := stringValue(stateMachine["InvocationType"])
-	if invocation != "" && invocation != "REQUEST_RESPONSE" && invocation != "FIRE_AND_FORGET" {
-		return validation("StateMachineParameters.InvocationType must be REQUEST_RESPONSE or FIRE_AND_FORGET.")
-	}
-	return nil
-}
-
-func (p *Pack) notify() {
+func (p *worker) notify() {
 	select {
 	case p.wake <- struct{}{}:
 	default:
@@ -1027,14 +791,6 @@ func getRecord(ctx context.Context, collection spi.Collection, key string) (map[
 		return nil, false, err
 	}
 	return rec, true, nil
-}
-
-func putRecord(ctx context.Context, collection spi.Collection, key string, rec map[string]any) error {
-	b, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	return collection.Put(ctx, key, b)
 }
 
 func clone(input map[string]any) map[string]any {
@@ -1077,12 +833,6 @@ func validation(message string) *spi.Fault {
 	return &spi.Fault{Code: "ValidationException", Message: message, HTTPStatus: 400, Fault: "client"}
 }
 
-func conflict(message string) *spi.Fault {
-	return &spi.Fault{Code: "ConflictException", Message: message, HTTPStatus: 409, Fault: "client"}
-}
-
 func notFound() *spi.Fault {
-	return &spi.Fault{Code: "NotFoundException", Message: "Pipe does not exist.", HTTPStatus: 400, Fault: "client"}
+	return &spi.Fault{Code: "NotFoundException", Message: "Pipe does not exist.", HTTPStatus: 404, Fault: "client"}
 }
-
-var _ interface{ Close() error } = (*Pack)(nil)

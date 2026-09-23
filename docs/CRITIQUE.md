@@ -1422,3 +1422,16 @@ The recording is re-cut where the pack answered something other than the model's
 - **Protection and agents.** Task protection answers ProtectedTask shapes. UpdateContainerAgent answers one instance and leaves its status alone.
 - **Removals.** Untag and DeleteAttributes remove only what they name.
 - **DescribeClusters.** DescribeClusters reports missing clusters in `failures`.
+
+### Pipes: the control plane had one validator for two shapes
+
+Pipes follows Scheduler's shape. The pipe records are bundle YAML, and delivery is a Go worker registered under `worker:`. The worker now wakes on the engine's `collection:pipe` publish, which the pack did with a direct `notify()`. DeletePipe stays native because it also clears the worker's checkpoint and its per-pipe retry counts.
+
+The source and target validation is now `require` rules shared between CreatePipe and UpdatePipe. That sharing exposed a pack bug. UpdatePipe's source parameters have no StartingPosition, because it cannot change. The pack replaced the stored parameters with the update's and then validated the result, so every update that touched a Kinesis or DynamoDB stream pipe's source parameters rejected itself. The bundle merges the update's block over the stored one.
+
+UpdatePipe's input has no Source either. A request that carries one leaves the pipe's source unchanged, which is what the mutant formerly aimed at the pack's check now guards.
+
+The recording is re-cut in three places:
+- **Outputs.** Outputs carry the DesiredState their models declare.
+- **NotFoundException.** It is 404, not 400.
+- **Summaries.** ListPipes answers summaries, and DeletePipe answers the pipe it deleted.

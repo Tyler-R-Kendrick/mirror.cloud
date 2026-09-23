@@ -1,0 +1,570 @@
+{
+  "schema": "trace/1",
+  "service": "aws.pipes",
+  "source": "pack:internal/services/aws/pipes@e4db213",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreatePipe",
+      "input": {
+        "Name": "k1",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:kinesis:us-east-1:123456789012:stream/s",
+        "SourceParameters": {
+          "KinesisStreamParameters": {
+            "StartingPosition": "NOWHERE"
+          }
+        },
+        "Target": "arn:aws:sqs:us-east-1:123456789012:t"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePipe",
+      "input": {
+        "Name": "k2",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:kinesis:us-east-1:123456789012:stream/s",
+        "SourceParameters": {
+          "KinesisStreamParameters": {
+            "OnPartialBatchItemFailure": "SPLIT",
+            "StartingPosition": "LATEST"
+          }
+        },
+        "Target": "arn:aws:sqs:us-east-1:123456789012:t"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePipe",
+      "input": {
+        "Name": "k3",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:kinesis:us-east-1:123456789012:stream/s",
+        "SourceParameters": {
+          "KinesisStreamParameters": {
+            "DeadLetterConfig": {
+              "Arn": "arn:aws:sqs:us-east-1:123456789012:dlq.fifo"
+            },
+            "StartingPosition": "LATEST"
+          }
+        },
+        "Target": "arn:aws:sqs:us-east-1:123456789012:t"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePipe",
+      "input": {
+        "Name": "d1",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:dynamodb:us-east-1:123456789012:table/t/stream/2024",
+        "SourceParameters": {
+          "DynamoDBStreamParameters": {
+            "StartingPosition": "AT_TIMESTAMP"
+          }
+        },
+        "Target": "arn:aws:sqs:us-east-1:123456789012:t"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePipe",
+      "input": {
+        "Name": "s1",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:sqs:us-east-1:123456789012:s",
+        "Target": "arn:aws:states:us-east-1:123456789012:stateMachine:m",
+        "TargetParameters": {
+          "StateMachineParameters": {
+            "InvocationType": "SOMETIMES"
+          }
+        }
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePipe",
+      "input": {
+        "DesiredState": "STOPPED",
+        "Name": "control",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:sqs:us-east-1:123456789012:source",
+        "Target": "arn:aws:sqs:us-east-1:123456789012:target"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/control",
+        "CurrentState": "STOPPED",
+        "DesiredState": "STOPPED",
+        "Name": "control"
+      },
+      "recut": "The model's CreatePipe, UpdatePipe, StartPipe and StopPipe outputs declare DesiredState; the pack answered only CurrentState."
+    },
+    {
+      "operation": "CreatePipe",
+      "input": {
+        "DesiredState": "STOPPED",
+        "Name": "control",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:sqs:us-east-1:123456789012:source",
+        "Target": "arn:aws:sqs:us-east-1:123456789012:target"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ConflictException",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribePipe",
+      "input": {
+        "Name": "missing"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model declares NotFoundException with httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "UpdatePipe",
+      "input": {
+        "DesiredState": "RUNNING",
+        "Name": "control",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Target": "arn:aws:sqs:us-east-1:123456789012:other"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/control",
+        "CurrentState": "RUNNING",
+        "DesiredState": "RUNNING",
+        "Name": "control"
+      },
+      "recut": "The model's CreatePipe, UpdatePipe, StartPipe and StopPipe outputs declare DesiredState; the pack answered only CurrentState."
+    },
+    {
+      "operation": "DescribePipe",
+      "input": {
+        "Name": "control"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/control",
+        "CurrentState": "RUNNING",
+        "DesiredState": "RUNNING",
+        "Name": "control",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:sqs:us-east-1:123456789012:source",
+        "Target": "arn:aws:sqs:us-east-1:123456789012:other"
+      }
+    },
+    {
+      "operation": "ListPipes",
+      "input": {},
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Pipes": [
+          {
+            "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/control",
+            "CurrentState": "RUNNING",
+            "DesiredState": "RUNNING",
+            "Enrichment": null,
+            "Name": "control",
+            "Source": "arn:aws:sqs:us-east-1:123456789012:source",
+            "Target": "arn:aws:sqs:us-east-1:123456789012:other"
+          }
+        ]
+      },
+      "recut": "ListPipes answers PipeSummary shapes -- name, ARN, states, source, target and enrichment; the pack answered whole pipe records."
+    },
+    {
+      "operation": "StopPipe",
+      "input": {
+        "Name": "control"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/control",
+        "CurrentState": "STOPPED",
+        "DesiredState": "STOPPED",
+        "Name": "control"
+      },
+      "recut": "The model's CreatePipe, UpdatePipe, StartPipe and StopPipe outputs declare DesiredState; the pack answered only CurrentState."
+    },
+    {
+      "operation": "StartPipe",
+      "input": {
+        "Name": "control"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/control",
+        "CurrentState": "RUNNING",
+        "DesiredState": "RUNNING",
+        "Name": "control"
+      },
+      "recut": "The model's CreatePipe, UpdatePipe, StartPipe and StopPipe outputs declare DesiredState; the pack answered only CurrentState."
+    },
+    {
+      "operation": "StartPipe",
+      "input": {
+        "Name": "missing"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model declares NotFoundException with httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "resourceArn": {
+          "$fromPath": "Arn",
+          "$fromStep": 5
+        },
+        "tags": {
+          "keep": "1",
+          "remove": "2"
+        }
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "resourceArn": {
+          "$fromPath": "Arn",
+          "$fromStep": 5
+        },
+        "tags": {
+          "keep": "updated"
+        }
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "resourceArn": {
+          "$fromPath": "Arn",
+          "$fromStep": 5
+        },
+        "tagKeys": [
+          "remove"
+        ]
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": {
+          "$fromPath": "Arn",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": {
+          "keep": "updated"
+        }
+      }
+    },
+    {
+      "operation": "CreatePipe",
+      "input": {
+        "Name": "kin",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:kinesis:us-east-1:123456789012:stream/s",
+        "SourceParameters": {
+          "KinesisStreamParameters": {
+            "BatchSize": 5,
+            "StartingPosition": "TRIM_HORIZON"
+          }
+        },
+        "Target": "arn:aws:sqs:us-east-1:123456789012:t"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/kin",
+        "CurrentState": "RUNNING",
+        "DesiredState": "RUNNING",
+        "Name": "kin"
+      },
+      "recut": "The model's CreatePipe, UpdatePipe, StartPipe and StopPipe outputs declare DesiredState; the pack answered only CurrentState."
+    },
+    {
+      "operation": "UpdatePipe",
+      "input": {
+        "Name": "kin",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "SourceParameters": {
+          "KinesisStreamParameters": {
+            "BatchSize": 7
+          }
+        }
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/kin",
+        "CurrentState": "RUNNING",
+        "DesiredState": "RUNNING",
+        "Name": "kin"
+      },
+      "recut": "UpdatePipe's source parameters carry no StartingPosition, which cannot change; the pack replaced the stored parameters with the update's and then rejected its own record for lacking one. The update is merged over the stored parameters."
+    },
+    {
+      "operation": "DescribePipe",
+      "input": {
+        "Name": "kin"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/kin",
+        "CurrentState": "RUNNING",
+        "Description": null,
+        "DesiredState": "RUNNING",
+        "Enrichment": null,
+        "EnrichmentParameters": null,
+        "KmsKeyIdentifier": null,
+        "LogConfiguration": null,
+        "Name": "kin",
+        "RoleArn": "arn:aws:iam::123456789012:role/pipes",
+        "Source": "arn:aws:kinesis:us-east-1:123456789012:stream/s",
+        "SourceParameters": {
+          "KinesisStreamParameters": {
+            "BatchSize": 7,
+            "StartingPosition": "TRIM_HORIZON"
+          }
+        },
+        "Tags": null,
+        "Target": "arn:aws:sqs:us-east-1:123456789012:t",
+        "TargetParameters": null
+      },
+      "recut": "Follows from step 19: the update is accepted, so BatchSize is 7."
+    },
+    {
+      "operation": "DeletePipe",
+      "input": {
+        "Name": "control"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/control",
+        "CurrentState": "DELETING",
+        "DesiredState": "RUNNING",
+        "Name": "control"
+      },
+      "recut": "The model's DeletePipe output declares the pipe's name, ARN and states, with CurrentState DELETING; the pack answered nothing."
+    },
+    {
+      "operation": "DeletePipe",
+      "input": {
+        "Name": "control"
+      },
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model declares NotFoundException with httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "ListPipes",
+      "input": {},
+      "identity": {
+        "Account": "123456789012",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Pipes": [
+          {
+            "Arn": "arn:aws:pipes:us-east-1:123456789012:pipe/kin",
+            "CurrentState": "RUNNING",
+            "DesiredState": "RUNNING",
+            "Enrichment": null,
+            "Name": "kin",
+            "Source": "arn:aws:kinesis:us-east-1:123456789012:stream/s",
+            "Target": "arn:aws:sqs:us-east-1:123456789012:t"
+          }
+        ]
+      },
+      "recut": "ListPipes answers PipeSummary shapes -- name, ARN, states, source, target and enrichment; the pack answered whole pipe records."
+    }
+  ]
+}

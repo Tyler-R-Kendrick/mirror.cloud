@@ -26,6 +26,17 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
+// served is the service as the registry builds it: the bundle, with the
+// delivery worker running until Close. Tests also drive the worker directly.
+type served struct {
+	spi.BehaviorPack
+	*worker
+}
+
+func (s served) Close() error { return s.worker.Close() }
+
+func New(d spi.Deps) served { return served{bundled.Handler("aws.pipes", d), Start(d)} }
+
 func TestPipesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	defer p.Close()
@@ -424,7 +435,12 @@ func TestPipesDynamoDBStreamDeliveryAndCheckpoint(t *testing.T) {
 	if got := len(storedMessages(t, deps, id, "ddb-target")); got != 1 {
 		t.Fatalf("checkpoint redelivered %d records", got)
 	}
-	assertFault(t, p, id, "UpdatePipe", map[string]any{"Name": "dynamodb", "Source": strings.Replace(streamARN, "Events", "Other", 1)}, "ValidationException")
+	// UpdatePipe's input has no Source: a pipe's source never changes, even
+	// when a request carries one.
+	invoke(t, p, id, "UpdatePipe", map[string]any{"Name": "dynamodb", "RoleArn": "arn:aws:iam::123456789012:role/pipes", "Source": strings.Replace(streamARN, "Events", "Other", 1)})
+	if source := invoke(t, p, id, "DescribePipe", map[string]any{"Name": "dynamodb"}).Output["Source"]; source != streamARN {
+		t.Fatalf("source updated to %v", source)
+	}
 
 	bad := pipeInput("bad-dynamodb", "unused", "ddb-target")
 	bad["Source"] = streamARN
@@ -770,8 +786,8 @@ func TestPipesControlPlaneValidationUpdatesAndTags(t *testing.T) {
 	arn := created.Output["Arn"].(string)
 	assertFault(t, p, id, "CreatePipe", input, "ConflictException")
 	assertFault(t, p, id, "DescribePipe", map[string]any{"Name": "missing"}, "NotFoundException")
-	assertFault(t, p, id, "UpdatePipe", map[string]any{"Name": "control", "DesiredState": "PAUSED"}, "ValidationException")
-	updated := invoke(t, p, id, "UpdatePipe", map[string]any{"Name": "control", "DesiredState": "RUNNING", "Target": queueARN(id, "other")})
+	assertFault(t, p, id, "UpdatePipe", map[string]any{"Name": "control", "RoleArn": "arn:aws:iam::123456789012:role/pipes", "DesiredState": "PAUSED"}, "ValidationException")
+	updated := invoke(t, p, id, "UpdatePipe", map[string]any{"Name": "control", "RoleArn": "arn:aws:iam::123456789012:role/pipes", "DesiredState": "RUNNING", "Target": queueARN(id, "other")})
 	if updated.Output["CurrentState"] != "RUNNING" {
 		t.Fatalf("update %#v", updated.Output)
 	}

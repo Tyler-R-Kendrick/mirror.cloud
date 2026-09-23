@@ -24,6 +24,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	internalrand "github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
@@ -511,6 +512,13 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	ownerStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": ownerMachine["stateMachineArn"]}, nil)
 	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": ownerStarted["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
 		t.Fatalf("mismatched ExpectedBucketOwner execution %#v", execution)
+	}
+	ownerState["ItemReader"].(map[string]any)["Parameters"].(map[string]any)["ExpectedBucketOwner"] = 123456789012
+	ownerDefinition, _ = json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": ownerState}})
+	ownerMachine = invoke(p, "CreateStateMachine", map[string]any{"name": "reader-numeric-owner", "definition": string(ownerDefinition), "roleArn": testRoleARN}, nil)
+	ownerStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": ownerMachine["stateMachineArn"]}, nil)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": ownerStarted["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
+		t.Fatalf("numeric ExpectedBucketOwner execution %#v", execution)
 	}
 	if _, _, valid := p.mapItems(ctx, &spi.Request{Identity: id}, map[string]any{"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "items.parquet", "VersionId": parquetVersionID}, "ReaderConfig": map[string]any{"InputType": "PARQUET"}}}, nil, nil); valid {
 		t.Fatal("accepted Parquet ItemReader VersionId at runtime")
@@ -3397,6 +3405,9 @@ func TestStatesTestStateReaderDataFormats(t *testing.T) {
 		"mock":       map[string]any{"result": `[]`}, "inspectionLevel": "DEBUG",
 		"stateConfiguration": map[string]any{"mapItemReaderData": "1|one\n2|two\n"},
 	}})
+	if _, exposed := response.Output["inspectionData"].(map[string]any)["afterItemsPointer"]; exposed {
+		t.Fatalf("TestState exposed afterItemsPointer with no ItemsPointer configured: %#v", response.Output["inspectionData"])
+	}
 	if err != nil || response.Output["inspectionData"].(map[string]any)["afterItemSelector"] != `[{"source":"CSV","value":{"id":"1","name":"one"}},{"source":"CSV","value":{"id":"2","name":"two"}}]` {
 		t.Fatalf("TestState configured CSV ItemReader data %#v, %v", response, err)
 	}
@@ -3974,6 +3985,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	seeded1, ok1 := evalIntrinsic(`States.MathRandom(10, 20, 42)`, intrinsicData, nil, p.deps.Rand)
 	seeded2, ok2 := evalIntrinsic(`States.MathRandom(10, 20, 42)`, intrinsicData, nil, p.deps.Rand)
 	uuid, uuidOK := evalIntrinsic(`States.UUID()`, intrinsicData, nil, p.deps.Rand)
+	// The seed alone decides a seeded draw: another random source, and the
+	// value the seed itself derives, must both agree.
+	seeded3, _ := evalIntrinsic(`States.MathRandom(10, 20, 42)`, intrinsicData, nil, internalrand.New("another source"))
+	if want := float64(10 + internalrand.New("42").Intn(10)); seeded1 != want || seeded3 != want {
+		t.Fatalf("seeded MathRandom %#v %#v, want %v", seeded1, seeded3, want)
+	}
 	if !ok1 || !ok2 || seeded1 != seeded2 || seeded1.(float64) < 10 || seeded1.(float64) >= 20 || !uuidOK || len(uuid.(string)) != 36 || uuid.(string)[14] != '4' {
 		t.Fatalf("random intrinsics %#v %#v %#v", seeded1, seeded2, uuid)
 	}
@@ -4588,5 +4605,34 @@ func fmtString(v any) string {
 	default:
 		b, _ := json.Marshal(v)
 		return string(b)
+	}
+}
+
+func TestStatesTestStateDefinitionBounds(t *testing.T) {
+	p := New(spitest.Deps(t))
+	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for name, definition := range map[string]any{
+		"empty": "", "over 1 MiB": `{"Type":"Pass","End":true,"Comment":"` + strings.Repeat("x", 1048576) + `"}`, "not a string": 1,
+	} {
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: identity, Operation: "TestState", Input: map[string]any{"definition": definition}})
+		if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ValidationException" {
+			t.Errorf("%s definition: %v, want ValidationException", name, err)
+		}
+	}
+}
+
+func TestReaderMaxItemsPath(t *testing.T) {
+	items, _, valid := limitReaderItems([]any{1, 2, 3}, "S3://items", map[string]any{"MaxItemsPath": "$.max"}, map[string]any{"max": 2.0}, nil)
+	if got, _ := items.([]any); !valid || len(got) != 2 {
+		t.Fatalf("MaxItemsPath 2 over three items = %#v (valid %v)", items, valid)
+	}
+}
+
+// A path that starts at a variable still resolves its function arguments
+// against the state input: `$.b` below is the input's b, not the variable's.
+func TestJSONPathVariableFunctionArgumentsReadTheInput(t *testing.T) {
+	got := jsonPath(map[string]any{"b": 3.0}, "$v.append($.b)", map[string]any{"v": []any{1.0, 2.0}})
+	if !reflect.DeepEqual(got, []any{1.0, 2.0, 3.0}) {
+		t.Fatalf("$v.append($.b) = %#v", got)
 	}
 }

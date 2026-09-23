@@ -3548,7 +3548,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			if err != nil {
 				return nil, err
 			}
-			delete(req.Input, "Document")
 			delete(req.Input, "_body")
 			req.Input["ServerSideEncryptionConfiguration"] = configuration
 		}
@@ -4703,21 +4702,6 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 			defaultAlgorithm = str(defaults["SSEAlgorithm"])
 			defaultKeyID = str(defaults["KMSMasterKeyID"])
 			defaultBucketKey = truthy(rule["BucketKeyEnabled"])
-		} else if encoded := str(document["Document"]); encoded != "" {
-			var parsed struct {
-				Rules []struct {
-					Defaults struct {
-						Algorithm string `xml:"SSEAlgorithm"`
-						KeyID     string `xml:"KMSMasterKeyID"`
-					} `xml:"ApplyServerSideEncryptionByDefault"`
-					BucketKey bool `xml:"BucketKeyEnabled"`
-				} `xml:"Rule"`
-			}
-			if xml.Unmarshal([]byte(encoded), &parsed) == nil && len(parsed.Rules) > 0 {
-				defaultAlgorithm = parsed.Rules[0].Defaults.Algorithm
-				defaultKeyID = parsed.Rules[0].Defaults.KeyID
-				defaultBucketKey = parsed.Rules[0].BucketKey
-			}
 		}
 	}
 	if algorithm == "" {

@@ -1277,3 +1277,25 @@ IAM's shadow gave NewAuthorizer as a reason the pack had to stay. That was never
 - The user-and-group test could not tell a group Deny from an implicit deny, because nothing allowed the action in the first place. It does now, and a needle guards the group read.
 - CreateVirtualMFADevice answered `MFADevice` and a bare `SerialNumber`, neither of them a member of the output, so the wire carried nothing. It now answers `VirtualMFADevice`, as AWS does.
 - Several tests pinned pack answers AWS does not give: names in UpdateRole, UpdateUser, UpdateGroup and GetSAMLProvider results, and `PolicyName` accepted where the model requires `PolicyArn`. They now expect AWS's answers.
+
+### A sixth of the mutation suite had never run
+
+`TestMutantsAreKilled` counted any failing `go test` as a kill, and a mutant that doesn't compile fails `go test`. A rewrite like `if false {` that leaves a variable unused, or a type change that stops a package building, "passed" without a single test running. A compile sweep over every needle found **408 such mutants**, out of about 2,450: 327 died on "declared and not used" and the rest on undefined names, type errors, unused imports and vet's `bool` check. One of them named a variable that has never existed in the code it mutates.
+
+The harness now fails a mutant whose package does not build, and says so. Each of the 408 was rewritten to compile while keeping its behavior:
+- `if false {` became `if false && (<the original condition>) {`;
+- a replaced operand `X` became `(false && (X))` or `(true || (X))`;
+- where the mutant orphaned a variable, it gained a blank use of it;
+- about 50 were rewritten by hand.
+
+**Then 30 of them survived.** Guards the suite claimed to prove were in fact untested, because the test named on the needle failed for a different reason or never reached the guard:
+- SNS unsubscribe-from-a-deleted-topic used an email subscription, which has no ARN to unsubscribe.
+- The cross-scope Subscribe case sent an invalid endpoint.
+- The S3 wrong-bucket multipart case named a bucket that doesn't exist.
+- The FIFO missing-group check was backed up by a later check that answers a different code.
+
+Nine needles were pointed at the test that does catch them. Seventeen tests gained the assertion or case that reaches the guard, including a 50-round concurrent create for Firehose's in-transaction duplicate check, which only a race can observe. Two guards turned out to be unreachable or redundant and were deleted:
+- S3's raw-`Document` encryption reader, which nothing writes since #414.
+- Step Functions' reader bucket-owner comparison, which S3 already enforces. The type check it also did is not redundant and stays, now tested.
+
+One gap is left named rather than filled: Firehose's OpenSearch processing-failure envelope has no test that observes it.

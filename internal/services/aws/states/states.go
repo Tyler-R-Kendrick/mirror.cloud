@@ -3539,9 +3539,10 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		return nil, "", false
 	}
 	config, _ := reader["ReaderConfig"].(map[string]any)
+	// S3 checks the owner itself; a value that is not a string would reach
+	// it as no owner at all, so that is the one thing to refuse here.
 	if owner, exists := input["ExpectedBucketOwner"]; exists {
-		expected, valid := owner.(string)
-		if !valid || expected != req.Identity.Account {
+		if _, valid := owner.(string); !valid {
 			return nil, "", false
 		}
 	}

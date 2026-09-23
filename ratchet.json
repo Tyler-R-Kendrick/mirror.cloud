@@ -2,7 +2,7 @@
   "packs": 21,
   "case_labels": 1007,
   "services_files": 53,
-  "services_loc": 40170,
+  "services_loc": 40155,
   "fault_sites": 712,
   "register_sites": 21,
   "pack_dirs": [

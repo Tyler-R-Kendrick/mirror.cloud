@@ -18,7 +18,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
@@ -886,7 +886,7 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 		}
 		in["FunctionName"] = name
 		in["InvocationType"] = "Event"
-		_, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: in, Body: io.NopCloser(bytes.NewReader(payload))})
+		_, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: in, Body: io.NopCloser(bytes.NewReader(payload))})
 		return err
 	case strings.Contains(arn, ":states:"):
 		parameters, _ := target["StateMachineParameters"].(map[string]any)

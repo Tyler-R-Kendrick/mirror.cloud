@@ -20,7 +20,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -309,13 +309,13 @@ func TestPipesKinesisPartialBatchCheckpoint(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	stream, function := bundled.Handler("aws.kinesis", deps), lambda.New(deps)
+	stream, function := bundled.Handler("aws.kinesis", deps), bundled.Handler("aws.lambda", deps)
 	invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "partial"})
 	for _, data := range []string{"done", "retry"} {
 		invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "partial", "PartitionKey": data, "Data": []byte(data)})
 	}
 	partial := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event[-1]['eventID']}]}\n"
-	invoke(t, function, id, "CreateFunction", map[string]any{
+	invoke(t, function, id, "CreateFunction", map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "kinesis-partial", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(partial),
 	})
 	input := pipeInput("partial-kinesis", "unused", "unused")
@@ -458,7 +458,7 @@ func TestPipesDynamoDBPartialBatchCheckpoint(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	database, function := dynamodb.New(deps), lambda.New(deps)
+	database, function := dynamodb.New(deps), bundled.Handler("aws.lambda", deps)
 	created := invoke(t, database, id, "CreateTable", map[string]any{
 		"TableName": "Partial", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
 		"StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_IMAGE"},
@@ -467,7 +467,7 @@ func TestPipesDynamoDBPartialBatchCheckpoint(t *testing.T) {
 		invoke(t, database, id, "PutItem", map[string]any{"TableName": "Partial", "Item": map[string]any{"id": map[string]any{"S": key}}})
 	}
 	partial := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event[-1]['eventID']}]}\n"
-	invoke(t, function, id, "CreateFunction", map[string]any{
+	invoke(t, function, id, "CreateFunction", map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "ddb-partial", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(partial),
 	})
 	input := pipeInput("partial-dynamodb", "unused", "unused")
@@ -617,12 +617,12 @@ func TestPipesAPIGatewayEnrichment(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue, function, gateway := bundled.Handler("aws.sqs", deps), lambda.New(deps), bundled.Handler("aws.apigateway", deps)
+	queue, function, gateway := bundled.Handler("aws.sqs", deps), bundled.Handler("aws.lambda", deps), bundled.Handler("aws.apigateway", deps)
 	for _, name := range []string{"api-source", "api-target"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
 	source := "def lambda_handler(event, context):\n    import json\n    body=json.loads(event['body'])\n    return {'statusCode': 200, 'body': json.dumps([{'value': body[0]['value'] * 3, 'path': event['path'], 'query': event['queryStringParameters']['kind'], 'header': event['headers']['X-Test']}])}\n"
-	invoke(t, function, id, "CreateFunction", map[string]any{
+	invoke(t, function, id, "CreateFunction", map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "api-enrichment", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(source),
 	})
 	api := invoke(t, gateway, id, "CreateRestApi", map[string]any{"name": "pipe-enrichment"}).Output
@@ -858,10 +858,10 @@ func TestPipesLambdaPartialBatchResponse(t *testing.T) {
 	p := New(deps)
 	defer p.Close()
 	queue := bundled.Handler("aws.sqs", deps)
-	function := lambda.New(deps)
+	function := bundled.Handler("aws.lambda", deps)
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "source"})
 	partial := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event[-1]['messageId']}]}\n"
-	invoke(t, function, id, "CreateFunction", map[string]any{
+	invoke(t, function, id, "CreateFunction", map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "partial", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(partial),
 	})
 	input := pipeInput("partial", "source", "unused")
@@ -912,12 +912,12 @@ func TestPipesLambdaEnrichment(t *testing.T) {
 	p := New(deps)
 	defer p.Close()
 	queue := bundled.Handler("aws.sqs", deps)
-	function := lambda.New(deps)
+	function := bundled.Handler("aws.lambda", deps)
 	for _, name := range []string{"source", "target", "empty-source", "empty-target", "failed-source", "failed-target"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
 	enrich := "def lambda_handler(event, context):\n    return [{'messageId': item['messageId'], 'value': item['value'] * 2} for item in event]\n"
-	invoke(t, function, id, "CreateFunction", map[string]any{
+	invoke(t, function, id, "CreateFunction", map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "enrich", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(enrich),
 	})
 	input := pipeInput("enrich", "source", "target")

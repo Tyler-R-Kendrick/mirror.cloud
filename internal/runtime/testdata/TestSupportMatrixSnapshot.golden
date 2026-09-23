@@ -85,7 +85,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.kinesisanalyticsv2` | `awsJson1_1` | 6 | 27 |
 | `aws.kms` | `awsJson1_1` | 54 | 0 |
 | `aws.lakeformation` | `restJson1` | 8 | 53 |
-| `aws.lambda` | `restJson1` | 88 | 0 |
+| `aws.lambda` | `restJson1` | 79 | 9 |
 | `aws.lex-models` | `restJson1` | 7 | 35 |
 | `aws.lightsail` | `awsJson1_1` | 7 | 154 |
 | `aws.location` | `restJson1` | 8 | 56 |

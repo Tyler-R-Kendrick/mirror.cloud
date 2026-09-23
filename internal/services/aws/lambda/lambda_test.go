@@ -20,12 +20,23 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
+// served is the service as the registry builds it: the bundle, with the SQS
+// event-source worker running until Close.
+type served struct {
+	spi.BehaviorPack
+	stop func() error
+}
+
+func (s served) Close() error { return s.stop() }
+
+func New(d spi.Deps) served { return served{bundled.Handler("aws.lambda", d), Start(d)} }
+
 func TestInvokeEventAndDryRunStatus(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
-		"FunctionName": "async", "Runtime": "unsupported", "Handler": "handler",
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
+		"FunctionName": "async", "Runtime": "unsupported", "Handler": "handler", "Code": map[string]any{"ZipFile": ""},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +60,7 @@ func TestInvokeAcceptsRawArrayPayload(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	src := "def lambda_handler(event, context):\n    return {'length': len(event)}\n"
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "batch", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(src))},
 	}})
@@ -76,7 +87,7 @@ func TestInvokeReceivesFunctionEnvironment(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	src := "import os\ndef lambda_handler(event, context):\n    return {'name': os.environ['AWS_LAMBDA_FUNCTION_NAME'], 'bucket': os.environ['BUCKET_NAME']}\n"
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "s3-reader", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code":        map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(src))},
 		"Environment": map[string]any{"Variables": map[string]any{"BUCKET_NAME": "objects"}},
@@ -108,7 +119,7 @@ func TestSQSEventSourceMappingInvokesAndDeletes(t *testing.T) {
 	}
 	sourceARN := "arn:aws:sqs:us-east-1:123456789012:source"
 	code := "def lambda_handler(event, context):\n    record = event['Records'][0]\n    if record['eventSource'] != 'aws:sqs' or record['eventSourceARN'] != 'arn:aws:sqs:us-east-1:123456789012:source':\n        raise RuntimeError('bad source event')\n    return {'count': len(event['Records'])}\n"
-	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "consumer", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
 	}}); err != nil {
@@ -155,7 +166,7 @@ func TestSQSEventSourceMappingPreservesPartialFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event['Records'][0]['messageId']}] }\n"
-	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "partial", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
 	}}); err != nil {
@@ -199,7 +210,7 @@ func TestSQSEventSourceMappingRedrivesFailedMessage(t *testing.T) {
 	create("dead", nil)
 	create("source", map[string]any{"RedrivePolicy": `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dead","maxReceiveCount":"1"}`})
 	code := "def lambda_handler(event, context):\n    raise RuntimeError('failed')\n"
-	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "failing", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
 	}}); err != nil {
@@ -243,7 +254,7 @@ func TestBootedServerLambdaPythonInvoke(t *testing.T) {
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	src := "def lambda_handler(event, context):\n    return {\"echo\": event.get(\"n\", 0)}\n"
-	create := `{"FunctionName":"echo","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(src)) + `"}}`
+	create := `{"Role":"arn:aws:iam::000000000000:role/lambda","FunctionName":"echo","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(src)) + `"}}`
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(create))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/lambda/aws4_request, SignedHeaders=host, Signature=00")
@@ -288,7 +299,7 @@ func TestBootedServerLambdaRemainder(t *testing.T) {
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	src := "def lambda_handler(event, context):\n    return {}\n"
-	create := `{"FunctionName":"echo","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(src)) + `"}}`
+	create := `{"Role":"arn:aws:iam::000000000000:role/lambda","FunctionName":"echo","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(src)) + `"}}`
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(create))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/lambda/aws4_request, SignedHeaders=host, Signature=00")
@@ -339,13 +350,13 @@ func TestBootedServerLambdaRemainder(t *testing.T) {
 	do(http.MethodGet, "/2015-03-31/functions/echo/aliases", "", "live")
 	do(http.MethodPost, "/2015-03-31/functions/echo/policy", `{"StatementId":"s1","Action":"lambda:InvokeFunction","Principal":"*"}`, "Statement")
 	do(http.MethodGet, "/2015-03-31/functions/echo/policy", "", "s1")
-	do(http.MethodDelete, "/2015-03-31/functions/echo/policy?StatementId=s1", "")
-	do(http.MethodPut, "/2015-03-31/functions/echo/concurrency", `{"ReservedConcurrentExecutions":5}`, "5")
-	do(http.MethodGet, "/2015-03-31/functions/echo/concurrency", "", "5")
-	do(http.MethodDelete, "/2015-03-31/functions/echo/concurrency", "")
-	do(http.MethodPost, "/2015-03-31/tags/arn:aws:lambda:us-east-1:000000000000:function:echo", `{"Tags":{"k":"v"}}`)
-	do(http.MethodGet, "/2015-03-31/tags/arn:aws:lambda:us-east-1:000000000000:function:echo", "")
-	do(http.MethodDelete, "/2015-03-31/tags/arn:aws:lambda:us-east-1:000000000000:function:echo", "")
+	do(http.MethodDelete, "/2015-03-31/functions/echo/policy/s1", "")
+	do(http.MethodPut, "/2017-10-31/functions/echo/concurrency", `{"ReservedConcurrentExecutions":5}`, "5")
+	do(http.MethodGet, "/2019-09-30/functions/echo/concurrency", "", "5")
+	do(http.MethodDelete, "/2017-10-31/functions/echo/concurrency", "")
+	do(http.MethodPost, "/2017-03-31/tags/arn:aws:lambda:us-east-1:000000000000:function:echo", `{"Tags":{"k":"v"}}`)
+	do(http.MethodGet, "/2017-03-31/tags/arn:aws:lambda:us-east-1:000000000000:function:echo", "")
+	do(http.MethodDelete, "/2017-03-31/tags/arn:aws:lambda:us-east-1:000000000000:function:echo?tagKeys=k", "")
 	esm := do(http.MethodPost, "/2015-03-31/event-source-mappings", `{"FunctionName":"echo","EventSourceArn":"arn:aws:sqs:us-east-1:000000000000:q"}`, "UUID")
 	uuid := ""
 	if i := strings.Index(esm, `"UUID":"`); i >= 0 {
@@ -363,9 +374,9 @@ func TestBootedServerLambdaRemainder(t *testing.T) {
 	do(http.MethodDelete, "/2015-03-31/functions/echo", "")
 	do(http.MethodPost, "/?Action=CreateFunctionUrlConfig", `{"FunctionName":"echo","AuthType":"NONE"}`, "FunctionUrl")
 	do(http.MethodPost, "/?Action=GetFunctionUrlConfig", `{"FunctionName":"echo"}`, "FunctionUrl")
-	do(http.MethodPost, "/?Action=PublishLayerVersion", `{"LayerName":"shared"}`, "LayerVersionArn")
+	do(http.MethodPost, "/?Action=PublishLayerVersion", `{"LayerName":"shared","Content":{"ZipFile":""}}`, "LayerVersionArn")
 	do(http.MethodPost, "/?Action=ListLayers", `{}`, "Layers")
-	do(http.MethodPost, "/?Action=CreateCodeSigningConfig", `{"Description":"c"}`, "CodeSigningConfig")
+	do(http.MethodPost, "/?Action=CreateCodeSigningConfig", `{"Description":"c","AllowedPublishers":{"SigningProfileVersionArns":["arn:aws:signer:us-east-1:000000000000:/signing-profiles/p/v"]}}`, "CodeSigningConfig")
 	do(http.MethodPost, "/?Action=PutFunctionEventInvokeConfig", `{"FunctionName":"echo","MaximumRetryAttempts":1}`, "echo")
 	do(http.MethodPost, "/?Action=GetAccountSettings", `{}`, "AccountLimit")
 	do(http.MethodPost, "/?Action=PutProvisionedConcurrencyConfig", `{"FunctionName":"echo","Qualifier":"1","ProvisionedConcurrentExecutions":2}`, "READY")
@@ -373,8 +384,8 @@ func TestBootedServerLambdaRemainder(t *testing.T) {
 
 func TestLambdaHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 88 {
-		t.Fatalf("lambda Operations() %d want 88", n)
+	if n := len(p.Operations()); n != 79 {
+		t.Fatalf("lambda Operations() %d want 79", n)
 	}
 }
 
@@ -389,7 +400,7 @@ func TestBootedServerLambdaExtraOps(t *testing.T) {
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/lambda/aws4_request, SignedHeaders=host, Signature=00"
-	soft := func(op, body string) string {
+	status := func(op, body string) (int, string) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/?Action="+op, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -398,15 +409,8 @@ func TestBootedServerLambdaExtraOps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.Header.Get("x-mirror-fidelity") != "emulate" {
-			t.Fatalf("%s fidelity %q %s", op, res.Header.Get("x-mirror-fidelity"), raw)
-		}
-		if res.StatusCode >= 500 {
-			t.Fatalf("%s %d %s", op, res.StatusCode, raw)
-		}
-		return string(raw)
+		return res.StatusCode, res.Header.Get("x-mirror-fidelity")
 	}
 	hard := func(op, body string) string {
 		t.Helper()
@@ -433,12 +437,12 @@ func TestBootedServerLambdaExtraOps(t *testing.T) {
 		t.Fatalf("get url %s", got)
 	}
 	hard("DeleteFunctionUrlConfig", `{"FunctionName":"bootfn"}`)
-	gone := hard("GetFunctionUrlConfig", `{"FunctionName":"bootfn"}`)
-	if strings.Contains(gone, "lambda-url/bootfn") {
-		t.Fatalf("url still present %s", gone)
+	if code, _ := status("GetFunctionUrlConfig", `{"FunctionName":"bootfn"}`); code != http.StatusNotFound {
+		t.Fatalf("deleted url config answered %d", code)
 	}
-	payload := `{"FunctionName":"bootfn","LayerName":"shared","VersionNumber":"1","CapacityProviderName":"cp1","CodeSigningConfigId":"csc1","Qualifier":"1","DurableExecutionArn":"d1","AuthType":"NONE","StatementId":"s1","RecursiveLoop":"Allow","Policy":"{}","ProvisionedConcurrentExecutions":1}`
-	for _, op := range extraOps() {
-		soft(op, payload)
+	// Durable executions were records keyed by whatever the request named,
+	// with the operation's own name as their status; they are mock tier now.
+	if _, fidelity := status("GetDurableExecution", `{"DurableExecutionArn":"d1"}`); fidelity == "emulate" {
+		t.Fatal("GetDurableExecution claims emulate")
 	}
 }

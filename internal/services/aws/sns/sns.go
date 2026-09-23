@@ -1144,7 +1144,7 @@ func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[stri
 	in := p.lambdaNotification(req, sub, body, messageID, attrs)
 	in["FunctionName"] = name
 	in["InvocationType"] = "Event"
-	_, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
+	_, err := bundled.Handler("aws.lambda", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
 	p.recordLambdaDelivery(ctx, req, sub, messageID, err)
 	return err == nil
 }

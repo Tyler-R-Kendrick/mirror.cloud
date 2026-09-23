@@ -1,0 +1,1696 @@
+{
+  "schema": "trace/1",
+  "service": "aws.lambda",
+  "source": "pack:internal/services/aws/lambda@df0314d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateFunction",
+      "input": {
+        "Code": {
+          "ZipFile": "ZGVmIGxhbWJkYV9oYW5kbGVyKGUsIGMpOgogICAgcmV0dXJuIGUK"
+        },
+        "Environment": {
+          "Variables": {
+            "A": "1"
+          }
+        },
+        "FunctionName": "f1",
+        "Handler": "lambda_function.lambda_handler",
+        "Role": "arn:aws:iam::000000000000:role/lambda",
+        "Runtime": "python3.12"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeadLetterConfig": null,
+        "Description": null,
+        "Environment": {
+          "Variables": {
+            "A": "1"
+          }
+        },
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "FunctionName": "f1",
+        "Handler": "lambda_function.lambda_handler",
+        "MemorySize": null,
+        "Role": "arn:aws:iam::000000000000:role/lambda",
+        "Runtime": "python3.12",
+        "Timeout": null,
+        "Version": "$LATEST"
+      },
+      "recut": "The model's FunctionConfiguration declares Role and Version ($LATEST), and GetFunction's and ListFunctions' configurations carry the FunctionArn; the pack dropped the Role it was given and answered neither."
+    },
+    {
+      "operation": "GetFunction",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Configuration": {
+          "Environment": {
+            "Variables": {
+              "A": "1"
+            }
+          },
+          "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+          "FunctionName": "f1",
+          "Handler": "lambda_function.lambda_handler",
+          "Role": "arn:aws:iam::000000000000:role/lambda",
+          "Runtime": "python3.12",
+          "Version": "$LATEST"
+        }
+      },
+      "recut": "The model's FunctionConfiguration declares Role and Version ($LATEST), and GetFunction's and ListFunctions' configurations carry the FunctionArn; the pack dropped the Role it was given and answered neither."
+    },
+    {
+      "operation": "GetFunction",
+      "input": {
+        "FunctionName": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's FunctionConfiguration declares Role and Version ($LATEST), and GetFunction's and ListFunctions' configurations carry the FunctionArn; the pack dropped the Role it was given and answered neither."
+    },
+    {
+      "operation": "ListFunctions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Functions": [
+          {
+            "Environment": {
+              "Variables": {
+                "A": "1"
+              }
+            },
+            "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+            "FunctionName": "f1",
+            "Handler": "lambda_function.lambda_handler",
+            "Role": "arn:aws:iam::000000000000:role/lambda",
+            "Runtime": "python3.12",
+            "Version": "$LATEST"
+          }
+        ]
+      },
+      "recut": "The model's FunctionConfiguration declares Role and Version ($LATEST), and GetFunction's and ListFunctions' configurations carry the FunctionArn; the pack dropped the Role it was given and answered neither."
+    },
+    {
+      "operation": "GetFunctionConfiguration",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeadLetterConfig": null,
+        "Description": null,
+        "Environment": {
+          "Variables": {
+            "A": "1"
+          }
+        },
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "FunctionName": "f1",
+        "Handler": "lambda_function.lambda_handler",
+        "MemorySize": null,
+        "Role": "arn:aws:iam::000000000000:role/lambda",
+        "Runtime": "python3.12",
+        "Timeout": null,
+        "Version": "$LATEST"
+      },
+      "recut": "The model's FunctionConfiguration declares Role and Version ($LATEST), and GetFunction's and ListFunctions' configurations carry the FunctionArn; the pack dropped the Role it was given and answered neither."
+    },
+    {
+      "operation": "UpdateFunctionConfiguration",
+      "input": {
+        "Description": "d",
+        "FunctionName": "f1",
+        "MemorySize": 256,
+        "Timeout": 30
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeadLetterConfig": null,
+        "Description": "d",
+        "Environment": {
+          "Variables": {
+            "A": "1"
+          }
+        },
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "FunctionName": "f1",
+        "Handler": "lambda_function.lambda_handler",
+        "MemorySize": 256,
+        "Role": "arn:aws:iam::000000000000:role/lambda",
+        "Runtime": "python3.12",
+        "Timeout": 30,
+        "Version": "$LATEST"
+      },
+      "recut": "The model's FunctionConfiguration declares Role and Version ($LATEST), and GetFunction's and ListFunctions' configurations carry the FunctionArn; the pack dropped the Role it was given and answered neither."
+    },
+    {
+      "operation": "UpdateFunctionCode",
+      "input": {
+        "FunctionName": "f1",
+        "ZipFile": "ZGVmIGxhbWJkYV9oYW5kbGVyKGUsIGMpOgogICAgcmV0dXJuIGUK"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeadLetterConfig": null,
+        "Description": "d",
+        "Environment": {
+          "Variables": {
+            "A": "1"
+          }
+        },
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "FunctionName": "f1",
+        "Handler": "lambda_function.lambda_handler",
+        "MemorySize": 256,
+        "Role": "arn:aws:iam::000000000000:role/lambda",
+        "Runtime": "python3.12",
+        "Timeout": 30,
+        "Version": "$LATEST"
+      },
+      "recut": "The model's FunctionConfiguration declares Role and Version ($LATEST), and GetFunction's and ListFunctions' configurations carry the FunctionArn; the pack dropped the Role it was given and answered neither."
+    },
+    {
+      "operation": "PublishVersion",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": "d",
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:1",
+        "FunctionName": "f1",
+        "Handler": "lambda_function.lambda_handler",
+        "MemorySize": 256,
+        "Role": "arn:aws:iam::000000000000:role/lambda",
+        "Runtime": "python3.12",
+        "Timeout": 30,
+        "Version": "1"
+      },
+      "recut": "A published version's configuration is the function's configuration at publication, as the model's PublishVersion output and ListVersionsByFunction items declare; the pack answered only name, ARN and version."
+    },
+    {
+      "operation": "PublishVersion",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": "d",
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:2",
+        "FunctionName": "f1",
+        "Handler": "lambda_function.lambda_handler",
+        "MemorySize": 256,
+        "Role": "arn:aws:iam::000000000000:role/lambda",
+        "Runtime": "python3.12",
+        "Timeout": 30,
+        "Version": "2"
+      },
+      "recut": "A published version's configuration is the function's configuration at publication, as the model's PublishVersion output and ListVersionsByFunction items declare; the pack answered only name, ARN and version."
+    },
+    {
+      "operation": "ListVersionsByFunction",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Versions": [
+          {
+            "Description": "d",
+            "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:1",
+            "FunctionName": "f1",
+            "Handler": "lambda_function.lambda_handler",
+            "MemorySize": 256,
+            "Role": "arn:aws:iam::000000000000:role/lambda",
+            "Runtime": "python3.12",
+            "Timeout": 30,
+            "Version": "1"
+          },
+          {
+            "Description": "d",
+            "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:2",
+            "FunctionName": "f1",
+            "Handler": "lambda_function.lambda_handler",
+            "MemorySize": 256,
+            "Role": "arn:aws:iam::000000000000:role/lambda",
+            "Runtime": "python3.12",
+            "Timeout": 30,
+            "Version": "2"
+          }
+        ]
+      },
+      "recut": "A published version's configuration is the function's configuration at publication, as the model's PublishVersion output and ListVersionsByFunction items declare; the pack answered only name, ARN and version."
+    },
+    {
+      "operation": "CreateAlias",
+      "input": {
+        "FunctionName": "f1",
+        "FunctionVersion": "1",
+        "Name": "live"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AliasArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:live",
+        "Description": "",
+        "FunctionVersion": "1",
+        "Name": "live"
+      }
+    },
+    {
+      "operation": "GetAlias",
+      "input": {
+        "FunctionName": "f1",
+        "Name": "live"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AliasArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:live",
+        "Description": "",
+        "FunctionVersion": "1",
+        "Name": "live"
+      }
+    },
+    {
+      "operation": "UpdateAlias",
+      "input": {
+        "FunctionName": "f1",
+        "FunctionVersion": "2",
+        "Name": "live"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AliasArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:live",
+        "Description": "",
+        "FunctionVersion": "2",
+        "Name": "live"
+      },
+      "recut": "The model's AliasConfiguration has no FunctionName; the pack added one on update."
+    },
+    {
+      "operation": "ListAliases",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Aliases": [
+          {
+            "AliasArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:live",
+            "Description": "",
+            "FunctionVersion": "2",
+            "Name": "live"
+          }
+        ]
+      },
+      "recut": "The model's AliasConfiguration has no FunctionName; the pack added one on update."
+    },
+    {
+      "operation": "DeleteAlias",
+      "input": {
+        "FunctionName": "f1",
+        "Name": "live"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAlias",
+      "input": {
+        "FunctionName": "f1",
+        "Name": "live"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddPermission",
+      "input": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": "f1",
+        "Principal": "s3.amazonaws.com",
+        "StatementId": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Statement": "{\"Action\":\"lambda:InvokeFunction\",\"Effect\":\"Allow\",\"Principal\":\"s3.amazonaws.com\",\"Sid\":\"s1\"}"
+      },
+      "recut": "AddPermission's Statement is the statement itself; the pack wrapped it in a second Statement object."
+    },
+    {
+      "operation": "GetPolicy",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Statement\":[{\"Action\":\"lambda:InvokeFunction\",\"Effect\":\"Allow\",\"Principal\":\"s3.amazonaws.com\",\"Sid\":\"s1\"}],\"Version\":\"2012-10-17\"}"
+      }
+    },
+    {
+      "operation": "RemovePermission",
+      "input": {
+        "FunctionName": "f1",
+        "StatementId": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "Resource": {
+          "$fromPath": "FunctionArn",
+          "$fromStep": 0
+        },
+        "Tags": {
+          "a": "1",
+          "b": "2"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "Resource": {
+          "$fromPath": "FunctionArn",
+          "$fromStep": 0
+        },
+        "TagKeys": [
+          "a"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTags",
+      "input": {
+        "Resource": {
+          "$fromPath": "FunctionArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": {
+          "b": "2"
+        }
+      },
+      "recut": "UntagResource removes only the named TagKeys; the pack removed every tag."
+    },
+    {
+      "operation": "PutFunctionConcurrency",
+      "input": {
+        "FunctionName": "f1",
+        "ReservedConcurrentExecutions": 5
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReservedConcurrentExecutions": 5
+      }
+    },
+    {
+      "operation": "GetFunctionConcurrency",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReservedConcurrentExecutions": 5
+      }
+    },
+    {
+      "operation": "DeleteFunctionConcurrency",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetFunctionConcurrency",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReservedConcurrentExecutions": null
+      },
+      "recut": "A function with no reserved concurrency answers no ReservedConcurrentExecutions; the pack answered 0."
+    },
+    {
+      "operation": "CreateEventSourceMapping",
+      "input": {
+        "BatchSize": 5,
+        "EventSourceArn": "arn:aws:sqs:us-east-1:000000000000:q",
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BatchSize": 5,
+        "EventSourceArn": "arn:aws:sqs:us-east-1:000000000000:q",
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "State": "Enabled",
+        "UUID": "7c589129"
+      },
+      "recut": "The model's EventSourceMappingConfiguration declares FunctionArn and BatchSize and has no FunctionName or Enabled; an update with Enabled false leaves the mapping Disabled. The pack echoed its request and stayed Enabled."
+    },
+    {
+      "operation": "GetEventSourceMapping",
+      "input": {
+        "UUID": {
+          "$fromPath": "UUID",
+          "$fromStep": 26
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BatchSize": 5,
+        "EventSourceArn": "arn:aws:sqs:us-east-1:000000000000:q",
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "State": "Enabled",
+        "UUID": "7c589129"
+      },
+      "recut": "The model's EventSourceMappingConfiguration declares FunctionArn and BatchSize and has no FunctionName or Enabled; an update with Enabled false leaves the mapping Disabled. The pack echoed its request and stayed Enabled."
+    },
+    {
+      "operation": "UpdateEventSourceMapping",
+      "input": {
+        "Enabled": false,
+        "UUID": {
+          "$fromPath": "UUID",
+          "$fromStep": 26
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BatchSize": 5,
+        "EventSourceArn": "arn:aws:sqs:us-east-1:000000000000:q",
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "State": "Disabled",
+        "UUID": "7c589129"
+      },
+      "recut": "The model's EventSourceMappingConfiguration declares FunctionArn and BatchSize and has no FunctionName or Enabled; an update with Enabled false leaves the mapping Disabled. The pack echoed its request and stayed Enabled."
+    },
+    {
+      "operation": "ListEventSourceMappings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSourceMappings": [
+          {
+            "BatchSize": 5,
+            "EventSourceArn": "arn:aws:sqs:us-east-1:000000000000:q",
+            "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+            "State": "Disabled",
+            "UUID": "7c589129"
+          }
+        ]
+      },
+      "recut": "The model's EventSourceMappingConfiguration declares FunctionArn and BatchSize and has no FunctionName or Enabled; an update with Enabled false leaves the mapping Disabled. The pack echoed its request and stayed Enabled."
+    },
+    {
+      "operation": "DeleteEventSourceMapping",
+      "input": {
+        "UUID": {
+          "$fromPath": "UUID",
+          "$fromStep": 26
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BatchSize": 5,
+        "EventSourceArn": "arn:aws:sqs:us-east-1:000000000000:q",
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "State": "Disabled",
+        "UUID": "7c589129"
+      },
+      "recut": "The model's DeleteEventSourceMapping output is the mapping deleted; the pack answered nothing."
+    },
+    {
+      "operation": "GetEventSourceMapping",
+      "input": {
+        "UUID": {
+          "$fromPath": "UUID",
+          "$fromStep": 26
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateFunctionUrlConfig",
+      "input": {
+        "AuthType": "NONE",
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AuthType": "NONE",
+        "Cors": null,
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "FunctionUrl": "http://127.0.0.1/lambda-url/f1",
+        "InvokeMode": null
+      },
+      "recut": "The model's FunctionUrlConfig declares FunctionArn and has no FunctionName."
+    },
+    {
+      "operation": "GetFunctionUrlConfig",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AuthType": "NONE",
+        "Cors": null,
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "FunctionUrl": "http://127.0.0.1/lambda-url/f1",
+        "InvokeMode": null
+      },
+      "recut": "The model's FunctionUrlConfig declares FunctionArn and has no FunctionName."
+    },
+    {
+      "operation": "UpdateFunctionUrlConfig",
+      "input": {
+        "AuthType": "AWS_IAM",
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AuthType": "AWS_IAM",
+        "Cors": null,
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "FunctionUrl": "http://127.0.0.1/lambda-url/f1",
+        "InvokeMode": null
+      },
+      "recut": "The model's FunctionUrlConfig declares FunctionArn and has no FunctionName."
+    },
+    {
+      "operation": "ListFunctionUrlConfigs",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FunctionUrlConfigs": [
+          {
+            "AuthType": "AWS_IAM",
+            "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+            "FunctionUrl": "http://127.0.0.1/lambda-url/f1"
+          }
+        ]
+      },
+      "recut": "The model's FunctionUrlConfig declares FunctionArn and has no FunctionName."
+    },
+    {
+      "operation": "DeleteFunctionUrlConfig",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PublishLayerVersion",
+      "input": {
+        "Content": {
+          "ZipFile": "ZGVmIGxhbWJkYV9oYW5kbGVyKGUsIGMpOgogICAgcmV0dXJuIGUK"
+        },
+        "Description": "d",
+        "LayerName": "lay"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": "d",
+        "LayerArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay",
+        "LayerVersionArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay:1",
+        "Version": 1
+      },
+      "recut": "The model's layer version outputs declare LayerArn and have no LayerName."
+    },
+    {
+      "operation": "PublishLayerVersion",
+      "input": {
+        "Content": {
+          "ZipFile": "ZGVmIGxhbWJkYV9oYW5kbGVyKGUsIGMpOgogICAgcmV0dXJuIGUK"
+        },
+        "LayerName": "lay"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": "",
+        "LayerArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay",
+        "LayerVersionArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay:2",
+        "Version": 2
+      },
+      "recut": "The model's layer version outputs declare LayerArn and have no LayerName."
+    },
+    {
+      "operation": "GetLayerVersion",
+      "input": {
+        "LayerName": "lay",
+        "VersionNumber": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": "d",
+        "LayerArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay",
+        "LayerVersionArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay:1",
+        "Version": 1
+      },
+      "recut": "The model's layer version outputs declare LayerArn and have no LayerName. GetLayerVersion answers the version named; the pack read VersionNumber as a string, found none, and answered the latest."
+    },
+    {
+      "operation": "GetLayerVersionByArn",
+      "input": {
+        "Arn": {
+          "$fromPath": "LayerVersionArn",
+          "$fromStep": 38
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": "",
+        "LayerArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay",
+        "LayerVersionArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay:2",
+        "Version": 2
+      },
+      "recut": "The model's layer version outputs declare LayerArn and have no LayerName."
+    },
+    {
+      "operation": "ListLayerVersions",
+      "input": {
+        "LayerName": "lay"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LayerVersions": [
+          {
+            "Description": "d",
+            "LayerVersionArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay:1",
+            "Version": 1
+          },
+          {
+            "Description": "",
+            "LayerVersionArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay:2",
+            "Version": 2
+          }
+        ]
+      },
+      "recut": "The model's layer version outputs declare LayerArn and have no LayerName."
+    },
+    {
+      "operation": "ListLayers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Layers": [
+          {
+            "LatestMatchingVersion": {
+              "Description": "",
+              "LayerVersionArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay:2",
+              "Version": 2
+            },
+            "LayerArn": "arn:aws:lambda:us-east-1:000000000000:layer:lay",
+            "LayerName": "lay"
+          }
+        ]
+      },
+      "recut": "ListLayers answers LayersListItem shapes, with the latest version under LatestMatchingVersion; the pack answered the latest version record flat."
+    },
+    {
+      "operation": "AddLayerVersionPermission",
+      "input": {
+        "Action": "lambda:GetLayerVersion",
+        "LayerName": "lay",
+        "Principal": "*",
+        "StatementId": "p1",
+        "VersionNumber": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RevisionId": "5f59",
+        "Statement": "{\"Action\":\"lambda:GetLayerVersion\",\"Principal\":\"*\",\"Sid\":\"p1\"}"
+      }
+    },
+    {
+      "operation": "GetLayerVersionPolicy",
+      "input": {
+        "LayerName": "lay",
+        "VersionNumber": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Statement\":[{\"Action\":\"lambda:GetLayerVersion\",\"Principal\":\"*\",\"Sid\":\"p1\"}],\"Version\":\"2012-10-17\"}"
+      }
+    },
+    {
+      "operation": "RemoveLayerVersionPermission",
+      "input": {
+        "LayerName": "lay",
+        "StatementId": "p1",
+        "VersionNumber": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteLayerVersion",
+      "input": {
+        "LayerName": "lay",
+        "VersionNumber": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateCodeSigningConfig",
+      "input": {
+        "AllowedPublishers": {
+          "SigningProfileVersionArns": [
+            "arn:aws:signer:us-east-1:000000000000:/signing-profiles/p/v"
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CodeSigningConfig": {
+          "AllowedPublishers": {
+            "SigningProfileVersionArns": [
+              "arn:aws:signer:us-east-1:000000000000:/signing-profiles/p/v"
+            ]
+          },
+          "CodeSigningConfigArn": "arn:aws:lambda:us-east-1:000000000000:code-signing-config:9c8e2cb0",
+          "CodeSigningConfigId": "9c8e2cb0"
+        }
+      }
+    },
+    {
+      "operation": "GetCodeSigningConfig",
+      "input": {
+        "CodeSigningConfigArn": {
+          "$fromPath": "CodeSigningConfig.CodeSigningConfigArn",
+          "$fromStep": 47
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CodeSigningConfig": {
+          "AllowedPublishers": {
+            "SigningProfileVersionArns": [
+              "arn:aws:signer:us-east-1:000000000000:/signing-profiles/p/v"
+            ]
+          },
+          "CodeSigningConfigArn": "arn:aws:lambda:us-east-1:000000000000:code-signing-config:9c8e2cb0",
+          "CodeSigningConfigId": "9c8e2cb0"
+        }
+      }
+    },
+    {
+      "operation": "ListCodeSigningConfigs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CodeSigningConfigs": [
+          {
+            "AllowedPublishers": {
+              "SigningProfileVersionArns": [
+                "arn:aws:signer:us-east-1:000000000000:/signing-profiles/p/v"
+              ]
+            },
+            "CodeSigningConfigArn": "arn:aws:lambda:us-east-1:000000000000:code-signing-config:9c8e2cb0",
+            "CodeSigningConfigId": "9c8e2cb0"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutFunctionCodeSigningConfig",
+      "input": {
+        "CodeSigningConfigArn": {
+          "$fromPath": "CodeSigningConfig.CodeSigningConfigArn",
+          "$fromStep": 47
+        },
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CodeSigningConfigArn": "arn:aws:lambda:us-east-1:000000000000:code-signing-config:9c8e2cb0",
+        "FunctionName": "f1"
+      }
+    },
+    {
+      "operation": "GetFunctionCodeSigningConfig",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CodeSigningConfigArn": "arn:aws:lambda:us-east-1:000000000000:code-signing-config:9c8e2cb0",
+        "FunctionName": "f1"
+      }
+    },
+    {
+      "operation": "ListFunctionsByCodeSigningConfig",
+      "input": {
+        "CodeSigningConfigArn": {
+          "$fromPath": "CodeSigningConfig.CodeSigningConfigArn",
+          "$fromStep": 47
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FunctionArns": [
+          "arn:aws:lambda:us-east-1:000000000000:function:f1"
+        ]
+      },
+      "recut": "ListFunctionsByCodeSigningConfig answers function ARNs; the pack answered names."
+    },
+    {
+      "operation": "DeleteFunctionCodeSigningConfig",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteCodeSigningConfig",
+      "input": {
+        "CodeSigningConfigArn": {
+          "$fromPath": "CodeSigningConfig.CodeSigningConfigArn",
+          "$fromStep": 47
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutFunctionEventInvokeConfig",
+      "input": {
+        "FunctionName": "f1",
+        "MaximumEventAgeInSeconds": 60,
+        "MaximumRetryAttempts": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DestinationConfig": null,
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "MaximumEventAgeInSeconds": 60,
+        "MaximumRetryAttempts": 1
+      },
+      "recut": "The model's FunctionEventInvokeConfig declares FunctionArn and has no FunctionName."
+    },
+    {
+      "operation": "GetFunctionEventInvokeConfig",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DestinationConfig": null,
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "MaximumEventAgeInSeconds": 60,
+        "MaximumRetryAttempts": 1
+      },
+      "recut": "The model's FunctionEventInvokeConfig declares FunctionArn and has no FunctionName."
+    },
+    {
+      "operation": "ListFunctionEventInvokeConfigs",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FunctionEventInvokeConfigs": [
+          {
+            "DestinationConfig": null,
+            "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 1
+          }
+        ]
+      },
+      "recut": "The model's FunctionEventInvokeConfig declares FunctionArn and has no FunctionName."
+    },
+    {
+      "operation": "DeleteFunctionEventInvokeConfig",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutProvisionedConcurrencyConfig",
+      "input": {
+        "FunctionName": "f1",
+        "ProvisionedConcurrentExecutions": 2,
+        "Qualifier": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AllocatedProvisionedConcurrentExecutions": 2,
+        "AvailableProvisionedConcurrentExecutions": 2,
+        "RequestedProvisionedConcurrentExecutions": 2,
+        "Status": "READY"
+      },
+      "recut": "The model's provisioned concurrency outputs declare allocated and available executions alongside the requested ones, and have no FunctionName."
+    },
+    {
+      "operation": "GetProvisionedConcurrencyConfig",
+      "input": {
+        "FunctionName": "f1",
+        "Qualifier": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AllocatedProvisionedConcurrentExecutions": 2,
+        "AvailableProvisionedConcurrentExecutions": 2,
+        "RequestedProvisionedConcurrentExecutions": 2,
+        "Status": "READY"
+      },
+      "recut": "The model's provisioned concurrency outputs declare allocated and available executions alongside the requested ones, and have no FunctionName."
+    },
+    {
+      "operation": "ListProvisionedConcurrencyConfigs",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProvisionedConcurrencyConfigs": [
+          {
+            "AllocatedProvisionedConcurrentExecutions": 2,
+            "AvailableProvisionedConcurrentExecutions": 2,
+            "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1:1",
+            "RequestedProvisionedConcurrentExecutions": 2,
+            "Status": "READY"
+          }
+        ]
+      },
+      "recut": "The model's provisioned concurrency outputs declare allocated and available executions alongside the requested ones, and have no FunctionName."
+    },
+    {
+      "operation": "DeleteProvisionedConcurrencyConfig",
+      "input": {
+        "FunctionName": "f1",
+        "Qualifier": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutFunctionRecursionConfig",
+      "input": {
+        "FunctionName": "f1",
+        "RecursiveLoop": "Terminate"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RecursiveLoop": "Terminate"
+      }
+    },
+    {
+      "operation": "GetFunctionRecursionConfig",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RecursiveLoop": "Terminate"
+      }
+    },
+    {
+      "operation": "PutRuntimeManagementConfig",
+      "input": {
+        "FunctionName": "f1",
+        "UpdateRuntimeOn": "Manual"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "RuntimeVersionArn": null,
+        "UpdateRuntimeOn": "Manual"
+      },
+      "recut": "The model's runtime management outputs declare FunctionArn and have no FunctionName."
+    },
+    {
+      "operation": "GetRuntimeManagementConfig",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:f1",
+        "RuntimeVersionArn": null,
+        "UpdateRuntimeOn": "Manual"
+      },
+      "recut": "The model's runtime management outputs declare FunctionArn and have no FunctionName."
+    },
+    {
+      "operation": "PutResourcePolicy",
+      "input": {
+        "Policy": "{\"Version\":\"2012-10-17\"}",
+        "ResourceArn": {
+          "$fromPath": "FunctionArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Version\":\"2012-10-17\"}",
+        "RevisionId": "33f6"
+      },
+      "recut": "The model's PutResourcePolicy output declares the Policy stored."
+    },
+    {
+      "operation": "GetResourcePolicy",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "FunctionArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Version\":\"2012-10-17\"}",
+        "RevisionId": "33f6"
+      },
+      "recut": "The model's GetResourcePolicy output declares the RevisionId PutResourcePolicy answered."
+    },
+    {
+      "operation": "DeleteResourcePolicy",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "FunctionArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetAccountSettings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountLimit": {
+          "ConcurrentExecutions": 1000,
+          "TotalCodeSize": 80530636800
+        },
+        "AccountUsage": {
+          "FunctionCount": 1,
+          "TotalCodeSize": 0
+        }
+      }
+    },
+    {
+      "operation": "CreateCapacityProvider",
+      "input": {
+        "CapacityProviderName": "cp",
+        "PermissionsConfig": {
+          "CapacityProviderOperatorRoleArn": "arn:aws:iam::000000000000:role/lambda"
+        },
+        "VpcConfig": {
+          "SubnetIds": [
+            "subnet-1"
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CapacityProvider": {
+          "CapacityProviderArn": "arn:aws:lambda:us-east-1:000000000000:capacity-provider:cp",
+          "CapacityProviderName": "cp",
+          "PermissionsConfig": {
+            "CapacityProviderOperatorRoleArn": "arn:aws:iam::000000000000:role/lambda"
+          },
+          "State": "Active",
+          "VpcConfig": {
+            "SubnetIds": [
+              "subnet-1"
+            ]
+          }
+        }
+      },
+      "recut": "The model's CapacityProvider declares a CapacityProviderArn; the pack answered none."
+    },
+    {
+      "operation": "GetCapacityProvider",
+      "input": {
+        "CapacityProviderName": "cp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CapacityProvider": {
+          "CapacityProviderArn": "arn:aws:lambda:us-east-1:000000000000:capacity-provider:cp",
+          "CapacityProviderName": "cp",
+          "PermissionsConfig": {
+            "CapacityProviderOperatorRoleArn": "arn:aws:iam::000000000000:role/lambda"
+          },
+          "State": "Active",
+          "VpcConfig": {
+            "SubnetIds": [
+              "subnet-1"
+            ]
+          }
+        }
+      },
+      "recut": "The model's CapacityProvider declares a CapacityProviderArn; the pack answered none."
+    },
+    {
+      "operation": "ListCapacityProviders",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CapacityProviders": [
+          {
+            "CapacityProviderArn": "arn:aws:lambda:us-east-1:000000000000:capacity-provider:cp",
+            "CapacityProviderName": "cp",
+            "PermissionsConfig": {
+              "CapacityProviderOperatorRoleArn": "arn:aws:iam::000000000000:role/lambda"
+            },
+            "State": "Active",
+            "VpcConfig": {
+              "SubnetIds": [
+                "subnet-1"
+              ]
+            }
+          }
+        ]
+      },
+      "recut": "The model's CapacityProvider declares a CapacityProviderArn; the pack answered none."
+    },
+    {
+      "operation": "DeleteCapacityProvider",
+      "input": {
+        "CapacityProviderName": "cp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CapacityProvider": {
+          "CapacityProviderArn": "arn:aws:lambda:us-east-1:000000000000:capacity-provider:cp",
+          "CapacityProviderName": "cp",
+          "PermissionsConfig": {
+            "CapacityProviderOperatorRoleArn": "arn:aws:iam::000000000000:role/lambda"
+          },
+          "State": "Deleting",
+          "VpcConfig": {
+            "SubnetIds": [
+              "subnet-1"
+            ]
+          }
+        }
+      },
+      "recut": "The model's DeleteCapacityProvider output is the capacity provider being deleted; the pack answered nothing."
+    },
+    {
+      "operation": "DeleteFunction",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetFunction",
+      "input": {
+        "FunctionName": "f1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    }
+  ]
+}

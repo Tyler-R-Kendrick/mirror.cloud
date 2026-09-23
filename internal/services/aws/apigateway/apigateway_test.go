@@ -42,7 +42,7 @@ func TestBootedServerAPIGatewayLambdaProxy(t *testing.T) {
 
 	src := "def lambda_handler(event, context):\n    import json\n    b=event.get('body') or '{}'\n    if isinstance(b,str):\n        b=json.loads(b or '{}')\n    return {'echo': b.get('n', b)}\n"
 	pyb64 := base64.StdEncoding.EncodeToString([]byte(src))
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(`{"FunctionName":"echo","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"`+pyb64+`"}}`))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(`{"Role":"arn:aws:iam::000000000000:role/lambda","FunctionName":"echo","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"`+pyb64+`"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", authLam)
 	res, err := http.DefaultClient.Do(req)

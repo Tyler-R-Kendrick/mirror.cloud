@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"maps"
 	"math"
@@ -38,7 +39,7 @@ import (
 	internalrand "github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -5121,7 +5122,7 @@ func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource stri
 	default:
 		in["input"] = m
 	}
-	lp := lambda.New(p.deps)
+	lp := bundled.Handler("aws.lambda", p.deps)
 	resp, err := lp.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
 	if err != nil {
 		return nil, err

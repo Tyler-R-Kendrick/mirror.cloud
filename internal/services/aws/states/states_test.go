@@ -28,8 +28,8 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs" // natives the ECS bundle serves
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"    // natives the ECS bundle serves
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -4455,7 +4455,7 @@ func TestBootedServerStatesMapLambdaActivity(t *testing.T) {
 		return
 	}
 	src := "def lambda_handler(event, context):\n    return {\"n\": event.get(\"n\", 0) + 1}\n"
-	create := `{"FunctionName":"inc","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(src)) + `"}}`
+	create := `{"Role":"arn:aws:iam::000000000000:role/lambda","FunctionName":"inc","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(src)) + `"}}`
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(create))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", lamAuth)
@@ -4554,7 +4554,7 @@ def lambda_handler(event, context):
     change(event["path"], -1)
     return event
 `
-	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "concurrency-worker", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(src))},
 	}}); err != nil {

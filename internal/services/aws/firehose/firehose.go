@@ -34,7 +34,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -4523,7 +4523,7 @@ func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, pro
 	attempts := 0
 	for attempt := 0; attempt <= retries; attempt++ {
 		attempts++
-		response, err = lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name}, Body: io.NopCloser(bytes.NewReader(event))})
+		response, err = bundled.Handler("aws.lambda", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name}, Body: io.NopCloser(bytes.NewReader(event))})
 		if err == nil {
 			break
 		}

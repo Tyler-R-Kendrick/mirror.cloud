@@ -1435,3 +1435,23 @@ The recording is re-cut in three places:
 - **Outputs.** Outputs carry the DesiredState their models declare.
 - **NotFoundException.** It is 404, not 400.
 - **Summaries.** ListPipes answers summaries, and DeletePipe answers the pipe it deleted.
+
+### Lambda: a router in the codec, and a query no bundle had read
+
+Lambda's records are bundle YAML: functions, versions, aliases, permissions, layers, code signing, event-source mappings and the per-function configurations. Invoke and its two variants stay Go, because they run a handler in a process. The SQS event-source consumer is the bundle's worker.
+
+The pack's consumer used to subscribe once for every `lambda.New`. Every service that invoked a function constructed one, so one runtime could deliver the same message several times. Callers now reach Lambda through `bundled.Handler`, and one worker consumes.
+
+Two things outside the pack moved with it:
+- **The Lambda router in the restJson1 codec.** It guessed operations from path substrings ahead of the model's URIs, and accepted API-date prefixes that Lambda does not publish. For example, `/2015-03-31/tags` is really `/2017-03-31/tags`. Lambda now routes by `httpuri.Match` like every other bundle. Only the `?Action=` form this project's tests use survives.
+- **Query-bound members.** They were stored under their wire name, so UntagResource's `?tagKeys=` never reached `TagKeys`. This held for every restJson1 bundle that binds a query member under a different name. The decoder now maps the wire name to the member, as it already did for headers.
+
+The model requires `Role` on CreateFunction, and many tests across packages created functions without one. They now send it.
+
+Nine durable-execution extras are mock tier. They stored records keyed by whatever the request named, with the operation's own name as the status.
+
+The recording is re-cut where the pack answered outside its models:
+- **Function configurations.** They carry Role, Version and FunctionArn. Published versions snapshot the configuration.
+- **Model shapes.** Event-source mappings, URL configs, layers and the per-function configurations answer the shapes their models declare, not the request echoed with FunctionName.
+- **Layer versions.** GetLayerVersion answers the version it names, rather than the latest.
+- **Removals.** Untag removes only the named keys.

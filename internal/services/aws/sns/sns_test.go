@@ -26,7 +26,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -652,11 +652,11 @@ func TestSNSSQSDeliveryPropagatesTraceHeader(t *testing.T) {
 
 func TestLambdaSubscriptionDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, lp := New(deps), lambda.New(deps)
+	p, lp := New(deps), bundled.Handler("aws.lambda", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	code := base64.StdEncoding.EncodeToString([]byte("def lambda_handler(event, context):\n return event['Records'][0]['Sns']\n"))
-	_, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	_, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "notify", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": map[string]any{"ZipFile": code},
 	}})
 	if err != nil {
@@ -690,10 +690,10 @@ func TestLambdaSubscriptionDelivery(t *testing.T) {
 
 func TestSNSLambdaSuccessFeedbackDeliveryLog(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, lp := New(deps), lambda.New(deps)
+	p, lp := New(deps), bundled.Handler("aws.lambda", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
-	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "feedback", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte("def lambda_handler(event, context):\n return event\n"))},
 	}}); err != nil {
@@ -3038,13 +3038,13 @@ func TestSNSLambdaSubscriptionRedrive(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	qp := bundled.Handler("aws.sqs", deps)
-	lp := lambda.New(deps)
+	lp := bundled.Handler("aws.lambda", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sns-lambda-dlq"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"FunctionName": "sns-redrive-lambda"}}); err != nil {
+	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda", "FunctionName": "sns-redrive-lambda", "Code": map[string]any{"ZipFile": ""}}}); err != nil {
 		t.Fatal(err)
 	}
 	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "sns-lambda-redrive"}})
@@ -3694,12 +3694,12 @@ func TestSNSFilterPolicyNumericSQSDelivery(t *testing.T) {
 
 func TestSNSLambdaSubscribeNotificationEnvelope(t *testing.T) {
 	deps := spitest.Deps(t)
-	p, lp := New(deps), lambda.New(deps)
+	p, lp := New(deps), bundled.Handler("aws.lambda", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	eventOut := filepath.Join(t.TempDir(), "event.json")
 	code := "import json,os\ndef lambda_handler(event, context):\n open(os.environ['EVENT_OUT'],'w').write(json.dumps(event))\n return event\n"
-	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "sns-lambda-envelope", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code":        map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
 		"Environment": map[string]any{"Variables": map[string]any{"EVENT_OUT": eventOut}},
@@ -3878,7 +3878,7 @@ func TestSNSLambdaFunctionDLQToTopic(t *testing.T) {
 		t.Skip("python3 not installed")
 	}
 	deps := spitest.Deps(t)
-	p, lp, qp := New(deps), lambda.New(deps), bundled.Handler("aws.sqs", deps)
+	p, lp, qp := New(deps), bundled.Handler("aws.lambda", deps), bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "lambda-dlq"}}); err != nil {
@@ -3886,7 +3886,7 @@ func TestSNSLambdaFunctionDLQToTopic(t *testing.T) {
 	}
 	dlqTopic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "lambda-dlq"}).Output["TopicArn"])
 	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": dlqTopic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:lambda-dlq"})
-	created, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	created, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "sns-dlq-fn", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code":             map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte("def lambda_handler(event, context):\n raise Exception('boom')\n"))},
 		"DeadLetterConfig": map[string]any{"TargetArn": dlqTopic},

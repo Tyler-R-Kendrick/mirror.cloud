@@ -23,7 +23,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -652,7 +652,7 @@ func (p *worker) invokeLambdaPayload(ctx context.Context, identity spi.Identity,
 	if index := strings.IndexByte(name, ':'); index >= 0 {
 		name = name[:index]
 	}
-	response, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{
+	response, err := bundled.Handler("aws.lambda", p.deps).Invoke(ctx, &spi.Request{
 		Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name}, Body: io.NopCloser(bytes.NewReader(payload)),
 	})
 	if err != nil {

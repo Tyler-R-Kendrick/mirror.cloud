@@ -361,7 +361,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		res.Body.Close()
 		source := "import os, urllib.request\ndef lambda_handler(event, context):\n    return {'name': os.environ['AWS_LAMBDA_FUNCTION_NAME'], 'body': urllib.request.urlopen(os.environ['AWS_ENDPOINT_URL'] + '/lambda-read-bdd/object').read().decode()}\n"
-		createBody := `{"FunctionName":"s3-reader","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(source)) + `"},"Environment":{"Variables":{"AWS_ENDPOINT_URL":"` + ts.URL + `"}}}`
+		createBody := `{"Role":"arn:aws:iam::000000000000:role/lambda","FunctionName":"s3-reader","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(source)) + `"},"Environment":{"Variables":{"AWS_ENDPOINT_URL":"` + ts.URL + `"}}}`
 		create, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(createBody))
 		create.Header.Set("Content-Type", "application/json")
 		create.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/lambda/aws4_request, SignedHeaders=host, Signature=00")

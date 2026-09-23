@@ -1,4 +1,6 @@
-// Package lambda stores functions and invokes local python/node handlers.
+// Package lambda runs the functions behavior/aws/lambda stores: Invoke and its
+// variants, which the bundle declares native, execute a local python3 or node
+// handler, and the worker delivers SQS messages to mapped functions.
 package lambda
 
 import (
@@ -12,13 +14,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -27,59 +25,36 @@ import (
 var PublishSNS func(ctx context.Context, deps spi.Deps, id spi.Identity, topicARN, message string)
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.lambda", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
-}
-
-// Pack implements Lambda-lite.
-type Pack struct {
-	deps      spi.Deps
-	cancelSQS func()
-	closeOnce sync.Once
-}
-
-// New constructs the pack.
-func New(d spi.Deps) *Pack {
-	p := &Pack{deps: d}
-	if d.Bus != nil {
-		p.cancelSQS = d.Bus.Subscribe("sqs", p.consumeSQS)
+	for op, invoke := range map[string]func(*runner, context.Context, *spi.Request) (*spi.Response, error){
+		"Invoke": (*runner).invoke, "InvokeAsync": (*runner).invokeAsync, "InvokeWithResponseStream": (*runner).invokeStream,
+	} {
+		bundled.RegisterNative("aws.lambda", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return invoke(&runner{deps: deps}, ctx, req)
+		})
 	}
-	return p
+	bundled.RegisterWorker("aws.lambda", Start)
 }
 
-// Close stops the SQS event-source consumer.
-func (p *Pack) Close() error {
-	p.closeOnce.Do(func() {
-		if p.cancelSQS != nil {
-			p.cancelSQS()
-		}
-	})
-	return nil
+// runner runs the functions behavior/aws/lambda stores, from the collection
+// and in the layout the bundle writes them: keyed by name, with Runtime,
+// Handler, Code, Environment and DeadLetterConfig.
+type runner struct{ deps spi.Deps }
+
+func (p *runner) col(req *spi.Request, name string) spi.Collection {
+	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(name)
 }
 
-func (p *Pack) ServiceID() string { return "aws.lambda" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	core := []string{
-		"CreateFunction", "GetFunction", "ListFunctions", "DeleteFunction", "Invoke",
-		"UpdateFunctionCode", "UpdateFunctionConfiguration", "GetFunctionConfiguration",
-		"PublishVersion", "ListVersionsByFunction",
-		"CreateAlias", "GetAlias", "UpdateAlias", "DeleteAlias", "ListAliases",
-		"AddPermission", "RemovePermission", "GetPolicy",
-		"TagResource", "UntagResource", "ListTags",
-		"PutFunctionConcurrency", "GetFunctionConcurrency", "DeleteFunctionConcurrency",
-		"CreateEventSourceMapping", "GetEventSourceMapping", "ListEventSourceMappings",
-		"UpdateEventSourceMapping", "DeleteEventSourceMapping",
+// Start runs the SQS event-source worker against deps and answers how to
+// stop it.
+func Start(d spi.Deps) func() error {
+	if d.Bus == nil {
+		return func() error { return nil }
 	}
-	return append(core, extraOps()...)
+	cancel := d.Bus.Subscribe("sqs", (&runner{deps: d}).consumeSQS)
+	return func() error { cancel(); return nil }
 }
 
-func (p *Pack) col(req *spi.Request) spi.Collection {
-	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection("lambda")
-}
-
-func (p *Pack) emitDLQ(ctx context.Context, req *spi.Request, rec map[string]any, payload []byte, invokeErr error) {
+func (p *runner) emitDLQ(ctx context.Context, req *spi.Request, rec map[string]any, payload []byte, invokeErr error) {
 	target := str(asMap(rec["DeadLetterConfig"])["TargetArn"])
 	if target == "" || PublishSNS == nil || !strings.Contains(target, ":sns:") {
 		return
@@ -100,288 +75,26 @@ func asMap(v any) map[string]any {
 	return map[string]any{}
 }
 
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	if req.HTTP != nil {
-		req.Operation = route(req)
-		if req.Input == nil {
-			req.Input = map[string]any{}
-		}
-		if name := functionName(req); name != "" && str(req.Input["FunctionName"]) == "" {
-			req.Input["FunctionName"] = name
-		}
-		parts := strings.Split(req.HTTP.URL.Path, "/")
-		for i, p := range parts {
-			if p == "aliases" && i+1 < len(parts) && first(req.Input, "Name") == "" {
-				req.Input["Name"] = parts[i+1]
-			}
-			if p == "event-source-mappings" && i+1 < len(parts) && first(req.Input, "UUID") == "" {
-				req.Input["UUID"] = parts[i+1]
-			}
-			if p == "tags" && i+1 < len(parts) && first(req.Input, "Resource", "ResourceArn") == "" {
-				req.Input["Resource"] = strings.TrimPrefix(req.HTTP.URL.Path, "/2015-03-31/tags/")
-			}
-		}
+func (p *runner) invokeAsync(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	resp, err := p.invoke(ctx, req)
+	if err != nil {
+		return nil, err
 	}
-	switch req.Operation {
-	case "CreateFunction":
-		name := str(req.Input["FunctionName"])
-		rec := map[string]any{
-			"FunctionName": name,
-			"Runtime":      str(req.Input["Runtime"]),
-			"Handler":      str(req.Input["Handler"]),
-			"Code":         req.Input["Code"],
-			"Environment":  req.Input["Environment"],
-		}
-		if dlc := req.Input["DeadLetterConfig"]; dlc != nil {
-			rec["DeadLetterConfig"] = dlc
-		}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req).Put(ctx, name, b)
-		arn := "arn:aws:lambda:" + req.Identity.Region + ":" + req.Identity.Account + ":function:" + name
-		out := map[string]any{"FunctionName": name, "FunctionArn": arn, "Runtime": rec["Runtime"], "Handler": rec["Handler"]}
-		if rec["DeadLetterConfig"] != nil {
-			out["DeadLetterConfig"] = rec["DeadLetterConfig"]
-		}
-		return &spi.Response{Output: out}, nil
-	case "GetFunction":
-		name := str(req.Input["FunctionName"])
-		b, ok, _ := p.col(req).Get(ctx, name)
-		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 404, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		delete(rec, "Code")
-		return &spi.Response{Output: map[string]any{"Configuration": rec}}, nil
-	case "ListFunctions":
-		kvs, _, _ := p.col(req).List(ctx, "", "", 0)
-		var fns []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			delete(rec, "Code")
-			fns = append(fns, rec)
-		}
-		return &spi.Response{Output: map[string]any{"Functions": fns}}, nil
-	case "DeleteFunction":
-		_ = p.col(req).Delete(ctx, str(req.Input["FunctionName"]))
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
-	case "Invoke":
-		return p.invoke(ctx, req)
-	case "UpdateFunctionCode":
-		name := str(req.Input["FunctionName"])
-		rec, err := p.loadFn(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		if c, ok := req.Input["Code"]; ok {
-			rec["Code"] = c
-		} else if z, ok := req.Input["ZipFile"]; ok {
-			rec["Code"] = map[string]any{"ZipFile": z}
-		}
-		p.saveFn(ctx, req, name, rec)
-		return fnConfig(req, rec), nil
-	case "UpdateFunctionConfiguration":
-		name := str(req.Input["FunctionName"])
-		rec, err := p.loadFn(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		for _, k := range []string{"Runtime", "Handler", "Timeout", "MemorySize", "Description", "Role", "Environment"} {
-			if v, ok := req.Input[k]; ok {
-				rec[k] = v
-			}
-		}
-		p.saveFn(ctx, req, name, rec)
-		return fnConfig(req, rec), nil
-	case "GetFunctionConfiguration":
-		name := str(req.Input["FunctionName"])
-		rec, err := p.loadFn(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		delete(rec, "Code")
-		return fnConfig(req, rec), nil
-	case "PublishVersion":
-		name := str(req.Input["FunctionName"])
-		rec, err := p.loadFn(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		n := 1
-		if v, ok := rec["VersionN"].(float64); ok {
-			n = int(v) + 1
-		}
-		rec["VersionN"] = n
-		p.saveFn(ctx, req, name, rec)
-		ver := map[string]any{"FunctionName": name, "Version": strconv.Itoa(n), "FunctionArn": fnARN(req, name) + ":" + strconv.Itoa(n)}
-		b, _ := json.Marshal(ver)
-		_ = p.col(req).Put(ctx, "ver:"+name+":"+strconv.Itoa(n), b)
-		return &spi.Response{Output: ver}, nil
-	case "ListVersionsByFunction":
-		name := str(req.Input["FunctionName"])
-		kvs, _, _ := p.col(req).List(ctx, "ver:"+name+":", "", 0)
-		var vers []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			vers = append(vers, rec)
-		}
-		return &spi.Response{Output: map[string]any{"Versions": vers}}, nil
-	case "CreateAlias":
-		name := str(req.Input["FunctionName"])
-		alias := first(req.Input, "Name")
-		rec := map[string]any{"AliasArn": fnARN(req, name) + ":" + alias, "Name": alias, "FunctionVersion": first(req.Input, "FunctionVersion"), "Description": first(req.Input, "Description")}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req).Put(ctx, "alias:"+name+":"+alias, b)
-		return &spi.Response{Output: rec}, nil
-	case "GetAlias":
-		name, alias := str(req.Input["FunctionName"]), first(req.Input, "Name")
-		b, ok, _ := p.col(req).Get(ctx, "alias:"+name+":"+alias)
-		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 404, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: rec}, nil
-	case "UpdateAlias":
-		name, alias := str(req.Input["FunctionName"]), first(req.Input, "Name")
-		b, ok, _ := p.col(req).Get(ctx, "alias:"+name+":"+alias)
-		rec := map[string]any{"Name": alias, "FunctionName": name}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
-		}
-		if v := first(req.Input, "FunctionVersion"); v != "" {
-			rec["FunctionVersion"] = v
-		}
-		if v := first(req.Input, "Description"); v != "" {
-			rec["Description"] = v
-		}
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req).Put(ctx, "alias:"+name+":"+alias, nb)
-		return &spi.Response{Output: rec}, nil
-	case "DeleteAlias":
-		_ = p.col(req).Delete(ctx, "alias:"+str(req.Input["FunctionName"])+":"+first(req.Input, "Name"))
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
-	case "ListAliases":
-		name := str(req.Input["FunctionName"])
-		kvs, _, _ := p.col(req).List(ctx, "alias:"+name+":", "", 0)
-		var items []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			items = append(items, rec)
-		}
-		return &spi.Response{Output: map[string]any{"Aliases": items}}, nil
-	case "AddPermission":
-		name := str(req.Input["FunctionName"])
-		sid := first(req.Input, "StatementId")
-		stmt := map[string]any{"Sid": sid, "Effect": "Allow", "Action": first(req.Input, "Action"), "Principal": first(req.Input, "Principal")}
-		b, _ := json.Marshal(stmt)
-		_ = p.col(req).Put(ctx, "perm:"+name+":"+sid, b)
-		raw, _ := json.Marshal(map[string]any{"Statement": stmt})
-		return &spi.Response{Output: map[string]any{"Statement": string(raw)}}, nil
-	case "RemovePermission":
-		_ = p.col(req).Delete(ctx, "perm:"+str(req.Input["FunctionName"])+":"+first(req.Input, "StatementId"))
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
-	case "GetPolicy":
-		name := str(req.Input["FunctionName"])
-		kvs, _, _ := p.col(req).List(ctx, "perm:"+name+":", "", 0)
-		var stmts []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			stmts = append(stmts, rec)
-		}
-		raw, _ := json.Marshal(map[string]any{"Version": "2012-10-17", "Statement": stmts})
-		return &spi.Response{Output: map[string]any{"Policy": string(raw)}}, nil
-	case "TagResource":
-		arn := first(req.Input, "Resource", "ResourceArn")
-		b, _ := json.Marshal(req.Input["Tags"])
-		_ = p.col(req).Put(ctx, "tags:"+arn, b)
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
-	case "UntagResource":
-		_ = p.col(req).Delete(ctx, "tags:"+first(req.Input, "Resource", "ResourceArn"))
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
-	case "ListTags":
-		arn := first(req.Input, "Resource", "ResourceArn")
-		b, ok, _ := p.col(req).Get(ctx, "tags:"+arn)
-		tags := any(map[string]any{})
-		if ok {
-			_ = json.Unmarshal(b, &tags)
-		}
-		return &spi.Response{Output: map[string]any{"Tags": tags}}, nil
-	case "PutFunctionConcurrency":
-		name := str(req.Input["FunctionName"])
-		n := req.Input["ReservedConcurrentExecutions"]
-		b, _ := json.Marshal(map[string]any{"ReservedConcurrentExecutions": n})
-		_ = p.col(req).Put(ctx, "conc:"+name, b)
-		return &spi.Response{Output: map[string]any{"ReservedConcurrentExecutions": n}}, nil
-	case "GetFunctionConcurrency":
-		name := str(req.Input["FunctionName"])
-		b, ok, _ := p.col(req).Get(ctx, "conc:"+name)
-		if !ok {
-			return &spi.Response{Output: map[string]any{"ReservedConcurrentExecutions": 0}}, nil
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: rec}, nil
-	case "DeleteFunctionConcurrency":
-		_ = p.col(req).Delete(ctx, "conc:"+str(req.Input["FunctionName"]))
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
-	case "CreateEventSourceMapping":
-		id := p.deps.Rand.Hex(8)
-		rec := map[string]any{
-			"UUID": id, "FunctionName": first(req.Input, "FunctionName"),
-			"EventSourceArn": first(req.Input, "EventSourceArn"), "State": "Enabled",
-		}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req).Put(ctx, "esm:"+id, b)
-		return &spi.Response{Output: rec}, nil
-	case "GetEventSourceMapping":
-		id := first(req.Input, "UUID")
-		b, ok, _ := p.col(req).Get(ctx, "esm:"+id)
-		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 404, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: rec}, nil
-	case "ListEventSourceMappings":
-		kvs, _, _ := p.col(req).List(ctx, "esm:", "", 0)
-		var items []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			items = append(items, rec)
-		}
-		return &spi.Response{Output: map[string]any{"EventSourceMappings": items}}, nil
-	case "UpdateEventSourceMapping":
-		id := first(req.Input, "UUID")
-		b, ok, _ := p.col(req).Get(ctx, "esm:"+id)
-		rec := map[string]any{"UUID": id}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
-		}
-		for k, v := range req.Input {
-			if k != "UUID" {
-				rec[k] = v
-			}
-		}
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req).Put(ctx, "esm:"+id, nb)
-		return &spi.Response{Output: rec}, nil
-	case "DeleteEventSourceMapping":
-		_ = p.col(req).Delete(ctx, "esm:"+first(req.Input, "UUID"))
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
-	default:
-		return p.extra(ctx, req)
-	}
+	return &spi.Response{Status: 202, Output: map[string]any{"Status": 202, "Payload": resp.Output["Payload"]}}, nil
 }
 
-func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+// ponytail: not a real HTTP/2 event stream; returns the same Invoke payload.
+func (p *runner) invokeStream(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	resp, err := p.invoke(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &spi.Response{Output: map[string]any{"StatusCode": 200, "Payload": resp.Output["Payload"]}}, nil
+}
+
+func (p *runner) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := str(req.Input["FunctionName"])
-	b, ok, _ := p.col(req).Get(ctx, name)
+	b, ok, _ := p.col(req, "lambda").Get(ctx, name)
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 404, Fault: "client"}
 	}
@@ -438,7 +151,7 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 // consumeSQS delivers messages for mappings created through the Lambda API.
 // The SQS bus event is only a wake-up; ReceiveMessage remains the source of
 // truth so visibility, retry, and redrive semantics stay in the SQS pack.
-func (p *Pack) consumeSQS(ctx context.Context, payload []byte) {
+func (p *runner) consumeSQS(ctx context.Context, payload []byte) {
 	var event map[string]any
 	if json.Unmarshal(payload, &event) != nil {
 		return
@@ -456,7 +169,7 @@ func (p *Pack) consumeSQS(ctx context.Context, payload []byte) {
 		sourceARN = "arn:aws:sqs:" + identity.Region + ":" + identity.Account + ":" + queue
 	}
 	req := &spi.Request{Identity: identity}
-	kvs, _, _ := p.col(req).List(ctx, "esm:", "", 0)
+	kvs, _, _ := p.col(req, "lambdaesm").List(ctx, "", "", 0)
 	for _, kv := range kvs {
 		var mapping map[string]any
 		if json.Unmarshal(kv.Value, &mapping) != nil || stringValue(mapping["EventSourceArn"]) != sourceARN {
@@ -472,7 +185,7 @@ func (p *Pack) consumeSQS(ctx context.Context, payload []byte) {
 	}
 }
 
-func (p *Pack) processSQSMapping(ctx context.Context, identity spi.Identity, queue, sourceARN, function string) {
+func (p *runner) processSQSMapping(ctx context.Context, identity spi.Identity, queue, sourceARN, function string) {
 	if function == "" {
 		return
 	}
@@ -512,7 +225,7 @@ func (p *Pack) processSQSMapping(ctx context.Context, identity spi.Identity, que
 			})
 		}
 		body, _ := json.Marshal(map[string]any{"Records": records})
-		response, invokeErr := p.Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": function}, Body: io.NopCloser(bytes.NewReader(body))})
+		response, invokeErr := p.invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": function}, Body: io.NopCloser(bytes.NewReader(body))})
 		if invokeErr != nil {
 			continue
 		}
@@ -672,143 +385,10 @@ func splitHandler(h string) (mod, fn string) {
 	return mod, fn
 }
 
-func route(req *spi.Request) string {
-	if req.HTTP == nil {
-		return req.Operation
-	}
-	if a := req.HTTP.URL.Query().Get("Action"); a != "" {
-		return a
-	}
-	path, m := req.HTTP.URL.Path, req.HTTP.Method
-	switch {
-	case strings.Contains(path, "/invocations"):
-		return "Invoke"
-	case strings.Contains(path, "/event-source-mappings"):
-		hasID := strings.Count(strings.Trim(path, "/"), "/") >= 2
-		switch m {
-		case http.MethodPost:
-			return "CreateEventSourceMapping"
-		case http.MethodPut:
-			return "UpdateEventSourceMapping"
-		case http.MethodDelete:
-			return "DeleteEventSourceMapping"
-		case http.MethodGet:
-			if hasID && !strings.HasSuffix(path, "/event-source-mappings") {
-				return "GetEventSourceMapping"
-			}
-			return "ListEventSourceMappings"
-		}
-	case strings.Contains(path, "/tags"):
-		switch m {
-		case http.MethodPost:
-			return "TagResource"
-		case http.MethodDelete:
-			return "UntagResource"
-		default:
-			return "ListTags"
-		}
-	case strings.Contains(path, "/code") && m == http.MethodPut:
-		return "UpdateFunctionCode"
-	case strings.Contains(path, "/configuration") && m == http.MethodPut:
-		return "UpdateFunctionConfiguration"
-	case strings.Contains(path, "/configuration") && m == http.MethodGet:
-		return "GetFunctionConfiguration"
-	case strings.Contains(path, "/versions") && m == http.MethodPost:
-		return "PublishVersion"
-	case strings.Contains(path, "/versions"):
-		return "ListVersionsByFunction"
-	case strings.Contains(path, "/aliases"):
-		named := strings.Count(path, "/") > strings.Count("/2015-03-31/functions/x/aliases", "/")-1 && !strings.HasSuffix(path, "/aliases")
-		switch m {
-		case http.MethodPost:
-			return "CreateAlias"
-		case http.MethodPut:
-			return "UpdateAlias"
-		case http.MethodDelete:
-			return "DeleteAlias"
-		case http.MethodGet:
-			if named {
-				return "GetAlias"
-			}
-			return "ListAliases"
-		}
-	case strings.Contains(path, "/policy"):
-		switch m {
-		case http.MethodPost:
-			return "AddPermission"
-		case http.MethodDelete:
-			return "RemovePermission"
-		default:
-			return "GetPolicy"
-		}
-	case strings.Contains(path, "/concurrency"):
-		switch m {
-		case http.MethodPut:
-			return "PutFunctionConcurrency"
-		case http.MethodDelete:
-			return "DeleteFunctionConcurrency"
-		default:
-			return "GetFunctionConcurrency"
-		}
-	case m == http.MethodGet && strings.Contains(path, "/functions/") && !strings.HasSuffix(path, "/functions"):
-		return "GetFunction"
-	case m == http.MethodGet:
-		return "ListFunctions"
-	case m == http.MethodDelete:
-		return "DeleteFunction"
-	default:
-		return "CreateFunction"
-	}
-	return "CreateFunction"
-}
-
-func (p *Pack) loadFn(ctx context.Context, req *spi.Request, name string) (map[string]any, error) {
-	b, ok, _ := p.col(req).Get(ctx, name)
-	if !ok {
-		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 404, Fault: "client"}
-	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
-	return rec, nil
-}
-
-func (p *Pack) saveFn(ctx context.Context, req *spi.Request, name string, rec map[string]any) {
-	b, _ := json.Marshal(rec)
-	_ = p.col(req).Put(ctx, name, b)
-}
-
-func fnARN(req *spi.Request, name string) string {
-	return "arn:aws:lambda:" + req.Identity.Region + ":" + req.Identity.Account + ":function:" + name
-}
-
-func fnConfig(req *spi.Request, rec map[string]any) *spi.Response {
-	out := map[string]any{}
-	for k, v := range rec {
-		if k != "Code" {
-			out[k] = v
-		}
-	}
-	out["FunctionArn"] = fnARN(req, str(rec["FunctionName"]))
-	return &spi.Response{Output: out}
-}
-
 func first(in map[string]any, keys ...string) string {
 	for _, k := range keys {
 		if s := str(in[k]); s != "" {
 			return s
-		}
-	}
-	return ""
-}
-
-func functionName(req *spi.Request) string {
-	if req.HTTP == nil {
-		return ""
-	}
-	parts := strings.Split(req.HTTP.URL.Path, "/")
-	for i, p := range parts {
-		if p == "functions" && i+1 < len(parts) && parts[i+1] != "" {
-			return parts[i+1]
 		}
 	}
 	return ""

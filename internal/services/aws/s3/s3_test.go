@@ -39,7 +39,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/logging"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -665,7 +665,7 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 	id := ident()
 	path := t.TempDir() + "/event.json"
 	source := "import json\n\ndef lambda_handler(event, context):\n    open(" + strconv.Quote(path) + ", 'a').write(json.dumps(event) + '\\n')\n"
-	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "handler", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(source))},
 	}}); err != nil {

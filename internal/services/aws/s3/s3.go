@@ -33,7 +33,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/identity"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/zeebo/xxh3"
@@ -4560,7 +4560,7 @@ func (p *Pack) verifyNotificationDestination(ctx context.Context, req *spi.Reque
 	if service == "lambda" {
 		_, name, _ = strings.Cut(arn, ":function:")
 		name, _, _ = strings.Cut(name, ":")
-		_, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name, "InvocationType": "DryRun"}})
+		_, err := bundled.Handler("aws.lambda", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name, "InvocationType": "DryRun"}})
 		return err
 	}
 	payload, _ := json.Marshal(map[string]any{
@@ -5512,7 +5512,7 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 			continue
 		}
 		name, _, _ = strings.Cut(name, ":")
-		_, _ = lambda.New(p.deps).Invoke(ctx, &spi.Request{
+		_, _ = bundled.Handler("aws.lambda", p.deps).Invoke(ctx, &spi.Request{
 			Identity: notificationTargetIdentity(req.Identity, arn), Operation: "Invoke", Body: io.NopCloser(bytes.NewReader(payload)),
 			Input: map[string]any{"FunctionName": name, "InvocationType": "Event"},
 		})

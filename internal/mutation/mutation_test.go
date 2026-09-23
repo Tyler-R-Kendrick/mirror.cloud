@@ -12576,9 +12576,9 @@ var mutants = []mutant{
 	},
 	{
 		name: "cloudcontrol-write-wrong-collection",
-		file: filepath.Join("internal", "services", "aws", "cloudcontrol", "cloudcontrol.go"),
-		old:  `p.col(req, "ccres").Put(ctx, id, b)`,
-		new:  `p.col(req, "ccres-mutated").Put(ctx, id, b)`,
+		file: filepath.Join("behavior", "aws", "cloudcontrol", "service.yaml"),
+		old:  "collection: ccres",
+		new:  "collection: ccres-mutated",
 		pkg:  "./internal/services/aws/cloudcontrol",
 		run:  "TestCreatedResourceRoundTrip",
 	},

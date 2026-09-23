@@ -27,7 +27,7 @@ func TestReadsCloudFormationS3BucketConfiguration(t *testing.T) {
 	if _, err := cloudformation.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "bucket", "TemplateBody": template}}); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "GetResource", Input: map[string]any{"TypeName": "AWS::S3::Bucket", "Identifier": "configured"}})
+	resp, err := newPack(t, deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "GetResource", Input: map[string]any{"TypeName": "AWS::S3::Bucket", "Identifier": "configured"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestReadsAPIGatewayV2AndRDSResources(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	p := New(deps)
+	p := newPack(t, deps)
 	for typeName, identifier := range map[string]string{
 		"AWS::ApiGatewayV2::Api": apiID,
 		"AWS::RDS::DBInstance":   "database",
@@ -87,14 +87,14 @@ func TestReadsAPIGatewayV2AndRDSResources(t *testing.T) {
 }
 
 func TestCloudControlHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := newPack(t, spitest.Deps(t))
 	if n := len(p.Operations()); n != 6 {
 		t.Fatalf("cloudcontrol Operations() %d want 6", n)
 	}
 }
 
 func TestCreatedResourceRoundTrip(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := newPack(t, spitest.Deps(t))
 	ctx := context.Background()
 	req := func(operation string, input map[string]any) (*spi.Response, error) {
 		return p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}, Operation: operation, Input: input})
@@ -163,4 +163,13 @@ func TestBootedServerCloudControlCreateGetDelete(t *testing.T) {
 	if strings.Contains(string(raw), `"`+id+`"`) {
 		t.Fatalf("still present %s", raw)
 	}
+}
+
+func newPack(t *testing.T, deps spi.Deps) spi.BehaviorPack {
+	t.Helper()
+	p, err := bundled.New("aws.cloudcontrol", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

@@ -1,12 +1,11 @@
 {
-  "packs": 13,
-  "case_labels": 826,
+  "packs": 12,
+  "case_labels": 821,
   "services_files": 45,
-  "services_loc": 38092,
-  "fault_sites": 689,
-  "register_sites": 13,
+  "services_loc": 38064,
+  "fault_sites": 687,
+  "register_sites": 12,
   "pack_dirs": [
-    "aws/cloudcontrol",
     "aws/dynamodb",
     "aws/ecs",
     "aws/events",

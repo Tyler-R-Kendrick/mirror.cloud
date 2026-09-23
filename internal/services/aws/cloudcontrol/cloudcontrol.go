@@ -1,45 +1,42 @@
-// Package cloudcontrol stores resource records (no CloudFormation handler).
+// Package cloudcontrol reads the resources Cloud Control answers for: its own
+// records, served from its bundle, and the resources other services own.
 package cloudcontrol
 
 import (
 	"context"
 	"encoding/json"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.cloudcontrol", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range []string{"GetResource", "ListResources"} {
+		bundled.RegisterNative("aws.cloudcontrol", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return reader{deps}.invoke(ctx, req)
+		})
+	}
 }
 
-// Pack implements Cloud Control-lite.
-type Pack struct{ deps spi.Deps }
+// reader answers GetResource and ListResources: the bundle's own records, and
+// the resources other services own.
+//
+// ponytail: those are read out of the owners' stores in their layouts -- S3's
+// buckets and bucket configuration, API Gateway v2's ag2, RDS's dbinst and
+// dbcluster. Calling each owner's Get/Describe operation, as CloudFormation
+// now does to provision, is the upgrade.
+type reader struct{ deps spi.Deps }
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
-
-func (p *Pack) ServiceID() string { return "aws.cloudcontrol" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return []string{"CreateResource", "GetResource", "ListResources", "DeleteResource", "UpdateResource", "GetResourceRequestStatus"}
-}
-
-func (p *Pack) col(req *spi.Request, n string) spi.Collection {
+func (p reader) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
 }
 
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func notFound() error {
+	return &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 404, Fault: "client"}
+}
+
+func (p reader) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	switch req.Operation {
-	case "CreateResource":
-		id := p.deps.Rand.Hex(8)
-		rec := map[string]any{"Identifier": id, "TypeName": first(req.Input, "TypeName"), "Properties": first(req.Input, "DesiredState")}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "ccres").Put(ctx, id, b)
-		return &spi.Response{Output: map[string]any{"ProgressEvent": map[string]any{"Identifier": id, "OperationStatus": "SUCCESS", "TypeName": rec["TypeName"]}}}, nil
 	case "GetResource":
 		id := first(req.Input, "Identifier")
 		b, ok, _ := p.col(req, "ccres").Get(ctx, id)
@@ -55,10 +52,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			b, ok, _ = p.col(req, collection).Get(ctx, id)
 		}
 		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+			return nil, notFound()
 		}
 		return resourceDescription(id, first(req.Input, "TypeName"), b), nil
-	case "ListResources":
+	default: // ListResources
 		if records := listRecords(ctx, p.col(req, "ccres"), first(req.Input, "TypeName")); len(records) != 0 {
 			return &spi.Response{Output: map[string]any{"ResourceDescriptions": records}}, nil
 		}
@@ -68,28 +65,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if collection := backingCollection(first(req.Input, "TypeName")); collection != "" {
 			return listBacking(ctx, p.col(req, collection), first(req.Input, "TypeName")), nil
 		}
-		return listWrap(ctx, p.col(req, "ccres"), "ResourceDescriptions")
-	case "DeleteResource":
-		_ = p.col(req, "ccres").Delete(ctx, first(req.Input, "Identifier"))
-		return &spi.Response{Output: map[string]any{"ProgressEvent": map[string]any{"OperationStatus": "SUCCESS"}}}, nil
-	case "UpdateResource":
-		id := first(req.Input, "Identifier")
-		b, ok, _ := p.col(req, "ccres").Get(ctx, id)
-		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		if p := first(req.Input, "PatchDocument", "DesiredState"); p != "" {
-			rec["Properties"] = p
-		}
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "ccres").Put(ctx, id, nb)
-		return &spi.Response{Output: map[string]any{"ProgressEvent": map[string]any{"Identifier": id, "OperationStatus": "SUCCESS"}}}, nil
-	case "GetResourceRequestStatus":
-		return &spi.Response{Output: map[string]any{"ProgressEvent": map[string]any{"OperationStatus": "SUCCESS"}}}, nil
-	default:
-		return nil, spi.NotImplemented("aws.cloudcontrol", req.Operation, "emulate")
+		return &spi.Response{Output: map[string]any{"ResourceDescriptions": listRecords(ctx, p.col(req, "ccres"), "")}}, nil
 	}
 }
 
@@ -105,9 +81,9 @@ func backingCollection(typeName string) string {
 	return ""
 }
 
-func (p *Pack) s3Resource(ctx context.Context, req *spi.Request, bucket string) (*spi.Response, error) {
+func (p reader) s3Resource(ctx context.Context, req *spi.Request, bucket string) (*spi.Response, error) {
 	if _, ok, _ := p.col(req, "buckets").Get(ctx, bucket); !ok {
-		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		return nil, notFound()
 	}
 	props := map[string]any{"BucketName": bucket}
 	if version, ok, _ := p.col(req, "versioning").Get(ctx, bucket); ok {
@@ -137,7 +113,7 @@ func (p *Pack) s3Resource(ctx context.Context, req *spi.Request, bucket string) 
 	return resourceDescription(bucket, "AWS::S3::Bucket", raw), nil
 }
 
-func (p *Pack) listS3Resources(ctx context.Context, req *spi.Request) *spi.Response {
+func (p reader) listS3Resources(ctx context.Context, req *spi.Request) *spi.Response {
 	kvs, _, _ := p.col(req, "buckets").List(ctx, "", "", 0)
 	items := make([]any, 0, len(kvs))
 	for _, kv := range kvs {
@@ -161,10 +137,6 @@ func listBacking(ctx context.Context, collection spi.Collection, typeName string
 		items = append(items, resourceDescription(kv.Key, typeName, kv.Value).Output["ResourceDescription"])
 	}
 	return &spi.Response{Output: map[string]any{"ResourceDescriptions": items}}
-}
-
-func listWrap(ctx context.Context, c spi.Collection, key string) (*spi.Response, error) {
-	return &spi.Response{Output: map[string]any{key: listRecords(ctx, c, "")}}, nil
 }
 
 func listRecords(ctx context.Context, c spi.Collection, typeName string) []any {

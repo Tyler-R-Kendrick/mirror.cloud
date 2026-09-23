@@ -1366,3 +1366,9 @@ The ECS test that follows a task through RUNNING, STOPPED and FAILED passes agai
 The pack is now a bundle keyed by ARN throughout. That removes the pack's raw ARN-to-name index collections, which a bundle could not have read. The recording is re-cut in three places:
 - **DescribeLoadBalancers.** The pack ignored `Names` (it read a `LoadBalancerNames` member the request does not have) and answered every load balancer for an unknown name.
 - **CreateTrustStore and DescribeTrustStores.** The pack answered a `CaCertificatesBundleS3Bucket` member that the model's `TrustStore` does not declare.
+
+### Cloud Control: its own records moved; the reads of other services' did not
+
+Cloud Control's own CRUD is now bundle YAML: CreateResource, UpdateResource, DeleteResource and GetResourceRequestStatus. GetResource and ListResources remain Go natives. That is because they also answer resources other services own, such as an S3 bucket with its configuration, an API Gateway v2 API, or an RDS instance or cluster. They read those out of the owners' stores in each owner's layout. This is the same reach CloudFormation had before #423. It is marked `ponytail:`, and the upgrade is to ask each owner through its own Describe operation.
+
+The recording is re-cut in two places. At steps 5 and 8, the pack answered ResourceNotFoundException with 400. The model declares that error's httpError as 404.

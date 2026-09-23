@@ -1,0 +1,1100 @@
+{
+  "schema": "trace/1",
+  "service": "aws.events",
+  "source": "pack:internal/services/aws/events@89b852e",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "PutRule",
+      "input": {
+        "EventPattern": "{\"source\":[\"app\"]}",
+        "Name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RuleArn": "arn:aws:events:us-east-1:000000000000:rule/r1"
+      }
+    },
+    {
+      "operation": "PutRule",
+      "input": {
+        "EventBusName": "custom",
+        "EventPattern": "{\"source\":[\"x\"]}",
+        "Name": "r2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RuleArn": "arn:aws:events:us-east-1:000000000000:rule/custom/r2"
+      }
+    },
+    {
+      "operation": "ListRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Rules": [
+          {
+            "Arn": "arn:aws:events:us-east-1:000000000000:rule/r1",
+            "Description": null,
+            "EventBusName": null,
+            "EventPattern": "{\"source\":[\"app\"]}",
+            "Name": "r1",
+            "ScheduleExpression": null,
+            "State": "ENABLED"
+          }
+        ]
+      },
+      "recut": "The model's Rule and DescribeRule output declare the rule's Arn; the pack answered none."
+    },
+    {
+      "operation": "ListRules",
+      "input": {
+        "EventBusName": "custom"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Rules": [
+          {
+            "Arn": "arn:aws:events:us-east-1:000000000000:rule/custom/r2",
+            "Description": null,
+            "EventBusName": "custom",
+            "EventPattern": "{\"source\":[\"x\"]}",
+            "Name": "r2",
+            "ScheduleExpression": null,
+            "State": "ENABLED"
+          }
+        ]
+      },
+      "recut": "The model's Rule and DescribeRule output declare the rule's Arn; the pack answered none."
+    },
+    {
+      "operation": "DescribeRule",
+      "input": {
+        "Name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1:000000000000:rule/r1",
+        "Description": null,
+        "EventBusName": null,
+        "EventPattern": "{\"source\":[\"app\"]}",
+        "Name": "r1",
+        "RoleArn": null,
+        "ScheduleExpression": null,
+        "State": "ENABLED"
+      },
+      "recut": "The model's Rule and DescribeRule output declare the rule's Arn; the pack answered none."
+    },
+    {
+      "operation": "DescribeRule",
+      "input": {
+        "Name": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DisableRule",
+      "input": {
+        "Name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventPattern": "{\"source\":[\"app\"]}",
+        "Name": "r1",
+        "State": "DISABLED"
+      }
+    },
+    {
+      "operation": "DescribeRule",
+      "input": {
+        "Name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1:000000000000:rule/r1",
+        "Description": null,
+        "EventBusName": null,
+        "EventPattern": "{\"source\":[\"app\"]}",
+        "Name": "r1",
+        "RoleArn": null,
+        "ScheduleExpression": null,
+        "State": "DISABLED"
+      },
+      "recut": "The model's Rule and DescribeRule output declare the rule's Arn; the pack answered none."
+    },
+    {
+      "operation": "EnableRule",
+      "input": {
+        "Name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventPattern": "{\"source\":[\"app\"]}",
+        "Name": "r1",
+        "State": "ENABLED"
+      }
+    },
+    {
+      "operation": "PutTargets",
+      "input": {
+        "Rule": "r1",
+        "Targets": [
+          {
+            "Arn": "arn:aws:sqs:us-east-1:000000000000:q",
+            "Id": "t1"
+          },
+          {
+            "Arn": "arn:aws:sqs:us-east-1:000000000000:q2",
+            "Id": "t2"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedEntries": null,
+        "FailedEntryCount": 0
+      }
+    },
+    {
+      "operation": "ListTargetsByRule",
+      "input": {
+        "Rule": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Targets": [
+          {
+            "Arn": "arn:aws:sqs:us-east-1:000000000000:q",
+            "Id": "t1"
+          },
+          {
+            "Arn": "arn:aws:sqs:us-east-1:000000000000:q2",
+            "Id": "t2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListRuleNamesByTarget",
+      "input": {
+        "TargetArn": "arn:aws:sqs:us-east-1:000000000000:q"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RuleNames": [
+          "r1"
+        ]
+      }
+    },
+    {
+      "operation": "RemoveTargets",
+      "input": {
+        "Ids": [
+          "t2"
+        ],
+        "Rule": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedEntries": [],
+        "FailedEntryCount": 0
+      }
+    },
+    {
+      "operation": "ListTargetsByRule",
+      "input": {
+        "Rule": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Targets": [
+          {
+            "Arn": "arn:aws:sqs:us-east-1:000000000000:q",
+            "Id": "t1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteRule",
+      "input": {
+        "EventBusName": "custom",
+        "Name": "r2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRules",
+      "input": {
+        "EventBusName": "custom"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Rules": null
+      }
+    },
+    {
+      "operation": "CreateEventBus",
+      "input": {
+        "Name": "custom"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": null,
+        "EventBusArn": "arn:aws:events:us-east-1:000000000000:event-bus/custom"
+      },
+      "recut": "The model's event bus shapes carry Arn and Name (CreateEventBus answers EventBusArn only), and DescribeEventBus answers its resource policy as Policy; the pack echoed its stored record, with EventBusArn and a Statements list the model does not declare."
+    },
+    {
+      "operation": "DescribeEventBus",
+      "input": {
+        "Name": "custom"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1:000000000000:event-bus/custom",
+        "Description": null,
+        "Name": "custom",
+        "Policy": null
+      },
+      "recut": "The model's event bus shapes carry Arn and Name (CreateEventBus answers EventBusArn only), and DescribeEventBus answers its resource policy as Policy; the pack echoed its stored record, with EventBusArn and a Statements list the model does not declare."
+    },
+    {
+      "operation": "ListEventBuses",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventBuses": [
+          {
+            "Arn": "arn:aws:events:us-east-1:000000000000:event-bus/custom",
+            "Description": null,
+            "Name": "custom"
+          }
+        ]
+      },
+      "recut": "The model's event bus shapes carry Arn and Name (CreateEventBus answers EventBusArn only), and DescribeEventBus answers its resource policy as Policy; the pack echoed its stored record, with EventBusArn and a Statements list the model does not declare."
+    },
+    {
+      "operation": "PutPermission",
+      "input": {
+        "Action": "events:PutEvents",
+        "EventBusName": "custom",
+        "Principal": "111111111111",
+        "StatementId": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeEventBus",
+      "input": {
+        "Name": "custom"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1:000000000000:event-bus/custom",
+        "Description": null,
+        "Name": "custom",
+        "Policy": "{\"Statement\":[{\"Action\":\"events:PutEvents\",\"Effect\":\"Allow\",\"Principal\":\"111111111111\",\"Sid\":\"s1\"}],\"Version\":\"2012-10-17\"}"
+      },
+      "recut": "The model's event bus shapes carry Arn and Name (CreateEventBus answers EventBusArn only), and DescribeEventBus answers its resource policy as Policy; the pack echoed its stored record, with EventBusArn and a Statements list the model does not declare."
+    },
+    {
+      "operation": "RemovePermission",
+      "input": {
+        "EventBusName": "custom",
+        "StatementId": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeEventBus",
+      "input": {
+        "Name": "custom"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1:000000000000:event-bus/custom",
+        "Description": null,
+        "Name": "custom",
+        "Policy": null
+      },
+      "recut": "The model's event bus shapes carry Arn and Name (CreateEventBus answers EventBusArn only), and DescribeEventBus answers its resource policy as Policy; the pack echoed its stored record, with EventBusArn and a Statements list the model does not declare."
+    },
+    {
+      "operation": "DeleteEventBus",
+      "input": {
+        "Name": "custom"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateArchive",
+      "input": {
+        "ArchiveName": "a1",
+        "EventSourceArn": "arn:aws:events:us-east-1:000000000000:event-bus/default"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ArchiveArn": "arn:aws:events:us-east-1:000000000000:archive/a1",
+        "State": "ENABLED"
+      },
+      "recut": "The model's archive outputs are ArchiveArn and State, and DescribeArchive and ListArchives answer the archive's own members with its counts; the pack answered Name, a member the model does not declare, and UpdateArchive replaced the stored archive with the update, losing its EventSourceArn."
+    },
+    {
+      "operation": "DescribeArchive",
+      "input": {
+        "ArchiveName": "a1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ArchiveArn": "arn:aws:events:us-east-1:000000000000:archive/a1",
+        "ArchiveName": "a1",
+        "Description": null,
+        "EventCount": 0,
+        "EventPattern": null,
+        "EventSourceArn": "arn:aws:events:us-east-1:000000000000:event-bus/default",
+        "RetentionDays": null,
+        "SizeBytes": 0,
+        "State": "ENABLED"
+      },
+      "recut": "The model's archive outputs are ArchiveArn and State, and DescribeArchive and ListArchives answer the archive's own members with its counts; the pack answered Name, a member the model does not declare, and UpdateArchive replaced the stored archive with the update, losing its EventSourceArn."
+    },
+    {
+      "operation": "UpdateArchive",
+      "input": {
+        "ArchiveName": "a1",
+        "Description": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ArchiveArn": "arn:aws:events:us-east-1:000000000000:archive/a1",
+        "State": "ENABLED"
+      },
+      "recut": "The model's archive outputs are ArchiveArn and State, and DescribeArchive and ListArchives answer the archive's own members with its counts; the pack answered Name, a member the model does not declare, and UpdateArchive replaced the stored archive with the update, losing its EventSourceArn."
+    },
+    {
+      "operation": "ListArchives",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Archives": [
+          {
+            "ArchiveName": "a1",
+            "EventCount": 0,
+            "EventSourceArn": "arn:aws:events:us-east-1:000000000000:event-bus/default",
+            "RetentionDays": null,
+            "SizeBytes": 0,
+            "State": "ENABLED"
+          }
+        ]
+      },
+      "recut": "The model's archive outputs are ArchiveArn and State, and DescribeArchive and ListArchives answer the archive's own members with its counts; the pack answered Name, a member the model does not declare, and UpdateArchive replaced the stored archive with the update, losing its EventSourceArn."
+    },
+    {
+      "operation": "DeleteArchive",
+      "input": {
+        "ArchiveName": "a1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateEndpoint",
+      "input": {
+        "EventBuses": [
+          {
+            "EventBusArn": "a"
+          },
+          {
+            "EventBusArn": "b"
+          }
+        ],
+        "Name": "e1",
+        "RoutingConfig": {
+          "FailoverConfig": {
+            "Primary": {
+              "HealthCheck": "h"
+            },
+            "Secondary": {
+              "Route": "us-west-2"
+            }
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1:000000000000:endpoint/e1",
+        "EventBuses": [
+          {
+            "EventBusArn": "a"
+          },
+          {
+            "EventBusArn": "b"
+          }
+        ],
+        "Name": "e1",
+        "RoleArn": null,
+        "RoutingConfig": {
+          "FailoverConfig": {
+            "Primary": {
+              "HealthCheck": "h"
+            },
+            "Secondary": {
+              "Route": "us-west-2"
+            }
+          }
+        },
+        "State": "ACTIVE"
+      },
+      "recut": "The model's CreateEndpoint output echoes the endpoint's RoutingConfig and EventBuses, and endpoints carry their State; the pack answered only Name, Arn and State on create and no State after."
+    },
+    {
+      "operation": "DescribeEndpoint",
+      "input": {
+        "Name": "e1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1:000000000000:endpoint/e1",
+        "EventBuses": [
+          {
+            "EventBusArn": "a"
+          },
+          {
+            "EventBusArn": "b"
+          }
+        ],
+        "Name": "e1",
+        "RoleArn": null,
+        "RoutingConfig": {
+          "FailoverConfig": {
+            "Primary": {
+              "HealthCheck": "h"
+            },
+            "Secondary": {
+              "Route": "us-west-2"
+            }
+          }
+        },
+        "State": "ACTIVE"
+      },
+      "recut": "The model's CreateEndpoint output echoes the endpoint's RoutingConfig and EventBuses, and endpoints carry their State; the pack answered only Name, Arn and State on create and no State after."
+    },
+    {
+      "operation": "ListEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": [
+          {
+            "Arn": "arn:aws:events:us-east-1:000000000000:endpoint/e1",
+            "EventBuses": [
+              {
+                "EventBusArn": "a"
+              },
+              {
+                "EventBusArn": "b"
+              }
+            ],
+            "Name": "e1",
+            "RoutingConfig": {
+              "FailoverConfig": {
+                "Primary": {
+                  "HealthCheck": "h"
+                },
+                "Secondary": {
+                  "Route": "us-west-2"
+                }
+              }
+            },
+            "State": "ACTIVE"
+          }
+        ]
+      },
+      "recut": "The model's CreateEndpoint output echoes the endpoint's RoutingConfig and EventBuses, and endpoints carry their State; the pack answered only Name, Arn and State on create and no State after."
+    },
+    {
+      "operation": "DeleteEndpoint",
+      "input": {
+        "Name": "e1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreatePartnerEventSource",
+      "input": {
+        "Account": "111111111111",
+        "Name": "aws.partner/acme/src"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSourceArn": "arn:aws:events:us-east-1::event-source/aws.partner/acme/src"
+      },
+      "recut": "A partner event source's ARN carries no account (arn:aws:events:region::event-source/name), and the model's event source shapes answer Arn and Name, with the partner account only under ListPartnerEventSourceAccounts; the pack answered an account-scoped EventSourceArn and echoed the Account."
+    },
+    {
+      "operation": "DescribePartnerEventSource",
+      "input": {
+        "Name": "aws.partner/acme/src"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1::event-source/aws.partner/acme/src",
+        "Name": "aws.partner/acme/src"
+      },
+      "recut": "A partner event source's ARN carries no account (arn:aws:events:region::event-source/name), and the model's event source shapes answer Arn and Name, with the partner account only under ListPartnerEventSourceAccounts; the pack answered an account-scoped EventSourceArn and echoed the Account."
+    },
+    {
+      "operation": "ListPartnerEventSources",
+      "input": {
+        "NamePrefix": "aws.partner"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PartnerEventSources": [
+          {
+            "Arn": "arn:aws:events:us-east-1::event-source/aws.partner/acme/src",
+            "Name": "aws.partner/acme/src"
+          }
+        ]
+      },
+      "recut": "A partner event source's ARN carries no account (arn:aws:events:region::event-source/name), and the model's event source shapes answer Arn and Name, with the partner account only under ListPartnerEventSourceAccounts; the pack answered an account-scoped EventSourceArn and echoed the Account."
+    },
+    {
+      "operation": "ActivateEventSource",
+      "input": {
+        "Name": "aws.partner/acme/src"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "recut": "The model's ActivateEventSource and DeactivateEventSource outputs are empty; the pack echoed the source."
+    },
+    {
+      "operation": "DescribeEventSource",
+      "input": {
+        "Name": "aws.partner/acme/src"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:events:us-east-1::event-source/aws.partner/acme/src",
+        "Name": "aws.partner/acme/src",
+        "State": "ACTIVE"
+      },
+      "recut": "A partner event source's ARN carries no account (arn:aws:events:region::event-source/name), and the model's event source shapes answer Arn and Name, with the partner account only under ListPartnerEventSourceAccounts; the pack answered an account-scoped EventSourceArn and echoed the Account."
+    },
+    {
+      "operation": "ListEventSources",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSources": [
+          {
+            "Arn": "arn:aws:events:us-east-1::event-source/aws.partner/acme/src",
+            "Name": "aws.partner/acme/src",
+            "State": "ACTIVE"
+          }
+        ]
+      },
+      "recut": "A partner event source's ARN carries no account (arn:aws:events:region::event-source/name), and the model's event source shapes answer Arn and Name, with the partner account only under ListPartnerEventSourceAccounts; the pack answered an account-scoped EventSourceArn and echoed the Account."
+    },
+    {
+      "operation": "DeactivateEventSource",
+      "input": {
+        "Name": "aws.partner/acme/src"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "recut": "The model's ActivateEventSource and DeactivateEventSource outputs are empty; the pack echoed the source."
+    },
+    {
+      "operation": "ListPartnerEventSourceAccounts",
+      "input": {
+        "EventSourceName": "aws.partner/acme/src"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PartnerEventSourceAccounts": [
+          {
+            "Account": "111111111111",
+            "State": "ACTIVE"
+          }
+        ]
+      },
+      "recut": "A partner event source's ARN carries no account (arn:aws:events:region::event-source/name), and the model's event source shapes answer Arn and Name, with the partner account only under ListPartnerEventSourceAccounts; the pack answered an account-scoped EventSourceArn and echoed the Account."
+    },
+    {
+      "operation": "DeletePartnerEventSource",
+      "input": {
+        "Account": "111111111111",
+        "Name": "aws.partner/acme/src"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "StartReplay",
+      "input": {
+        "Destination": {
+          "Arn": "arn:aws:events:us-east-1:000000000000:event-bus/default"
+        },
+        "EventEndTime": 1,
+        "EventSourceArn": {
+          "$fromPath": "ArchiveArn",
+          "$fromStep": 24
+        },
+        "EventStartTime": 0,
+        "ReplayName": "rp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplayArn": "arn:aws:events:us-east-1:000000000000:replay/rp",
+        "State": "RUNNING"
+      },
+      "recut": "The model's replay outputs are ReplayArn and State, and ListReplays answers ReplayName, source, state and times; the pack answered Name, a member the model does not declare, and echoed the whole replay from CancelReplay."
+    },
+    {
+      "operation": "DescribeReplay",
+      "input": {
+        "ReplayName": "rp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": null,
+        "Destination": {
+          "Arn": "arn:aws:events:us-east-1:000000000000:event-bus/default"
+        },
+        "EventEndTime": 1,
+        "EventSourceArn": "arn:aws:events:us-east-1:000000000000:archive/a1",
+        "EventStartTime": 0,
+        "ReplayArn": "arn:aws:events:us-east-1:000000000000:replay/rp",
+        "ReplayName": "rp",
+        "State": "RUNNING"
+      },
+      "recut": "The model's replay outputs are ReplayArn and State, and ListReplays answers ReplayName, source, state and times; the pack answered Name, a member the model does not declare, and echoed the whole replay from CancelReplay."
+    },
+    {
+      "operation": "CancelReplay",
+      "input": {
+        "ReplayName": "rp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplayArn": "arn:aws:events:us-east-1:000000000000:replay/rp",
+        "State": "CANCELLED"
+      },
+      "recut": "The model's replay outputs are ReplayArn and State, and ListReplays answers ReplayName, source, state and times; the pack answered Name, a member the model does not declare, and echoed the whole replay from CancelReplay."
+    },
+    {
+      "operation": "ListReplays",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Replays": [
+          {
+            "EventEndTime": 1,
+            "EventSourceArn": "arn:aws:events:us-east-1:000000000000:archive/a1",
+            "EventStartTime": 0,
+            "ReplayName": "rp",
+            "State": "CANCELLED"
+          }
+        ]
+      },
+      "recut": "The model's replay outputs are ReplayArn and State, and ListReplays answers ReplayName, source, state and times; the pack answered Name, a member the model does not declare, and echoed the whole replay from CancelReplay."
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "ResourceARN": {
+          "$fromPath": "RuleArn",
+          "$fromStep": 0
+        },
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          },
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "ResourceARN": {
+          "$fromPath": "RuleArn",
+          "$fromStep": 0
+        },
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceARN": {
+          "$fromPath": "RuleArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      },
+      "recut": "UntagResource removes only the named TagKeys; the pack removed every tag."
+    },
+    {
+      "operation": "TestEventPattern",
+      "input": {
+        "Event": "{\"id\":\"1\",\"account\":\"000000000000\",\"source\":\"app\",\"time\":\"2020-01-01T00:00:00Z\",\"region\":\"us-east-1\",\"resources\":[],\"detail-type\":\"t\",\"detail\":{}}",
+        "EventPattern": "{\"source\":[\"app\"]}"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Result": true
+      }
+    },
+    {
+      "operation": "DeleteRule",
+      "input": {
+        "Name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeRule",
+      "input": {
+        "Name": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

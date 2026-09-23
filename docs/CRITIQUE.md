@@ -1467,3 +1467,27 @@ Two things outside the pack moved:
 - **The `project` parameter.** `storage.buckets.insert` and `list` require `project`, which every real client sends. The tests now send it too.
 
 About eighty further operations were one suffix-guessed key-value echo. They are mock tier, as RDS's and SSM's were. This contradicted SUPPORT's own claim that extra GCS operations were named control-plane records.
+
+### EventBridge: records to YAML, delivery stays Go
+
+EventBridge's records are bundle YAML: rule listings and deletes, targets' listing and removal, event buses and their permission statements, archives, endpoints, partner and consumer event sources, replays and tags.
+
+The operations that validate or deliver stay Go:
+- PutRule, which computes a schedule's next firing.
+- PutTargets, with its per-target validation.
+- PutEvents and PutPartnerEvents, which match rules and deliver.
+- TestEventPattern, which runs the pattern matcher.
+- Connections and API-destination writes, whose auth parameters delivery reads.
+
+The retry and schedule loop is the bundle's worker. Natives wake it through the bus now, rather than through a channel on the pack.
+
+Two layouts changed so a bundle could read them:
+- **Targets.** A rule's targets were stored as a bare JSON array. They are now `{Bus, Rule, Targets}`, which also lets ListRuleNamesByTarget filter by bus without parsing a NUL-joined key.
+- **Tags.** Tags were a bare array too, and are now `{Tags}`.
+
+The recording is re-cut where the pack echoed its records instead of the model's shapes:
+- **ARNs.** Rules carry their ARN, and buses answer Arn and a Policy rather than a Statements list.
+- **Archives.** UpdateArchive merges, where it used to replace the archive and lose its source.
+- **Partner sources.** A partner source's ARN has no account, and its account appears only under ListPartnerEventSourceAccounts.
+- **Replays.** Replays answer their declared members.
+- **Removals.** Untag removes only the named keys.

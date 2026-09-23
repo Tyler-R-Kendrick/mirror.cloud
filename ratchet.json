@@ -1,13 +1,12 @@
 {
-  "packs": 6,
-  "case_labels": 561,
+  "packs": 5,
+  "case_labels": 524,
   "services_files": 38,
-  "services_loc": 34605,
+  "services_loc": 34373,
   "fault_sites": 670,
-  "register_sites": 6,
+  "register_sites": 5,
   "pack_dirs": [
     "aws/dynamodb",
-    "aws/events",
     "aws/firehose",
     "aws/s3",
     "aws/sns",

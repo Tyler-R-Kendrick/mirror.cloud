@@ -14634,8 +14634,8 @@ var mutants = []mutant{
 	{
 		name: "events-drop-s3-ingress",
 		file: filepath.Join("internal", "services", "aws", "events", "events.go"),
-		old:  `p.cancelS3 = d.Bus.Subscribe("events:s3", p.consumeS3)`,
-		new:  `p.cancelS3 = d.Bus.Subscribe("events:mutated", p.consumeS3)`,
+		old:  `d.Bus.Subscribe("events:s3", p.consumeS3)`,
+		new:  `d.Bus.Subscribe("events:mutated", p.consumeS3)`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketNotificationEventBridgeDelivery",
 	},

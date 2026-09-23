@@ -225,7 +225,7 @@ func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 	}}})
 	waitEventTimer(t, observed.after, time.Minute)
 	_ = deps.Clock.Advance(time.Minute)
-	p.runScheduledRules(ctx)
+	p.worker.runScheduledRules(ctx)
 	if got := messages("disabled"); len(got) != 0 {
 		t.Fatalf("disabled schedule delivered %#v", got)
 	}
@@ -733,7 +733,7 @@ func TestAPIDestinationControlPlane(t *testing.T) {
 		"Name": "control", "Description": "updated",
 		"AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyValue": "replacement"}},
 	})
-	storedConnection, _ := p.load(ctx, &spi.Request{Identity: id}, "connections", "control")
+	storedConnection, _ := p.worker.load(ctx, &spi.Request{Identity: id}, "connections", "control")
 	storedAuth := storedConnection["AuthParameters"].(map[string]any)["ApiKeyAuthParameters"].(map[string]any)
 	if err != nil || updated.Output["ConnectionState"] != "AUTHORIZED" || storedConnection["Description"] != "updated" || storedAuth["ApiKeyName"] != "X-Key" || storedAuth["ApiKeyValue"] != "replacement" {
 		t.Fatalf("update connection %#v stored=%#v err=%v", updated, storedConnection, err)
@@ -750,7 +750,7 @@ func TestAPIDestinationControlPlane(t *testing.T) {
 	if _, err := invoke("UpdateApiDestination", map[string]any{"Name": "control", "Description": "updated"}); err != nil {
 		t.Fatal(err)
 	}
-	storedDestination, _ := p.load(ctx, &spi.Request{Identity: id}, "apidest", "control")
+	storedDestination, _ := p.worker.load(ctx, &spi.Request{Identity: id}, "apidest", "control")
 	if storedDestination["Description"] != "updated" || storedDestination["InvocationEndpoint"] != "https://example.test/original" || storedDestination["HttpMethod"] != "POST" || storedDestination["InvocationRateLimitPerSecond"] != float64(300) {
 		t.Fatalf("update API destination %#v", storedDestination)
 	}
@@ -758,7 +758,7 @@ func TestAPIDestinationControlPlane(t *testing.T) {
 	wantFault("UpdateApiDestination", map[string]any{"Name": "missing", "Description": "updated"}, "ResourceNotFoundException")
 
 	deauthorized, err := invoke("DeauthorizeConnection", map[string]any{"Name": "control"})
-	storedConnection, _ = p.load(ctx, &spi.Request{Identity: id}, "connections", "control")
+	storedConnection, _ = p.worker.load(ctx, &spi.Request{Identity: id}, "connections", "control")
 	if err != nil || deauthorized.Output["ConnectionState"] != "DEAUTHORIZED" || storedConnection["AuthParameters"] != nil {
 		t.Fatalf("deauthorize connection %#v stored=%#v err=%v", deauthorized, storedConnection, err)
 	}
@@ -996,12 +996,12 @@ func TestBootedServerEventBridgePutEvents(t *testing.T) {
 	call("ListConnections", `{}`)
 	call("CreateApiDestination", `{"Name":"d1","ConnectionArn":"`+str(connection["ConnectionArn"])+`","InvocationEndpoint":"https://example.test","HttpMethod":"POST"}`)
 	call("ListApiDestinations", `{}`)
-	call("CreateEndpoint", `{"Name":"e1"}`)
+	call("CreateEndpoint", `{"Name":"e1","RoutingConfig":{"FailoverConfig":{"Primary":{"HealthCheck":"h"},"Secondary":{"Route":"us-west-2"}}},"EventBuses":[{"EventBusArn":"a"},{"EventBusArn":"b"}]}`)
 	call("ListEndpoints", `{}`)
-	call("CreatePartnerEventSource", `{"Name":"p1"}`)
+	call("CreatePartnerEventSource", `{"Name":"p1","Account":"111111111111"}`)
 	call("ActivateEventSource", `{"Name":"p1"}`)
 	call("ListEventSources", `{}`)
-	call("StartReplay", `{"ReplayName":"r1","EventSourceArn":"arn:a"}`)
+	call("StartReplay", `{"ReplayName":"r1","EventSourceArn":"arn:a","EventStartTime":0,"EventEndTime":1,"Destination":{"Arn":"arn:aws:events:us-east-1:000000000000:event-bus/default"}}`)
 	call("DescribeReplay", `{"ReplayName":"r1"}`)
 	call("CancelReplay", `{"ReplayName":"r1"}`)
 	call("EnableRule", `{"Name":"r"}`)
@@ -1012,7 +1012,7 @@ func TestBootedServerEventBridgePutEvents(t *testing.T) {
 	}
 	call("TagResource", `{"ResourceARN":"arn:r","Tags":[{"Key":"k","Value":"v"}]}`)
 	call("ListTagsForResource", `{"ResourceARN":"arn:r"}`)
-	call("UntagResource", `{"ResourceARN":"arn:r"}`)
+	call("UntagResource", `{"ResourceARN":"arn:r","TagKeys":["k"]}`)
 	call("DisableRule", `{"Name":"r"}`)
 	call("DeleteArchive", `{"ArchiveName":"a1"}`)
 	call("DeleteConnection", `{"Name":"c1"}`)
@@ -1091,7 +1091,7 @@ func TestBootedServerEventsExtraOps(t *testing.T) {
 		t.Fatalf("bus still present %s", listed)
 	}
 	payload := `{"Name":"bootbus","ArchiveName":"a1","ReplayName":"r1","EventBusName":"bootbus","ResourceARN":"arn:r","StatementId":"s1","TargetArn":"arn:t","EventPattern":"{}","Event":"{}","Entries":[]}`
-	for _, op := range extraOps() {
+	for _, op := range bundled.Handler("aws.events", spitest.Deps(t)).Operations() {
 		soft(op, payload)
 	}
 }

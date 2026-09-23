@@ -33,7 +33,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/organizations"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/pipes"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/rds"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"

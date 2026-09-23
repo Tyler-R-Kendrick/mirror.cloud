@@ -1,0 +1,869 @@
+{
+  "schema": "trace/1",
+  "service": "aws.organizations",
+  "source": "pack:internal/services/aws/organizations@503d3b1",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeOrganization",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AWSOrganizationsNotInUseException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's AWSOrganizationsNotInUseException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "CreateOrganization",
+      "input": {
+        "FeatureSet": "ALL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Organization": {
+          "Arn": "arn:aws:organizations::000000000000:organization/o-7c589129",
+          "FeatureSet": "ALL",
+          "Id": "o-7c589129",
+          "MasterAccountId": "000000000000",
+          "RootId": "r-5f59"
+        }
+      }
+    },
+    {
+      "operation": "DescribeOrganization",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Organization": {
+          "Arn": "arn:aws:organizations::000000000000:organization/o-7c589129",
+          "FeatureSet": "ALL",
+          "Id": "o-7c589129",
+          "MasterAccountId": "000000000000",
+          "RootId": "r-5f59"
+        }
+      }
+    },
+    {
+      "operation": "ListRoots",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Roots": [
+          {
+            "Arn": "arn:aws:organizations::000000000000:root/o-7c589129/r-5f59",
+            "Id": "r-5f59",
+            "Name": "Root",
+            "PolicyTypes": [
+              {
+                "Status": "ENABLED",
+                "Type": "SERVICE_CONTROL_POLICY"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "EnablePolicyType",
+      "input": {
+        "PolicyType": {
+          "$fromPath": "Roots.0.PolicyTypes.0.Type",
+          "$fromStep": 3
+        },
+        "RootId": "r-miss"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "RootNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's RootNotFoundException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "DisablePolicyType",
+      "input": {
+        "PolicyType": {
+          "$fromPath": "Roots.0.PolicyTypes.0.Type",
+          "$fromStep": 3
+        },
+        "RootId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Root": {
+          "Arn": "arn:aws:organizations::000000000000:root/o-7c589129/r-5f59",
+          "Id": "r-5f59",
+          "Name": "Root",
+          "PolicyTypes": [
+            {
+              "Status": "PENDING_DISABLE",
+              "Type": "SERVICE_CONTROL_POLICY"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "EnablePolicyType",
+      "input": {
+        "PolicyType": {
+          "$fromPath": "Roots.0.PolicyTypes.0.Type",
+          "$fromStep": 3
+        },
+        "RootId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Root": {
+          "Arn": "arn:aws:organizations::000000000000:root/o-7c589129/r-5f59",
+          "Id": "r-5f59",
+          "Name": "Root",
+          "PolicyTypes": [
+            {
+              "Status": "ENABLED",
+              "Type": "SERVICE_CONTROL_POLICY"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "DescribeAccount",
+      "input": {
+        "AccountId": "111111111111"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AccountNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's AccountNotFoundException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "CreateAccount",
+      "input": {
+        "AccountName": "member",
+        "Email": "member@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CreateAccountStatus": {
+          "AccountId": "9c8e2cb00724",
+          "AccountName": "member",
+          "Id": "car-9c8e2cb00724",
+          "State": "SUCCEEDED"
+        }
+      }
+    },
+    {
+      "operation": "DescribeAccount",
+      "input": {
+        "AccountId": {
+          "$fromPath": "CreateAccountStatus.AccountId",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Account": {
+          "Email": "member@example.com",
+          "Id": "9c8e2cb00724",
+          "Name": "member",
+          "ParentId": "r-5f59",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListAccounts",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Accounts": [
+          {
+            "Email": "member@example.com",
+            "Id": "9c8e2cb00724",
+            "Name": "member",
+            "ParentId": "r-5f59",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateOrganizationalUnit",
+      "input": {
+        "Name": "team",
+        "ParentId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationalUnit": {
+          "Id": "ou-33f6fc5d",
+          "Name": "team",
+          "ParentId": "r-5f59",
+          "Tags": null
+        }
+      }
+    },
+    {
+      "operation": "DescribeOrganizationalUnit",
+      "input": {
+        "OrganizationalUnitId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationalUnit": {
+          "Id": "ou-33f6fc5d",
+          "Name": "team",
+          "ParentId": "r-5f59",
+          "Tags": null
+        }
+      }
+    },
+    {
+      "operation": "DescribeOrganizationalUnit",
+      "input": {
+        "OrganizationalUnitId": "ou-miss-missing1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "OrganizationalUnitNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's OrganizationalUnitNotFoundException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "ListOrganizationalUnitsForParent",
+      "input": {
+        "ParentId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationalUnits": [
+          {
+            "Id": "ou-33f6fc5d",
+            "Name": "team",
+            "ParentId": "r-5f59",
+            "Tags": null
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListChildren",
+      "input": {
+        "ChildType": "ORGANIZATIONAL_UNIT",
+        "ParentId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Children": [
+          {
+            "Id": "ou-33f6fc5d",
+            "Type": "ORGANIZATIONAL_UNIT"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListChildren",
+      "input": {
+        "ChildType": "ACCOUNT",
+        "ParentId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Children": [
+          {
+            "Id": "9c8e2cb00724",
+            "Type": "ACCOUNT"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListParents",
+      "input": {
+        "ChildId": "111111111111"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parents": []
+      }
+    },
+    {
+      "operation": "MoveAccount",
+      "input": {
+        "AccountId": "111111111111",
+        "DestinationParentId": "r-5f59",
+        "SourceParentId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AccountNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's AccountNotFoundException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "MoveAccount",
+      "input": {
+        "AccountId": {
+          "$fromPath": "CreateAccountStatus.AccountId",
+          "$fromStep": 8
+        },
+        "DestinationParentId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        },
+        "SourceParentId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListParents",
+      "input": {
+        "ChildId": {
+          "$fromPath": "CreateAccountStatus.AccountId",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parents": [
+          {
+            "Id": "ou-33f6fc5d",
+            "Type": "ORGANIZATIONAL_UNIT"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreatePolicy",
+      "input": {
+        "Content": "{\"Version\":\"2012-10-17\",\"Statement\":{\"Effect\":\"Deny\",\"Action\":\"s3:Delete*\",\"Resource\":\"*\"}}",
+        "Description": "d",
+        "Name": "custom",
+        "Type": {
+          "$fromPath": "Roots.0.PolicyTypes.0.Type",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": {
+          "Content": "{\"Version\":\"2012-10-17\",\"Statement\":{\"Effect\":\"Deny\",\"Action\":\"s3:Delete*\",\"Resource\":\"*\"}}",
+          "PolicySummary": {
+            "Arn": "arn:aws:organizations::000000000000:policy/SERVICE_CONTROL_POLICY/p-83d4958a",
+            "AwsManaged": false,
+            "Description": "d",
+            "Id": "p-83d4958a",
+            "Name": "custom",
+            "Type": "SERVICE_CONTROL_POLICY"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribePolicy",
+      "input": {
+        "PolicyId": {
+          "$fromPath": "Policy.PolicySummary.Id",
+          "$fromStep": 21
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": {
+          "Content": "{\"Version\":\"2012-10-17\",\"Statement\":{\"Effect\":\"Deny\",\"Action\":\"s3:Delete*\",\"Resource\":\"*\"}}",
+          "PolicySummary": {
+            "Arn": "arn:aws:organizations::000000000000:policy/SERVICE_CONTROL_POLICY/p-83d4958a",
+            "AwsManaged": false,
+            "Description": "d",
+            "Id": "p-83d4958a",
+            "Name": "custom",
+            "Type": "SERVICE_CONTROL_POLICY"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribePolicy",
+      "input": {
+        "PolicyId": "p-missing1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "PolicyNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's PolicyNotFoundException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "ListPolicies",
+      "input": {
+        "Filter": {
+          "$fromPath": "Roots.0.PolicyTypes.0.Type",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policies": [
+          {
+            "Arn": "arn:aws:organizations::000000000000:policy/SERVICE_CONTROL_POLICY/p-83d4958a",
+            "AwsManaged": false,
+            "Description": "d",
+            "Id": "p-83d4958a",
+            "Name": "custom",
+            "Type": "SERVICE_CONTROL_POLICY"
+          },
+          {
+            "Arn": "arn:aws:organizations::aws:policy/service_control_policy/p-FullAWSAccess",
+            "AwsManaged": true,
+            "Id": "p-FullAWSAccess",
+            "Name": "FullAWSAccess",
+            "Type": "SERVICE_CONTROL_POLICY"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AttachPolicy",
+      "input": {
+        "PolicyId": "p-missing1",
+        "TargetId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "PolicyNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's PolicyNotFoundException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "AttachPolicy",
+      "input": {
+        "PolicyId": {
+          "$fromPath": "Policy.PolicySummary.Id",
+          "$fromStep": 21
+        },
+        "TargetId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPoliciesForTarget",
+      "input": {
+        "Filter": {
+          "$fromPath": "Roots.0.PolicyTypes.0.Type",
+          "$fromStep": 3
+        },
+        "TargetId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policies": [
+          {
+            "Arn": "arn:aws:organizations::000000000000:policy/SERVICE_CONTROL_POLICY/p-83d4958a",
+            "AwsManaged": false,
+            "Description": "d",
+            "Id": "p-83d4958a",
+            "Name": "custom",
+            "Type": "SERVICE_CONTROL_POLICY"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListPoliciesForTarget",
+      "input": {
+        "Filter": "TAG_POLICY",
+        "TargetId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policies": []
+      }
+    },
+    {
+      "operation": "ListTargetsForPolicy",
+      "input": {
+        "PolicyId": {
+          "$fromPath": "Policy.PolicySummary.Id",
+          "$fromStep": 21
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Targets": [
+          {
+            "TargetId": "ou-33f6fc5d"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetachPolicy",
+      "input": {
+        "PolicyId": {
+          "$fromPath": "Policy.PolicySummary.Id",
+          "$fromStep": 21
+        },
+        "TargetId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTargetsForPolicy",
+      "input": {
+        "PolicyId": {
+          "$fromPath": "Policy.PolicySummary.Id",
+          "$fromStep": 21
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Targets": []
+      }
+    },
+    {
+      "operation": "DeletePolicy",
+      "input": {
+        "PolicyId": {
+          "$fromPath": "Policies.1.Id",
+          "$fromStep": 24
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "PolicyNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's PolicyNotFoundException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "DeletePolicy",
+      "input": {
+        "PolicyId": {
+          "$fromPath": "Policy.PolicySummary.Id",
+          "$fromStep": 21
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "MoveAccount",
+      "input": {
+        "AccountId": {
+          "$fromPath": "CreateAccountStatus.AccountId",
+          "$fromStep": 8
+        },
+        "DestinationParentId": "r-5f59",
+        "SourceParentId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteOrganizationalUnit",
+      "input": {
+        "OrganizationalUnitId": {
+          "$fromPath": "OrganizationalUnit.Id",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListOrganizationalUnitsForParent",
+      "input": {
+        "ParentId": "r-5f59"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationalUnits": null
+      }
+    },
+    {
+      "operation": "DeleteOrganization",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeOrganization",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AWSOrganizationsNotInUseException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's AWSOrganizationsNotInUseException carries httpError 404; the pack answered 400."
+    }
+  ]
+}

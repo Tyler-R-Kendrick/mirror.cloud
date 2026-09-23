@@ -1,0 +1,330 @@
+schema: bir/1
+service: aws.organizations
+
+# Transcribed from the hand-written pack, not established against the real
+# service. An organization, its root, accounts, OUs and policies are records;
+# accounts are created SUCCEEDED at once and never exist as accounts.
+#
+# IAM's authorizer reads these records to apply service control policies: it
+# finds a member account in the global orgmembers collection, then walks the
+# management account's oou, oattach and opolicy collections. Their names and
+# record layouts are that contract.
+provenance: authored
+
+resources:
+  org:
+    collection: org
+    singleton: current
+    record: {}
+  root:
+    collection: oroot
+    id:
+      input_members: [RootId]
+    record: {}
+  account:
+    collection: oacct
+    id:
+      input_members: [AccountId]
+    record: {}
+  # Which organization an account belongs to, where every account can find it.
+  member:
+    collection: orgmembers
+    global: true
+    id:
+      input_members: [AccountId]
+    record: {}
+  ou:
+    collection: oou
+    id:
+      input_members: [OrganizationalUnitId]
+    record: {}
+  policy:
+    collection: opolicy
+    id:
+      input_members: [PolicyId]
+    record: {}
+  attachment:
+    collection: oattach
+    id:
+      derive: "string(input.TargetId) + '/' + string(input.PolicyId)"
+    record: {}
+
+errors:
+  NotInUse:
+    code: AWSOrganizationsNotInUseException
+    http: 404
+    fault: client
+  AccountNotFound:
+    code: AccountNotFoundException
+    http: 404
+    fault: client
+  RootNotFound:
+    code: RootNotFoundException
+    http: 404
+    fault: client
+  OUNotFound:
+    code: OrganizationalUnitNotFoundException
+    http: 404
+    fault: client
+  PolicyNotFound:
+    code: PolicyNotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateOrganization:
+    let:
+      features: "'FeatureSet' in input && string(input.FeatureSet) != '' ? string(input.FeatureSet) : 'ALL'"
+    effects:
+      - generate: { bind: oid, kind: hex, bytes: 8 }
+      - generate: { bind: rid, kind: hex, bytes: 4 }
+      - put:
+          resource: org
+          record:
+            Id: "'o-' + fx.oid"
+            Arn: "'arn:aws:organizations::' + identity.account + ':organization/o-' + fx.oid"
+            MasterAccountId: identity.account
+            FeatureSet: features
+            RootId: "'r-' + fx.rid"
+      - put:
+          resource: root
+          key: "'r-' + fx.rid"
+          record:
+            Id: "'r-' + fx.rid"
+            Name: "'Root'"
+            Arn: "'arn:aws:organizations::' + identity.account + ':root/o-' + fx.oid + '/r-' + fx.rid"
+            PolicyTypes: "features == 'ALL' ? dyn([{'Type': 'SERVICE_CONTROL_POLICY', 'Status': 'ENABLED'}]) : null"
+      - put:
+          resource: policy
+          key: "'p-FullAWSAccess'"
+          record:
+            PolicySummary: >-
+              {'Id': 'p-FullAWSAccess', 'Arn': 'arn:aws:organizations::aws:policy/service_control_policy/p-FullAWSAccess',
+               'Name': 'FullAWSAccess', 'Type': 'SERVICE_CONTROL_POLICY', 'AwsManaged': true}
+            Content: "'{\"Version\":\"2012-10-17\",\"Statement\":{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}}'"
+      - put:
+          resource: attachment
+          key: "'r-' + fx.rid + '/p-FullAWSAccess'"
+          record:
+            TargetId: "'r-' + fx.rid"
+            PolicyId: "'p-FullAWSAccess'"
+    output:
+      Organization: >-
+        {'Id': 'o-' + fx.oid, 'Arn': 'arn:aws:organizations::' + identity.account + ':organization/o-' + fx.oid,
+         'MasterAccountId': identity.account, 'FeatureSet': features, 'RootId': 'r-' + fx.rid}
+
+  DescribeOrganization: {get: {resource: org, error: NotInUse, wrap: Organization}}
+
+  # Every membership this management account recorded goes with it, so IAM
+  # stops applying its policies to accounts it no longer governs.
+  DeleteOrganization:
+    effects:
+      - delete: { resource: org, missing: ignore }
+      - delete:
+          resource: member
+          where: "item.ManagementAccount == identity.account && item.Region == identity.region"
+    output: {}
+
+  CreateAccount:
+    reads:
+      o: { resource: org }
+    let:
+      root: "o_found ? string(o.RootId) : ''"
+    effects:
+      - generate: { bind: aid, kind: hex, bytes: 12 }
+      - put:
+          resource: account
+          key: fx.aid
+          record:
+            Id: fx.aid
+            Name: string(input.AccountName)
+            Email: string(input.Email)
+            Status: "'ACTIVE'"
+            ParentId: root
+      - put:
+          resource: member
+          key: fx.aid
+          record:
+            ManagementAccount: identity.account
+            Region: identity.region
+            RootId: root
+            ParentId: root
+    output:
+      CreateAccountStatus: >-
+        {'Id': 'car-' + fx.aid, 'AccountId': fx.aid, 'State': 'SUCCEEDED', 'AccountName': string(input.AccountName)}
+
+  DescribeAccount: {get: {resource: account, error: AccountNotFound, wrap: Account}}
+  ListAccounts:
+    list: { resource: account, member: Accounts, paginate: model }
+
+  MoveAccount:
+    reads:
+      a: { resource: account }
+      m: { resource: member }
+    require:
+      - { cond: a_found, error: AccountNotFound }
+    effects:
+      - patch:
+          resource: account
+          record:
+            ParentId: string(input.DestinationParentId)
+      - patch:
+          resource: member
+          when: m_found
+          record:
+            ParentId: string(input.DestinationParentId)
+    output: {}
+
+  ListParents:
+    reads:
+      a: { resource: account, key: string(input.ChildId) }
+      u: { resource: ou, key: string(input.ChildId) }
+    let:
+      parent: "a_found ? string(a.ParentId) : (u_found ? string(u.ParentId) : '')"
+    output:
+      Parents: >-
+        parent == '' ? [] : [{'Id': parent, 'Type': parent.startsWith('r-') ? 'ROOT' : 'ORGANIZATIONAL_UNIT'}]
+
+  ListChildren:
+    select:
+      binding: units
+      resource: ou
+      filter: "string(item.ParentId) == string(input.ParentId)"
+    list:
+      resource: account
+      member: Children
+      filter: "string(item.ParentId) == string(input.ParentId)"
+    output:
+      Children: >-
+        string(input.ChildType) == 'ORGANIZATIONAL_UNIT'
+          ? units.map(u, {'Id': u.Id, 'Type': 'ORGANIZATIONAL_UNIT'})
+          : items.map(a, {'Id': a.Id, 'Type': 'ACCOUNT'})
+
+  CreateOrganizationalUnit:
+    effects:
+      - generate: { bind: uid, kind: hex, bytes: 8 }
+      - put:
+          resource: ou
+          key: "'ou-' + fx.uid"
+          record:
+            Id: "'ou-' + fx.uid"
+            Name: string(input.Name)
+            ParentId: string(input.ParentId)
+    output:
+      OrganizationalUnit: rec
+
+  DescribeOrganizationalUnit: {get: {resource: ou, error: OUNotFound, wrap: OrganizationalUnit}}
+  ListOrganizationalUnitsForParent:
+    list:
+      resource: ou
+      member: OrganizationalUnits
+      paginate: model
+      filter: "string(item.ParentId) == string(input.ParentId)"
+  DeleteOrganizationalUnit: {delete: {resource: ou, missing: ignore}}
+
+  ListRoots:
+    list: { resource: root, member: Roots, paginate: model }
+
+  EnablePolicyType:
+    reads:
+      r: { resource: root }
+    require:
+      - { cond: r_found, error: RootNotFound }
+    effects:
+      - patch:
+          resource: root
+          record:
+            PolicyTypes: "[{'Type': string(input.PolicyType), 'Status': 'ENABLED'}]"
+    output:
+      Root: rec
+
+  DisablePolicyType:
+    reads:
+      r: { resource: root }
+    require:
+      - { cond: r_found, error: RootNotFound }
+    effects:
+      - patch:
+          resource: root
+          record:
+            PolicyTypes: "[{'Type': string(input.PolicyType), 'Status': 'PENDING_DISABLE'}]"
+    output:
+      Root: rec
+
+  CreatePolicy:
+    let:
+      type: "'Type' in input && string(input.Type) != '' ? string(input.Type) : 'SERVICE_CONTROL_POLICY'"
+    effects:
+      - generate: { bind: pid, kind: hex, bytes: 8 }
+      - put:
+          resource: policy
+          key: "'p-' + fx.pid"
+          record:
+            PolicySummary: >-
+              {'Id': 'p-' + fx.pid, 'Arn': 'arn:aws:organizations::' + identity.account + ':policy/' + type + '/p-' + fx.pid,
+               'Name': string(input.Name), 'Description': 'Description' in input ? string(input.Description) : '',
+               'Type': type, 'AwsManaged': false}
+            Content: input.Content
+    output:
+      Policy: rec
+
+  DescribePolicy: {get: {resource: policy, error: PolicyNotFound, wrap: Policy}}
+  ListPolicies:
+    list:
+      resource: policy
+      member: Policies
+      paginate: model
+      filter: "string(item.PolicySummary.Type) == string(input.Filter)"
+    output:
+      Policies: "items.map(p, p.PolicySummary)"
+
+  # The AWS-managed FullAWSAccess cannot be deleted.
+  DeletePolicy:
+    require:
+      - { cond: "string(input.PolicyId) != 'p-FullAWSAccess'", error: PolicyNotFound }
+    effects:
+      - delete: { resource: policy, missing: ignore }
+    output: {}
+
+  AttachPolicy:
+    reads:
+      p: { resource: policy }
+    require:
+      - { cond: p_found, error: PolicyNotFound }
+    effects:
+      - put:
+          resource: attachment
+          record:
+            TargetId: string(input.TargetId)
+            PolicyId: string(input.PolicyId)
+    output: {}
+
+  DetachPolicy: {delete: {resource: attachment, missing: ignore}}
+
+  ListPoliciesForTarget:
+    select: { binding: policies, resource: policy }
+    list:
+      resource: attachment
+      member: Policies
+      prefix: "string(input.TargetId) + '/'"
+    output:
+      Policies: >-
+        items.map(a, policies.filter(p, string(p.PolicySummary.Id) == string(a.PolicyId)
+          && string(p.PolicySummary.Type) == string(input.Filter)))
+          .filter(l, size(l) > 0).map(l, l[0].PolicySummary)
+
+  ListTargetsForPolicy:
+    list:
+      resource: attachment
+      member: Targets
+      filter: "string(item.PolicyId) == string(input.PolicyId)"
+    output:
+      Targets: "items.map(a, {'TargetId': a.TargetId})"
+
+quirks:
+  - operation: CreateAccount
+    note: >
+      An account is created SUCCEEDED at once, under the organization's root,
+      and is only a record: nothing provisions it, and it can be addressed as
+      a caller only because IAM's authorizer reads its membership.
+    provenance: authored

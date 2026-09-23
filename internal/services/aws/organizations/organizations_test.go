@@ -1,4 +1,7 @@
-package organizations
+// Package organizations_test keeps the Organizations tests after the pack
+// became a bundle: the lifecycle, the booted server, and the service control
+// policies IAM's authorizer enforces from the records the bundle writes.
+package organizations_test
 
 import (
 	"context"
@@ -17,8 +20,18 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
+// newPack builds the bundle the registry serves as aws.organizations.
+func newPack(t *testing.T, deps spi.Deps) spi.BehaviorPack {
+	t.Helper()
+	p, err := bundled.New("aws.organizations", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestOrganizationsHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := newPack(t, spitest.Deps(t))
 	if n := len(p.Operations()); n != 24 {
 		t.Fatalf("organizations Operations() %d want 24", n)
 	}
@@ -26,7 +39,7 @@ func TestOrganizationsHTTPProvenOps(t *testing.T) {
 
 func TestServiceControlPolicyEnforcesMemberAccount(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := newPack(t, deps)
 	ctx := context.Background()
 	management := spi.Identity{Account: "000000000000", Region: "us-east-1", ARN: "arn:aws:iam::000000000000:user/admin"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -49,7 +62,7 @@ func TestServiceControlPolicyEnforcesMemberAccount(t *testing.T) {
 		t.Fatalf("account parent = %#v", parents.Output["Parents"])
 	}
 	policy := invoke("CreatePolicy", map[string]any{
-		"Name": "deny-delete", "Type": "SERVICE_CONTROL_POLICY",
+		"Name": "deny-delete", "Type": "SERVICE_CONTROL_POLICY", "Description": "deny deletes",
 		"Content": `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:Delete*","Resource":"*"},{"Effect":"Deny","NotAction":["iam:*","sts:*","organizations:*"],"Resource":"*","Condition":{"StringNotEquals":{"aws:RequestedRegion":["eu-central-1"]}}},{"Effect":"Deny","Action":"sqs:CreateQueue","Resource":"*","Condition":{"Null":{"aws:RequestTag/team":"true"}}},{"Effect":"Deny","Action":"ec2:RunInstances","Resource":"*","Condition":{"StringNotEquals":{"ec2:MetadataHttpTokens":"required"}}}]}`,
 	})
 	policyID := policy.Output["Policy"].(map[string]any)["PolicySummary"].(map[string]any)["Id"].(string)
@@ -183,7 +196,7 @@ func TestBootedServerOrganizationsCreateGetDelete(t *testing.T) {
 }
 
 func TestOrganizationsControlPlaneLifecycle(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := newPack(t, spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -244,7 +257,7 @@ func TestOrganizationsControlPlaneLifecycle(t *testing.T) {
 		t.Fatalf("OU parents %#v", parents)
 	}
 
-	policy := must("CreatePolicy", map[string]any{"Name": "custom", "Content": `{}`}).Output["Policy"].(map[string]any)
+	policy := must("CreatePolicy", map[string]any{"Name": "custom", "Description": "custom", "Type": "SERVICE_CONTROL_POLICY", "Content": `{}`}).Output["Policy"].(map[string]any)
 	policyID := policy["PolicySummary"].(map[string]any)["Id"].(string)
 	if must("DescribePolicy", map[string]any{"PolicyId": policyID}).Output["Policy"] == nil {
 		t.Fatal("missing policy description")

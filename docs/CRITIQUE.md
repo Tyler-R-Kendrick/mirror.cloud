@@ -1340,3 +1340,15 @@ Two engine changes let a bundle do the rest:
 The STS pack is now a bundle. Two recorded behaviors changed:
 - AssumeRoleWithWebIdentity's assumed-role ARN now ends in the RoleSessionName the request must carry, not a fixed `web`. The recording is re-cut for it.
 - DecodeAuthorizationMessage now answers its input. The pack guessed at hex and base64, but nothing in the emulator issues an encoded message to decode.
+
+### Organizations: the cross-scope write it waited for was the one STS needed
+
+Organizations was blocked on writing outside its caller's scope. An account's membership lives in `_mirror/global` because IAM's authorizer has to find it knowing only the account. The `global: true` resources that STS brought are that write.
+
+The bundle keeps the pack's collections and record layouts exactly, because IAM reads them to enforce service control policies. The SCP test that exercises that path now runs against the bundle unchanged.
+
+Two things did change:
+- **DeleteOrganization** removes every membership its management account recorded, using a `where` over the global collection. The pack walked the accounts it could still see.
+- **Not-found faults answer 404,** which is the `httpError` the model declares on all five; the pack answered 400. The recording is re-cut for them.
+
+The pack's tests stay as a test-only package pointed at the bundle, and they now send the `Description` and `Type` CreatePolicy requires.

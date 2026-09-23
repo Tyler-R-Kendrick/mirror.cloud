@@ -3,6 +3,7 @@ package ecs
 import (
 	"context"
 	"encoding/json"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/elasticloadbalancing"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -20,7 +20,10 @@ func TestServiceTargetsFollowTaskState(t *testing.T) {
 	deps := spitest.Deps(t)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	elb := elasticloadbalancing.New(deps)
+	elb, err := bundled.New("aws.elasticloadbalancing", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tg, err := elb.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTargetGroup", Input: map[string]any{"Name": "svc", "Port": 80, "Protocol": "HTTP", "TargetType": "ip"}})
 	if err != nil {
 		t.Fatal(err)

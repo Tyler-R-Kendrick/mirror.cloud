@@ -1352,3 +1352,17 @@ Two things did change:
 - **Not-found faults answer 404,** which is the `httpError` the model declares on all five; the pack answered 400. The recording is re-cut for them.
 
 The pack's tests stay as a test-only package pointed at the bundle, and they now send the `Description` and `Type` CreatePolicy requires.
+
+### ELB: a pack no one else read turned out to have a writer
+
+The ELB pack looked self-contained, and nothing else read its collections. But ECS wrote one of them. When a task started or stopped, ECS rewrote the target list stored under a target group's ARN, in the pack's raw-array layout. That is the same reach into another service's storage that CloudFormation had before #423. The same fix applies: ECS now registers and deregisters a task's targets through ELB's RegisterTargets and DeregisterTargets. A needle guards the call.
+
+For that to be right, those operations had to mean what AWS means:
+- **RegisterTargets** adds targets by Id; the pack replaced the whole list.
+- **DeregisterTargets** removes the named ones; the pack dropped every target.
+
+The ECS test that follows a task through RUNNING, STOPPED and FAILED passes against the bundle unchanged.
+
+The pack is now a bundle keyed by ARN throughout. That removes the pack's raw ARN-to-name index collections, which a bundle could not have read. The recording is re-cut in three places:
+- **DescribeLoadBalancers.** The pack ignored `Names` (it read a `LoadBalancerNames` member the request does not have) and answered every load balancer for an unknown name.
+- **CreateTrustStore and DescribeTrustStores.** The pack answered a `CaCertificatesBundleS3Bucket` member that the model's `TrustStore` does not declare.

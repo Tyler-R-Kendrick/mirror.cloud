@@ -1,6 +1,9 @@
-package elasticloadbalancing
+// Package elasticloadbalancing_test keeps the ELB tests after the pack became
+// a bundle: the booted server over the query protocol, and the operation list.
+package elasticloadbalancing_test
 
 import (
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -52,7 +55,7 @@ func TestBootedServerELBCreateDescribe(t *testing.T) {
 	if !strings.Contains(tg, "tg1") {
 		t.Fatalf("tg %s", tg)
 	}
-	lis := call(url.Values{"Action": {"CreateListener"}, "Version": {"2015-12-01"}, "LoadBalancerArn": {"arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/alb1/x"}, "Port": {"443"}, "Protocol": {"HTTPS"}})
+	lis := call(url.Values{"Action": {"CreateListener"}, "Version": {"2015-12-01"}, "LoadBalancerArn": {"arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/alb1/x"}, "Port": {"443"}, "Protocol": {"HTTPS"}, "DefaultActions.member.1.Type": {"fixed-response"}})
 	larn := ""
 	if i := strings.Index(lis, "arn:aws:elasticloadbalancing:"); i >= 0 {
 		rest := lis[i:]
@@ -63,7 +66,7 @@ func TestBootedServerELBCreateDescribe(t *testing.T) {
 	if larn == "" {
 		t.Fatalf("listener %s", lis)
 	}
-	rule := call(url.Values{"Action": {"CreateRule"}, "Version": {"2015-12-01"}, "ListenerArn": {larn}, "Priority": {"10"}})
+	rule := call(url.Values{"Action": {"CreateRule"}, "Version": {"2015-12-01"}, "ListenerArn": {larn}, "Priority": {"10"}, "Conditions.member.1.Field": {"path-pattern"}, "Conditions.member.1.Values.member.1": {"/a"}, "Actions.member.1.Type": {"fixed-response"}})
 	if !strings.Contains(rule, "RuleArn") {
 		t.Fatalf("rule %s", rule)
 	}
@@ -76,7 +79,7 @@ func TestBootedServerELBCreateDescribe(t *testing.T) {
 	if !strings.Contains(certs, "certificate") && !strings.Contains(certs, "Certificates") {
 		t.Fatalf("certs %s", certs)
 	}
-	ts1 := call(url.Values{"Action": {"CreateTrustStore"}, "Version": {"2015-12-01"}, "Name": {"ts1"}})
+	ts1 := call(url.Values{"Action": {"CreateTrustStore"}, "Version": {"2015-12-01"}, "Name": {"ts1"}, "CaCertificatesBundleS3Bucket": {"b"}, "CaCertificatesBundleS3Key": {"k"}})
 	if !strings.Contains(ts1, "TrustStoreArn") {
 		t.Fatalf("trust %s", ts1)
 	}
@@ -101,33 +104,36 @@ func TestBootedServerELBCreateDescribe(t *testing.T) {
 	call(url.Values{"Action": {"ModifyRule"}, "Version": {v}, "RuleArn": {rarn}, "Priority": {"20"}})
 	call(url.Values{"Action": {"SetRulePriorities"}, "Version": {v}, "RulePriorities.member.1.RuleArn": {rarn}, "RulePriorities.member.1.Priority": {"5"}})
 	call(url.Values{"Action": {"DescribeListenerAttributes"}, "Version": {v}, "ListenerArn": {larn}})
-	call(url.Values{"Action": {"ModifyListenerAttributes"}, "Version": {v}, "ListenerArn": {larn}})
+	call(url.Values{"Action": {"ModifyListenerAttributes"}, "Version": {v}, "ListenerArn": {larn}, "Attributes.member.1.Key": {"tcp.idle_timeout.seconds"}, "Attributes.member.1.Value": {"350"}})
 	call(url.Values{"Action": {"ModifyListener"}, "Version": {v}, "ListenerArn": {larn}, "Port": {"8443"}})
-	call(url.Values{"Action": {"RemoveListenerCertificates"}, "Version": {v}, "ListenerArn": {larn}})
+	call(url.Values{"Action": {"RemoveListenerCertificates"}, "Version": {v}, "ListenerArn": {larn}, "Certificates.member.1.CertificateArn": {"arn:aws:acm:us-east-1:000000000000:certificate/x"}})
 	call(url.Values{"Action": {"DescribeTargetGroupAttributes"}, "Version": {v}, "TargetGroupArn": {"arn:tg"}})
-	call(url.Values{"Action": {"ModifyTargetGroupAttributes"}, "Version": {v}, "TargetGroupArn": {"arn:tg"}})
+	call(url.Values{"Action": {"ModifyTargetGroupAttributes"}, "Version": {v}, "TargetGroupArn": {"arn:tg"}, "Attributes.member.1.Key": {"deregistration_delay.timeout_seconds"}, "Attributes.member.1.Value": {"30"}})
 	call(url.Values{"Action": {"DescribeTrustStores"}, "Version": {v}})
-	call(url.Values{"Action": {"ModifyTrustStore"}, "Version": {v}, "TrustStoreArn": {tarn}})
+	call(url.Values{"Action": {"ModifyTrustStore"}, "Version": {v}, "TrustStoreArn": {tarn}, "CaCertificatesBundleS3Bucket": {"b"}, "CaCertificatesBundleS3Key": {"k2"}})
 	call(url.Values{"Action": {"AddTrustStoreRevocations"}, "Version": {v}, "TrustStoreArn": {tarn}})
 	call(url.Values{"Action": {"DescribeTrustStoreRevocations"}, "Version": {v}, "TrustStoreArn": {tarn}})
 	call(url.Values{"Action": {"GetTrustStoreCaCertificatesBundle"}, "Version": {v}, "TrustStoreArn": {tarn}})
-	call(url.Values{"Action": {"GetTrustStoreRevocationContent"}, "Version": {v}, "TrustStoreArn": {tarn}})
+	call(url.Values{"Action": {"GetTrustStoreRevocationContent"}, "Version": {v}, "TrustStoreArn": {tarn}, "RevocationId": {"1"}})
 	call(url.Values{"Action": {"DescribeTrustStoreAssociations"}, "Version": {v}, "TrustStoreArn": {tarn}})
-	call(url.Values{"Action": {"RemoveTrustStoreRevocations"}, "Version": {v}, "TrustStoreArn": {tarn}})
-	call(url.Values{"Action": {"DeleteSharedTrustStoreAssociation"}, "Version": {v}, "TrustStoreArn": {tarn}})
+	call(url.Values{"Action": {"RemoveTrustStoreRevocations"}, "Version": {v}, "TrustStoreArn": {tarn}, "RevocationIds.member.1": {"1"}})
+	call(url.Values{"Action": {"DeleteSharedTrustStoreAssociation"}, "Version": {v}, "TrustStoreArn": {tarn}, "ResourceArn": {lb}})
 	call(url.Values{"Action": {"DeleteTrustStore"}, "Version": {v}, "TrustStoreArn": {tarn}})
 	call(url.Values{"Action": {"DescribeCapacityReservation"}, "Version": {v}, "LoadBalancerArn": {lb}})
 	call(url.Values{"Action": {"ModifyCapacityReservation"}, "Version": {v}, "LoadBalancerArn": {lb}})
 	call(url.Values{"Action": {"ModifyIpPools"}, "Version": {v}, "LoadBalancerArn": {lb}})
 	call(url.Values{"Action": {"GetResourcePolicy"}, "Version": {v}, "ResourceArn": {lb}})
 	call(url.Values{"Action": {"SetIpAddressType"}, "Version": {v}, "LoadBalancerArn": {lb}, "IpAddressType": {"ipv4"}})
-	call(url.Values{"Action": {"SetSecurityGroups"}, "Version": {v}, "LoadBalancerArn": {lb}})
+	call(url.Values{"Action": {"SetSecurityGroups"}, "Version": {v}, "LoadBalancerArn": {lb}, "SecurityGroups.member.1": {"sg-1"}})
 	call(url.Values{"Action": {"SetSubnets"}, "Version": {v}, "LoadBalancerArn": {lb}})
 	call(url.Values{"Action": {"DeleteRule"}, "Version": {v}, "RuleArn": {rarn}})
 }
 
 func TestELBHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p, err := bundled.New("aws.elasticloadbalancing", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if n := len(p.Operations()); n != 51 {
 		t.Fatalf("elb Operations() %d want 51", n)
 	}

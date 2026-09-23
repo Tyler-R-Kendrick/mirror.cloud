@@ -9322,28 +9322,24 @@ var mutants = []mutant{
 	{
 		name: "kafka-publish-to-missing-cluster",
 		file: filepath.Join("internal", "services", "aws", "kafka", "kafka.go"),
-		old: `func (p *Pack) Publish(ctx context.Context, identity spi.Identity, clusterARN, topic string, data []byte) error {
-	req := &spi.Request{Identity: identity}
-	if _, ok, _ := p.col(req, "msk").Get(ctx, clusterARN); !ok {`,
-		new: `func (p *Pack) Publish(ctx context.Context, identity spi.Identity, clusterARN, topic string, data []byte) error {
-	req := &spi.Request{Identity: identity}
-	if false {`,
-		pkg: "./internal/services/aws/kafka",
-		run: "TestKafkaPublishesMessages",
+		old:  "\tif _, ok, _ := t.col(identity, \"msk\").Get(ctx, clusterARN); !ok {",
+		new:  "\tif false {",
+		pkg:  "./internal/services/aws/kafka",
+		run:  "TestKafkaPublishesMessages",
 	},
 	{
 		name: "kafka-corrupt-persisted-message",
 		file: filepath.Join("internal", "services", "aws", "kafka", "kafka.go"),
-		old:  `p.col(req, "mskrecords").Put(ctx, key, encoded)`,
-		new:  `p.col(req, "mskrecords").Put(ctx, key, nil)`,
+		old:  "t.col(identity, \"mskrecords\").Put(ctx, key, encoded)",
+		new:  "t.col(identity, \"mskrecords\").Put(ctx, key, nil)",
 		pkg:  "./internal/services/aws/kafka",
 		run:  "TestKafkaPublishesMessages",
 	},
 	{
 		name: "kafka-dont-publish-message-event",
 		file: filepath.Join("internal", "services", "aws", "kafka", "kafka.go"),
-		old:  `p.deps.Bus.Publish(ctx, "kafka", event)`,
-		new:  `p.deps.Bus.Publish(ctx, "mutated", event)`,
+		old:  "t.deps.Bus.Publish(ctx, \"kafka\", event)",
+		new:  "t.deps.Bus.Publish(ctx, \"mutated\", event)",
 		pkg:  "./internal/services/aws/kafka",
 		run:  "TestKafkaPublishesMessages",
 	},
@@ -9356,14 +9352,15 @@ var mutants = []mutant{
 		run:  "TestKafkaPublishesMessages",
 	},
 	{
+		// The cleanup lives in the bundle now, and no recording can see it: the
+		// topic plane that fills mskrecords is not an SPI operation. The needle
+		// mutates the YAML; -overlay reaches embedded files.
 		name: "kafka-retain-deleted-cluster-messages",
-		file: filepath.Join("internal", "services", "aws", "kafka", "kafka.go"),
-		old: `for _, message := range messages {
-			_ = p.col(req, "mskrecords").Delete(ctx, message.Key)`,
-		new: `for _, message := range messages {
-			_ = message.Key`,
-		pkg: "./internal/services/aws/kafka",
-		run: "TestKafkaPublishesMessages",
+		file: filepath.Join("behavior", "aws", "kafka", "service.yaml"),
+		old:  "      - delete: { resource: message, where: \"string(item.ClusterARN) == string(input.ClusterArn)\" }",
+		new:  "      - delete: { resource: message, where: \"false\" }",
+		pkg:  "./internal/services/aws/kafka",
+		run:  "TestKafkaPublishesMessages",
 	},
 	{
 		name: "firehose-allow-mismatched-database-source",
@@ -10014,14 +10011,14 @@ var mutants = []mutant{
 		run:  "TestRedshiftCopyDataPlane",
 	},
 	{
+		// The cascade lives in the bundle now; no recording can see rstable,
+		// which only the Go COPY data plane writes.
 		name: "redshift-retain-deleted-cluster-tables",
-		file: filepath.Join("internal", "services", "aws", "redshift", "redshift.go"),
-		old: `for _, table := range tables {
-			_ = p.col(req, "rstable").Delete(ctx, table.Key)`,
-		new: `for _, table := range tables {
-			_ = table.Key`,
-		pkg: "./internal/services/aws/redshift",
-		run: "TestRedshiftCopyDataPlane",
+		file: filepath.Join("behavior", "aws", "redshift", "service.yaml"),
+		old:  "      - delete: { resource: copy_table, where: \"string(item.Cluster) == string(input.ClusterIdentifier)\" }",
+		new:  "      - delete: { resource: copy_table, where: \"false\" }",
+		pkg:  "./internal/services/aws/redshift",
+		run:  "TestRedshiftCopyDataPlane",
 	},
 	{
 		name: "firehose-skip-opensearch-serverless-delivery",
@@ -10264,22 +10261,39 @@ var mutants = []mutant{
 	{
 		name: "s3tables-drop-row-commit",
 		file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
-		old: `// ponytail: whole-table JSON rewrite; replace with Iceberg manifests when a file engine exists.
-		stored, _ = json.Marshal(rows)
-		return tx.Put(key, stored)`,
-		new: `// ponytail: whole-table JSON rewrite; replace with Iceberg manifests when a file engine exists.
-		stored, _ = json.Marshal(rows)
-		return nil`,
-		pkg: "./internal/services/aws/s3tables",
-		run: "TestS3TablesRowMutations",
+		old:  "\t\tstored, _ = json.Marshal(rowsDoc{Rows: rows})\n\t\treturn tx.Put(key, stored)",
+		new:  "\t\tstored, _ = json.Marshal(rowsDoc{Rows: rows})\n\t\treturn nil",
+		pkg:  "./internal/services/aws/s3tables",
+		run:  "TestS3TablesRowMutations",
 	},
 	{
+		// The rename is the bundle's now, and the recording's step after it is
+		// superseded, so only this test reads the renamed record back.
 		name: "s3tables-keep-old-renamed-name",
-		file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
-		old:  `rec["name"] = newName`,
-		new:  `rec["name"] = name`,
+		file: filepath.Join("behavior", "aws", "s3tables", "service.yaml"),
+		old:  "            name: new_name",
+		new:  "            name: old_name",
 		pkg:  "./internal/services/aws/s3tables",
-		run:  "TestS3TablesControlPlaneLifecycle",
+		run:  "TestRowsFollowTheirTable",
+	},
+	{
+		// Rows are written by the Go row plane under the table's key; a
+		// DeleteTable that forgets them leaves rows a new table of the same name
+		// inherits.
+		name: "s3tables-delete-table-keeps-rows",
+		file: filepath.Join("behavior", "aws", "s3tables", "service.yaml"),
+		old:  "      - delete: { resource: rows, missing: ignore }\n      - delete: { resource: table, missing: ignore }",
+		new:  "      - delete: { resource: table, missing: ignore }",
+		pkg:  "./internal/services/aws/s3tables",
+		run:  "TestRowsFollowTheirTable",
+	},
+	{
+		name: "s3tables-rename-leaves-rows-behind",
+		file: filepath.Join("behavior", "aws", "s3tables", "service.yaml"),
+		old:  "          when: r_found",
+		new:  "          when: \"false\"",
+		pkg:  "./internal/services/aws/s3tables",
+		run:  "TestRowsFollowTheirTable",
 	},
 	{
 		name: "firehose-drop-direct-put-source",

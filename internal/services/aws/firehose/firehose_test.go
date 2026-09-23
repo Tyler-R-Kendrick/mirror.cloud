@@ -575,7 +575,10 @@ func TestFirehoseConsumesMSKMessages(t *testing.T) {
 	kafka := kafkaservice.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	created, err := kafka.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{"ClusterName": "source"}})
+	created, err := bundled.Handler("aws.kafka", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
+		"ClusterName": "source", "KafkaVersion": "3.6.0", "NumberOfBrokerNodes": 1,
+		"BrokerNodeGroupInfo": map[string]any{"ClientSubnets": []any{"s"}, "InstanceType": "kafka.t3.small"},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1233,8 +1236,8 @@ func TestFirehoseRedshiftDestination(t *testing.T) {
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	redshift := redshiftservice.New(deps)
-	if _, err := redshift.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
-		"ClusterIdentifier": "warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
+	if _, err := bundled.Handler("aws.redshift", deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
+		"NodeType": "dc2.large", "ClusterIdentifier": "warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -1290,8 +1293,8 @@ func TestFirehoseRedshiftPersistentRetry(t *testing.T) {
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	redshift := redshiftservice.New(deps)
-	if _, err := redshift.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
-		"ClusterIdentifier": "retry-warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
+	if _, err := bundled.Handler("aws.redshift", deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
+		"NodeType": "dc2.large", "ClusterIdentifier": "retry-warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -1377,8 +1380,8 @@ func TestFirehoseRedshiftRetryExpiryAndDelete(t *testing.T) {
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	redshift := redshiftservice.New(deps)
-	if _, err := redshift.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
-		"ClusterIdentifier": "failed-warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
+	if _, err := bundled.Handler("aws.redshift", deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
+		"NodeType": "dc2.large", "ClusterIdentifier": "failed-warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -1510,7 +1513,7 @@ func TestFirehoseIcebergDestination(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	tables := s3tablesservice.New(deps)
-	if _, err := tables.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTableBucket", Input: map[string]any{"name": "warehouse"}}); err != nil {
+	if _, err := bundled.Handler("aws.s3tables", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTableBucket", Input: map[string]any{"name": "warehouse"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tables.CreateTable(ctx, id, "warehouse", "analytics", "events", []string{"id", "name", "op"}); err != nil {

@@ -2,10 +2,9 @@ schema: bir/1
 service: aws.s3tables
 
 # Transcribed from the hand-written pack, not established against the real
-# service. The pack is a control plane over three flat collections: buckets,
-# namespaces and tables. The row engine behind it (ApplyRows/TableRows) is a
-# set of Go methods no served operation dispatches to, so no table ever has
-# rows through the API.
+# service. A control plane over three flat collections -- buckets, namespaces
+# and tables -- plus the rows the Go row plane writes, which no served
+# operation reads or writes except to delete or move them with their table.
 provenance: authored
 
 # The pack answered CreateTableBucket's absent or empty name with
@@ -15,12 +14,9 @@ provenance: authored
 # rejects those requests, and the pack's fallback paths are dead.
 missing_input_error: Validation
 
-shadow: >
-  Complete and gated, but not yet serving: firehose's Iceberg delivery and the
-  athena tests call the pack's Go-only row engine (ApplyRows/RowMutation),
-  which no spi operation reaches, so deleting the pack would orphan them. The
-  bundle takes over when the row engine moves behind an operation or a shared
-  store contract.
+# Served. The row plane (CreateTable with a schema, ApplyRows, TableRows) is
+# Go in internal/services/aws/s3tables, because no SPI operation reaches it;
+# the tables it writes rows for, and the rows themselves, are records here.
 
 resources:
   table_bucket:
@@ -60,7 +56,7 @@ resources:
       # the first non-empty of tableBucketARN/tableBucketArn/tableBucketName
       # and the namespace falls back to the first element of a list-typed
       # namespace member.
-      derive: >
+      derive: &tablekey >
         lastSegment(
           ('tableBucketARN' in input && type(input.tableBucketARN) == string && input.tableBucketARN != '' ? string(input.tableBucketARN)
           : ('tableBucketArn' in input && type(input.tableBucketArn) == string && input.tableBucketArn != '' ? string(input.tableBucketArn)
@@ -76,6 +72,13 @@ resources:
         ('name' in input && type(input.name) == string && input.name != '' ? string(input.name)
         : ('Name' in input && type(input.Name) == string && input.Name != '' ? string(input.Name)
         : ''))
+
+  # A table's rows, written by the Go row plane under the table's own key.
+  rows:
+    collection: s3trows
+    id:
+      derive: *tablekey
+    record: {}
 
 errors:
   Validation:
@@ -213,12 +216,14 @@ operations:
 
   DeleteTable:
     effects:
+      - delete: { resource: rows, missing: ignore }
       - delete: { resource: table, missing: ignore }
     output: {}
 
   RenameTable:
     reads:
       t: { resource: table }
+      r: { resource: rows }
     let:
       old_key: id
       old_name: >
@@ -244,7 +249,17 @@ operations:
             tableBucketARN: t.tableBucketARN
             format: t.format
             metadataLocation: t.metadataLocation
+            # The row schema the Go row plane wrote; rows are unreadable
+            # without it.
+            columns: "'columns' in t ? t.columns : null"
       - delete: { resource: table, key: old_key }
+      - put:
+          resource: rows
+          key: "substr(old_key, 0, blen(old_key) - blen(old_name)) + new_name"
+          when: r_found
+          record:
+            rows: r.rows
+      - delete: { resource: rows, key: old_key, missing: ignore }
     output: {}
 
   GetTableMetadataLocation:

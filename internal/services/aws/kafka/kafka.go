@@ -1,4 +1,7 @@
-// Package kafka stores MSK cluster and local topic records (no Kafka broker).
+// Package kafka is the MSK topic plane: the in-process message bus aws.firehose
+// reads from. The cluster API is served by behavior/aws/kafka; this package
+// holds only what no SPI operation reaches -- publishing a topic record and
+// reading records back -- over the collections that bundle owns.
 package kafka
 
 import (
@@ -7,114 +10,58 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
-func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.kafka", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
-}
+// Topics publishes and reads MSK topic records.
+type Topics struct{ deps spi.Deps }
 
-// Pack implements MSK-lite.
-type Pack struct{ deps spi.Deps }
-
-// Message is a locally published MSK topic record.
+// Message is a locally published MSK topic record. ClusterARN is stored so the
+// bundle's DeleteCluster can remove a cluster's messages by predicate.
 type Message struct {
-	Data      []byte
-	Timestamp time.Time
+	ClusterARN string `json:",omitempty"`
+	Data       []byte
+	Timestamp  time.Time
 }
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
+// New constructs the topic plane.
+func New(d spi.Deps) *Topics { return &Topics{deps: d} }
 
-func (p *Pack) ServiceID() string { return "aws.kafka" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return []string{
-		"CreateCluster", "DescribeCluster", "ListClusters", "DeleteCluster",
-		"GetBootstrapBrokers", "ListNodes", "UpdateBrokerCount",
+func (t *Topics) col(identity spi.Identity, n string) spi.Collection {
+	return t.deps.Store.Scope(identity.Account, identity.Region).Collection(n)
+}
+
+func (t *Topics) cluster(ctx context.Context, identity spi.Identity, clusterARN string) error {
+	if _, ok, _ := t.col(identity, "msk").Get(ctx, clusterARN); !ok {
+		return &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
 	}
-}
-
-func (p *Pack) col(req *spi.Request, n string) spi.Collection {
-	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
-}
-
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	arn := first(req.Input, "ClusterArn")
-	switch req.Operation {
-	case "CreateCluster":
-		name := first(req.Input, "ClusterName")
-		id := p.deps.Rand.Hex(8)
-		arn = "arn:aws:kafka:" + req.Identity.Region + ":" + req.Identity.Account + ":cluster/" + name + "/" + id
-		rec := map[string]any{"ClusterName": name, "ClusterArn": arn, "State": "ACTIVE", "BrokerNodeGroupInfo": req.Input["BrokerNodeGroupInfo"]}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "msk").Put(ctx, arn, b)
-		return &spi.Response{Output: map[string]any{"ClusterArn": arn, "ClusterName": name, "State": "ACTIVE"}}, nil
-	case "DescribeCluster":
-		b, ok, _ := p.col(req, "msk").Get(ctx, arn)
-		if !ok {
-			return nil, &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: map[string]any{"ClusterInfo": rec}}, nil
-	case "ListClusters":
-		kvs, _, _ := p.col(req, "msk").List(ctx, "", "", 0)
-		var items []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			items = append(items, rec)
-		}
-		return &spi.Response{Output: map[string]any{"ClusterInfoList": items}}, nil
-	case "DeleteCluster":
-		messages, _, _ := p.col(req, "mskrecords").List(ctx, arn+"|", "", 0)
-		for _, message := range messages {
-			_ = p.col(req, "mskrecords").Delete(ctx, message.Key)
-		}
-		_ = p.col(req, "msk").Delete(ctx, arn)
-		return &spi.Response{Output: map[string]any{"ClusterArn": arn, "State": "DELETING"}}, nil
-	case "GetBootstrapBrokers":
-		return &spi.Response{Output: map[string]any{"BootstrapBrokerString": "localhost:9092", "BootstrapBrokerStringTls": "localhost:9094"}}, nil
-	case "ListNodes":
-		return &spi.Response{Output: map[string]any{"NodeInfoList": []any{map[string]any{"BrokerNodeInfo": map[string]any{"BrokerId": "1", "Endpoints": []any{"localhost:9092"}}}}}}, nil
-	case "UpdateBrokerCount":
-		return &spi.Response{Output: map[string]any{"ClusterArn": arn, "ClusterOperationArn": arn + "/op"}}, nil
-	default:
-		return nil, spi.NotImplemented("aws.kafka", req.Operation, "emulate")
-	}
+	return nil
 }
 
 // Publish stores a topic message and notifies in-process consumers.
-func (p *Pack) Publish(ctx context.Context, identity spi.Identity, clusterARN, topic string, data []byte) error {
-	req := &spi.Request{Identity: identity}
-	if _, ok, _ := p.col(req, "msk").Get(ctx, clusterARN); !ok {
-		return &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
-	}
-	message := Message{Data: append([]byte(nil), data...), Timestamp: p.deps.Clock.Now()}
-	encoded, _ := json.Marshal(message)
-	key := clusterARN + "|" + topic + "|" + fmt.Sprintf("%020d-%s", message.Timestamp.UnixNano(), p.deps.Rand.Hex(8))
-	if err := p.col(req, "mskrecords").Put(ctx, key, encoded); err != nil {
+func (t *Topics) Publish(ctx context.Context, identity spi.Identity, clusterARN, topic string, data []byte) error {
+	if err := t.cluster(ctx, identity, clusterARN); err != nil {
 		return err
 	}
-	if p.deps.Bus != nil {
+	message := Message{ClusterARN: clusterARN, Data: append([]byte(nil), data...), Timestamp: t.deps.Clock.Now()}
+	encoded, _ := json.Marshal(message)
+	key := clusterARN + "|" + topic + "|" + fmt.Sprintf("%020d-%s", message.Timestamp.UnixNano(), t.deps.Rand.Hex(8))
+	if err := t.col(identity, "mskrecords").Put(ctx, key, encoded); err != nil {
+		return err
+	}
+	if t.deps.Bus != nil {
 		event, _ := json.Marshal(map[string]any{"Account": identity.Account, "Region": identity.Region, "ClusterARN": clusterARN, "Topic": topic, "Message": message})
-		return p.deps.Bus.Publish(ctx, "kafka", event)
+		return t.deps.Bus.Publish(ctx, "kafka", event)
 	}
 	return nil
 }
 
 // Messages returns topic messages at or after the requested timestamp.
-func (p *Pack) Messages(ctx context.Context, identity spi.Identity, clusterARN, topic string, from time.Time) ([]Message, error) {
-	req := &spi.Request{Identity: identity}
-	if _, ok, _ := p.col(req, "msk").Get(ctx, clusterARN); !ok {
-		return nil, &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
+func (t *Topics) Messages(ctx context.Context, identity spi.Identity, clusterARN, topic string, from time.Time) ([]Message, error) {
+	if err := t.cluster(ctx, identity, clusterARN); err != nil {
+		return nil, err
 	}
-	items, _, err := p.col(req, "mskrecords").List(ctx, clusterARN+"|"+topic+"|", "", 0)
+	items, _, err := t.col(identity, "mskrecords").List(ctx, clusterARN+"|"+topic+"|", "", 0)
 	if err != nil {
 		return nil, err
 	}
@@ -126,13 +73,4 @@ func (p *Pack) Messages(ctx context.Context, identity spi.Identity, clusterARN, 
 		}
 	}
 	return messages, nil
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s, ok := in[k].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
 }

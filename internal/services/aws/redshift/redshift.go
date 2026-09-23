@@ -1,4 +1,8 @@
-// Package redshift emulates cluster control-plane records and a Firehose COPY row store (not a SQL engine).
+// Package redshift is the Redshift COPY data plane: the local tables
+// aws.firehose loads through COPY. The cluster API is served by
+// behavior/aws/redshift; this package holds only what no SPI operation reaches
+// -- declaring a table, COPY row parsing with its credential check, and
+// reading rows back -- over the collections that bundle owns.
 package redshift
 
 import (
@@ -10,278 +14,39 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
-func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.redshift", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
-}
+// Warehouse loads and reads COPY tables.
+type Warehouse struct{ deps spi.Deps }
 
-// Pack implements Redshift-lite.
-type Pack struct{ deps spi.Deps }
-
-// CopyInput is the narrow data-plane contract used by Firehose's Redshift COPY destination.
+// CopyInput is one COPY command.
 type CopyInput struct {
 	Cluster, Database, Table, Username, Password, Columns, Options string
 	Data                                                           [][]byte
 }
 
+// tableData is a declared table and its rows. Cluster is stored so the
+// bundle's DeleteCluster can remove a cluster's tables by predicate.
 type tableData struct {
+	Cluster string `json:",omitempty"`
 	Columns []string
 	Rows    []map[string]any
 }
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
+// New constructs the data plane.
+func New(d spi.Deps) *Warehouse { return &Warehouse{deps: d} }
 
-func (p *Pack) ServiceID() string { return "aws.redshift" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	core := []string{
-		"CreateCluster", "DescribeClusters", "ModifyCluster", "DeleteCluster", "RebootCluster",
-		"PauseCluster", "ResumeCluster", "ResizeCluster", "RestoreFromClusterSnapshot",
-		"CreateClusterSnapshot", "DescribeClusterSnapshots", "DeleteClusterSnapshot", "CopyClusterSnapshot",
-		"CreateClusterSubnetGroup", "DescribeClusterSubnetGroups", "DeleteClusterSubnetGroup", "ModifyClusterSubnetGroup",
-		"CreateClusterParameterGroup", "DescribeClusterParameterGroups", "DeleteClusterParameterGroup",
-		"ModifyClusterParameterGroup", "ResetClusterParameterGroup", "DescribeClusterParameters",
-		"EnableSnapshotCopy", "DisableSnapshotCopy",
-		"CreateSnapshotCopyGrant", "DescribeSnapshotCopyGrants", "DeleteSnapshotCopyGrant",
-		"CreateEventSubscription", "DescribeEventSubscriptions", "DeleteEventSubscription",
-		"GetClusterCredentials", "ModifyClusterIamRoles",
-		"CreateTags", "DescribeTags", "DeleteTags",
-	}
-	return append(core, extraOps()...)
-}
-
-func (p *Pack) col(req *spi.Request, n string) spi.Collection {
-	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
-}
-
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	switch req.Operation {
-	case "CreateCluster":
-		id := first(req.Input, "ClusterIdentifier")
-		rec := map[string]any{
-			"ClusterIdentifier": id, "ClusterStatus": "available",
-			"NodeType": first(req.Input, "NodeType"), "MasterUsername": first(req.Input, "MasterUsername"), "DBName": first(req.Input, "DBName"),
-			"Endpoint": map[string]any{"Address": id + "." + req.Identity.Region + ".redshift.amazonaws.com", "Port": 5439},
-		}
-		if rec["DBName"] == "" {
-			rec["DBName"] = "dev"
-		}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "rscluster").Put(ctx, id, b)
-		if password := first(req.Input, "MasterUserPassword"); password != "" {
-			credential, _ := json.Marshal(map[string]any{"Username": rec["MasterUsername"], "PasswordHash": fmt.Sprintf("%x", sha256.Sum256([]byte(password)))})
-			_ = p.col(req, "rscredential").Put(ctx, id, credential)
-		}
-		return &spi.Response{Output: map[string]any{"Cluster": rec}}, nil
-	case "DescribeClusters":
-		return listOrGet(ctx, p.col(req, "rscluster"), first(req.Input, "ClusterIdentifier"), "Clusters")
-	case "ModifyCluster", "RebootCluster", "PauseCluster", "ResumeCluster":
-		id := first(req.Input, "ClusterIdentifier")
-		b, ok, _ := p.col(req, "rscluster").Get(ctx, id)
-		rec := map[string]any{"ClusterIdentifier": id}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
-		}
-		if req.Operation == "PauseCluster" {
-			rec["ClusterStatus"] = "paused"
-		} else {
-			rec["ClusterStatus"] = "available"
-		}
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "rscluster").Put(ctx, id, nb)
-		return &spi.Response{Output: map[string]any{"Cluster": rec}}, nil
-	case "DeleteCluster":
-		id := first(req.Input, "ClusterIdentifier")
-		_ = p.col(req, "rscluster").Delete(ctx, id)
-		_ = p.col(req, "rscredential").Delete(ctx, id)
-		tables, _, _ := p.col(req, "rstable").List(ctx, id+"|", "", 0)
-		for _, table := range tables {
-			_ = p.col(req, "rstable").Delete(ctx, table.Key)
-		}
-		return &spi.Response{Output: map[string]any{"Cluster": map[string]any{"ClusterIdentifier": id, "ClusterStatus": "deleting"}}}, nil
-	case "CreateClusterSnapshot":
-		id := first(req.Input, "SnapshotIdentifier")
-		rec := map[string]any{"SnapshotIdentifier": id, "ClusterIdentifier": first(req.Input, "ClusterIdentifier"), "Status": "available"}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "rssnap").Put(ctx, id, b)
-		return &spi.Response{Output: map[string]any{"Snapshot": rec}}, nil
-	case "DescribeClusterSnapshots":
-		return listOrGet(ctx, p.col(req, "rssnap"), first(req.Input, "SnapshotIdentifier"), "Snapshots")
-	case "DeleteClusterSnapshot":
-		_ = p.col(req, "rssnap").Delete(ctx, first(req.Input, "SnapshotIdentifier"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "CreateClusterSubnetGroup":
-		id := first(req.Input, "ClusterSubnetGroupName")
-		rec := map[string]any{"ClusterSubnetGroupName": id}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "rssubnet").Put(ctx, id, b)
-		return &spi.Response{Output: map[string]any{"ClusterSubnetGroup": rec}}, nil
-	case "DescribeClusterSubnetGroups":
-		return listOrGet(ctx, p.col(req, "rssubnet"), first(req.Input, "ClusterSubnetGroupName"), "ClusterSubnetGroups")
-	case "DeleteClusterSubnetGroup":
-		_ = p.col(req, "rssubnet").Delete(ctx, first(req.Input, "ClusterSubnetGroupName"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "CreateClusterParameterGroup":
-		id := first(req.Input, "ParameterGroupName")
-		rec := map[string]any{"ParameterGroupName": id, "ParameterGroupFamily": first(req.Input, "ParameterGroupFamily")}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "rspg").Put(ctx, id, b)
-		return &spi.Response{Output: map[string]any{"ClusterParameterGroup": rec}}, nil
-	case "DescribeClusterParameterGroups":
-		return listOrGet(ctx, p.col(req, "rspg"), first(req.Input, "ParameterGroupName"), "ParameterGroups")
-	case "DeleteClusterParameterGroup":
-		_ = p.col(req, "rspg").Delete(ctx, first(req.Input, "ParameterGroupName"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "CreateTags":
-		b, _ := json.Marshal(req.Input["Tags"])
-		_ = p.col(req, "rstags").Put(ctx, first(req.Input, "ResourceName"), b)
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "DescribeTags":
-		b, ok, _ := p.col(req, "rstags").Get(ctx, first(req.Input, "ResourceName"))
-		var tags any = []any{}
-		if ok {
-			_ = json.Unmarshal(b, &tags)
-		}
-		return &spi.Response{Output: map[string]any{"TaggedResources": []any{map[string]any{"Tags": tags}}}}, nil
-	case "DeleteTags":
-		_ = p.col(req, "rstags").Delete(ctx, first(req.Input, "ResourceName"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "ResizeCluster":
-		id := first(req.Input, "ClusterIdentifier")
-		b, ok, _ := p.col(req, "rscluster").Get(ctx, id)
-		rec := map[string]any{"ClusterIdentifier": id, "ClusterStatus": "resizing"}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
-			rec["ClusterStatus"] = "resizing"
-		}
-		if n := first(req.Input, "NodeType"); n != "" {
-			rec["NodeType"] = n
-		}
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "rscluster").Put(ctx, id, nb)
-		return &spi.Response{Output: map[string]any{"Cluster": rec}}, nil
-	case "RestoreFromClusterSnapshot":
-		id := first(req.Input, "ClusterIdentifier")
-		rec := map[string]any{
-			"ClusterIdentifier": id, "ClusterStatus": "available",
-			"Endpoint": map[string]any{"Address": id + "." + req.Identity.Region + ".redshift.amazonaws.com", "Port": 5439},
-		}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "rscluster").Put(ctx, id, b)
-		return &spi.Response{Output: map[string]any{"Cluster": rec}}, nil
-	case "CopyClusterSnapshot":
-		src, dst := first(req.Input, "SourceSnapshotIdentifier"), first(req.Input, "TargetSnapshotIdentifier")
-		b, _, _ := p.col(req, "rssnap").Get(ctx, src)
-		rec := map[string]any{"SnapshotIdentifier": dst, "Status": "available"}
-		_ = json.Unmarshal(b, &rec)
-		rec["SnapshotIdentifier"] = dst
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "rssnap").Put(ctx, dst, nb)
-		return &spi.Response{Output: map[string]any{"Snapshot": rec}}, nil
-	case "ModifyClusterSubnetGroup":
-		id := first(req.Input, "ClusterSubnetGroupName")
-		rec := map[string]any{"ClusterSubnetGroupName": id}
-		if b, ok, _ := p.col(req, "rssubnet").Get(ctx, id); ok {
-			_ = json.Unmarshal(b, &rec)
-		}
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "rssubnet").Put(ctx, id, nb)
-		return &spi.Response{Output: map[string]any{"ClusterSubnetGroup": rec}}, nil
-	case "ModifyClusterParameterGroup", "ResetClusterParameterGroup":
-		name := first(req.Input, "ParameterGroupName")
-		b, _ := json.Marshal(req.Input)
-		_ = p.col(req, "rspg-params").Put(ctx, name, b)
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "DescribeClusterParameters":
-		name := first(req.Input, "ParameterGroupName")
-		b, ok, _ := p.col(req, "rspg-params").Get(ctx, name)
-		params := []any{}
-		if ok {
-			var rec map[string]any
-			_ = json.Unmarshal(b, &rec)
-			params = append(params, rec)
-		}
-		return &spi.Response{Output: map[string]any{"Parameters": params}}, nil
-	case "EnableSnapshotCopy":
-		id := first(req.Input, "ClusterIdentifier")
-		b, ok, _ := p.col(req, "rscluster").Get(ctx, id)
-		rec := map[string]any{"ClusterIdentifier": id}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
-		}
-		rec["ClusterSnapshotCopyStatus"] = map[string]any{"DestinationRegion": first(req.Input, "DestinationRegion")}
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "rscluster").Put(ctx, id, nb)
-		return &spi.Response{Output: map[string]any{"Cluster": rec}}, nil
-	case "DisableSnapshotCopy":
-		id := first(req.Input, "ClusterIdentifier")
-		b, ok, _ := p.col(req, "rscluster").Get(ctx, id)
-		rec := map[string]any{"ClusterIdentifier": id}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
-		}
-		delete(rec, "ClusterSnapshotCopyStatus")
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "rscluster").Put(ctx, id, nb)
-		return &spi.Response{Output: map[string]any{"Cluster": rec}}, nil
-	case "CreateSnapshotCopyGrant":
-		n := first(req.Input, "SnapshotCopyGrantName")
-		rec := map[string]any{"SnapshotCopyGrantName": n, "KmsKeyId": first(req.Input, "KmsKeyId")}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "rscopygrant").Put(ctx, n, b)
-		return &spi.Response{Output: map[string]any{"SnapshotCopyGrant": rec}}, nil
-	case "DescribeSnapshotCopyGrants":
-		return listOrGet(ctx, p.col(req, "rscopygrant"), first(req.Input, "SnapshotCopyGrantName"), "SnapshotCopyGrants")
-	case "DeleteSnapshotCopyGrant":
-		_ = p.col(req, "rscopygrant").Delete(ctx, first(req.Input, "SnapshotCopyGrantName"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "CreateEventSubscription":
-		n := first(req.Input, "SubscriptionName")
-		rec := map[string]any{"CustSubscriptionId": n, "SnsTopicArn": first(req.Input, "SnsTopicArn"), "Status": "active"}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "rsev").Put(ctx, n, b)
-		return &spi.Response{Output: map[string]any{"EventSubscription": rec}}, nil
-	case "DescribeEventSubscriptions":
-		return listOrGet(ctx, p.col(req, "rsev"), first(req.Input, "SubscriptionName"), "EventSubscriptionsList")
-	case "DeleteEventSubscription":
-		_ = p.col(req, "rsev").Delete(ctx, first(req.Input, "SubscriptionName"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "GetClusterCredentials":
-		user := first(req.Input, "DbUser")
-		return &spi.Response{Output: map[string]any{
-			"DbUser": "IAM:" + user, "DbPassword": p.deps.Rand.Derive("rs:" + user).Hex(16),
-			"Expiration": "2099-01-01T00:00:00Z",
-		}}, nil
-	case "ModifyClusterIamRoles":
-		id := first(req.Input, "ClusterIdentifier")
-		b, ok, _ := p.col(req, "rscluster").Get(ctx, id)
-		rec := map[string]any{"ClusterIdentifier": id}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
-		}
-		rec["IamRoles"] = req.Input["AddIamRoles"]
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "rscluster").Put(ctx, id, nb)
-		return &spi.Response{Output: map[string]any{"Cluster": rec}}, nil
-	default:
-		return p.extra(ctx, req)
-	}
+func (w *Warehouse) col(identity spi.Identity, n string) spi.Collection {
+	return w.deps.Store.Scope(identity.Account, identity.Region).Collection(n)
 }
 
 // CreateTable declares the existing table required by a Firehose COPY command.
-func (p *Pack) CreateTable(ctx context.Context, identity spi.Identity, cluster, database, table string, columns []string) error {
+func (w *Warehouse) CreateTable(ctx context.Context, identity spi.Identity, cluster, database, table string, columns []string) error {
 	if cluster == "" || database == "" || table == "" || len(columns) == 0 {
 		return errors.New("cluster, database, table, and columns are required")
 	}
-	req := &spi.Request{Identity: identity}
-	if _, ok, _ := p.col(req, "rscluster").Get(ctx, cluster); !ok {
+	if _, ok, _ := w.col(identity, "rscluster").Get(ctx, cluster); !ok {
 		return errors.New("Redshift cluster not found")
 	}
 	for _, column := range columns {
@@ -289,14 +54,13 @@ func (p *Pack) CreateTable(ctx context.Context, identity spi.Identity, cluster, 
 			return errors.New("Redshift table column is empty")
 		}
 	}
-	body, _ := json.Marshal(tableData{Columns: columns})
-	return p.col(req, "rstable").Put(ctx, redshiftTableKey(cluster, database, table), body)
+	body, _ := json.Marshal(tableData{Cluster: cluster, Columns: columns})
+	return w.col(identity, "rstable").Put(ctx, redshiftTableKey(cluster, database, table), body)
 }
 
 // Copy loads records into a declared table using the common Firehose COPY formats.
-func (p *Pack) Copy(ctx context.Context, identity spi.Identity, input CopyInput) error {
-	req := &spi.Request{Identity: identity}
-	clusterBody, ok, _ := p.col(req, "rscluster").Get(ctx, input.Cluster)
+func (w *Warehouse) Copy(ctx context.Context, identity spi.Identity, input CopyInput) error {
+	clusterBody, ok, _ := w.col(identity, "rscluster").Get(ctx, input.Cluster)
 	if !ok {
 		return errors.New("Redshift cluster not found")
 	}
@@ -305,7 +69,7 @@ func (p *Pack) Copy(ctx context.Context, identity spi.Identity, input CopyInput)
 	if first(cluster, "ClusterStatus") != "available" || first(cluster, "DBName") != input.Database {
 		return errors.New("Redshift cluster is unavailable or database does not exist")
 	}
-	credentialBody, ok, _ := p.col(req, "rscredential").Get(ctx, input.Cluster)
+	credentialBody, ok, _ := w.col(identity, "rscredential").Get(ctx, input.Cluster)
 	if !ok {
 		return errors.New("Redshift credentials are unavailable")
 	}
@@ -315,7 +79,7 @@ func (p *Pack) Copy(ctx context.Context, identity spi.Identity, input CopyInput)
 		return errors.New("Redshift credentials are invalid")
 	}
 	key := redshiftTableKey(input.Cluster, input.Database, input.Table)
-	return p.col(req, "rstable").Txn(ctx, func(tx spi.Tx) error {
+	return w.col(identity, "rstable").Txn(ctx, func(tx spi.Tx) error {
 		body, ok, err := tx.Get(key)
 		if err != nil {
 			return err
@@ -346,9 +110,8 @@ func (p *Pack) Copy(ctx context.Context, identity spi.Identity, input CopyInput)
 }
 
 // TableRows returns a copy of rows loaded by COPY for local data-plane consumers.
-func (p *Pack) TableRows(ctx context.Context, identity spi.Identity, cluster, database, table string) ([]map[string]any, error) {
-	req := &spi.Request{Identity: identity}
-	body, ok, err := p.col(req, "rstable").Get(ctx, redshiftTableKey(cluster, database, table))
+func (w *Warehouse) TableRows(ctx context.Context, identity spi.Identity, cluster, database, table string) ([]map[string]any, error) {
+	body, ok, err := w.col(identity, "rstable").Get(ctx, redshiftTableKey(cluster, database, table))
 	if err != nil || !ok {
 		return nil, errors.New("Redshift table not found")
 	}

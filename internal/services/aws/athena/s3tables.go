@@ -54,10 +54,10 @@ func (p *Pack) runS3TablesQuery(ctx context.Context, req *spi.Request, sql, data
 			return nil, nil, fmt.Errorf("table %s.%s not found", db, table)
 		}
 		raw, _, _ := p.col(req, "s3trows").Get(ctx, key)
-		var rows []any
-		_ = json.Unmarshal(raw, &rows)
-		rows = append(rows, parseValues(query[at+len(" VALUES "):])...)
-		raw, _ = json.Marshal(rows)
+		var doc s3Rows
+		_ = json.Unmarshal(raw, &doc)
+		doc.Rows = append(doc.Rows, parseValues(query[at+len(" VALUES "):])...)
+		raw, _ = json.Marshal(doc)
 		_ = p.col(req, "s3trows").Put(ctx, key, raw)
 		return []any{}, []any{}, nil
 	default:
@@ -76,11 +76,22 @@ func (p *Pack) putS3Table(ctx context.Context, req *spi.Request, bucket, databas
 	key := s3TableKey(bucket, database, table)
 	rec, _ := json.Marshal(map[string]any{
 		"name": table, "namespace": database, "tableBucketARN": "arn:aws:s3tables:" + req.Identity.Region + ":" + req.Identity.Account + ":bucket/" + bucket,
-		"format": "ICEBERG", "columns": cols,
+		"format": "ICEBERG", "columns": cols, "metadataLocation": "",
 	})
 	_ = p.col(req, "s3tt").Put(ctx, key, rec)
-	raw, _ := json.Marshal(rows)
+	raw, _ := json.Marshal(s3Rows{Rows: rows})
 	return p.col(req, "s3trows").Put(ctx, key, raw)
+}
+
+// s3Rows is a table's stored rows, in the shape the s3tables row plane and
+// bundle use: an object, so the bundle can move and delete it as a record.
+//
+// ponytail: this file reads and writes the row plane's collections directly --
+// a second copy of internal/services/aws/s3tables' row engine. Going through
+// that package would remove it; it needs a column-order read the row plane
+// does not export yet.
+type s3Rows struct {
+	Rows []any `json:"rows"`
 }
 
 func (p *Pack) scanS3Table(ctx context.Context, req *spi.Request, bucket string, selection sel) ([]any, []any, error) {
@@ -93,8 +104,9 @@ func (p *Pack) scanS3Table(ctx context.Context, req *spi.Request, bucket string,
 	_ = json.Unmarshal(raw, &table)
 	columns := stringValues(table["columns"])
 	raw, _, _ = p.col(req, "s3trows").Get(ctx, key)
-	var stored []any
-	_ = json.Unmarshal(raw, &stored)
+	var doc s3Rows
+	_ = json.Unmarshal(raw, &doc)
+	stored := doc.Rows
 	projection := columns
 	if len(selection.cols) > 0 {
 		projection = selection.cols

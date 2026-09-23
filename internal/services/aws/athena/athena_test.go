@@ -11,11 +11,10 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 )
 
@@ -23,8 +22,7 @@ func TestS3TablesCatalogDDLInsertSelectAndCTAS(t *testing.T) {
 	deps := spitest.Deps(t)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	tables := s3tables.New(deps)
-	if _, err := tables.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTableBucket", Input: map[string]any{"name": "warehouse"}}); err != nil {
+	if _, err := bundled.Handler("aws.s3tables", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTableBucket", Input: map[string]any{"name": "warehouse"}}); err != nil {
 		t.Fatal(err)
 	}
 	p := New(deps)
@@ -62,7 +60,7 @@ func TestS3TablesCatalogDDLInsertSelectAndCTAS(t *testing.T) {
 		t.Fatalf("ctas = %s", raw)
 	}
 	arn := "arn:aws:s3tables:us-east-1:000000000000:bucket/warehouse"
-	if _, err := tables.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTable", Input: map[string]any{"tableBucketARN": arn, "namespace": "analytics", "name": "copied"}}); err != nil {
+	if _, err := bundled.Handler("aws.s3tables", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTable", Input: map[string]any{"tableBucketARN": arn, "namespace": "analytics", "name": "copied"}}); err != nil {
 		t.Fatal(err)
 	}
 }

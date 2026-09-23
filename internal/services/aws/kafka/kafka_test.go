@@ -10,25 +10,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
-func TestKafkaHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 7 {
-		t.Fatalf("kafka Operations() %d want 7", n)
-	}
-}
-
 func TestKafkaPublishesMessages(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p, clusters := New(deps), bundled.Handler("aws.kafka", deps)
 	ctx := context.Background()
 	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	created, err := p.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateCluster", Input: map[string]any{"ClusterName": "source"}})
+	created, err := clusters.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateCluster", Input: map[string]any{
+		"ClusterName": "source", "KafkaVersion": "3.6.0", "NumberOfBrokerNodes": 1,
+		"BrokerNodeGroupInfo": map[string]any{"ClientSubnets": []any{"s"}, "InstanceType": "kafka.t3.small"},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,10 +48,11 @@ func TestKafkaPublishesMessages(t *testing.T) {
 	if err != nil || len(messages) != 1 || string(messages[0].Data) != "two" || event["ClusterARN"] != arn || event["Topic"] != "events" || message["Data"] != "dHdv" {
 		t.Fatalf("MSK messages %#v, event %#v, %v", messages, event, err)
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteCluster", Input: map[string]any{"ClusterArn": arn}}); err != nil {
+	// The bundle's DeleteCluster takes the cluster's topic messages with it.
+	if _, err := clusters.Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteCluster", Input: map[string]any{"ClusterArn": arn}}); err != nil {
 		t.Fatal(err)
 	}
-	if retained, _, _ := p.col(&spi.Request{Identity: identity}, "mskrecords").List(ctx, arn+"|", "", 0); len(retained) != 0 {
+	if retained, _, _ := p.col(identity, "mskrecords").List(ctx, arn+"|", "", 0); len(retained) != 0 {
 		t.Fatalf("deleted MSK cluster retained messages %#v", retained)
 	}
 	if _, err := p.Messages(ctx, identity, arn, "events", time.Time{}); err == nil {
@@ -98,7 +96,7 @@ func TestBootedServerMSKCluster(t *testing.T) {
 		_ = json.Unmarshal(raw, &out)
 		return out
 	}
-	created := call("CreateCluster", `{"ClusterName":"c1","BrokerNodeGroupInfo":{"InstanceType":"kafka.t3.small"}}`)
+	created := call("CreateCluster", `{"ClusterName":"c1","KafkaVersion":"3.6.0","NumberOfBrokerNodes":1,"BrokerNodeGroupInfo":{"ClientSubnets":["s"],"InstanceType":"kafka.t3.small"}}`)
 	arn, _ := created["ClusterArn"].(string)
 	if arn == "" {
 		t.Fatalf("create %v", created)

@@ -1307,4 +1307,4 @@ Nine needles were pointed at the test that does catch them. Eighteen tests gaine
 - Step Functions' reader bucket-owner comparison, which S3 already enforces. The type check it also did is not redundant and stays, now tested.
 - Firehose's unlocked duplicate-stream pre-check, which repeated the check inside the transaction. Without it, a plain duplicate create reaches the guard that matters.
 
-One gap is left named rather than filled: Firehose's OpenSearch processing-failure envelope has no test that observes it.
+One gap was left named at first: nothing observed Firehose writing an OpenSearch stream's processing failures, so skipping them entirely passed. The OpenSearch destination test now sends a record that fails decompression and reads its envelope back from the error prefix, and a needle drops the write.

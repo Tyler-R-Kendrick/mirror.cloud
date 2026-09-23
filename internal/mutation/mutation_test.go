@@ -13140,6 +13140,14 @@ var mutants = []mutant{
 		run:  "TestOpenSearchBufferRetryPersistence",
 	},
 	{
+		name: "firehose-drop-opensearch-processing-failures",
+		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+		old:  "records, failures := p.processData(ctx, req, destination, stream, recIDs[i], data[i], now)\n\t\t\tfor _, failure := range failures {\n\t\t\t\tp.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)",
+		new:  "records, failures := p.processData(ctx, req, destination, stream, recIDs[i], data[i], now)\n\t\t\tfor _, failure := range failures[:0] {\n\t\t\t\tp.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)",
+		pkg:  "./internal/services/aws/firehose",
+		run:  "TestFirehoseOpenSearchDestination$",
+	},
+	{
 		name: "firehose-lose-opensearch-arrival-time",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 		old:  `arrival: payload.Arrivals[index], searchIndex: searchFailureIndex(destination, payload.Arrivals[index]), searchType: first(destination, "TypeName"),`,

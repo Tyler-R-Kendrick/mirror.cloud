@@ -1578,3 +1578,9 @@ Website validation is one `require` rule per check. The index-document checks ap
 The logging target check reads the target bucket twice: once in the caller's region, and once in the global `s3buckets` registry to tell a cross-location target from a missing one.
 
 ABAC had no test, so it has one now.
+
+**Policy and encryption.** These moved to YAML, six operations. PutObject still reads default encryption from `bktcfg/encryption`, in the layout the YAML writes.
+
+GetBucketEncryption now answers under the model's `ServerSideEncryptionConfiguration` member rather than flat. The wire is unchanged, because it is the payload member.
+
+A bundle operation can now declare `status:` for a service that departs from its model. S3 answers PutBucketPolicy with 204 where the model says 200.

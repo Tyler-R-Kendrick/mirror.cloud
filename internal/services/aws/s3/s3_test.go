@@ -3205,7 +3205,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	bucket := map[string]any{"Bucket": "bucket-encryption"}
 	mustInvoke(t, p, "CreateBucket", bucket, nil)
 	defaultRules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}
-	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, defaultRules) {
+	if got := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]; !reflect.DeepEqual(got, defaultRules) {
 		t.Fatalf("default encryption = %#v", got)
 	}
 	rule := func(algorithm string, keyID any, bucketKey bool) map[string]any {
@@ -3223,7 +3223,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 		if _, err := put(configuration); err != nil {
 			t.Fatalf("put %s: %v", algorithm, err)
 		}
-		if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, configuration["Rules"]) {
+		if got := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]; !reflect.DeepEqual(got, configuration["Rules"]) {
 			t.Fatalf("get %s = %#v", algorithm, got)
 		}
 		object := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "object-" + strings.ReplaceAll(algorithm, ":", "-")}, []byte("body"))
@@ -3279,7 +3279,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 			if test.code == "InvalidArgument" && (fault.Message != "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse" || fault.Fields["ArgumentName"] != "ApplyServerSideEncryptionByDefault") {
 				t.Fatalf("invalid key fault = %#v", fault)
 			}
-			if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, baseline["Rules"]) {
+			if got := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]; !reflect.DeepEqual(got, baseline["Rules"]) {
 				t.Fatalf("invalid put replaced baseline = %#v", got)
 			}
 		})
@@ -3287,7 +3287,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	for range 2 {
 		mustInvoke(t, p, "DeleteBucketEncryption", bucket, nil)
 	}
-	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, defaultRules) {
+	if got := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]; !reflect.DeepEqual(got, defaultRules) {
 		t.Fatalf("deleted encryption = %#v", got)
 	}
 }

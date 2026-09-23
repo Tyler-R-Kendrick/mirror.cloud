@@ -160,6 +160,9 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	resp, err := e.invoke(ctx, req)
 	if resp != nil && resp.Status == 0 {
 		resp.Status = e.modelOps[req.Operation].HTTP.Code
+		if op, ok := e.ir.Operations[req.Operation]; ok && op.Status != 0 {
+			resp.Status = op.Status
+		}
 	}
 	return resp, err
 }

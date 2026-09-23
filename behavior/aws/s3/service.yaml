@@ -30,17 +30,11 @@ native:
   - PutBucketAcl
   - GetObjectAcl
   - PutObjectAcl
-  - GetBucketPolicy
-  - PutBucketPolicy
-  - DeleteBucketPolicy
   - GetBucketLifecycleConfiguration
   - PutBucketLifecycleConfiguration
   - DeleteBucketLifecycle
   - GetBucketReplication
   - PutBucketReplication
-  - GetBucketEncryption
-  - PutBucketEncryption
-  - DeleteBucketEncryption
   - GetBucketObjectLockConfiguration
   - PutBucketObjectLockConfiguration
   - PutObject
@@ -135,6 +129,14 @@ resources:
     collection: bktcfg
     id: { derive: "string(input.Bucket) + '/abac'" }
     record: {}
+  policy:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/policy'" }
+    record: {}
+  encryption:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/encryption'" }
+    record: {}
   # Where every bucket lives, by name, across accounts and regions.
   bucketlocation:
     collection: s3buckets
@@ -180,6 +182,9 @@ errors:
   TooManyRoutingRules: { code: InternalError, http: 500, fault: server, message: Too many routing rules }
   CrossLocationLogging: { code: CrossLocationLoggingProhibitted, http: 400, fault: client, message: "Cross S3 location logging not allowed. " }
   InvalidLoggingTarget: { code: InvalidTargetBucketForLogging, http: 400, fault: client, message: The target bucket for logging does not exist }
+  NoPolicy: { code: NoSuchBucketPolicy, http: 404, fault: client, message: The bucket policy does not exist }
+  MalformedPolicy: { code: MalformedPolicy, http: 400, fault: client }
+  NoEncryption: { code: ServerSideEncryptionConfigurationNotFoundError, http: 404, fault: client, message: The server side encryption configuration was not found }
   NoOwnershipControls: { code: OwnershipControlsNotFoundError, http: 404, fault: client, message: The bucket ownership controls were not found }
 
 operations:
@@ -706,3 +711,81 @@ operations:
       - { cond: abac_found, error: NoAbac }
     output:
       AbacStatus: abac.AbacStatus
+
+  # A policy is kept as the caller sent it; it must be a JSON object with at
+  # least one member. S3 answers a put with 204 where the model says 200.
+  PutBucketPolicy:
+    reads: { b: { resource: bucket } }
+    let:
+      text: "'Policy' in input ? string(input.Policy) : ''"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: "text.startsWith('{') && parseJSON(text) != null"
+        error: MalformedPolicy
+        message: Policies must be valid JSON and the first byte must be '{'
+      - cond: "size(parseJSON(text)) != 0"
+        error: MalformedPolicy
+        message: Missing required field Statement
+    effects:
+      - put: { resource: policy, record: { Policy: text } }
+    output: {}
+    status: 204
+
+  GetBucketPolicy:
+    reads: { b: { resource: bucket }, pol: { resource: policy } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: pol_found, error: NoPolicy, fields: { BucketName: input.Bucket } }
+    output:
+      Policy: pol.Policy
+
+  DeleteBucketPolicy:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: policy, missing: ignore }
+    output: {}
+
+  # Default encryption is one rule. PutObject reads it from this layout to
+  # encrypt objects written without an algorithm of their own.
+  PutBucketEncryption:
+    reads: { b: { resource: bucket } }
+    let:
+      sse: "'ServerSideEncryptionConfiguration' in input ? input.ServerSideEncryptionConfiguration : null"
+      defaults: >-
+        type(sse) == map && 'Rules' in sse && type(sse.Rules) == list && size(sse.Rules) == 1
+        && type(sse.Rules[0]) == map && 'ApplyServerSideEncryptionByDefault' in sse.Rules[0]
+        && type(sse.Rules[0].ApplyServerSideEncryptionByDefault) == map
+        ? sse.Rules[0].ApplyServerSideEncryptionByDefault : null
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: "defaults != null && 'SSEAlgorithm' in defaults && string(defaults.SSEAlgorithm) in ['AES256', 'aws:fsx', 'aws:backup', 'aws:kms', 'aws:kms:dsse']"
+        error: MalformedXML
+      - cond: "!('KMSMasterKeyID' in defaults) || string(defaults.SSEAlgorithm) == 'aws:kms'"
+        error: InvalidArgument
+        message: a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse
+        fields: { ArgumentName: "'ApplyServerSideEncryptionByDefault'" }
+    effects:
+      - put: { resource: encryption, record: { ServerSideEncryptionConfiguration: "{'Rules': sse.Rules}" } }
+    output: {}
+
+  GetBucketEncryption:
+    reads: { b: { resource: bucket }, enc: { resource: encryption } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    output:
+      ServerSideEncryptionConfiguration: >-
+        enc_found ? enc.ServerSideEncryptionConfiguration
+        : {'Rules': [{'ApplyServerSideEncryptionByDefault': {'SSEAlgorithm': 'AES256'}, 'BucketKeyEnabled': false}]}
+
+  DeleteBucketEncryption:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: encryption, missing: ignore }
+    output: {}

@@ -325,6 +325,11 @@ type Operation struct {
 	Batch  *BatchSpec        `yaml:"batch,omitempty"`
 	Output map[string]string `yaml:"output,omitempty"`
 
+	// Status is the HTTP status the operation answers with when the service
+	// departs from its model: S3 answers PutBucketPolicy with 204 where the
+	// model says 200. Unset, the model's code stands.
+	Status int `yaml:"status,omitempty"`
+
 	// OmitNull names output members the answer drops when they project null.
 	// A record that lacks a member answers without it -- OpenSearch answers
 	// a missed get with no _source member at all -- and answering null

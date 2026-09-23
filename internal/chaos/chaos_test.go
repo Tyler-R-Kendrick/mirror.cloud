@@ -5673,7 +5673,8 @@ func TestConcurrentBucketEncryptionWritesRemainValid(t *testing.T) {
 		}
 	}
 	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketEncryption", Input: map[string]any{"Bucket": "encryption-chaos"}})
-	rules, _ := response.Output["Rules"].([]any)
+	configuration, _ := response.Output["ServerSideEncryptionConfiguration"].(map[string]any)
+	rules, _ := configuration["Rules"].([]any)
 	if err != nil || successes != 16 || len(rules) != 1 || rules[0].(map[string]any)["ApplyServerSideEncryptionByDefault"].(map[string]any)["SSEAlgorithm"] != "AES256" {
 		t.Fatalf("persisted concurrent encryption = %#v, successes=%d, err=%v", response, successes, err)
 	}

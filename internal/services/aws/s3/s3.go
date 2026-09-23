@@ -55,10 +55,8 @@ var natives = []string{
 	"GetBucketVersioning", "PutBucketVersioning", "GetBucketTagging", "PutBucketTagging",
 	"GetBucketNotificationConfiguration", "PutBucketNotificationConfiguration",
 	"GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
-	"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
 	"GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
 	"GetBucketReplication", "PutBucketReplication",
-	"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 	"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
 	"PutObject", "PostObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
 	"ListObjects", "ListObjectsV2", "ListObjectVersions",
@@ -295,9 +293,7 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle":
 		return p.bucketLifecycle(ctx, req)
 	case "GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
-		"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
 		"GetBucketReplication", "PutBucketReplication", "DeleteBucketReplication",
-		"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
 		"GetObjectLockConfiguration", "PutObjectLockConfiguration":
 		return p.bucketCfg(ctx, req)
@@ -3540,19 +3536,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
-		if req.Operation == "PutBucketEncryption" {
-			configuration, err := validateBucketEncryption(req.Input["ServerSideEncryptionConfiguration"])
-			if err != nil {
-				return nil, err
-			}
-			delete(req.Input, "_body")
-			req.Input["ServerSideEncryptionConfiguration"] = configuration
-		}
-		if req.Operation == "PutBucketPolicy" {
-			if err := validateBucketPolicy(str(req.Input["Policy"])); err != nil {
-				return nil, err
-			}
-		}
 		if req.Operation == "PutBucketAcl" || req.Operation == "PutObjectAcl" {
 			acl, _, err := requestACL(req, true)
 			if err != nil {
@@ -3594,9 +3577,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		if req.Operation == "PutObjectAcl" {
 			p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
 		}
-		if req.Operation == "PutBucketPolicy" {
-			return &spi.Response{Status: http.StatusNoContent}, nil
-		}
 		return &spi.Response{Status: 200}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {
@@ -3614,13 +3594,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 				"Grants": []any{map[string]any{"Grantee": map[string]any{"ID": req.Identity.Account, "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}},
 			}}, nil
 		}
-		if req.Operation == "GetBucketEncryption" {
-			return &spi.Response{Output: map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}}}, nil
-		}
 		if miss != nil {
-			if req.Operation == "GetBucketPolicy" {
-				miss.Fields = map[string]any{"BucketName": b}
-			}
 			if req.Operation == "GetBucketObjectLockConfiguration" || req.Operation == "GetObjectLockConfiguration" {
 				miss.Fields = map[string]any{"BucketName": b}
 			}
@@ -3633,60 +3607,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
 		return &spi.Response{Status: http.StatusOK, Output: doc}, nil
 	}
-	if req.Operation == "GetBucketEncryption" {
-		return &spi.Response{Status: 200, Output: map[string]any{"Rules": asMap(doc["ServerSideEncryptionConfiguration"])["Rules"]}}, nil
-	}
 	return &spi.Response{Status: 200, Output: doc}, nil
-}
-
-func validateBucketEncryption(value any) (map[string]any, error) {
-	malformed := func() error {
-		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	configuration, ok := value.(map[string]any)
-	if !ok {
-		return nil, malformed()
-	}
-	rules, ok := configuration["Rules"].([]any)
-	if !ok || len(rules) != 1 {
-		return nil, malformed()
-	}
-	rule, ok := rules[0].(map[string]any)
-	if !ok {
-		return nil, malformed()
-	}
-	defaults, ok := rule["ApplyServerSideEncryptionByDefault"].(map[string]any)
-	if !ok {
-		return nil, malformed()
-	}
-	algorithm := str(defaults["SSEAlgorithm"])
-	if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
-		return nil, malformed()
-	}
-	if _, exists := defaults["KMSMasterKeyID"]; algorithm != "aws:kms" && exists {
-		return nil, &spi.Fault{
-			Code: "InvalidArgument", Message: "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse",
-			HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "ApplyServerSideEncryptionByDefault"},
-		}
-	}
-	return map[string]any{"Rules": rules}, nil
-}
-
-func validateBucketPolicy(policy string) error {
-	malformed := func(message string) error {
-		return &spi.Fault{Code: "MalformedPolicy", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	if policy == "" || policy[0] != '{' {
-		return malformed("Policies must be valid JSON and the first byte must be '{'")
-	}
-	var document map[string]any
-	if json.Unmarshal([]byte(policy), &document) != nil {
-		return malformed("Policies must be valid JSON and the first byte must be '{'")
-	}
-	if len(document) == 0 {
-		return malformed("Missing required field Statement")
-	}
-	return nil
 }
 
 func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
@@ -3882,14 +3803,10 @@ func cfgKind(op string) (string, *spi.Fault) {
 		return &spi.Fault{Code: code, Message: msg, HTTPStatus: 404, Fault: "client"}
 	}
 	switch {
-	case strings.Contains(op, "Policy"):
-		return "policy", n("NoSuchBucketPolicy", "The bucket policy does not exist")
 	case strings.Contains(op, "Notification"):
 		return "notification", nil
 	case strings.Contains(op, "Lifecycle"):
 		return "lifecycle", n("NoSuchLifecycleConfiguration", "The lifecycle configuration does not exist")
-	case strings.Contains(op, "Encryption"):
-		return "encryption", n("ServerSideEncryptionConfigurationNotFoundError", "The server side encryption configuration was not found")
 	case strings.Contains(op, "Replication"):
 		return "replication", n("ReplicationConfigurationNotFoundError", "The replication configuration was not found")
 	case strings.Contains(op, "ObjectLock"):

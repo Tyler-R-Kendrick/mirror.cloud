@@ -14,7 +14,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -298,12 +297,15 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		assertWritesCovered(t, snsP.Operations(), seen)
 
 		seen = map[string]bool{}
-		ssmP := ssm.New(spitest.Deps(t))
+		ssmP, err := bundled.New("aws.ssm", spitest.Deps(t))
+		if err != nil {
+			t.Fatal(err)
+		}
 		inv(ssmP, "PutParameter", map[string]any{"Name": "/a", "Value": "1", "Type": "String"})
 		inv(ssmP, "LabelParameterVersion", map[string]any{"Name": "/a", "Labels": []any{"live"}})
-		inv(ssmP, "UnlabelParameterVersion", map[string]any{"Name": "/a"})
-		inv(ssmP, "AddTagsToResource", map[string]any{"ResourceId": "/a", "Tags": []any{map[string]any{"Key": "k", "Value": "v"}}})
-		inv(ssmP, "RemoveTagsFromResource", map[string]any{"ResourceId": "/a"})
+		inv(ssmP, "UnlabelParameterVersion", map[string]any{"Name": "/a", "ParameterVersion": 1, "Labels": []any{"live"}})
+		inv(ssmP, "AddTagsToResource", map[string]any{"ResourceType": "Parameter", "ResourceId": "/a", "Tags": []any{map[string]any{"Key": "k", "Value": "v"}}})
+		inv(ssmP, "RemoveTagsFromResource", map[string]any{"ResourceType": "Parameter", "ResourceId": "/a", "TagKeys": []any{"k"}})
 		inv(ssmP, "CreateDocument", map[string]any{"Name": "d", "Content": "{}"})
 		inv(ssmP, "UpdateDocument", map[string]any{"Name": "d", "Content": "{}"})
 		inv(ssmP, "UpdateDocumentDefaultVersion", map[string]any{"Name": "d", "DocumentVersion": "1"})
@@ -318,17 +320,17 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv(ssmP, "UpdatePatchBaseline", map[string]any{"BaselineId": bid})
 		inv(ssmP, "RegisterDefaultPatchBaseline", map[string]any{"BaselineId": bid})
 		inv(ssmP, "DeletePatchBaseline", map[string]any{"BaselineId": bid})
-		mw := inv(ssmP, "CreateMaintenanceWindow", map[string]any{"Name": "mw"})
+		mw := inv(ssmP, "CreateMaintenanceWindow", map[string]any{"Name": "mw", "Schedule": "rate(1 day)", "Duration": 2, "Cutoff": 1, "AllowUnassociatedTargets": false})
 		wid := str(mw.Output["WindowId"])
 		inv(ssmP, "UpdateMaintenanceWindow", map[string]any{"WindowId": wid})
-		tgt := inv(ssmP, "RegisterTargetWithMaintenanceWindow", map[string]any{"WindowId": wid})
+		tgt := inv(ssmP, "RegisterTargetWithMaintenanceWindow", map[string]any{"WindowId": wid, "ResourceType": "INSTANCE", "Targets": []any{map[string]any{"Key": "InstanceIds", "Values": []any{"i-1"}}}})
 		inv(ssmP, "DeregisterTargetFromMaintenanceWindow", map[string]any{"WindowId": wid, "WindowTargetId": str(tgt.Output["WindowTargetId"])})
-		tk := inv(ssmP, "RegisterTaskWithMaintenanceWindow", map[string]any{"WindowId": wid, "TaskArn": "AWS-RunShellScript"})
+		tk := inv(ssmP, "RegisterTaskWithMaintenanceWindow", map[string]any{"WindowId": wid, "TaskArn": "AWS-RunShellScript", "TaskType": "RUN_COMMAND"})
 		inv(ssmP, "DeregisterTaskFromMaintenanceWindow", map[string]any{"WindowId": wid, "WindowTaskId": str(tk.Output["WindowTaskId"])})
 		inv(ssmP, "DeleteMaintenanceWindow", map[string]any{"WindowId": wid})
 		auto := inv(ssmP, "StartAutomationExecution", map[string]any{"DocumentName": "AWS-Hello"})
 		inv(ssmP, "StopAutomationExecution", map[string]any{"AutomationExecutionId": str(auto.Output["AutomationExecutionId"])})
-		ops := inv(ssmP, "CreateOpsItem", map[string]any{"Title": "t", "Source": "m"})
+		ops := inv(ssmP, "CreateOpsItem", map[string]any{"Title": "t", "Source": "m", "Description": "d"})
 		oid := str(ops.Output["OpsItemId"])
 		inv(ssmP, "UpdateOpsItem", map[string]any{"OpsItemId": oid})
 		inv(ssmP, "DeleteOpsItem", map[string]any{"OpsItemId": oid})
@@ -340,12 +342,6 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv(ssmP, "DeleteParameter", map[string]any{"Name": "/a"})
 		inv(ssmP, "PutParameter", map[string]any{"Name": "/b", "Value": "1", "Type": "String"})
 		inv(ssmP, "DeleteParameters", map[string]any{"Names": []any{"/b"}})
-		fat := map[string]any{"Name": "x", "Title": "t", "Source": "m", "ActivationId": "a1", "SessionId": "s1", "InstanceId": "i-1", "BaselineId": "b1", "WindowId": "w1", "AssociationId": "as1", "OpsItemId": "o1", "ResourceArn": "arn:x", "PatchGroup": "pg", "DocumentName": "d", "SyncName": "s"}
-		for _, op := range ssmP.Operations() {
-			if isWriteOp(op) && !seen[op] {
-				inv(ssmP, op, fat)
-			}
-		}
 		assertWritesCovered(t, ssmP.Operations(), seen)
 
 		seen = map[string]bool{}

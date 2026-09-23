@@ -1,10 +1,10 @@
 {
-  "packs": 11,
-  "case_labels": 777,
-  "services_files": 43,
-  "services_loc": 37415,
-  "fault_sites": 686,
-  "register_sites": 11,
+  "packs": 10,
+  "case_labels": 714,
+  "services_files": 41,
+  "services_loc": 36613,
+  "fault_sites": 676,
+  "register_sites": 10,
   "pack_dirs": [
     "aws/dynamodb",
     "aws/ecs",
@@ -14,7 +14,6 @@
     "aws/pipes",
     "aws/s3",
     "aws/sns",
-    "aws/ssm",
     "aws/states",
     "gcp/gcs"
   ],

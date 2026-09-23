@@ -22,7 +22,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 

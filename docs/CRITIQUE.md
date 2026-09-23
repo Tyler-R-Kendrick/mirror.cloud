@@ -1384,3 +1384,21 @@ The recording is re-cut where the model says the pack was wrong:
 - **Delete operations.** Deletes answer the resource being deleted, as the model's outputs declare.
 - **Parameters.** DescribeDBParameters answers the Parameter list that was set, not the stored request.
 - **Tags.** RemoveTagsFromResource removes only the named keys.
+
+### SSM: the same echo, and a SecureString that decrypted itself
+
+SSM had the same shape as RDS. Its 64 declared operations are bundle YAML. The other 88 (activations, sessions, inventory, patch groups, compliance and more) were one prefix-guessed key-value echo, and they are mock tier now.
+
+Parameter Store changed where the model or AWS's documented behavior disagreed with the pack. The recording is re-cut at each step:
+- **Overwrites.** A PutParameter to an existing name without `Overwrite` now answers ParameterAlreadyExists instead of overwriting.
+- **SecureString reads.** A SecureString is answered in its stored form unless the read sets `WithDecryption`. The pack decrypted it for every caller.
+- **History.** GetParameterHistory answers each version once. The pack re-recorded the previous version on every overwrite.
+- **Metadata.** DescribeParameters answers metadata without values.
+- **Deletes.** DeleteParameter of an unknown name faults. DeleteParameters reports DeletedParameters and InvalidParameters.
+- **Labels.** Labels go on the latest version by default. Unlabel reports RemovedLabels and InvalidLabels.
+- **Tags.** Tag removal removes only the named keys.
+- **Command invocations.** Command invocations are one per targeted instance, not a fixed `i-0`.
+
+Several deletes and deregistrations now answer the identifiers their model outputs declare.
+
+The spine and conformance tests had been sending requests that the model rejects: missing required members, and an overwrite without `Overwrite`. They now send what an SDK would send.

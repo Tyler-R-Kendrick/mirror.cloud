@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -52,7 +52,7 @@ func TestBootedServerSSMSection48(t *testing.T) {
 	if asInt(put["Version"]) != 1 {
 		t.Fatalf("ver1 %v", put)
 	}
-	call("PutParameter", `{"Name":"/app/a","Value":"two","Type":"String"}`)
+	call("PutParameter", `{"Name":"/app/a","Value":"two","Type":"String","Overwrite":true}`)
 	_, got := call("GetParameter", `{"Name":"/app/a"}`)
 	if str(asM(got["Parameter"])["Value"]) != "two" {
 		t.Fatalf("get %v", got)
@@ -66,7 +66,7 @@ func TestBootedServerSSMSection48(t *testing.T) {
 	}
 
 	call("PutParameter", `{"Name":"/app/secret","Value":"plain","Type":"SecureString"}`)
-	_, sec := call("GetParameter", `{"Name":"/app/secret"}`)
+	_, sec := call("GetParameter", `{"Name":"/app/secret","WithDecryption":true}`)
 	if str(asM(sec["Parameter"])["Value"]) != "plain" {
 		t.Fatalf("secure decode %v", sec)
 	}
@@ -112,12 +112,12 @@ func TestBootedServerSSMSection48(t *testing.T) {
 	}
 
 	call("LabelParameterVersion", `{"Name":"/app/a","Labels":["prod"]}`)
-	call("AddTagsToResource", `{"ResourceId":"/app/a","Tags":[{"Key":"k","Value":"v"}]}`)
-	_, tags := call("ListTagsForResource", `{"ResourceId":"/app/a"}`)
+	call("AddTagsToResource", `{"ResourceType":"Parameter","ResourceId":"/app/a","Tags":[{"Key":"k","Value":"v"}]}`)
+	_, tags := call("ListTagsForResource", `{"ResourceType":"Parameter","ResourceId":"/app/a"}`)
 	if tags["TagList"] == nil {
 		t.Fatalf("tags %v", tags)
 	}
-	call("RemoveTagsFromResource", `{"ResourceId":"/app/a"}`)
+	call("RemoveTagsFromResource", `{"ResourceType":"Parameter","ResourceId":"/app/a","TagKeys":["k"]}`)
 	call("DeleteParameter", `{"Name":"/app/b"}`)
 	code, miss := call("GetParameter", `{"Name":"/app/b"}`)
 	if code != 400 && asM(miss["Parameter"])["Name"] != "" {
@@ -125,7 +125,7 @@ func TestBootedServerSSMSection48(t *testing.T) {
 	}
 	call("DeleteParameters", `{"Names":["/app/secret"]}`)
 
-	call("UnlabelParameterVersion", `{"Name":"/app/a","Labels":["prod"]}`)
+	call("UnlabelParameterVersion", `{"Name":"/app/a","ParameterVersion":2,"Labels":["prod"]}`)
 	_, doc := call("CreateDocument", `{"Name":"doc1","Content":"{}","DocumentType":"Command"}`)
 	if asM(doc["DocumentDescription"])["Name"] != "doc1" && str(asM(doc["DocumentDescription"])["Name"]) != "doc1" {
 		if _, ok := doc["DocumentDescription"]; !ok {
@@ -158,16 +158,16 @@ func TestBootedServerSSMSection48(t *testing.T) {
 	call("RegisterDefaultPatchBaseline", `{"BaselineId":"`+bid+`"}`)
 	call("GetDefaultPatchBaseline", `{}`)
 	call("DeletePatchBaseline", `{"BaselineId":"`+bid+`"}`)
-	_, mw := call("CreateMaintenanceWindow", `{"Name":"mw","Schedule":"cron(0 0 * * ? *)","Duration":1,"Cutoff":0}`)
+	_, mw := call("CreateMaintenanceWindow", `{"Name":"mw","Schedule":"cron(0 0 * * ? *)","Duration":1,"Cutoff":0,"AllowUnassociatedTargets":false}`)
 	wid := str(mw["WindowId"])
 	call("GetMaintenanceWindow", `{"WindowId":"`+wid+`"}`)
 	call("UpdateMaintenanceWindow", `{"WindowId":"`+wid+`","Name":"mw2"}`)
 	call("DescribeMaintenanceWindows", `{}`)
-	_, tgt := call("RegisterTargetWithMaintenanceWindow", `{"WindowId":"`+wid+`","ResourceType":"INSTANCE"}`)
+	_, tgt := call("RegisterTargetWithMaintenanceWindow", `{"WindowId":"`+wid+`","ResourceType":"INSTANCE","Targets":[{"Key":"InstanceIds","Values":["i-1"]}]}`)
 	tid := str(tgt["WindowTargetId"])
 	call("DescribeMaintenanceWindowTargets", `{"WindowId":"`+wid+`"}`)
 	call("DeregisterTargetFromMaintenanceWindow", `{"WindowId":"`+wid+`","WindowTargetId":"`+tid+`"}`)
-	_, task := call("RegisterTaskWithMaintenanceWindow", `{"WindowId":"`+wid+`","TaskArn":"AWS-RunShellScript"}`)
+	_, task := call("RegisterTaskWithMaintenanceWindow", `{"WindowId":"`+wid+`","TaskArn":"AWS-RunShellScript","TaskType":"RUN_COMMAND"}`)
 	tkid := str(task["WindowTaskId"])
 	call("DescribeMaintenanceWindowTasks", `{"WindowId":"`+wid+`"}`)
 	call("DeregisterTaskFromMaintenanceWindow", `{"WindowId":"`+wid+`","WindowTaskId":"`+tkid+`"}`)
@@ -177,7 +177,7 @@ func TestBootedServerSSMSection48(t *testing.T) {
 	call("GetAutomationExecution", `{"AutomationExecutionId":"`+aeid+`"}`)
 	call("DescribeAutomationExecutions", `{}`)
 	call("StopAutomationExecution", `{"AutomationExecutionId":"`+aeid+`"}`)
-	_, ops := call("CreateOpsItem", `{"Title":"t","Source":"mirror"}`)
+	_, ops := call("CreateOpsItem", `{"Title":"t","Source":"mirror","Description":"d"}`)
 	oid := str(ops["OpsItemId"])
 	call("GetOpsItem", `{"OpsItemId":"`+oid+`"}`)
 	call("UpdateOpsItem", `{"OpsItemId":"`+oid+`","Status":"Resolved"}`)
@@ -198,10 +198,10 @@ func TestBootedServerSSMSection48(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := io.ReadAll(res.Body)
 	res.Body.Close()
-	if res.StatusCode >= 300 || res.Header.Get("x-mirror-fidelity") != "emulate" {
-		t.Fatalf("CreateActivation %d %s %s", res.StatusCode, res.Header.Get("x-mirror-fidelity"), raw)
+	// Activations were one of the echoing key-value extras; mock tier now.
+	if res.Header.Get("x-mirror-fidelity") == "emulate" {
+		t.Fatal("CreateActivation claims emulate")
 	}
 }
 
@@ -244,5 +244,9 @@ func TestSSMHTTPProvenOps(t *testing.T) {
 		"GetServiceSetting", "UpdateServiceSetting", "ResetServiceSetting",
 	}
 
-	assertSame(t, "ssm", ssm.New(spitest.Deps(t)).Operations(), append(want, ssm.ExtraOps()...))
+	p, err := bundled.New("aws.ssm", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSame(t, "ssm", p.Operations(), want)
 }

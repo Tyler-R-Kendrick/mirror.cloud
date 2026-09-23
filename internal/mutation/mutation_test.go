@@ -8927,9 +8927,9 @@ var mutants = []mutant{
 	},
 	{
 		name: "firehose-accept-invalid-list-limit",
-		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `return limit, limit >= minimum && limit <= maximum`,
-		new:  `return limit, true`,
+		file: filepath.Join("behavior", "aws", "firehose", "service.yaml"),
+		old:  `double(input.Limit) == double(limit) && limit >= 1 && limit <= 10000)`,
+		new:  `double(input.Limit) == double(limit))`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseListDeliveryStreamsPagination",
 	},

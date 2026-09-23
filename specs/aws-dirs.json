@@ -55,8 +55,8 @@
     "aws.timestream": "endpointPrefix ingest.timestream; the pack implements the write control plane (CreateDatabase/CreateTable)"
   },
   "unavailable": {
-    "aws.elastictranscoder": "no model published in aws/api-models-aws",
-    "aws.lookoutmetrics": "no model published in aws/api-models-aws",
-    "aws.qldb": "no model published in aws/api-models-aws"
+    "aws.elastictranscoder": "retired from aws/api-models-aws by 312fb32 (Deprecate Elastic Transcoder); specs/urls.tsv serves the last published model, from its parent d4b4881",
+    "aws.lookoutmetrics": "retired from aws/api-models-aws by 45aa0c8 (Deprecate multiple services on 2025-10-28); specs/urls.tsv serves the last published model, from its parent da9aa6a",
+    "aws.qldb": "retired from aws/api-models-aws by 45aa0c8 (Deprecate multiple services on 2025-10-28); specs/urls.tsv serves the last published model, from its parent da9aa6a"
   }
 }

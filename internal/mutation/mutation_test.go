@@ -4275,14 +4275,28 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-reject-api-gateway-resource",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old: `		return arn, err
-	case "AWS::ApiGateway::RestApi":
-		n := str(props["Name"])`,
-		new: `		return arn, err
-	case "AWS::ApiGateway::RestApiMutated":
-		n := str(props["Name"])`,
+		old: `case "AWS::ApiGateway::RestApi":
+		out, err := p.call(`,
+		new: `case "AWS::ApiGateway::RestApiMutated":
+		out, err := p.call(`,
 		pkg: "./internal/services/aws/cloudformation",
 		run: "TestCloudFormationProvisionedResourceLifecycle",
+	},
+	{
+		name: "cloudformation-provision-queue-without-creating-it",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `p.call(ctx, req, "aws.sqs", "CreateQueue",`,
+		new:  `p.call(ctx, req, "aws.sqs", "ListQueues",`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationProvisionedResourceLifecycle",
+	},
+	{
+		name: "cloudformation-delete-stack-keeps-table",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `{"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},`,
+		new:  `{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": id}},`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationProvisionedResourceLifecycle",
 	},
 	{
 		name: "cloudformation-treat-queue-url-as-bucket",

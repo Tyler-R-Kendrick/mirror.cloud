@@ -12,8 +12,17 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	// CloudFormation provisions through each resource's owning service.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -369,11 +378,12 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		"Api": map[string]any{"Type": "AWS::ApiGateway::RestApi", "Properties": map[string]any{}},
 		"Bucket": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{
 			"VersioningConfiguration": map[string]any{"Status": "Enabled"}, "Tags": []any{map[string]any{"Key": "env", "Value": "test"}},
-			"CorsConfiguration": map[string]any{}, "BucketEncryption": map[string]any{}, "LifecycleConfiguration": map[string]any{},
-			"ReplicationConfiguration": map[string]any{}, "NotificationConfiguration": map[string]any{}, "OwnershipControls": map[string]any{},
-			"PublicAccessBlockConfiguration": map[string]any{}, "WebsiteConfiguration": map[string]any{},
+			"PublicAccessBlockConfiguration": map[string]any{"BlockPublicAcls": true},
+			"OwnershipControls":              map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "BucketOwnerEnforced"}}},
 		}},
-		"Function":  map[string]any{"Type": "AWS::Lambda::Function", "Properties": map[string]any{"Runtime": "provided.al2", "Handler": "bootstrap", "Code": map[string]any{}}},
+		"Function": map[string]any{"Type": "AWS::Lambda::Function", "Properties": map[string]any{
+			"Runtime": "provided.al2", "Handler": "bootstrap", "Role": "arn:aws:iam::000000000000:role/fn", "Code": map[string]any{"ZipFile": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="},
+		}},
 		"Key":       map[string]any{"Type": "AWS::KMS::Key", "Properties": map[string]any{}},
 		"Log":       map[string]any{"Type": "AWS::Logs::LogGroup", "Properties": map[string]any{}},
 		"Parameter": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Value": "value"}},
@@ -381,12 +391,14 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 			"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/events", "Policy": `{"Version":"2012-10-17"}`,
 		}},
 		"Queue":  map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{}},
-		"Role":   map[string]any{"Type": "AWS::IAM::Role", "Properties": map[string]any{}},
-		"Rule":   map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{}},
+		"Role":   map[string]any{"Type": "AWS::IAM::Role", "Properties": map[string]any{"AssumeRolePolicyDocument": map[string]any{"Version": "2012-10-17", "Statement": []any{}}}},
+		"Rule":   map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"ScheduleExpression": "rate(1 hour)"}},
 		"Secret": map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"SecretString": "value"}},
 		"Stream": map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{}},
-		"Table":  map[string]any{"Type": "AWS::DynamoDB::Table", "Properties": map[string]any{}},
-		"Topic":  map[string]any{"Type": "AWS::SNS::Topic", "Properties": map[string]any{}},
+		"Table": map[string]any{"Type": "AWS::DynamoDB::Table", "Properties": map[string]any{
+			"KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "AttributeDefinitions": []any{map[string]any{"AttributeName": "id", "AttributeType": "S"}}, "BillingMode": "PAY_PER_REQUEST",
+		}},
+		"Topic": map[string]any{"Type": "AWS::SNS::Topic", "Properties": map[string]any{}},
 	}
 	template, _ := json.Marshal(map[string]any{"Resources": resources, "Outputs": map[string]any{
 		"BucketArn": map[string]any{"Value": map[string]any{"Fn::GetAtt": "Bucket.Arn"}},
@@ -413,8 +425,42 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 	if err != nil || len(listed.Output["StackResourceSummaries"].([]any)) != len(resources) {
 		t.Fatalf("resources %#v %v", listed, err)
 	}
+	// Each resource exists in its owning service, as that service stores it.
+	owned := func(svc, op string, in map[string]any) error {
+		_, err := p.call(ctx, &spi.Request{Identity: id}, svc, op, in)
+		return err
+	}
+	versioning, err := p.call(ctx, &spi.Request{Identity: id}, "aws.s3", "GetBucketVersioning", map[string]any{"Bucket": "all-bucket"})
+	if err != nil || versioning["Status"] != "Enabled" {
+		t.Fatalf("bucket versioning %#v %v", versioning, err)
+	}
+	for _, check := range []struct {
+		svc, op string
+		in      map[string]any
+	}{
+		{"aws.iam", "GetRole", map[string]any{"RoleName": "Role"}},
+		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "Queue"}},
+		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": "Table"}},
+		{"aws.logs", "DescribeLogGroups", map[string]any{"logGroupNamePrefix": "/aws/all/Log"}},
+	} {
+		if err := owned(check.svc, check.op, check.in); err != nil {
+			t.Errorf("%s %s after CreateStack: %v", check.svc, check.op, err)
+		}
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteStack", Input: map[string]any{"StackName": "all"}}); err != nil {
 		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		svc, op string
+		in      map[string]any
+	}{
+		{"aws.iam", "GetRole", map[string]any{"RoleName": "Role"}},
+		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "Queue"}},
+		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": "Table"}},
+	} {
+		if err := owned(check.svc, check.op, check.in); err == nil {
+			t.Errorf("%s %s still answers after DeleteStack", check.svc, check.op)
+		}
 	}
 	unsupported, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Nope": map[string]any{"Type": "AWS::Nope::Thing"}}})
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "bad", "TemplateBody": string(unsupported)}}); err == nil {

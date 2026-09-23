@@ -1,0 +1,355 @@
+schema: bir/1
+service: aws.elasticloadbalancing
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Load balancers, target groups, listeners, rules and trust stores are
+# records keyed by their ARNs; nothing routes traffic, every registered target
+# is healthy, and the per-resource attribute, tag and certificate lists are
+# stored as given. No other service reads these records.
+provenance: authored
+
+resources:
+  lb:
+    collection: elb
+    id: { input_members: [LoadBalancerArn] }
+    record: {}
+  tg:
+    collection: tg
+    id: { input_members: [TargetGroupArn] }
+    record: {}
+  listener:
+    collection: listener
+    id: { input_members: [ListenerArn] }
+    record: {}
+  rule:
+    collection: elbrules
+    id: { input_members: [RuleArn] }
+    record: {}
+  truststore:
+    collection: tstore
+    id: { input_members: [TrustStoreArn] }
+    record: {}
+  # Lists the pack kept as bare values, held here under one member each.
+  lbattr:
+    collection: elbattr
+    id: { input_members: [LoadBalancerArn] }
+    record: {}
+  tgattr:
+    collection: tgattr
+    id: { input_members: [TargetGroupArn] }
+    record: {}
+  lattr:
+    collection: lattr
+    id: { input_members: [ListenerArn] }
+    record: {}
+  targets:
+    collection: targets
+    id: { input_members: [TargetGroupArn] }
+    record: {}
+  certs:
+    collection: lcerts
+    id: { input_members: [ListenerArn] }
+    record: {}
+  revocations:
+    collection: tsrev
+    id: { input_members: [TrustStoreArn] }
+    record: {}
+  tags:
+    collection: elbtags
+    id: { derive: "string(input.ResourceArns[0])" }
+    record: {}
+
+operations:
+  CreateLoadBalancer:
+    let:
+      name: string(input.Name)
+    effects:
+      - generate: { bind: suffix, kind: hex, bytes: 8 }
+      - generate: { bind: dns, kind: hex, bytes: 4 }
+      - put:
+          resource: lb
+          key: &lbArn "'arn:aws:elasticloadbalancing:' + identity.region + ':' + identity.account + ':loadbalancer/app/' + name + '/' + fx.suffix"
+          record:
+            LoadBalancerArn: *lbArn
+            LoadBalancerName: name
+            Type: "'Type' in input && string(input.Type) != '' ? string(input.Type) : 'application'"
+            DNSName: "name + '-' + fx.dns + '.' + identity.region + '.elb.amazonaws.com'"
+            State: "{'Code': 'active'}"
+    output:
+      LoadBalancers: "[rec]"
+
+  DescribeLoadBalancers:
+    list:
+      resource: lb
+      member: LoadBalancers
+      filter: >-
+        (!('Names' in input) || item.LoadBalancerName in input.Names)
+        && (!('LoadBalancerArns' in input) || item.LoadBalancerArn in input.LoadBalancerArns)
+
+  DeleteLoadBalancer: {delete: {resource: lb, missing: ignore}}
+
+  ModifyLoadBalancerAttributes: &setAttributes
+    effects:
+      - put: { resource: lbattr, record: { Attributes: input.Attributes } }
+    output:
+      Attributes: input.Attributes
+  DescribeLoadBalancerAttributes:
+    reads: { a: { resource: lbattr } }
+    output:
+      Attributes: "a_found ? a.Attributes : []"
+
+  SetIpAddressType: &patchLB
+    effects:
+      - patch: { resource: lb, spread: input }
+    output: {}
+  SetSecurityGroups: *patchLB
+  SetSubnets: *patchLB
+
+  CreateTargetGroup:
+    let:
+      name: string(input.Name)
+    effects:
+      - generate: { bind: suffix, kind: hex, bytes: 8 }
+      - put:
+          resource: tg
+          key: &tgArn "'arn:aws:elasticloadbalancing:' + identity.region + ':' + identity.account + ':targetgroup/' + name + '/' + fx.suffix"
+          record:
+            TargetGroupArn: *tgArn
+            TargetGroupName: name
+            Protocol: "'Protocol' in input ? input.Protocol : null"
+            Port: "'Port' in input ? input.Port : null"
+            VpcId: "'VpcId' in input ? input.VpcId : null"
+            TargetType: "'TargetType' in input && string(input.TargetType) != '' ? string(input.TargetType) : 'instance'"
+    output:
+      TargetGroups: "[rec]"
+
+  DescribeTargetGroups:
+    list:
+      resource: tg
+      member: TargetGroups
+      filter: >-
+        (!('Names' in input) || item.TargetGroupName in input.Names)
+        && (!('TargetGroupArns' in input) || item.TargetGroupArn in input.TargetGroupArns)
+
+  ModifyTargetGroup:
+    effects:
+      - patch: { resource: tg, spread: input }
+    output:
+      TargetGroups: "[rec]"
+
+  DeleteTargetGroup: {delete: {resource: tg, missing: ignore}}
+
+  ModifyTargetGroupAttributes:
+    effects:
+      - put: { resource: tgattr, record: { Attributes: input.Attributes } }
+    output:
+      Attributes: input.Attributes
+  DescribeTargetGroupAttributes:
+    reads: { a: { resource: tgattr } }
+    output:
+      Attributes: "a_found ? a.Attributes : []"
+
+  # Targets are identified by Id: registering one already present replaces it,
+  # and deregistering removes only the named ones. ECS registers a service's
+  # running tasks through these two operations.
+  RegisterTargets:
+    reads: { t: { resource: targets } }
+    effects:
+      - put:
+          resource: targets
+          record:
+            Targets: >-
+              (t_found ? t.Targets.filter(x, !(x.Id in input.Targets.map(y, y.Id))) : []) + input.Targets
+    output: {}
+  DeregisterTargets:
+    reads: { t: { resource: targets } }
+    effects:
+      - put:
+          resource: targets
+          record:
+            Targets: "t_found ? t.Targets.filter(x, !(x.Id in input.Targets.map(y, y.Id))) : []"
+    output: {}
+  DescribeTargetHealth:
+    reads: { t: { resource: targets } }
+    output:
+      TargetHealthDescriptions: >-
+        t_found ? t.Targets.map(x, {'Target': x, 'TargetHealth': {'State': 'healthy'}}) : []
+
+  CreateListener:
+    let:
+      lbArn: string(input.LoadBalancerArn)
+    effects:
+      - generate: { bind: suffix, kind: hex, bytes: 8 }
+      - put:
+          resource: listener
+          key: &listenerArn "split(lbArn, ':loadbalancer/')[0] + ':listener/' + fx.suffix"
+          record:
+            ListenerArn: *listenerArn
+            LoadBalancerArn: lbArn
+            Protocol: "'Protocol' in input ? input.Protocol : null"
+            Port: "'Port' in input ? input.Port : null"
+            DefaultActions: "'DefaultActions' in input ? input.DefaultActions : null"
+    output:
+      Listeners: "[rec]"
+
+  DescribeListeners:
+    list:
+      resource: listener
+      member: Listeners
+      filter: >-
+        (!('ListenerArns' in input) || item.ListenerArn in input.ListenerArns)
+        && (!('LoadBalancerArn' in input) || item.LoadBalancerArn == input.LoadBalancerArn)
+
+  ModifyListener:
+    effects:
+      - patch: { resource: listener, spread: input }
+    output:
+      Listeners: "[rec]"
+
+  DeleteListener: {delete: {resource: listener, missing: ignore}}
+
+  ModifyListenerAttributes:
+    effects:
+      - put: { resource: lattr, record: { Attributes: input.Attributes } }
+    output:
+      Attributes: input.Attributes
+  DescribeListenerAttributes:
+    reads: { a: { resource: lattr } }
+    output:
+      Attributes: "a_found ? a.Attributes : []"
+
+  AddListenerCertificates:
+    effects:
+      - put: { resource: certs, record: { Certificates: input.Certificates } }
+    output:
+      Certificates: input.Certificates
+  DescribeListenerCertificates:
+    reads: { c: { resource: certs } }
+    output:
+      Certificates: "c_found ? c.Certificates : []"
+  RemoveListenerCertificates: {delete: {resource: certs, missing: ignore}}
+
+  CreateRule:
+    effects:
+      - generate: { bind: suffix, kind: hex, bytes: 8 }
+      - put:
+          resource: rule
+          key: &ruleArn "string(input.ListenerArn) + '/rule/' + fx.suffix"
+          record:
+            RuleArn: *ruleArn
+            ListenerArn: string(input.ListenerArn)
+            Priority: "'Priority' in input ? input.Priority : null"
+            Conditions: "'Conditions' in input ? input.Conditions : null"
+            Actions: "'Actions' in input ? input.Actions : null"
+    output:
+      Rules: "[rec]"
+
+  DescribeRules:
+    list:
+      resource: rule
+      member: Rules
+      filter: >-
+        (!('RuleArns' in input) || item.RuleArn in input.RuleArns)
+        && (!('ListenerArn' in input) || item.ListenerArn == input.ListenerArn)
+
+  ModifyRule:
+    effects:
+      - patch: { resource: rule, spread: input }
+    output:
+      Rules: "[rec]"
+
+  DeleteRule: {delete: {resource: rule, missing: ignore}}
+
+  SetRulePriorities:
+    output:
+      Rules: input.RulePriorities
+
+  AddTags:
+    effects:
+      - put: { resource: tags, record: { Tags: input.Tags } }
+    output: {}
+  RemoveTags: {delete: {resource: tags, missing: ignore}}
+  DescribeTags:
+    reads: { t: { resource: tags } }
+    output:
+      TagDescriptions: "[{'Tags': t_found ? t.Tags : []}]"
+
+  CreateTrustStore:
+    let:
+      name: string(input.Name)
+    effects:
+      - generate: { bind: suffix, kind: hex, bytes: 8 }
+      - put:
+          resource: truststore
+          key: &tsArn "'arn:aws:elasticloadbalancing:' + identity.region + ':' + identity.account + ':truststore/' + name + '/' + fx.suffix"
+          record:
+            TrustStoreArn: *tsArn
+            Name: name
+            Status: "'ACTIVE'"
+    output:
+      TrustStores: "[rec]"
+
+  DescribeTrustStores:
+    list: { resource: truststore, member: TrustStores }
+
+  ModifyTrustStore:
+    effects:
+      - patch: { resource: truststore, spread: input }
+    output:
+      TrustStores: "[rec]"
+
+  DeleteTrustStore: {delete: {resource: truststore, missing: ignore}}
+
+  AddTrustStoreRevocations:
+    effects:
+      - put: { resource: revocations, record: { Revocations: "'RevocationContents' in input ? input.RevocationContents : []" } }
+    output:
+      TrustStoreRevocations: "'RevocationContents' in input ? input.RevocationContents : []"
+  DescribeTrustStoreRevocations:
+    reads: { r: { resource: revocations } }
+    output:
+      TrustStoreRevocations: "r_found ? r.Revocations : []"
+  RemoveTrustStoreRevocations: {delete: {resource: revocations, missing: ignore}}
+
+  DescribeTrustStoreAssociations:
+    output:
+      TrustStoreAssociations: "[]"
+  DeleteSharedTrustStoreAssociation: {}
+  GetTrustStoreCaCertificatesBundle:
+    output:
+      Location: "'s3://mirror/ca.pem'"
+  GetTrustStoreRevocationContent:
+    output:
+      Location: "'s3://mirror/rev.crl'"
+
+  # Capacity reservations and IPAM pools are accepted and not modelled: no
+  # capacity is reserved and no address is drawn from a pool.
+  ModifyCapacityReservation: {}
+  DescribeCapacityReservation:
+    output:
+      CapacityReservationState: "[]"
+  ModifyIpPools:
+    output:
+      IpamPools: "'IpamPools' in input ? input.IpamPools : null"
+
+  DescribeSSLPolicies:
+    output:
+      SslPolicies: "[{'Name': 'ELBSecurityPolicy-2016-08', 'SslProtocols': ['TLSv1.2']}]"
+  DescribeAccountLimits:
+    output:
+      Limits: "[{'Name': 'application-load-balancers', 'Max': '1000'}]"
+  GetResourcePolicy:
+    output:
+      Policy: "''"
+
+quirks:
+  - operation: DescribeTargetHealth
+    note: >
+      Every registered target is healthy: nothing sends a health check.
+    provenance: authored
+  - operation: RemoveTags
+    note: >
+      Removing tags drops every tag the resource had, not only the named keys,
+      and DescribeTags answers only the first named resource. Transcribed from
+      the pack.
+    provenance: authored

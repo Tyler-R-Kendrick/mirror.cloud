@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -398,33 +399,23 @@ func (p *Pack) createTask(ctx context.Context, req *spi.Request, cluster string,
 }
 
 func (p *Pack) syncTargets(ctx context.Context, req *spi.Request, task map[string]any, register bool) {
+	operation := "DeregisterTargets"
+	if register {
+		operation = "RegisterTargets"
+	}
 	for _, raw := range asAnySlice(task["loadBalancers"]) {
 		lb, _ := raw.(map[string]any)
 		arn := first(lb, "targetGroupArn", "TargetGroupArn")
 		if arn == "" {
 			continue
 		}
-		col := p.col(req, "targets")
-		stored, _, _ := col.Get(ctx, arn)
-		var targets []any
-		_ = json.Unmarshal(stored, &targets)
-		id := first(task, "privateIPv4Address")
-		filtered := targets[:0]
-		for _, rawTarget := range targets {
-			target, _ := rawTarget.(map[string]any)
-			if first(target, "Id") != id {
-				filtered = append(filtered, rawTarget)
-			}
+		target := map[string]any{"Id": first(task, "privateIPv4Address")}
+		if port := lb["containerPort"]; port != nil {
+			target["Port"] = port
 		}
-		if register {
-			target := map[string]any{"Id": id}
-			if port := lb["containerPort"]; port != nil {
-				target["Port"] = port
-			}
-			filtered = append(filtered, target)
-		}
-		updated, _ := json.Marshal(filtered)
-		_ = col.Put(ctx, arn, updated)
+		// ELB owns its targets; ECS registers a task the way a caller would.
+		_, _ = bundled.Handler("aws.elasticloadbalancing", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: operation,
+			Input: map[string]any{"TargetGroupArn": arn, "Targets": []any{target}}})
 	}
 }
 

@@ -26,7 +26,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudformation"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/elasticloadbalancing"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/firehose"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"

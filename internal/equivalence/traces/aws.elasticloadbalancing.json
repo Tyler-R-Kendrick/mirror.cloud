@@ -1,0 +1,1334 @@
+{
+  "schema": "trace/1",
+  "service": "aws.elasticloadbalancing",
+  "source": "pack:internal/services/aws/elasticloadbalancing@d1dba13",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeLoadBalancers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": null
+      }
+    },
+    {
+      "operation": "CreateLoadBalancer",
+      "input": {
+        "Name": "web",
+        "Subnets": [
+          "subnet-1"
+        ],
+        "Type": "application"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": [
+          {
+            "DNSName": "web-5f59.us-east-1.elb.amazonaws.com",
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/web/7c589129",
+            "LoadBalancerName": "web",
+            "State": {
+              "Code": "active"
+            },
+            "Type": "application"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLoadBalancers",
+      "input": {
+        "Names": [
+          "web"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": [
+          {
+            "DNSName": "web-5f59.us-east-1.elb.amazonaws.com",
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/web/7c589129",
+            "LoadBalancerName": "web",
+            "State": {
+              "Code": "active"
+            },
+            "Type": "application"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLoadBalancers",
+      "input": {
+        "Names": [
+          "missing"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": []
+      },
+      "recut": "DescribeLoadBalancers' Names member restricts the answer to the named load balancers; the pack read a LoadBalancerNames member the request does not have and answered every one for an unknown name."
+    },
+    {
+      "operation": "DescribeLoadBalancers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": [
+          {
+            "DNSName": "web-5f59.us-east-1.elb.amazonaws.com",
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/web/7c589129",
+            "LoadBalancerName": "web",
+            "State": {
+              "Code": "active"
+            },
+            "Type": "application"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyLoadBalancerAttributes",
+      "input": {
+        "Attributes": [
+          {
+            "Key": "idle_timeout.timeout_seconds",
+            "Value": "60"
+          }
+        ],
+        "LoadBalancerArn": {
+          "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": [
+          {
+            "Key": "idle_timeout.timeout_seconds",
+            "Value": "60"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLoadBalancerAttributes",
+      "input": {
+        "LoadBalancerArn": {
+          "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": [
+          {
+            "Key": "idle_timeout.timeout_seconds",
+            "Value": "60"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateTargetGroup",
+      "input": {
+        "Name": "tg",
+        "Port": 80,
+        "Protocol": "HTTP",
+        "VpcId": "vpc-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TargetGroups": [
+          {
+            "Port": 80,
+            "Protocol": "HTTP",
+            "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+            "TargetGroupName": "tg",
+            "TargetType": "instance",
+            "VpcId": "vpc-1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTargetGroups",
+      "input": {
+        "Names": [
+          "tg"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TargetGroups": [
+          {
+            "Port": 80,
+            "Protocol": "HTTP",
+            "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+            "TargetGroupName": "tg",
+            "TargetType": "instance",
+            "VpcId": "vpc-1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyTargetGroup",
+      "input": {
+        "HealthCheckPath": "/health",
+        "TargetGroupArn": {
+          "$fromPath": "TargetGroups.0.TargetGroupArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TargetGroups": [
+          {
+            "HealthCheckPath": "/health",
+            "Port": 80,
+            "Protocol": "HTTP",
+            "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+            "TargetGroupName": "tg",
+            "TargetType": "instance",
+            "VpcId": "vpc-1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTargetGroups",
+      "input": {
+        "Names": [
+          "tg"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TargetGroups": [
+          {
+            "HealthCheckPath": "/health",
+            "Port": 80,
+            "Protocol": "HTTP",
+            "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+            "TargetGroupName": "tg",
+            "TargetType": "instance",
+            "VpcId": "vpc-1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateListener",
+      "input": {
+        "DefaultActions": [
+          {
+            "TargetGroupArn": {
+              "$fromPath": "TargetGroups.0.TargetGroupArn",
+              "$fromStep": 7
+            },
+            "Type": "forward"
+          }
+        ],
+        "LoadBalancerArn": {
+          "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+          "$fromStep": 1
+        },
+        "Port": 80,
+        "Protocol": "HTTP"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Listeners": [
+          {
+            "DefaultActions": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+                "Type": "forward"
+              }
+            ],
+            "ListenerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/33f6fc5d",
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/web/7c589129",
+            "Port": 80,
+            "Protocol": "HTTP"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeListeners",
+      "input": {
+        "LoadBalancerArn": {
+          "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Listeners": [
+          {
+            "DefaultActions": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+                "Type": "forward"
+              }
+            ],
+            "ListenerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/33f6fc5d",
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/web/7c589129",
+            "Port": 80,
+            "Protocol": "HTTP"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeListeners",
+      "input": {
+        "ListenerArns": [
+          {
+            "$fromPath": "Listeners.0.ListenerArn",
+            "$fromStep": 11
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Listeners": [
+          {
+            "DefaultActions": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+                "Type": "forward"
+              }
+            ],
+            "ListenerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/33f6fc5d",
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/web/7c589129",
+            "Port": 80,
+            "Protocol": "HTTP"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyListener",
+      "input": {
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        },
+        "Port": 8080
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Listeners": [
+          {
+            "DefaultActions": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+                "Type": "forward"
+              }
+            ],
+            "ListenerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/33f6fc5d",
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/app/web/7c589129",
+            "Port": 8080,
+            "Protocol": "HTTP"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RegisterTargets",
+      "input": {
+        "TargetGroupArn": {
+          "$fromPath": "TargetGroups.0.TargetGroupArn",
+          "$fromStep": 7
+        },
+        "Targets": [
+          {
+            "Id": "i-1",
+            "Port": 80
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTargetHealth",
+      "input": {
+        "TargetGroupArn": {
+          "$fromPath": "TargetGroups.0.TargetGroupArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TargetHealthDescriptions": [
+          {
+            "Target": {
+              "Id": "i-1",
+              "Port": 80
+            },
+            "TargetHealth": {
+              "State": "healthy"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateRule",
+      "input": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "$fromPath": "TargetGroups.0.TargetGroupArn",
+              "$fromStep": 7
+            },
+            "Type": "forward"
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "path-pattern",
+            "Values": [
+              "/a"
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        },
+        "Priority": 10
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Rules": [
+          {
+            "Actions": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+                "Type": "forward"
+              }
+            ],
+            "Conditions": [
+              {
+                "Field": "path-pattern",
+                "Values": [
+                  "/a"
+                ]
+              }
+            ],
+            "ListenerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/33f6fc5d",
+            "Priority": 10,
+            "RuleArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/33f6fc5d/rule/83d4958a"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeRules",
+      "input": {
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Rules": [
+          {
+            "Actions": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/tg/9c8e2cb0",
+                "Type": "forward"
+              }
+            ],
+            "Conditions": [
+              {
+                "Field": "path-pattern",
+                "Values": [
+                  "/a"
+                ]
+              }
+            ],
+            "ListenerArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/33f6fc5d",
+            "Priority": 10,
+            "RuleArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/33f6fc5d/rule/83d4958a"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteRule",
+      "input": {
+        "RuleArn": {
+          "$fromPath": "Rules.0.RuleArn",
+          "$fromStep": 17
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeRules",
+      "input": {
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Rules": null
+      }
+    },
+    {
+      "operation": "AddTags",
+      "input": {
+        "ResourceArns": [
+          {
+            "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+            "$fromStep": 1
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "env",
+            "Value": "dev"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTags",
+      "input": {
+        "ResourceArns": [
+          {
+            "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagDescriptions": [
+          {
+            "Tags": [
+              {
+                "Key": "env",
+                "Value": "dev"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RemoveTags",
+      "input": {
+        "ResourceArns": [
+          {
+            "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+            "$fromStep": 1
+          }
+        ],
+        "TagKeys": [
+          "env"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTags",
+      "input": {
+        "ResourceArns": [
+          {
+            "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagDescriptions": [
+          {
+            "Tags": []
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyListenerAttributes",
+      "input": {
+        "Attributes": [
+          {
+            "Key": "tcp.idle_timeout.seconds",
+            "Value": "350"
+          }
+        ],
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": [
+          {
+            "Key": "tcp.idle_timeout.seconds",
+            "Value": "350"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeListenerAttributes",
+      "input": {
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": [
+          {
+            "Key": "tcp.idle_timeout.seconds",
+            "Value": "350"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyTargetGroupAttributes",
+      "input": {
+        "Attributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30"
+          }
+        ],
+        "TargetGroupArn": {
+          "$fromPath": "TargetGroups.0.TargetGroupArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTargetGroupAttributes",
+      "input": {
+        "TargetGroupArn": {
+          "$fromPath": "TargetGroups.0.TargetGroupArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AddListenerCertificates",
+      "input": {
+        "Certificates": [
+          {
+            "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/c1"
+          }
+        ],
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificates": [
+          {
+            "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/c1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeListenerCertificates",
+      "input": {
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificates": [
+          {
+            "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/c1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RemoveListenerCertificates",
+      "input": {
+        "Certificates": [
+          {
+            "CertificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/c1"
+          }
+        ],
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeListenerCertificates",
+      "input": {
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Certificates": []
+      }
+    },
+    {
+      "operation": "CreateTrustStore",
+      "input": {
+        "CaCertificatesBundleS3Bucket": "b",
+        "CaCertificatesBundleS3Key": "k",
+        "Name": "ts"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrustStores": [
+          {
+            "Name": "ts",
+            "Status": "ACTIVE",
+            "TrustStoreArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:truststore/ts/100aa4e6"
+          }
+        ]
+      },
+      "recut": "The model's TrustStore structure declares Name, TrustStoreArn, Status, NumberOfCaCertificates and TotalRevokedEntries; the pack answered CaCertificatesBundleS3Bucket, which no SDK can read."
+    },
+    {
+      "operation": "DescribeTrustStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrustStores": [
+          {
+            "Name": "ts",
+            "Status": "ACTIVE",
+            "TrustStoreArn": "arn:aws:elasticloadbalancing:us-east-1:000000000000:truststore/ts/100aa4e6"
+          }
+        ]
+      },
+      "recut": "The model's TrustStore structure declares Name, TrustStoreArn, Status, NumberOfCaCertificates and TotalRevokedEntries; the pack answered CaCertificatesBundleS3Bucket, which no SDK can read."
+    },
+    {
+      "operation": "AddTrustStoreRevocations",
+      "input": {
+        "RevocationContents": [
+          {
+            "S3Bucket": "b",
+            "S3Key": "crl"
+          }
+        ],
+        "TrustStoreArn": {
+          "$fromPath": "TrustStores.0.TrustStoreArn",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrustStoreRevocations": [
+          {
+            "S3Bucket": "b",
+            "S3Key": "crl"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTrustStoreRevocations",
+      "input": {
+        "TrustStoreArn": {
+          "$fromPath": "TrustStores.0.TrustStoreArn",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrustStoreRevocations": [
+          {
+            "S3Bucket": "b",
+            "S3Key": "crl"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RemoveTrustStoreRevocations",
+      "input": {
+        "RevocationIds": [
+          1
+        ],
+        "TrustStoreArn": {
+          "$fromPath": "TrustStores.0.TrustStoreArn",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTrustStoreRevocations",
+      "input": {
+        "TrustStoreArn": {
+          "$fromPath": "TrustStores.0.TrustStoreArn",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrustStoreRevocations": []
+      }
+    },
+    {
+      "operation": "DescribeTrustStoreAssociations",
+      "input": {
+        "TrustStoreArn": {
+          "$fromPath": "TrustStores.0.TrustStoreArn",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrustStoreAssociations": []
+      }
+    },
+    {
+      "operation": "GetTrustStoreCaCertificatesBundle",
+      "input": {
+        "TrustStoreArn": {
+          "$fromPath": "TrustStores.0.TrustStoreArn",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Location": "s3://mirror/ca.pem"
+      }
+    },
+    {
+      "operation": "GetTrustStoreRevocationContent",
+      "input": {
+        "RevocationId": 1,
+        "TrustStoreArn": {
+          "$fromPath": "TrustStores.0.TrustStoreArn",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Location": "s3://mirror/rev.crl"
+      }
+    },
+    {
+      "operation": "DeleteTrustStore",
+      "input": {
+        "TrustStoreArn": {
+          "$fromPath": "TrustStores.0.TrustStoreArn",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTrustStores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TrustStores": null
+      }
+    },
+    {
+      "operation": "DescribeSSLPolicies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SslPolicies": [
+          {
+            "Name": "ELBSecurityPolicy-2016-08",
+            "SslProtocols": [
+              "TLSv1.2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAccountLimits",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Limits": [
+          {
+            "Max": "1000",
+            "Name": "application-load-balancers"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetResourcePolicy",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": ""
+      }
+    },
+    {
+      "operation": "DeregisterTargets",
+      "input": {
+        "TargetGroupArn": {
+          "$fromPath": "TargetGroups.0.TargetGroupArn",
+          "$fromStep": 7
+        },
+        "Targets": [
+          {
+            "Id": "i-1",
+            "Port": 80
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTargetHealth",
+      "input": {
+        "TargetGroupArn": {
+          "$fromPath": "TargetGroups.0.TargetGroupArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TargetHealthDescriptions": null
+      }
+    },
+    {
+      "operation": "DeleteListener",
+      "input": {
+        "ListenerArn": {
+          "$fromPath": "Listeners.0.ListenerArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeListeners",
+      "input": {
+        "LoadBalancerArn": {
+          "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Listeners": null
+      }
+    },
+    {
+      "operation": "DeleteTargetGroup",
+      "input": {
+        "TargetGroupArn": {
+          "$fromPath": "TargetGroups.0.TargetGroupArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTargetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TargetGroups": null
+      }
+    },
+    {
+      "operation": "DeleteLoadBalancer",
+      "input": {
+        "LoadBalancerArn": {
+          "$fromPath": "LoadBalancers.0.LoadBalancerArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeLoadBalancers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "LoadBalancers": null
+      }
+    }
+  ]
+}

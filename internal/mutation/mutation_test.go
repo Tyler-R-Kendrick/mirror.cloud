@@ -15572,6 +15572,16 @@ var mutants = []mutant{
 		run:  "TestS3PresignedSignatureFaultCharacterization",
 	},
 	{
+		// A running task that is not registered with its target group never
+		// receives traffic; ECS registers it through ELB's own operation.
+		name: "ecs-never-register-running-task-targets",
+		file: filepath.Join("internal", "services", "aws", "ecs", "ecs.go"),
+		old:  `operation = "RegisterTargets"`,
+		new:  `operation = "DeregisterTargets"`,
+		pkg:  "./internal/services/aws/ecs",
+		run:  "TestServiceTargetsFollowTaskState",
+	},
+	{
 		// A global resource that fell back to the caller's scope would hide an
 		// STS credential from the edge and from every other account.
 		name: "engine-scope-global-resources-per-account",

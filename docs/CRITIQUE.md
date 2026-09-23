@@ -1278,6 +1278,14 @@ IAM's shadow gave NewAuthorizer as a reason the pack had to stay. That was never
 - CreateVirtualMFADevice answered `MFADevice` and a bare `SerialNumber`, neither of them a member of the output, so the wire carried nothing. It now answers `VirtualMFADevice`, as AWS does.
 - Several tests pinned pack answers AWS does not give: names in UpdateRole, UpdateUser, UpdateGroup and GetSAMLProvider results, and `PolicyName` accepted where the model requires `PolicyArn`. They now expect AWS's answers.
 
+CloudFormation is the last of the shadow set that needed nothing new. It first had to stop writing other services' storage: a role under the pack's old `iam` prefix, a KMS key in base64, an S3 bucket's versioning as raw bytes. Each of the eleven resource types is now created and deleted through its owning service's operation, and the lifecycle test checks each in its owner. Then the template engine (CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports) went native. `DescribeStackResources` had never been tested and was never recorded; it is now a line of YAML over the stack record, with a test and a needle.
+
+Scheduler needed one more mechanism: a bundle can declare `worker:`, and the Go registered with `bundled.RegisterWorker` runs for as long as the registry-built service does. A cross-service call that builds the bundle does not start it. Its delivery loop now walks the bundle's schedule records. Two things changed along the way:
+- **The first invocation counts from `LastModificationDate`.** The pack computed each schedule's next run when the schedule was created. The worker now counts from the write time, which the bundle records together with `CreationDate`, so a loop that first sees a schedule late does not skip it. AWS answers both dates, and the pack never did. The recording was re-cut for them, citing the model.
+- **Unparseable expressions are rejected again.** A `scheduler.expression_error` primitive runs the at/rate/cron parser, so CreateSchedule and UpdateSchedule once again reject an expression that doesn't parse, which the bundle alone could not do. Nothing had tested that rejection; a test does now.
+
+The loop polls once a second because the bundle's writes don't wake it. It is marked `ponytail:`, and a store change feed is the upgrade.
+
 ### A sixth of the mutation suite had never run
 
 `TestMutantsAreKilled` counted any failing `go test` as a kill, and a mutant that doesn't compile fails `go test`. A rewrite like `if false {` that leaves a variable unused, or a type change that stops a package building, "passed" without a single test running. A compile sweep over every needle found **408 such mutants**, out of about 2,450: 327 died on "declared and not used" and the rest on undefined names, type errors, unused imports and vet's `bool` check. One of them named a variable that has never existed in the code it mutates.
@@ -1288,14 +1296,15 @@ The harness now fails a mutant whose package does not build, and says so. Each o
 - where the mutant orphaned a variable, it gained a blank use of it;
 - about 50 were rewritten by hand.
 
-**Then 30 of them survived.** Guards the suite claimed to prove were in fact untested, because the test named on the needle failed for a different reason or never reached the guard:
+**Then 32 of them survived.** Guards the suite claimed to prove were in fact untested, because the test named on the needle failed for a different reason or never reached the guard:
 - SNS unsubscribe-from-a-deleted-topic used an email subscription, which has no ARN to unsubscribe.
 - The cross-scope Subscribe case sent an invalid endpoint.
 - The S3 wrong-bucket multipart case named a bucket that doesn't exist.
 - The FIFO missing-group check was backed up by a later check that answers a different code.
 
-Nine needles were pointed at the test that does catch them. Seventeen tests gained the assertion or case that reaches the guard, including a 50-round concurrent create for Firehose's in-transaction duplicate check, which only a race can observe. Two guards turned out to be unreachable or redundant and were deleted:
+Nine needles were pointed at the test that does catch them. Eighteen tests gained the assertion or case that reaches the guard. Two of them are races, and a single ungated round rarely lines two callers up, so CI's slower runners let both mutants through: DynamoDB's TTL expiry and Firehose's create now release their goroutines together, over fifty rounds. Three guards turned out to be unreachable or redundant and were deleted:
 - S3's raw-`Document` encryption reader, which nothing writes since #414.
 - Step Functions' reader bucket-owner comparison, which S3 already enforces. The type check it also did is not redundant and stays, now tested.
+- Firehose's unlocked duplicate-stream pre-check, which repeated the check inside the transaction. Without it, a plain duplicate create reaches the guard that matters.
 
 One gap is left named rather than filled: Firehose's OpenSearch processing-failure envelope has no test that observes it.

@@ -1,4 +1,6 @@
-// Package scheduler emulates EventBridge Scheduler groups, schedules, and templated target delivery.
+// Package scheduler is EventBridge Scheduler's delivery worker: the loop
+// behavior/aws/scheduler declares under worker:. Groups and schedules are the
+// bundle's; this fires them.
 package scheduler
 
 import (
@@ -6,15 +8,12 @@ import (
 	"context"
 	"encoding/json"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -26,288 +25,57 @@ const (
 	retryStarted   = "_mirrorRetryStarted"
 )
 
-func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.scheduler", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
-}
+func init() { bundled.RegisterWorker("aws.scheduler", Start) }
 
-// Pack implements EventBridge Scheduler.
-type Pack struct {
+// worker fires the schedules behavior/aws/scheduler stores.
+type worker struct {
 	deps      spi.Deps
-	wake      chan struct{}
 	stop      chan struct{}
 	done      chan struct{}
 	closeOnce sync.Once
 }
 
-// New constructs the pack and resumes persisted schedules.
-func New(d spi.Deps) *Pack {
-	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
+// Start runs the delivery loop against deps and answers how to stop it.
+func Start(d spi.Deps) func() error {
+	p := &worker{deps: d, stop: make(chan struct{}), done: make(chan struct{})}
 	if d.Store == nil || d.Clock == nil {
 		close(p.done)
-		return p
+		return p.close
 	}
 	go p.loop()
-	return p
+	return p.close
 }
 
-func (p *Pack) ServiceID() string { return "aws.scheduler" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return []string{
-		"CreateSchedule", "GetSchedule", "ListSchedules", "UpdateSchedule", "DeleteSchedule",
-		"CreateScheduleGroup", "GetScheduleGroup", "ListScheduleGroups", "DeleteScheduleGroup",
-	}
-}
-
-// Close stops the schedule worker.
-func (p *Pack) Close() error {
+func (p *worker) close() error {
 	p.closeOnce.Do(func() { close(p.stop) })
 	<-p.done
 	return nil
 }
 
-func (p *Pack) col(req *spi.Request, name string) spi.Collection {
-	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(name)
-}
+// poll bounds how long the loop sleeps without a due schedule: the bundle's
+// writes do not wake it, so a schedule created or changed is seen within one
+// poll.
+//
+// ponytail: a poll on the clock. A store change feed the engine could publish
+// on write is the upgrade; until then a new schedule waits up to one poll.
+const poll = time.Second
 
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "Name", "name")
-	requestedGroup := first(req.Input, "GroupName", "groupName")
-	group := requestedGroup
-	if group == "" {
-		group = "default"
-	}
-	schedules := p.col(req, "sch:"+group)
-	switch req.Operation {
-	case "CreateSchedule":
-		if name == "" {
-			return nil, validation("Name is required.")
-		}
-		if group != "default" && !p.groupExists(ctx, req, group) {
-			return nil, notFound("Schedule group does not exist.")
-		}
-		if _, ok, err := schedules.Get(ctx, name); err != nil {
-			return nil, err
-		} else if ok {
-			return nil, conflict("Schedule already exists.")
-		}
-		arn := "arn:aws:scheduler:" + req.Identity.Region + ":" + req.Identity.Account + ":schedule/" + group + "/" + name
-		rec, fault := p.scheduleRecord(req.Input, name, group, arn)
-		if fault != nil {
-			return nil, fault
-		}
-		if err := putRecord(ctx, schedules, name, rec); err != nil {
-			return nil, err
-		}
-		p.notify()
-		return &spi.Response{Output: map[string]any{"ScheduleArn": arn}}, nil
-	case "GetSchedule":
-		if name == "" {
-			return nil, validation("Name is required.")
-		}
-		rec, ok, err := getRecord(ctx, schedules, name)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, notFound("Schedule does not exist.")
-		}
-		return &spi.Response{Output: publicRecord(rec)}, nil
-	case "ListSchedules":
-		groups := []string{group}
-		if requestedGroup == "" {
-			groups = p.groups(ctx, req.Identity)
-		}
-		items := []any{}
-		for _, group := range groups {
-			kvs, _, err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection("sch:"+group).List(ctx, "", "", 0)
-			if err != nil {
-				return nil, err
-			}
-			for _, kv := range kvs {
-				var rec map[string]any
-				if json.Unmarshal(kv.Value, &rec) == nil {
-					items = append(items, publicRecord(rec))
-				}
-			}
-		}
-		return &spi.Response{Output: map[string]any{"Schedules": items}}, nil
-	case "UpdateSchedule":
-		if name == "" {
-			return nil, validation("Name is required.")
-		}
-		existing, ok, err := getRecord(ctx, schedules, name)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, notFound("Schedule does not exist.")
-		}
-		rec, fault := p.scheduleRecord(req.Input, name, group, stringValue(existing["Arn"]))
-		if fault != nil {
-			return nil, fault
-		}
-		if err := putRecord(ctx, schedules, name, rec); err != nil {
-			return nil, err
-		}
-		p.notify()
-		return &spi.Response{Output: map[string]any{"ScheduleArn": existing["Arn"]}}, nil
-	case "DeleteSchedule":
-		if name == "" {
-			return nil, validation("Name is required.")
-		}
-		if _, ok, err := schedules.Get(ctx, name); err != nil {
-			return nil, err
-		} else if !ok {
-			return nil, notFound("Schedule does not exist.")
-		}
-		if err := schedules.Delete(ctx, name); err != nil {
-			return nil, err
-		}
-		p.notify()
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "CreateScheduleGroup":
-		if name == "" || name == "default" {
-			return nil, validation("A non-default Name is required.")
-		}
-		if p.groupExists(ctx, req, name) {
-			return nil, conflict("Schedule group already exists.")
-		}
-		arn := "arn:aws:scheduler:" + req.Identity.Region + ":" + req.Identity.Account + ":schedule-group/" + name
-		rec := map[string]any{"Name": name, "Arn": arn, "State": "ACTIVE"}
-		if err := putRecord(ctx, p.col(req, "schg"), name, rec); err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{"ScheduleGroupArn": arn}}, nil
-	case "GetScheduleGroup":
-		if name == "" {
-			return nil, validation("Name is required.")
-		}
-		if name == "default" {
-			return &spi.Response{Output: defaultGroup(req.Identity)}, nil
-		}
-		rec, ok, err := getRecord(ctx, p.col(req, "schg"), name)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, notFound("Schedule group does not exist.")
-		}
-		return &spi.Response{Output: rec}, nil
-	case "ListScheduleGroups":
-		resp, err := listCol(ctx, p.col(req, "schg"), "ScheduleGroups")
-		if err != nil {
-			return nil, err
-		}
-		resp.Output["ScheduleGroups"] = append([]any{defaultGroup(req.Identity)}, resp.Output["ScheduleGroups"].([]any)...)
-		return resp, nil
-	case "DeleteScheduleGroup":
-		if name == "" {
-			return nil, validation("Name is required.")
-		}
-		if name == "default" {
-			return nil, conflict("The default schedule group cannot be deleted.")
-		}
-		if !p.groupExists(ctx, req, name) {
-			return nil, notFound("Schedule group does not exist.")
-		}
-		if kvs, _, err := p.col(req, "sch:"+name).List(ctx, "", "", 1); err != nil {
-			return nil, err
-		} else if len(kvs) != 0 {
-			return nil, conflict("Schedule group is not empty.")
-		}
-		if err := p.col(req, "schg").Delete(ctx, name); err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{}}, nil
-	default:
-		return nil, spi.NotImplemented("aws.scheduler", req.Operation, "emulate")
-	}
-}
-
-func (p *Pack) scheduleRecord(input map[string]any, name, group, arn string) (map[string]any, *spi.Fault) {
-	expression := first(input, "ScheduleExpression", "scheduleExpression")
-	timezone := first(input, "ScheduleExpressionTimezone", "scheduleExpressionTimezone")
-	expr, err := parseScheduleExpression(expression, timezone)
-	if err != nil {
-		return nil, validation(err.Error())
-	}
-	target, ok := input["Target"].(map[string]any)
-	if !ok || first(target, "Arn", "arn") == "" || !validRoleARN(first(target, "RoleArn", "roleArn")) {
-		return nil, validation("Target Arn and RoleArn are required.")
-	}
-	targetARN := first(target, "Arn", "arn")
-	if len(targetARN) > 1600 {
-		return nil, validation("Target Arn exceeds 1600 characters.")
-	}
-	if payload := first(target, "Input", "input"); len(payload) > 256*1024 || (payload != "" && requiresJSON(targetARN) && !json.Valid([]byte(payload))) {
-		return nil, validation("Target Input must meet the target format and 256 KB limit.")
-	}
-	window, ok := input["FlexibleTimeWindow"].(map[string]any)
-	mode := first(window, "Mode", "mode")
-	if !ok || (mode != "OFF" && mode != "FLEXIBLE") {
-		return nil, validation("FlexibleTimeWindow Mode must be OFF or FLEXIBLE.")
-	}
-	if mode == "FLEXIBLE" {
-		minutes, _ := integer(window["MaximumWindowInMinutes"])
-		if minutes < 1 || minutes > 1440 {
-			return nil, validation("MaximumWindowInMinutes must be between 1 and 1440.")
-		}
-	}
-	state := first(input, "State", "state")
-	if state == "" {
-		state = "ENABLED"
-	}
-	if state != "ENABLED" && state != "DISABLED" {
-		return nil, validation("State must be ENABLED or DISABLED.")
-	}
-	action := first(input, "ActionAfterCompletion", "actionAfterCompletion")
-	if action != "" && action != "NONE" && action != "DELETE" {
-		return nil, validation("ActionAfterCompletion must be NONE or DELETE.")
-	}
-	if fault := validateReliability(target); fault != nil {
-		return nil, fault
-	}
-	start, _ := inputTime(input["StartDate"])
-	end, hasEnd := inputTime(input["EndDate"])
-	if hasEnd && !start.IsZero() && end.Before(start) {
-		return nil, validation("EndDate must not precede StartDate.")
-	}
-	rec := clone(input)
-	rec["Name"], rec["GroupName"], rec["Arn"], rec["State"] = name, group, arn, state
-	scheduled := expr.first(p.deps.Clock.Now(), start)
-	if !expr.OneTime() && hasEnd && scheduled.After(end) {
-		scheduled = time.Time{}
-	}
-	rec[nextInvocation] = formatTime(p.withWindow(rec, arn, scheduled))
-	rec[scheduledTime] = formatTime(scheduled)
-	return rec, nil
-}
-
-func (p *Pack) loop() {
+func (p *worker) loop() {
 	defer close(p.done)
 	for {
-		next := p.runDue(context.Background())
-		if next.IsZero() {
-			select {
-			case <-p.wake:
-			case <-p.stop:
-				return
-			}
-			continue
+		wake := p.deps.Clock.Now().Add(poll)
+		if next := p.runDue(context.Background()); !next.IsZero() && next.Before(wake) {
+			wake = next
 		}
 		select {
-		case <-p.deps.Clock.AfterTime(next):
-		case <-p.wake:
+		case <-p.deps.Clock.AfterTime(wake):
 		case <-p.stop:
 			return
 		}
 	}
 }
 
-func (p *Pack) runDue(ctx context.Context) time.Time {
+func (p *worker) runDue(ctx context.Context) time.Time {
 	now := p.deps.Clock.Now()
 	var earliest time.Time
 	scopes, err := p.deps.Store.Scopes(ctx)
@@ -315,8 +83,8 @@ func (p *Pack) runDue(ctx context.Context) time.Time {
 		return earliest
 	}
 	for _, identity := range scopes {
-		for _, group := range p.groups(ctx, identity) {
-			collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("sch:" + group)
+		{
+			collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("sch")
 			kvs, _, err := collection.List(ctx, "", "", 0)
 			if err != nil {
 				continue
@@ -326,7 +94,7 @@ func (p *Pack) runDue(ctx context.Context) time.Time {
 				if json.Unmarshal(kv.Value, &rec) != nil || stringValue(rec["State"]) == "DISABLED" {
 					continue
 				}
-				next := p.recordNext(rec, now)
+				scheduled, next := p.recordNext(rec, now)
 				if next.IsZero() {
 					continue
 				}
@@ -335,10 +103,6 @@ func (p *Pack) runDue(ctx context.Context) time.Time {
 					continue
 				}
 				target, _ := rec["Target"].(map[string]any)
-				scheduled := next
-				if stored, ok := inputTime(rec[scheduledTime]); ok {
-					scheduled = stored
-				}
 				attempt, _ := integer(rec[retryAttempts])
 				payload := p.targetPayload(rec, target, scheduled, attempt+1)
 				if err := events.DeliverTarget(ctx, p.deps, identity, first(target, "Arn", "arn"), target, payload); err != nil {
@@ -374,20 +138,37 @@ func (p *Pack) runDue(ctx context.Context) time.Time {
 	return earliest
 }
 
-func (p *Pack) recordNext(rec map[string]any, now time.Time) time.Time {
+// recordNext answers when a schedule is next due (scheduled) and when it
+// fires, which a flexible window offsets from that. Both are the worker's
+// bookkeeping once it has seen the schedule, and computed from the record
+// before.
+func (p *worker) recordNext(rec map[string]any, now time.Time) (scheduled, next time.Time) {
 	if raw, initialized := rec[nextInvocation]; initialized {
-		next, _ := inputTime(raw)
-		return next
+		next, _ = inputTime(raw)
+		if scheduled, ok := inputTime(rec[scheduledTime]); ok {
+			return scheduled, next
+		}
+		return next, next
 	}
 	expr, err := parseScheduleExpression(stringValue(rec["ScheduleExpression"]), stringValue(rec["ScheduleExpressionTimezone"]))
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, time.Time{}
+	}
+	// The first invocation counts from when the schedule was written, not from
+	// when this loop first saw it: a poll that lands late must not skip it.
+	written, ok := inputTime(rec["LastModificationDate"])
+	if !ok {
+		written = now
 	}
 	start, _ := inputTime(rec["StartDate"])
-	return p.withWindow(rec, stringValue(rec["Arn"]), expr.first(now, start))
+	scheduled = expr.first(written, start)
+	if end, ok := inputTime(rec["EndDate"]); !expr.OneTime() && ok && scheduled.After(end) {
+		scheduled = time.Time{}
+	}
+	return scheduled, p.withWindow(rec, stringValue(rec["Arn"]), scheduled)
 }
 
-func (p *Pack) withWindow(rec map[string]any, arn string, scheduled time.Time) time.Time {
+func (p *worker) withWindow(rec map[string]any, arn string, scheduled time.Time) time.Time {
 	if scheduled.IsZero() {
 		return scheduled
 	}
@@ -400,7 +181,7 @@ func (p *Pack) withWindow(rec map[string]any, arn string, scheduled time.Time) t
 	return scheduled.Add(time.Duration(seconds) * time.Second)
 }
 
-func (p *Pack) targetPayload(rec, target map[string]any, scheduled time.Time, attempt int) []byte {
+func (p *worker) targetPayload(rec, target map[string]any, scheduled time.Time, attempt int) []byte {
 	payload := first(target, "Input", "input")
 	if payload == "" {
 		payload = "{}"
@@ -417,7 +198,7 @@ func (p *Pack) targetPayload(rec, target map[string]any, scheduled time.Time, at
 	return []byte(payload)
 }
 
-func (p *Pack) retry(ctx context.Context, collection spi.Collection, key string, expected []byte, rec, target map[string]any, payload []byte, scheduled, now time.Time, deliveryErr error) (time.Time, bool) {
+func (p *worker) retry(ctx context.Context, collection spi.Collection, key string, expected []byte, rec, target map[string]any, payload []byte, scheduled, now time.Time, deliveryErr error) (time.Time, bool) {
 	policy, _ := target["RetryPolicy"].(map[string]any)
 	maxAttempts, ok := integer(policy["MaximumRetryAttempts"])
 	if !ok {
@@ -454,7 +235,7 @@ func (p *Pack) retry(ctx context.Context, collection spi.Collection, key string,
 	return retryAt, true
 }
 
-func (p *Pack) deadLetter(ctx context.Context, rec, target map[string]any, payload []byte, attempts int, scheduled time.Time, exhausted string, deliveryErr error) {
+func (p *worker) deadLetter(ctx context.Context, rec, target map[string]any, payload []byte, attempts int, scheduled time.Time, exhausted string, deliveryErr error) {
 	config, _ := target["DeadLetterConfig"].(map[string]any)
 	arn := first(config, "Arn", "arn")
 	if arn == "" {
@@ -482,70 +263,6 @@ func (p *Pack) deadLetter(ctx context.Context, rec, target map[string]any, paylo
 	}})
 }
 
-func (p *Pack) notify() {
-	select {
-	case p.wake <- struct{}{}:
-	default:
-	}
-}
-
-func (p *Pack) groupExists(ctx context.Context, req *spi.Request, name string) bool {
-	_, ok, _ := p.col(req, "schg").Get(ctx, name)
-	return ok
-}
-
-func (p *Pack) groups(ctx context.Context, identity spi.Identity) []string {
-	groups := []string{"default"}
-	kvs, _, _ := p.deps.Store.Scope(identity.Account, identity.Region).Collection("schg").List(ctx, "", "", 0)
-	for _, kv := range kvs {
-		groups = append(groups, kv.Key)
-	}
-	sort.Strings(groups)
-	return groups
-}
-
-func defaultGroup(identity spi.Identity) map[string]any {
-	return map[string]any{
-		"Name": "default", "State": "ACTIVE",
-		"Arn": "arn:aws:scheduler:" + identity.Region + ":" + identity.Account + ":schedule-group/default",
-	}
-}
-
-func listCol(ctx context.Context, collection spi.Collection, key string) (*spi.Response, error) {
-	kvs, _, err := collection.List(ctx, "", "", 0)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]any, 0, len(kvs))
-	for _, kv := range kvs {
-		var rec map[string]any
-		if json.Unmarshal(kv.Value, &rec) == nil {
-			items = append(items, rec)
-		}
-	}
-	return &spi.Response{Output: map[string]any{key: items}}, nil
-}
-
-func getRecord(ctx context.Context, collection spi.Collection, key string) (map[string]any, bool, error) {
-	b, ok, err := collection.Get(ctx, key)
-	if err != nil || !ok {
-		return nil, ok, err
-	}
-	var rec map[string]any
-	if err := json.Unmarshal(b, &rec); err != nil {
-		return nil, false, err
-	}
-	return rec, true, nil
-}
-
-func putRecord(ctx context.Context, collection spi.Collection, key string, rec map[string]any) error {
-	b, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	return collection.Put(ctx, key, b)
-}
-
 func changeRecordIfUnchanged(ctx context.Context, collection spi.Collection, key string, expected []byte, rec map[string]any) error {
 	var next []byte
 	var err error
@@ -567,24 +284,6 @@ func changeRecordIfUnchanged(ctx context.Context, collection spi.Collection, key
 	})
 }
 
-func publicRecord(rec map[string]any) map[string]any {
-	out := clone(rec)
-	delete(out, nextInvocation)
-	delete(out, scheduledTime)
-	delete(out, retryAttempts)
-	delete(out, retryStarted)
-	delete(out, "ClientToken")
-	return out
-}
-
-func clone(input map[string]any) map[string]any {
-	out := make(map[string]any, len(input))
-	for key, value := range input {
-		out[key] = value
-	}
-	return out
-}
-
 func first(input map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := input[key].(string); ok && value != "" {
@@ -595,42 +294,6 @@ func first(input map[string]any, keys ...string) string {
 }
 
 func stringValue(value any) string { valueString, _ := value.(string); return valueString }
-
-func requiresJSON(arn string) bool {
-	if strings.Contains(arn, ":scheduler:::aws-sdk:") {
-		return false
-	}
-	return strings.Contains(arn, ":lambda:") || strings.Contains(arn, ":states:") || strings.Contains(arn, ":events:")
-}
-
-func validateReliability(target map[string]any) *spi.Fault {
-	if raw, exists := target["RetryPolicy"]; exists {
-		policy, ok := raw.(map[string]any)
-		if !ok {
-			return validation("RetryPolicy must be an object.")
-		}
-		if raw, exists := policy["MaximumEventAgeInSeconds"]; exists {
-			age, ok := integer(raw)
-			if !ok || age < 60 || age > 86400 {
-				return validation("MaximumEventAgeInSeconds must be between 60 and 86400.")
-			}
-		}
-		if raw, exists := policy["MaximumRetryAttempts"]; exists {
-			attempts, ok := integer(raw)
-			if !ok || attempts < 0 || attempts > 185 {
-				return validation("MaximumRetryAttempts must be between 0 and 185.")
-			}
-		}
-	}
-	if raw, exists := target["DeadLetterConfig"]; exists {
-		config, ok := raw.(map[string]any)
-		arn := first(config, "Arn", "arn")
-		if !ok || (arn != "" && (!validSQSARN(arn) || strings.HasSuffix(arn, ".fifo"))) {
-			return validation("DeadLetterConfig Arn must identify a standard SQS queue.")
-		}
-	}
-	return nil
-}
 
 func integer(value any) (int, bool) {
 	switch value := value.(type) {
@@ -673,18 +336,6 @@ func earlier(current, candidate time.Time) time.Time {
 	return candidate
 }
 
-func validation(message string) *spi.Fault {
-	return &spi.Fault{Code: "ValidationException", Message: message, HTTPStatus: 400, Fault: "client"}
-}
-
-func notFound(message string) *spi.Fault {
-	return &spi.Fault{Code: "ResourceNotFoundException", Message: message, HTTPStatus: 400, Fault: "client"}
-}
-
-func conflict(message string) *spi.Fault {
-	return &spi.Fault{Code: "ConflictException", Message: message, HTTPStatus: 409, Fault: "client"}
-}
-
 func regionFromARN(arn string) string {
 	parts := strings.SplitN(arn, ":", 6)
 	if len(parts) == 6 {
@@ -700,26 +351,3 @@ func accountFromARN(arn string) string {
 	}
 	return ""
 }
-
-func validRoleARN(arn string) bool {
-	parts := strings.SplitN(arn, ":", 6)
-	return len(parts) == 6 && parts[0] == "arn" && validPartition(parts[1]) && parts[2] == "iam" && parts[3] == "" && len(parts[4]) == 12 && allDigits(parts[4]) && strings.HasPrefix(parts[5], "role/") && len(parts[5]) > len("role/")
-}
-
-func validSQSARN(arn string) bool {
-	parts := strings.SplitN(arn, ":", 6)
-	return len(parts) == 6 && parts[0] == "arn" && validPartition(parts[1]) && parts[2] == "sqs" && parts[3] != "" && len(parts[4]) == 12 && allDigits(parts[4]) && parts[5] != ""
-}
-
-func validPartition(value string) bool { return value == "aws" || strings.HasPrefix(value, "aws-") }
-
-func allDigits(value string) bool {
-	for _, char := range value {
-		if char < '0' || char > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-var _ interface{ Close() error } = (*Pack)(nil)

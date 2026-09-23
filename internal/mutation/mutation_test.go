@@ -4275,14 +4275,36 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-reject-api-gateway-resource",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old: `		return arn, err
-	case "AWS::ApiGateway::RestApi":
-		n := str(props["Name"])`,
-		new: `		return arn, err
-	case "AWS::ApiGateway::RestApiMutated":
-		n := str(props["Name"])`,
+		old: `case "AWS::ApiGateway::RestApi":
+		out, err := p.call(`,
+		new: `case "AWS::ApiGateway::RestApiMutated":
+		out, err := p.call(`,
 		pkg: "./internal/services/aws/cloudformation",
 		run: "TestCloudFormationProvisionedResourceLifecycle",
+	},
+	{
+		name: "cloudformation-describe-stack-resources-answers-none",
+		file: filepath.Join("behavior", "aws", "cloudformation", "service.yaml"),
+		old:  `        s_found && 'Resources' in s && s.Resources != null`,
+		new:  `        false`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationProvisionedResourceLifecycle",
+	},
+	{
+		name: "cloudformation-provision-queue-without-creating-it",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `p.call(ctx, req, "aws.sqs", "CreateQueue",`,
+		new:  `p.call(ctx, req, "aws.sqs", "ListQueues",`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationProvisionedResourceLifecycle",
+	},
+	{
+		name: "cloudformation-delete-stack-keeps-table",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `{"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},`,
+		new:  `{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": id}},`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationProvisionedResourceLifecycle",
 	},
 	{
 		name: "cloudformation-treat-queue-url-as-bucket",
@@ -12704,6 +12726,34 @@ var mutants = []mutant{
 		run: "TestScopesAreEnumeratedDeterministically",
 	},
 	{
+		name: "bundled-registry-skips-workers",
+		file: filepath.Join("internal", "bundled", "bundled.go"),
+		old:  `return withWorker{p, workers[id](deps)}, nil`,
+		new:  `return p, nil`,
+		pkg:  "./internal/bundled",
+		run:  "TestRegistryRunsDeclaredWorkers",
+	},
+	{
+		name: "scheduler-first-run-from-first-sight",
+		file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
+		old:  `written, ok := inputTime(rec["LastModificationDate"])`,
+		new:  `written, ok := inputTime(nil)`,
+		pkg:  "./internal/services/aws/scheduler",
+		run:  "TestSchedulerWaitsForAbsoluteDeadline",
+	},
+	{
+		name: "scheduler-accept-unparseable-expression",
+		file: filepath.Join("behavior", "aws", "scheduler", "service.yaml"),
+		old: `      - { cond: "!s_found", error: Conflict, message: Schedule already exists. }
+      - cond: >
+          prim(`,
+		new: `      - { cond: "!s_found", error: Conflict, message: Schedule already exists. }
+      - cond: >
+          true || prim(`,
+		pkg: "./internal/services/aws/scheduler",
+		run: "TestCreateScheduleRejectsUnparseableExpressions",
+	},
+	{
 		name: "scheduler-run-disabled-schedule",
 		file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
 		old:  `stringValue(rec["State"]) == "DISABLED"`,
@@ -15879,8 +15929,8 @@ var mutants = []mutant{
 	{
 		name: "scheduler-use-relative-deadline",
 		file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
-		old:  `case <-p.deps.Clock.AfterTime(next):`,
-		new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+		old:  `case <-p.deps.Clock.AfterTime(wake):`,
+		new:  `case <-p.deps.Clock.After(wake.Sub(p.deps.Clock.Now())):`,
 		pkg:  "./internal/services/aws/scheduler",
 		run:  "TestSchedulerWaitsForAbsoluteDeadline",
 	},

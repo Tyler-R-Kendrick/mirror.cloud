@@ -15,36 +15,18 @@ provenance: authored
 # the pack's empty-name fallbacks dead (see quirks).
 missing_input_error: Validation
 
-# Gated but not serving. The bundle covers the whole bookkeeping surface --
-# stack records, change sets, stack sets and their operations, drift
-# detections, types, generated templates, scans, refactors, policies and the
-# static answers -- but the template engine is not expressible: CreateStack,
-# UpdateStack and ExecuteChangeSet parse a JSON or YAML-subset template,
-# resolve Ref/GetAtt/Join/Sub against pseudo-parameters, and provision
-# fourteen resource types into sibling services' collections (buckets,
-# queues, topics, tables, roles, parameters, secrets, keys, log groups,
-# rules, functions, streams, APIs), several of them as raw non-JSON bytes
-# those services read back; DeleteStack deprovisions them in reverse; and
-# TemplateURL reads object bodies out of the blob store. B-IR has no
-# cross-service write, no raw blob read and no template-parsing primitive.
-# The bundle takes over when a primitive registry carries the template
-# engine and the provisioning effects exist.
-shadow: >
-  CreateStack, UpdateStack, ExecuteChangeSet, ValidateTemplate,
-  GetTemplateSummary and ListExports are the template engine: parsing,
-  intrinsic-function resolution, cross-service provisioning into sibling
-  packs' collections (some as raw bytes), deprovisioning on DeleteStack, and
-  blob reads for TemplateURL. None of that is expressible without
-  cross-service effects and a template primitive, so the pack keeps serving.
-  Everything else the pack does is transcribed and gated below; DeleteStack
-  here drops the stack record without the deprovision loop, which no trace
-  step can see because the loop writes to other services' collections.
+# The template engine is Go, in internal/services/aws/cloudformation:
+# CreateStack, UpdateStack and ExecuteChangeSet parse a JSON or YAML-subset
+# template, resolve Ref/GetAtt/Join/Sub against pseudo-parameters, and
+# provision each resource through the service that owns it; DeleteStack
+# deprovisions them in reverse; ValidateTemplate and GetTemplateSummary parse
+# without provisioning; ListExports flattens every stack's outputs. The stack
+# record below is the one the engine writes.
+native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports]
 
 resources:
-  # The stack record. In the bundle's world it is written only by the
-  # rollback family and patched by UpdateTerminationProtection; the
-  # provisioning writer is shadowed. Resources and Outputs are always empty
-  # here because nothing provisions.
+  # The stack record, written by the native template engine and patched by
+  # the rollback family and UpdateTerminationProtection.
   stack:
     collection: cfn
     id:
@@ -239,14 +221,16 @@ operations:
   # The pack also deprovisions every stack resource into the sibling
   # services' collections before deleting the record; that loop is the shadow
   # reason and is not transcribed.
-  DeleteStack:
+  # A missing stack answers no resources rather than faulting.
+  DescribeStackResources:
     reads:
       s: { resource: stack }
-    require:
-      - { cond: s_found, error: Validation }
-      - { cond: "!s.Protect", error: Validation }
-    effects:
-      - delete: { resource: stack }
+    output:
+      StackResources: >-
+        s_found && 'Resources' in s && s.Resources != null
+          ? s.Resources.map(r, {'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
+              'ResourceType': r.Type, 'ResourceStatus': 'CREATE_COMPLETE'})
+          : []
 
   # The rollback family conjures a fresh record for an absent stack rather
   # than faulting, keeps whatever an existing record held, and sets only the

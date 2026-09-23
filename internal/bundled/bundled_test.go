@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -94,5 +95,30 @@ func TestShadowBundlesAreStillGated(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("%s is shadowed but has no recording at %s", id, path)
 		}
+	}
+}
+
+// TestRegistryRunsDeclaredWorkers holds the worker lifecycle: the registry
+// starts a service's worker when it builds the service and stops it on
+// Close, and a cross-service call building the bundle starts none.
+func TestRegistryRunsDeclaredWorkers(t *testing.T) {
+	started, stopped := 0, 0
+	bundled.RegisterWorker("aws.sqs", func(spi.Deps) func() error {
+		started++
+		return func() error { stopped++; return nil }
+	})
+	deps := spitest.Deps(t)
+	if _, err := bundled.New("aws.sqs", deps); err != nil || started != 0 {
+		t.Fatalf("bundled.New started a worker (started=%d, err=%v)", started, err)
+	}
+	r, err := registry.New(deps, []string{"aws.sqs"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started != 1 {
+		t.Fatalf("registry started %d workers, want 1", started)
+	}
+	if err := r.Close(); err != nil || stopped != 1 {
+		t.Fatalf("registry Close stopped %d workers (err=%v), want 1", stopped, err)
 	}
 }

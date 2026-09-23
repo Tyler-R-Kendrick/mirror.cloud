@@ -155,8 +155,27 @@ var natives = map[string]NativeFunc{}
 // Call it from init; the bundle's native: list is what makes it served.
 func RegisterNative(id, op string, fn NativeFunc) { natives[id+"/"+op] = fn }
 
+// Worker runs a service's background loop against deps and answers how to
+// stop it.
+type Worker func(spi.Deps) (stop func() error)
+
+// workers is written only from package init, before any factory runs.
+var workers = map[string]Worker{}
+
+// RegisterWorker supplies the loop a bundle declares under worker:.
+func RegisterWorker(id string, w Worker) { workers[id] = w }
+
+// withWorker is a registered service whose loop runs while it does; the
+// registry closes it on shutdown.
+type withWorker struct {
+	spi.BehaviorPack
+	stop func() error
+}
+
+func (w withWorker) Close() error { return w.stop() }
+
 // Unregistered lists every id/op a bundle declares native that no linked
-// package registered. A binary missing one still serves the rest of that
+// package registered, and every id/worker likewise. A binary missing one still serves the rest of that
 // bundle -- CloudFormation reaches API Gateway's control plane without
 // linking ExecuteApi -- so this is checked where every service is linked.
 func Unregistered() []string {
@@ -171,6 +190,9 @@ func Unregistered() []string {
 				if natives[id+"/"+op] == nil {
 					missing = append(missing, id+"/"+op)
 				}
+			}
+			if ir.Worker != "" && workers[id] == nil {
+				missing = append(missing, id+"/worker")
 			}
 		}
 	}
@@ -258,5 +280,11 @@ func (b broken) Invoke(context.Context, *spi.Request) (*spi.Response, error) {
 
 // factory captures the ID so each registered entry builds its own service.
 func factory(id string) func(spi.Deps) (spi.BehaviorPack, error) {
-	return func(deps spi.Deps) (spi.BehaviorPack, error) { return New(id, deps) }
+	return func(deps spi.Deps) (spi.BehaviorPack, error) {
+		p, err := New(id, deps)
+		if err != nil || workers[id] == nil {
+			return p, err
+		}
+		return withWorker{p, workers[id](deps)}, nil
+	}
 }

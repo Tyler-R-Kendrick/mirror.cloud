@@ -14,6 +14,7 @@ import (
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudformation"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/rds"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3" // CloudFormation creates buckets through it
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )

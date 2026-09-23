@@ -88,6 +88,13 @@ type Service struct {
 	// keeps a whole hand-written pack alive beside a complete bundle.
 	Native []string `yaml:"native,omitempty"`
 
+	// Worker, when set, says the service runs a background loop in Go --
+	// Scheduler firing schedules on the clock -- registered with
+	// bundled.RegisterWorker. The value says what it does. The registry runs
+	// it for the service it builds; a cross-service call building the bundle
+	// does not.
+	Worker string `yaml:"worker,omitempty"`
+
 	// MissingInput names the error table entry the engine answers with when a
 	// required input member is absent. The model says which members are
 	// required; it does not say what a service calls their absence, and

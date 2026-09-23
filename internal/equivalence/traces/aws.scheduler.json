@@ -91,23 +91,15 @@
       "operation": "GetSchedule",
       "input": {"Name": "s1"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {
-        "Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
-        "State": "ENABLED", "ScheduleExpression": "rate(1 minute)", "Description": "first",
-        "FlexibleTimeWindow": {"Mode": "OFF"},
-        "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}
-      }
+      "output": {"ActionAfterCompletion": null, "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1", "CreationDate": "1970-01-01T00:00:00Z", "Description": "first", "EndDate": null, "FlexibleTimeWindow": {"Mode": "OFF"}, "GroupName": "default", "KmsKeyArn": null, "LastModificationDate": "1970-01-01T00:00:00Z", "Name": "s1", "ScheduleExpression": "rate(1 minute)", "ScheduleExpressionTimezone": null, "StartDate": null, "State": "ENABLED", "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "recut": "The Scheduler API answers CreationDate and LastModificationDate on GetSchedule (GetScheduleOutput) and in every ListSchedules ScheduleSummary; the generated model declares both. The pack omitted them. The bundle records both when a schedule is written, which the delivery worker also counts the first invocation from."
     },
     {
       "operation": "GetSchedule",
-      "input": {"Name": "s1", "GroupName": "default"},
+      "input": {"GroupName": "default", "Name": "s1"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {
-        "Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
-        "State": "ENABLED", "ScheduleExpression": "rate(1 minute)", "Description": "first",
-        "FlexibleTimeWindow": {"Mode": "OFF"},
-        "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}
-      }
+      "output": {"ActionAfterCompletion": null, "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1", "CreationDate": "1970-01-01T00:00:00Z", "Description": "first", "EndDate": null, "FlexibleTimeWindow": {"Mode": "OFF"}, "GroupName": "default", "KmsKeyArn": null, "LastModificationDate": "1970-01-01T00:00:00Z", "Name": "s1", "ScheduleExpression": "rate(1 minute)", "ScheduleExpressionTimezone": null, "StartDate": null, "State": "ENABLED", "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "recut": "The Scheduler API answers CreationDate and LastModificationDate on GetSchedule (GetScheduleOutput) and in every ListSchedules ScheduleSummary; the generated model declares both. The pack omitted them. The bundle records both when a schedule is written, which the delivery worker also counts the first invocation from."
     },
     {
       "operation": "GetSchedule",
@@ -119,12 +111,8 @@
       "operation": "ListSchedules",
       "input": {},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {"Schedules": [
-        {"Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
-         "State": "ENABLED", "ScheduleExpression": "rate(1 minute)", "Description": "first",
-         "FlexibleTimeWindow": {"Mode": "OFF"},
-         "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}
-      ]}
+      "output": {"Schedules": [{"Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1", "CreationDate": "1970-01-01T00:00:00Z", "Description": "first", "FlexibleTimeWindow": {"Mode": "OFF"}, "GroupName": "default", "LastModificationDate": "1970-01-01T00:00:00Z", "Name": "s1", "ScheduleExpression": "rate(1 minute)", "State": "ENABLED", "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}]},
+      "recut": "The Scheduler API answers CreationDate and LastModificationDate on GetSchedule (GetScheduleOutput) and in every ListSchedules ScheduleSummary; the generated model declares both. The pack omitted them. The bundle records both when a schedule is written, which the delivery worker also counts the first invocation from."
     },
     {
       "operation": "CreateSchedule",
@@ -200,40 +188,24 @@
     },
     {
       "operation": "GetSchedule",
-      "input": {"Name": "s2", "GroupName": "batch"},
+      "input": {"GroupName": "batch", "Name": "s2"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {
-        "Name": "s2", "GroupName": "batch", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2",
-        "State": "DISABLED", "ScheduleExpression": "at(2030-01-01T00:00:00)", "Description": "second",
-        "FlexibleTimeWindow": {"Mode": "OFF"},
-        "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}
-      }
+      "output": {"ActionAfterCompletion": null, "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2", "CreationDate": "1970-01-01T00:00:00Z", "Description": "second", "EndDate": null, "FlexibleTimeWindow": {"Mode": "OFF"}, "GroupName": "batch", "KmsKeyArn": null, "LastModificationDate": "1970-01-01T00:00:00Z", "Name": "s2", "ScheduleExpression": "at(2030-01-01T00:00:00)", "ScheduleExpressionTimezone": null, "StartDate": null, "State": "DISABLED", "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "recut": "The Scheduler API answers CreationDate and LastModificationDate on GetSchedule (GetScheduleOutput) and in every ListSchedules ScheduleSummary; the generated model declares both. The pack omitted them. The bundle records both when a schedule is written, which the delivery worker also counts the first invocation from."
     },
     {
       "operation": "ListSchedules",
       "input": {"GroupName": "batch"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {"Schedules": [
-        {"Name": "s2", "GroupName": "batch", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2",
-         "State": "DISABLED", "ScheduleExpression": "at(2030-01-01T00:00:00)", "Description": "second",
-         "FlexibleTimeWindow": {"Mode": "OFF"},
-         "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}
-      ]}
+      "output": {"Schedules": [{"Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2", "CreationDate": "1970-01-01T00:00:00Z", "Description": "second", "FlexibleTimeWindow": {"Mode": "OFF"}, "GroupName": "batch", "LastModificationDate": "1970-01-01T00:00:00Z", "Name": "s2", "ScheduleExpression": "at(2030-01-01T00:00:00)", "State": "DISABLED", "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}]},
+      "recut": "The Scheduler API answers CreationDate and LastModificationDate on GetSchedule (GetScheduleOutput) and in every ListSchedules ScheduleSummary; the generated model declares both. The pack omitted them. The bundle records both when a schedule is written, which the delivery worker also counts the first invocation from."
     },
     {
       "operation": "ListSchedules",
       "input": {},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {"Schedules": [
-        {"Name": "s2", "GroupName": "batch", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2",
-         "State": "DISABLED", "ScheduleExpression": "at(2030-01-01T00:00:00)", "Description": "second",
-         "FlexibleTimeWindow": {"Mode": "OFF"},
-         "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
-        {"Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
-         "State": "ENABLED", "ScheduleExpression": "rate(1 minute)", "Description": "first",
-         "FlexibleTimeWindow": {"Mode": "OFF"},
-         "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}
-      ]}
+      "output": {"Schedules": [{"Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/batch/s2", "CreationDate": "1970-01-01T00:00:00Z", "Description": "second", "FlexibleTimeWindow": {"Mode": "OFF"}, "GroupName": "batch", "LastModificationDate": "1970-01-01T00:00:00Z", "Name": "s2", "ScheduleExpression": "at(2030-01-01T00:00:00)", "State": "DISABLED", "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}, {"Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1", "CreationDate": "1970-01-01T00:00:00Z", "Description": "first", "FlexibleTimeWindow": {"Mode": "OFF"}, "GroupName": "default", "LastModificationDate": "1970-01-01T00:00:00Z", "Name": "s1", "ScheduleExpression": "rate(1 minute)", "State": "ENABLED", "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}}]},
+      "recut": "The Scheduler API answers CreationDate and LastModificationDate on GetSchedule (GetScheduleOutput) and in every ListSchedules ScheduleSummary; the generated model declares both. The pack omitted them. The bundle records both when a schedule is written, which the delivery worker also counts the first invocation from."
     },
     {
       "operation": "UpdateSchedule",
@@ -257,12 +229,8 @@
       "operation": "GetSchedule",
       "input": {"Name": "s1"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {
-        "Name": "s1", "GroupName": "default", "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1",
-        "State": "ENABLED", "ScheduleExpression": "rate(5 minutes)",
-        "FlexibleTimeWindow": {"Mode": "OFF"},
-        "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}
-      }
+      "output": {"ActionAfterCompletion": null, "Arn": "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s1", "CreationDate": "1970-01-01T00:00:00Z", "Description": null, "EndDate": null, "FlexibleTimeWindow": {"Mode": "OFF"}, "GroupName": "default", "KmsKeyArn": null, "LastModificationDate": "1970-01-01T00:00:00Z", "Name": "s1", "ScheduleExpression": "rate(5 minutes)", "ScheduleExpressionTimezone": null, "StartDate": null, "State": "ENABLED", "Target": {"Arn": "arn:aws:sqs:us-east-1:000000000000:q", "RoleArn": "arn:aws:iam::000000000000:role/test"}},
+      "recut": "The Scheduler API answers CreationDate and LastModificationDate on GetSchedule (GetScheduleOutput) and in every ListSchedules ScheduleSummary; the generated model declares both. The pack omitted them. The bundle records both when a schedule is written, which the delivery worker also counts the first invocation from."
     },
     {
       "operation": "DeleteSchedule",

@@ -1,49 +1,46 @@
-// Package cloudformation emulates CreateStack for a fixed resource-type set.
+// Package cloudformation is CloudFormation's template engine: the operations
+// behavior/aws/cloudformation lists as native.
 package cloudformation
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
+// natives are the operations behavior/aws/cloudformation lists as native:
+// the template engine. Parsing a template, resolving its intrinsics and
+// provisioning resources through their owning services is Go; the stack,
+// change set, stack set and type bookkeeping is the bundle's.
+var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports"}
+
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.cloudformation", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range natives {
+		bundled.RegisterNative("aws.cloudformation", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return New(deps).Invoke(ctx, req)
+		})
+	}
 }
 
-// Pack implements CloudFormation-lite.
+// Pack is the template engine behind the native operations.
 type Pack struct{ deps spi.Deps }
 
-// New constructs the pack.
+// New constructs the template engine.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
-
-func (p *Pack) ServiceID() string { return "aws.cloudformation" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	core := []string{"CreateStack", "UpdateStack", "DeleteStack", "DescribeStacks", "ListStacks",
-		"GetTemplate", "ListStackResources", "DescribeStackEvents", "ValidateTemplate",
-		"DescribeStackResource", "GetTemplateSummary", "ListExports",
-		"CreateChangeSet", "DescribeChangeSet", "ExecuteChangeSet", "DeleteChangeSet", "ListChangeSets",
-		"UpdateTerminationProtection", "SignalResource"}
-	return append(core, extraOps()...)
-}
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
 }
 
+// Invoke serves one native operation.
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := first(req.Input, "StackName")
 	switch req.Operation {
@@ -61,59 +58,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.upsert(ctx, req, name, req.Operation == "UpdateStack")
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
-	case "DescribeStacks":
-		return p.describe(ctx, req, name)
-	case "ListStacks":
-		kvs, _, _ := p.col(req, "cfn").List(ctx, "", "", 0)
-		var sums []any
-		for _, kv := range kvs {
-			var st stack
-			_ = json.Unmarshal(kv.Value, &st)
-			sums = append(sums, map[string]any{"StackName": st.Name, "StackId": st.ID, "StackStatus": st.Status})
-		}
-		return &spi.Response{Output: map[string]any{"StackSummaries": sums}}, nil
-	case "GetTemplate":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{"TemplateBody": st.Template, "StagesAvailable": []any{"Original"}}}, nil
-	case "ListStackResources":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		var rs []any
-		for _, r := range st.Resources {
-			rs = append(rs, map[string]any{"LogicalResourceId": r.Logical, "PhysicalResourceId": r.Physical, "ResourceType": r.Type, "ResourceStatus": "CREATE_COMPLETE"})
-		}
-		return &spi.Response{Output: map[string]any{"StackResourceSummaries": rs}}, nil
-	case "DescribeStackEvents":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		var ev []any
-		for _, r := range st.Resources {
-			ev = append(ev, map[string]any{"LogicalResourceId": r.Logical, "PhysicalResourceId": r.Physical, "ResourceType": r.Type, "ResourceStatus": "CREATE_COMPLETE", "StackName": st.Name, "StackId": st.ID})
-		}
-		ev = append(ev, map[string]any{"LogicalResourceId": st.Name, "ResourceType": "AWS::CloudFormation::Stack", "ResourceStatus": st.Status, "StackName": st.Name, "StackId": st.ID})
-		return &spi.Response{Output: map[string]any{"StackEvents": ev}}, nil
-	case "DescribeStackResource":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		want := first(req.Input, "LogicalResourceId")
-		for _, r := range st.Resources {
-			if r.Logical == want {
-				return &spi.Response{Output: map[string]any{"StackResourceDetail": map[string]any{
-					"LogicalResourceId": r.Logical, "PhysicalResourceId": r.Physical, "ResourceType": r.Type,
-					"ResourceStatus": "CREATE_COMPLETE", "StackName": st.Name, "StackId": st.ID,
-				}}}, nil
-			}
-		}
-		return nil, &spi.Fault{Code: "ValidationError", Message: "resource not found", HTTPStatus: 400, Fault: "client"}
 	case "GetTemplateSummary":
 		body, bodyErr := p.templateBody(ctx, req)
 		tpl, err := parseTemplate(body)
@@ -156,35 +100,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
-	case "CreateChangeSet":
-		csn := first(req.Input, "ChangeSetName")
-		body, err := p.templateBody(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8)
-		rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": id, "StackName": name, "Status": "CREATE_COMPLETE", "TemplateBody": body}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "cfn-cs").Put(ctx, name+":"+csn, b)
-		return &spi.Response{Output: map[string]any{"Id": id, "StackId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name}}, nil
-	case "DescribeChangeSet":
-		csn := first(req.Input, "ChangeSetName")
-		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, name+":"+csn)
-		if !ok {
-			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: rec}, nil
-	case "ListChangeSets":
-		kvs, _, _ := p.col(req, "cfn-cs").List(ctx, name+":", "", 0)
-		var items []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			items = append(items, rec)
-		}
-		return &spi.Response{Output: map[string]any{"Summaries": items}}, nil
 	case "ExecuteChangeSet":
 		csn := first(req.Input, "ChangeSetName")
 		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, name+":"+csn)
@@ -199,22 +114,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
-	case "DeleteChangeSet":
-		_ = p.col(req, "cfn-cs").Delete(ctx, name+":"+first(req.Input, "ChangeSetName"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "UpdateTerminationProtection":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		st.Protect = truthy(req.Input["EnableTerminationProtection"])
-		raw, _ := json.Marshal(st)
-		_ = p.col(req, "cfn").Put(ctx, name, raw)
-		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, nil
-	case "SignalResource":
-		return &spi.Response{Output: map[string]any{}}, nil
 	default:
-		return p.extra(ctx, req)
+		return nil, spi.NotImplemented("aws.cloudformation", req.Operation, "emulate")
 	}
 }
 
@@ -341,29 +242,6 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
-func (p *Pack) describe(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
-	var stacks []any
-	if name != "" {
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		stacks = append(stacks, wireStack(st))
-	} else {
-		kvs, _, _ := p.col(req, "cfn").List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			var st stack
-			_ = json.Unmarshal(kv.Value, &st)
-			stacks = append(stacks, wireStack(st))
-		}
-	}
-	return &spi.Response{Output: map[string]any{"Stacks": stacks}}, nil
-}
-
-func wireStack(st stack) map[string]any {
-	return map[string]any{"StackName": st.Name, "StackId": st.ID, "StackStatus": st.Status, "Outputs": st.Outputs}
-}
-
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
 	var st stack
 	b, ok, _ := p.col(req, "cfn").Get(ctx, name)
@@ -374,218 +252,200 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return st, nil
 }
 
+// provision creates a resource through the service that owns it, and answers
+// the resource's physical id. Going through the owner's API keeps its store
+// layout, validation and cascades that service's business.
 func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, stack string, props map[string]any) (string, error) {
-	acct, region := req.Identity.Account, req.Identity.Region
+	name := func(member, fallback string) string {
+		if n := str(props[member]); n != "" {
+			return n
+		}
+		return fallback
+	}
 	switch typ {
 	case "AWS::S3::Bucket":
-		name := str(props["BucketName"])
-		if name == "" {
-			name = strings.ToLower(stack + "-" + logical)
+		n := name("BucketName", strings.ToLower(stack+"-"+logical))
+		if _, err := p.call(ctx, req, "aws.s3", "CreateBucket", map[string]any{"Bucket": n}); err != nil {
+			return "", err
 		}
-		meta, _ := json.Marshal(map[string]any{"name": name, "region": region})
-		_ = p.col(req, "buckets").Put(ctx, name, meta)
-		p.configureBucket(ctx, req, name, props)
-		return name, nil
+		return n, p.configureBucket(ctx, req, n, props)
 	case "AWS::SQS::Queue":
-		q := str(props["QueueName"])
-		if q == "" {
-			q = logical
-		}
-		url := fmt.Sprintf("%s/%s/%s", advertise(req), acct, q)
-		meta, _ := json.Marshal(map[string]any{"url": url, "name": q, "attrs": map[string]any{}, "seq": 0})
-		_ = p.col(req, "queues").Put(ctx, q, meta)
-		return url, nil
+		out, err := p.call(ctx, req, "aws.sqs", "CreateQueue", map[string]any{"QueueName": name("QueueName", logical)})
+		return str(out["QueueUrl"]), err
 	case "AWS::SNS::Topic":
-		n := str(props["TopicName"])
-		if n == "" {
-			n = logical
-		}
-		arn := fmt.Sprintf("arn:aws:sns:%s:%s:%s", region, acct, n)
-		b, _ := json.Marshal(map[string]any{"arn": arn, "name": n})
-		_ = p.col(req, "topics").Put(ctx, n, b)
-		return arn, nil
+		out, err := p.call(ctx, req, "aws.sns", "CreateTopic", map[string]any{"Name": name("TopicName", logical)})
+		return str(out["TopicArn"]), err
 	case "AWS::DynamoDB::Table":
-		n := str(props["TableName"])
-		if n == "" {
-			n = logical
-		}
-		props["TableName"] = n
-		b, _ := json.Marshal(props)
-		_ = p.col(req, "tables").Put(ctx, n, b)
-		return n, nil
+		in := maps.Clone(props)
+		in["TableName"] = name("TableName", logical)
+		_, err := p.call(ctx, req, "aws.dynamodb", "CreateTable", in)
+		return str(in["TableName"]), err
 	case "AWS::IAM::Role":
-		n := str(props["RoleName"])
-		if n == "" {
-			n = logical
-		}
-		rec := map[string]any{"RoleName": n, "Arn": "arn:aws:iam::" + acct + ":role/" + n, "AssumeRolePolicyDocument": props["AssumeRolePolicyDocument"]}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "iam").Put(ctx, "role:"+n, b)
-		return str(rec["Arn"]), nil
+		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": name("RoleName", logical), "AssumeRolePolicyDocument": jsonText(props["AssumeRolePolicyDocument"])})
+		return str(asMap(out["Role"])["Arn"]), err
 	case "AWS::SSM::Parameter":
-		n := str(props["Name"])
-		if n == "" {
-			n = "/" + stack + "/" + logical
-		}
-		rec := map[string]any{"Name": n, "Value": str(props["Value"]), "Type": str(props["Type"]), "Version": 1}
-		if rec["Type"] == "" {
-			rec["Type"] = "String"
-		}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "ssm").Put(ctx, n, b)
-		return n, nil
+		n := name("Name", "/"+stack+"/"+logical)
+		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": name("Type", "String")})
+		return n, err
 	case "AWS::SecretsManager::Secret":
-		n := str(props["Name"])
-		if n == "" {
-			n = logical
-		}
-		arn := "arn:aws:secretsmanager:" + region + ":" + acct + ":secret:" + n
-		rec := map[string]any{"Name": n, "ARN": arn, "SecretString": str(props["SecretString"])}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "secrets").Put(ctx, n, b)
-		return arn, nil
+		out, err := p.call(ctx, req, "aws.secretsmanager", "CreateSecret", map[string]any{"Name": name("Name", logical), "SecretString": str(props["SecretString"])})
+		return str(out["ARN"]), err
 	case "AWS::KMS::Key":
-		id := p.deps.Rand.Hex(8)
-		mat := p.deps.Rand.Bytes(32)
-		arn := "arn:aws:kms:" + region + ":" + acct + ":key/" + id
-		rec := map[string]any{"KeyId": id, "Arn": arn, "KeyMaterial": base64.StdEncoding.EncodeToString(mat), "KeyState": "Enabled"}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "kms").Put(ctx, id, b)
-		return id, nil
+		out, err := p.call(ctx, req, "aws.kms", "CreateKey", map[string]any{"Description": str(props["Description"])})
+		return str(asMap(out["KeyMetadata"])["KeyId"]), err
 	case "AWS::Logs::LogGroup":
-		n := str(props["LogGroupName"])
-		if n == "" {
-			n = "/aws/" + stack + "/" + logical
-		}
-		_ = p.col(req, "groups").Put(ctx, n, []byte(n))
-		return n, nil
+		n := name("LogGroupName", "/aws/"+stack+"/"+logical)
+		_, err := p.call(ctx, req, "aws.logs", "CreateLogGroup", map[string]any{"logGroupName": n})
+		return n, err
 	case "AWS::Events::Rule":
-		n := str(props["Name"])
-		if n == "" {
-			n = logical
+		in := map[string]any{"Name": name("Name", logical)}
+		for _, member := range []string{"ScheduleExpression", "State", "Description", "EventBusName"} {
+			if v, ok := props[member]; ok {
+				in[member] = v
+			}
 		}
-		b, _ := json.Marshal(props)
-		_ = p.col(req, "rules").Put(ctx, n, b)
-		return "arn:aws:events:" + region + ":" + acct + ":rule/" + n, nil
+		if pattern, ok := props["EventPattern"]; ok {
+			in["EventPattern"] = jsonText(pattern)
+		}
+		out, err := p.call(ctx, req, "aws.events", "PutRule", in)
+		if targets, ok := props["Targets"]; ok && err == nil {
+			_, err = p.call(ctx, req, "aws.events", "PutTargets", map[string]any{"Rule": in["Name"], "Targets": targets})
+		}
+		return str(out["RuleArn"]), err
 	case "AWS::Lambda::Function":
-		n := str(props["FunctionName"])
-		if n == "" {
-			n = logical
-		}
-		rec := map[string]any{"FunctionName": n, "Runtime": props["Runtime"], "Handler": props["Handler"], "Code": props["Code"]}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "lambda").Put(ctx, n, b)
-		return "arn:aws:lambda:" + region + ":" + acct + ":function:" + n, nil
+		in := maps.Clone(props)
+		in["FunctionName"] = name("FunctionName", logical)
+		out, err := p.call(ctx, req, "aws.lambda", "CreateFunction", in)
+		return str(out["FunctionArn"]), err
 	case "AWS::Kinesis::Stream":
-		n := str(props["Name"])
-		if n == "" {
-			n = logical
-		}
+		n := name("Name", logical)
 		_, err := p.call(ctx, req, "aws.kinesis", "CreateStream", map[string]any{"StreamName": n})
 		return n, err
 	case "AWS::Kinesis::ResourcePolicy":
-		arn := str(props["ResourceArn"])
-		if arn == "" {
-			arn = str(props["ResourceARN"])
-		}
+		arn := name("ResourceArn", str(props["ResourceARN"]))
 		policy := props["ResourcePolicy"]
 		if policy == nil {
 			policy = props["Policy"]
 		}
-		text, ok := policy.(string)
-		if !ok {
-			body, _ := json.Marshal(policy)
-			text = string(body)
-		}
-		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": text})
+		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": jsonText(policy)})
 		return arn, err
 	case "AWS::ApiGateway::RestApi":
-		n := str(props["Name"])
-		if n == "" {
-			n = logical
-		}
-		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": n})
-		id, _ := out["id"].(string)
-		return id, err
+		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": name("Name", logical)})
+		return str(out["id"]), err
 	default:
 		return "", &spi.Fault{Code: "ValidationError", Message: "unsupported resource type " + typ, HTTPStatus: 400, Fault: "client"}
 	}
 }
 
+// deprovision deletes a resource through its owner. Failures are ignored, as
+// a stack delete proceeds past a resource that is already gone.
 func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) {
-	switch r.Type {
-	case "AWS::S3::Bucket":
-		_ = p.col(req, "buckets").Delete(ctx, r.Physical)
-		_ = p.col(req, "versioning").Delete(ctx, r.Physical)
-		_ = p.col(req, "tags").Delete(ctx, r.Physical)
-		for _, kind := range []string{"cors", "encryption", "lifecycle", "replication", "notification", "ownershipcontrols", "publicaccessblock", "website"} {
-			_ = p.col(req, "bktcfg").Delete(ctx, r.Physical+"/"+kind)
-		}
-	case "AWS::SQS::Queue":
-		_ = p.col(req, "queues").Delete(ctx, lastSlash(r.Physical))
-	case "AWS::SNS::Topic":
-		_ = p.col(req, "topics").Delete(ctx, lastColon(r.Physical))
-	case "AWS::DynamoDB::Table":
-		_ = p.col(req, "tables").Delete(ctx, r.Physical)
-	case "AWS::IAM::Role":
-		_ = p.col(req, "iam").Delete(ctx, "role:"+lastSlash(r.Physical))
-	case "AWS::SSM::Parameter":
-		_ = p.col(req, "ssm").Delete(ctx, r.Physical)
-	case "AWS::SecretsManager::Secret":
-		_ = p.col(req, "secrets").Delete(ctx, lastColon(r.Physical))
-	case "AWS::KMS::Key":
-		_ = p.col(req, "kms").Delete(ctx, r.Physical)
-	case "AWS::Logs::LogGroup":
-		_ = p.col(req, "groups").Delete(ctx, r.Physical)
-	case "AWS::Events::Rule":
-		_ = p.col(req, "rules").Delete(ctx, lastSlash(r.Physical))
-	case "AWS::Lambda::Function":
-		_ = p.col(req, "lambda").Delete(ctx, lastColon(r.Physical))
-	case "AWS::Kinesis::Stream":
-		_, _ = p.call(ctx, req, "aws.kinesis", "DeleteStream", map[string]any{"StreamName": r.Physical})
-	case "AWS::Kinesis::ResourcePolicy":
-		_, _ = p.call(ctx, req, "aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": r.Physical})
-	case "AWS::ApiGateway::RestApi":
-		_, _ = p.call(ctx, req, "aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": r.Physical})
+	id := r.Physical
+	del := map[string]struct {
+		svc, op string
+		in      map[string]any
+	}{
+		"AWS::S3::Bucket":              {"aws.s3", "DeleteBucket", map[string]any{"Bucket": id}},
+		"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
+		"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
+		"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
+		"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": lastSlash(id)}},
+		"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
+		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
+		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
+		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
+		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
+		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
+		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
+		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
+		"AWS::ApiGateway::RestApi":     {"aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": id}},
+	}[r.Type]
+	if del.svc != "" {
+		_, _ = p.call(ctx, req, del.svc, del.op, del.in)
 	}
 }
 
-// call provisions through the service that owns a resource, so its store
-// layout and cascades stay that service's business.
+// call invokes another service the way the edge would: through whatever the
+// registry serves it with, pack or bundle. A pack that runs a worker is
+// closed again, since this construction is per call.
 func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (map[string]any, error) {
-	resp, err := bundled.Handler(id, p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: op, Input: in})
-	if err != nil {
-		return nil, err
+	for _, f := range registry.Factories() {
+		if f.ServiceID != id {
+			continue
+		}
+		pack, err := f.New(p.deps)
+		if err != nil {
+			return nil, err
+		}
+		if closer, ok := pack.(interface{ Close() error }); ok {
+			defer closer.Close()
+		}
+		resp, err := pack.Invoke(ctx, &spi.Request{Identity: req.Identity, AdvertiseURL: advertise(req), Operation: op, Input: in})
+		if err != nil {
+			return nil, err
+		}
+		return resp.Output, nil
 	}
-	return resp.Output, nil
+	return nil, spi.NotImplemented(id, op, "emulate")
 }
 
-func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket string, props map[string]any) {
-	if version, ok := props["VersioningConfiguration"].(map[string]any); ok {
-		if status := str(version["Status"]); status != "" {
-			_ = p.col(req, "versioning").Put(ctx, bucket, []byte(status))
+// configureBucket applies the bucket properties that map one to one onto an
+// S3 operation, and refuses the rest by name rather than storing a shape S3
+// does not read.
+func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket string, props map[string]any) error {
+	// The S3 pack reads Status and TagSet lifted to the top of the input, as
+	// the restXml decoder hands them over (its liftedMembers debt).
+	for property, apply := range map[string]func(v any) (string, map[string]any){
+		"VersioningConfiguration": func(v any) (string, map[string]any) {
+			return "PutBucketVersioning", map[string]any{"VersioningConfiguration": v, "Status": asMap(v)["Status"]}
+		},
+		"Tags": func(v any) (string, map[string]any) {
+			return "PutBucketTagging", map[string]any{"Tagging": map[string]any{"TagSet": v}, "TagSet": v}
+		},
+		"PublicAccessBlockConfiguration": func(v any) (string, map[string]any) {
+			return "PutPublicAccessBlock", map[string]any{"PublicAccessBlockConfiguration": v}
+		},
+		"OwnershipControls": func(v any) (string, map[string]any) {
+			return "PutBucketOwnershipControls", map[string]any{"OwnershipControls": v}
+		},
+	} {
+		if v, ok := props[property]; ok {
+			op, in := apply(v)
+			in["Bucket"] = bucket
+			if _, err := p.call(ctx, req, "aws.s3", op, in); err != nil {
+				return err
+			}
 		}
 	}
-	if tags, ok := props["Tags"]; ok {
-		raw, _ := json.Marshal(tags)
-		_ = p.col(req, "tags").Put(ctx, bucket, raw)
-	}
-	configs := map[string]string{
-		"CorsConfiguration":              "cors",
-		"BucketEncryption":               "encryption",
-		"LifecycleConfiguration":         "lifecycle",
-		"ReplicationConfiguration":       "replication",
-		"NotificationConfiguration":      "notification",
-		"OwnershipControls":              "ownershipcontrols",
-		"PublicAccessBlockConfiguration": "publicaccessblock",
-		"WebsiteConfiguration":           "website",
-	}
-	for property, kind := range configs {
+	// ponytail: the configurations with no one-to-one S3 operation are stored
+	// in CloudFormation's own shape, which S3 does not read and Cloud Control
+	// reads back. Mapping each onto its S3 operation (CorsRules to CORSRules,
+	// and so on) is the upgrade, in both directions.
+	for property, kind := range map[string]string{
+		"CorsConfiguration": "cors", "BucketEncryption": "encryption", "LifecycleConfiguration": "lifecycle",
+		"ReplicationConfiguration": "replication", "NotificationConfiguration": "notification", "WebsiteConfiguration": "website",
+	} {
 		if value, ok := props[property]; ok {
 			raw, _ := json.Marshal(map[string]any{property: value})
 			_ = p.col(req, "bktcfg").Put(ctx, bucket+"/"+kind, raw)
 		}
 	}
+	return nil
+}
+
+func asMap(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+// jsonText answers a policy-like property as the JSON text an API takes; a
+// template may give it as an object or as a string already.
+func jsonText(v any) string {
+	if text, ok := v.(string); ok {
+		return text
+	}
+	raw, _ := json.Marshal(v)
+	return string(raw)
 }
 
 func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack string) any {
@@ -808,14 +668,4 @@ func lastColon(s string) string {
 		return s[i+1:]
 	}
 	return s
-}
-
-func truthy(v any) bool {
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		return t == "true" || t == "True"
-	}
-	return false
 }

@@ -1,0 +1,285 @@
+{
+  "schema": "trace/1",
+  "service": "aws.sts",
+  "source": "pack:internal/services/aws/sts@503d3b1",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetCallerIdentity",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "Account": "000000000000",
+        "Arn": "arn:aws:iam::000000000000:user/alice",
+        "UserId": "AKIAEXAMPLE"
+      }
+    },
+    {
+      "operation": "AssumeRole",
+      "input": {
+        "RoleArn": "arn:aws:iam::000000000000:role/Admin",
+        "RoleSessionName": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "AssumedRoleUser": {
+          "Arn": "arn:aws:sts::000000000000:assumed-role/Admin/s1",
+          "AssumedRoleId": "0065d8f59bf3981c0d07"
+        },
+        "Credentials": {
+          "AccessKeyId": "0065d8f59bf3981c0d07",
+          "Expiration": "1970-01-01T01:00:00Z",
+          "SecretAccessKey": "15a48b242fc0e0d82191737e37bca744873e62d5",
+          "SessionToken": "523c4cd7dbd59bcfe4e930b2ee7d030b"
+        }
+      }
+    },
+    {
+      "operation": "GetAccessKeyInfo",
+      "input": {
+        "AccessKeyId": {
+          "$fromPath": "Credentials.AccessKeyId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "Account": "000000000000"
+      }
+    },
+    {
+      "operation": "GetAccessKeyInfo",
+      "input": {
+        "AccessKeyId": "AKIAUNKNOWNKEY000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "Account": "000000000000"
+      }
+    },
+    {
+      "operation": "GetSessionToken",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "Credentials": {
+          "AccessKeyId": "62a95d92d3c90129e41a",
+          "Expiration": "1970-01-01T01:00:00Z",
+          "SecretAccessKey": "819cb9cb78ca275baedde88eda3fb076cf3b1518",
+          "SessionToken": "f54306e030802a98a7aa2c183d0d525b"
+        }
+      }
+    },
+    {
+      "operation": "GetFederationToken",
+      "input": {
+        "Name": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "Credentials": {
+          "AccessKeyId": "ec67625ef86ad897cdee",
+          "Expiration": "1970-01-01T01:00:00Z",
+          "SecretAccessKey": "8508c18a77372ab4ba7be79a60cfadfee9a4c2dc",
+          "SessionToken": "0fe8d99d886b6c44ce07a90e02f92287"
+        },
+        "FederatedUser": {
+          "Arn": "arn:aws:sts::000000000000:federated-user/bob",
+          "FederatedUserId": "ec67625ef86ad897cdee"
+        }
+      }
+    },
+    {
+      "operation": "AssumeRoleWithSAML",
+      "input": {
+        "PrincipalArn": "arn:aws:iam::000000000000:saml-provider/corp",
+        "RoleArn": "arn:aws:iam::000000000000:role/Admin",
+        "SAMLAssertion": "PHNhbWw+"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "AssumedRoleUser": {
+          "Arn": "arn:aws:sts::000000000000:assumed-role/Admin/saml",
+          "AssumedRoleId": "8e7750c86590ef37b725"
+        },
+        "Credentials": {
+          "AccessKeyId": "8e7750c86590ef37b725",
+          "Expiration": "1970-01-01T01:00:00Z",
+          "SecretAccessKey": "eb67fc49faad9aa3f1cd32cb86b7617da82fd4b0",
+          "SessionToken": "8f4736fd1144498ad77b2a7cbb420ec5"
+        }
+      }
+    },
+    {
+      "operation": "AssumeRoleWithSAML",
+      "input": {
+        "PrincipalArn": "arn:aws:iam::000000000000:saml-provider/corp",
+        "RoleArn": "arn:aws:iam::000000000000:role/Admin",
+        "SAMLAssertion": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "fault": {
+        "code": "MissingParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AssumeRoleWithWebIdentity",
+      "input": {
+        "RoleArn": "arn:aws:iam::000000000000:role/Admin",
+        "RoleSessionName": "w1",
+        "WebIdentityToken": "token"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "AssumedRoleUser": {
+          "Arn": "arn:aws:sts::000000000000:assumed-role/Admin/w1",
+          "AssumedRoleId": "71a868c4bfb93e8410ff"
+        },
+        "Credentials": {
+          "AccessKeyId": "71a868c4bfb93e8410ff",
+          "Expiration": "1970-01-01T01:00:00Z",
+          "SecretAccessKey": "34ee92036f3af42a44c19525f71e1e3e552821cf",
+          "SessionToken": "39bb7163b1cbd6d9698335fbb68051ac"
+        }
+      },
+      "recut": "AssumeRoleWithWebIdentity requires RoleSessionName, and the assumed-role ARN AWS answers ends in it (arn:aws:sts::\u003caccount\u003e:assumed-role/\u003crole\u003e/\u003cRoleSessionName\u003e); the pack wrote a fixed web in its place."
+    },
+    {
+      "operation": "AssumeRoot",
+      "input": {
+        "TargetPrincipal": "111111111111",
+        "TaskPolicyArn": {
+          "arn": "arn:aws:iam::aws:policy/root-task/IAMAuditRootUserCredentials"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "Credentials": {
+          "AccessKeyId": "eaceab4dbf7c0875ffae",
+          "Expiration": "1970-01-01T01:00:00Z",
+          "SecretAccessKey": "94be7f95323c7546efcd593006ad2c8594b140df",
+          "SessionToken": "6e841a2a16b105a77dff11abf589c319"
+        }
+      }
+    },
+    {
+      "operation": "DecodeAuthorizationMessage",
+      "input": {
+        "EncodedMessage": "plain message"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "DecodedMessage": "plain message"
+      }
+    },
+    {
+      "operation": "GetDelegatedAccessToken",
+      "input": {
+        "TradeInToken": "trade"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "Credentials": {
+          "AccessKeyId": "fb19d86ce86cf1628cfc",
+          "Expiration": "1970-01-01T01:00:00Z",
+          "SecretAccessKey": "2b187c3d9f1d3c59151614f9139aaea69b6c3986",
+          "SessionToken": "fb19d86ce86cf1628cfc5d1582bae674"
+        }
+      }
+    },
+    {
+      "operation": "GetWebIdentityToken",
+      "input": {
+        "Audience": [
+          "sts.amazonaws.com"
+        ],
+        "SigningAlgorithm": "RS256"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "AKIAEXAMPLE",
+        "ARN": "arn:aws:iam::000000000000:user/alice",
+        "Project": ""
+      },
+      "output": {
+        "Expiration": "1970-01-01T01:00:00Z",
+        "WebIdentityToken": "08366dd1b497e45fc2fdb7869c675487f58e7f69264cb2e0"
+      }
+    }
+  ]
+}

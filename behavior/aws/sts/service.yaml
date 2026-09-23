@@ -1,0 +1,131 @@
+schema: bir/1
+service: aws.sts
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Every credential is issued at once for an hour and nothing checks a
+# trust policy, a SAML assertion or a web identity token.
+provenance: authored
+missing_input_error: MissingParameter
+
+resources:
+  # An issued temporary credential, keyed by its access key in the scope every
+  # account shares: the edge finds it by the key alone to verify a request
+  # signed with it, and GetAccessKeyInfo answers its account.
+  key:
+    collection: stsk
+    global: true
+    id:
+      input_members: [AccessKeyId]
+    record: {}
+
+errors:
+  MissingParameter:
+    code: MissingParameter
+    http: 400
+    fault: client
+
+operations:
+  GetCallerIdentity:
+    output:
+      Account: identity.account
+      Arn: identity.arn
+      UserId: identity.access_key
+
+  AssumeRole:
+    let:
+      role: &roleName "split(string(input.RoleArn), '/')[size(split(string(input.RoleArn), '/')) - 1]"
+    effects: &issue
+      - generate: { bind: ak, kind: hex, bytes: 20 }
+      - generate: { bind: secret, kind: hex, bytes: 40 }
+      - generate: { bind: token, kind: hex, bytes: 32 }
+      - put:
+          resource: key
+          key: fx.ak
+          record:
+            Account: identity.account
+            SecretAccessKey: fx.secret
+            SessionToken: fx.token
+    output:
+      Credentials: &credentials >-
+        {'AccessKeyId': fx.ak, 'SecretAccessKey': fx.secret, 'SessionToken': fx.token,
+         'Expiration': string(now + duration('3600s'))}
+      AssumedRoleUser: >-
+        {'AssumedRoleId': fx.ak, 'Arn': 'arn:aws:sts::' + identity.account + ':assumed-role/' + role
+         + '/' + string(input.RoleSessionName)}
+
+  AssumeRoleWithSAML:
+    let:
+      role: *roleName
+    require:
+      - { cond: "string(input.SAMLAssertion) != ''", error: MissingParameter }
+    effects: *issue
+    output:
+      Credentials: *credentials
+      AssumedRoleUser: >-
+        {'AssumedRoleId': fx.ak, 'Arn': 'arn:aws:sts::' + identity.account + ':assumed-role/' + role + '/saml'}
+
+  AssumeRoleWithWebIdentity:
+    let:
+      role: *roleName
+    require:
+      - { cond: "string(input.WebIdentityToken) != ''", error: MissingParameter }
+    effects: *issue
+    output:
+      Credentials: *credentials
+      AssumedRoleUser: >-
+        {'AssumedRoleId': fx.ak, 'Arn': 'arn:aws:sts::' + identity.account + ':assumed-role/' + role
+         + '/' + string(input.RoleSessionName)}
+
+  GetSessionToken:
+    effects: *issue
+    output:
+      Credentials: *credentials
+
+  AssumeRoot:
+    effects: *issue
+    output:
+      Credentials: *credentials
+
+  GetDelegatedAccessToken:
+    effects: *issue
+    output:
+      Credentials: *credentials
+
+  GetFederationToken:
+    effects: *issue
+    output:
+      Credentials: *credentials
+      FederatedUser: >-
+        {'FederatedUserId': fx.ak, 'Arn': 'arn:aws:sts::' + identity.account + ':federated-user/' + string(input.Name)}
+
+  GetAccessKeyInfo:
+    reads:
+      k: { resource: key }
+    output:
+      Account: "k_found ? k.Account : identity.account"
+
+  DecodeAuthorizationMessage:
+    output:
+      DecodedMessage: string(input.EncodedMessage)
+
+  GetWebIdentityToken:
+    effects:
+      - generate: { bind: token, kind: hex, bytes: 48 }
+    output:
+      WebIdentityToken: fx.token
+      Expiration: string(now + duration('3600s'))
+
+quirks:
+  - operation: AssumeRole
+    note: >
+      Credentials are issued without evaluating the role's trust policy, and
+      a SAML assertion or web identity token is only checked for being
+      present. An access key a request did not come from STS for answers its
+      caller's own account from GetAccessKeyInfo.
+    provenance: authored
+  - operation: DecodeAuthorizationMessage
+    note: >
+      The message is answered as given. Nothing in the emulator issues an
+      encoded authorization message, so there is nothing to decrypt; the pack
+      tried hex and base64 on it and fell back to the same answer.
+    provenance: authored

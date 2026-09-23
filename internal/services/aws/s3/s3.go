@@ -1377,12 +1377,9 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		if credential := postObjectField(fields, "x-amz-credential"); credential != "" {
 			accessKey, _, _ = strings.Cut(credential, "/")
 		}
-		secret := "test"
-		if accessKey != "test" {
-			secret = p.deps.Rand.Derive(accessKey).Hex(40)
-		}
-		if _, temporary, _ := p.deps.Store.Scope("_mirror", "global").Collection("stsk").Get(ctx, accessKey); temporary {
-			if fault := identity.VerifyS3SessionTokenValue(postObjectField(fields, "x-amz-security-token"), p.deps.Rand.Derive(accessKey+"tok").Hex(32)); fault != nil {
+		secret, token, temporary := identity.S3Credential(ctx, p.deps.Store, p.deps.Rand, accessKey)
+		if temporary {
+			if fault := identity.VerifyS3SessionTokenValue(postObjectField(fields, "x-amz-security-token"), token); fault != nil {
 				return nil, fault
 			}
 		}

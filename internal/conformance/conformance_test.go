@@ -29,7 +29,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 )
 

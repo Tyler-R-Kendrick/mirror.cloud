@@ -572,6 +572,9 @@ func (ev *eval) collection(res bir.Resource) (spi.Collection, error) {
 		return nil, err
 	}
 	ev.lastCol = name
+	if res.Global {
+		return ev.e.deps.Store.Scope("_mirror", "global").Collection(name), nil
+	}
 	return ev.e.scope(ev.req).Collection(name), nil
 }
 

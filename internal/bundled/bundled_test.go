@@ -1,12 +1,14 @@
 package bundled_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/identity"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -120,5 +122,35 @@ func TestRegistryRunsDeclaredWorkers(t *testing.T) {
 	}
 	if err := r.Close(); err != nil || stopped != 1 {
 		t.Fatalf("registry Close stopped %d workers (err=%v), want 1", stopped, err)
+	}
+}
+
+// TestGlobalResourcesAreSharedAcrossAccounts: an STS credential lives in the
+// scope every account shares, so the edge can verify a request signed with it
+// knowing only the key, and GetAccessKeyInfo answers the issuer's account to
+// a caller in another.
+func TestGlobalResourcesAreSharedAcrossAccounts(t *testing.T) {
+	deps := spitest.Deps(t)
+	sts, err := bundled.New("aws.sts", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	out, err := sts.Invoke(context.Background(), &spi.Request{Identity: issuer, Operation: "AssumeRole", Input: map[string]any{
+		"RoleArn": "arn:aws:iam::111111111111:role/Admin", "RoleSessionName": "s",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds := out.Output["Credentials"].(map[string]any)
+	ak := creds["AccessKeyId"].(string)
+	secret, token, temporary := identity.S3Credential(context.Background(), deps.Store, deps.Rand, ak)
+	if !temporary || secret != creds["SecretAccessKey"] || token != creds["SessionToken"] {
+		t.Fatalf("the edge would not verify the issued credential: secret=%q token=%q temporary=%v", secret, token, temporary)
+	}
+	info, err := sts.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "222222222222", Region: "eu-west-1"},
+		Operation: "GetAccessKeyInfo", Input: map[string]any{"AccessKeyId": ak}})
+	if err != nil || info.Output["Account"] != issuer.Account {
+		t.Fatalf("GetAccessKeyInfo from another account = %v, %v; want %s", info, err, issuer.Account)
 	}
 }

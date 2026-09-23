@@ -141,6 +141,11 @@ type Resource struct {
 	// re-receive; callers still hold the old handle, and this collection is
 	// how those calls resolve without the pack growing a second index by hand.
 	KeyAliases string `yaml:"key_aliases,omitempty"`
+	// Global stores the resource in the one scope every account shares
+	// instead of the caller's account and region. It is for records another
+	// service or the edge must find without knowing whose they are -- an
+	// access key issued by STS is looked up by the key alone.
+	Global bool `yaml:"global,omitempty"`
 
 	ID  Identity `yaml:"id,omitempty"`
 	ARN string   `yaml:"arn,omitempty"`

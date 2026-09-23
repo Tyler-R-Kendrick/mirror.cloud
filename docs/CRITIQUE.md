@@ -1326,3 +1326,17 @@ The models answer something the hand table could not: **all three are `restJson1
 QLDB's GetDigest and GetBlock were hollow: a hash of nothing and an empty block. Its `SendCommand` belongs to a separate service, QLDB Session, and no request to QLDB can reach it. All three are mock-tier now.
 
 The lesson is the one "Reviewing the exemptions" records: an exemption must say why, and the why is a claim. This one was never checked against the upstream history, where it was false.
+
+### STS: an issued credential had to be re-derived, so no bundle could issue one
+
+A temporary credential's secret and session token were never stored. STS derived both from the access key and the runtime seed, and so did S3's CreateSession. The edge re-derived them to verify an S3 request signed with the key, and so did S3's POST-policy check. A bundle cannot derive from the seed, so the arrangement tied STS to Go.
+
+What needed storing was the fact, not the recipe. Each issued credential's record in the global `stsk` collection now holds its account, secret and token. `identity.S3Credential` reads it for both verifiers, which were two copies of the same six lines.
+
+Two engine changes let a bundle do the rest:
+- **A resource can be `global`.** It is stored in the scope every account shares, as `stsk` must be, because the edge looks a key up knowing nothing else.
+- **`identity.access_key` is bound.** GetCallerIdentity answers it as `UserId`.
+
+The STS pack is now a bundle. Two recorded behaviors changed:
+- AssumeRoleWithWebIdentity's assumed-role ARN now ends in the RoleSessionName the request must carry, not a fixed `web`. The recording is re-cut for it.
+- DecodeAuthorizationMessage now answers its input. The pack guessed at hex and base64, but nothing in the emulator issues an encoded message to decode.

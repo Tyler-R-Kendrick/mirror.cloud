@@ -54,7 +54,7 @@ program. Everything still counting is wave-3-blocked or owner-active:
   scheduler, kinesis, kms, cloudformation, redshift, iam, apigateway):
   each bundle's `shadow:` names its takeover condition; all funnel into
   the wave-3 unlocks below.
-- organizations/cloudcontrol: cross-scope writes / raw store reads.
+- organizations/cloudcontrol: raw store reads; cross-scope writes now exist (resource `global: true`, used by STS).
 - sns/states/firehose: hard tail. s3/dynamodb: owner-active (their PRs).
 - eventhttp/scheduleexpr: helpers counted but not packs — they die with
   the packs they serve, never by moving (C55).

@@ -188,12 +188,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures {
-		secret := "test"
-		if id.AccessKeyID != "test" {
-			secret = s.deps.Rand.Derive(id.AccessKeyID).Hex(40)
-		}
-		if _, temporary, _ := s.deps.Store.Scope("_mirror", "global").Collection("stsk").Get(ctx, id.AccessKeyID); temporary {
-			if fault := identity.VerifyS3SessionToken(r, s.deps.Rand.Derive(id.AccessKeyID+"tok").Hex(32)); fault != nil {
+		secret, token, temporary := identity.S3Credential(ctx, s.deps.Store, s.deps.Rand, id.AccessKeyID)
+		if temporary {
+			if fault := identity.VerifyS3SessionToken(r, token); fault != nil {
 				s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
 				return
 			}

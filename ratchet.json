@@ -1,15 +1,14 @@
 {
-  "packs": 5,
-  "case_labels": 524,
+  "packs": 4,
+  "case_labels": 515,
   "services_files": 38,
-  "services_loc": 34373,
+  "services_loc": 34275,
   "fault_sites": 670,
-  "register_sites": 5,
+  "register_sites": 4,
   "pack_dirs": [
     "aws/dynamodb",
     "aws/firehose",
     "aws/s3",
-    "aws/sns",
     "aws/states"
   ],
   "routing_mismatches": 0,

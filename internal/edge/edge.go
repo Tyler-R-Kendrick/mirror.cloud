@@ -788,7 +788,8 @@ func (s *Server) snsPhoneOptOut(w http.ResponseWriter, r *http.Request) {
 			region = "us-east-1"
 		}
 	}
-	_ = s.deps.Store.Scope(account, region).Collection("smsopt").Put(r.Context(), phone, []byte("true"))
+	rec, _ := json.Marshal(map[string]any{"phoneNumber": phone})
+	_ = s.deps.Store.Scope(account, region).Collection("smsopt").Put(r.Context(), phone, rec)
 	w.WriteHeader(http.StatusNoContent)
 }
 

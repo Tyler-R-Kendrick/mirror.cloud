@@ -207,7 +207,7 @@ func invokeSNSQueue(t *testing.T, p spi.BehaviorPack, id spi.Identity, operation
 	return resp
 }
 
-func invokeSNS(t *testing.T, p *Pack, id spi.Identity, operation string, input map[string]any) *spi.Response {
+func invokeSNS(t *testing.T, p spi.BehaviorPack, id spi.Identity, operation string, input map[string]any) *spi.Response {
 	t.Helper()
 	resp, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
 	if err != nil {
@@ -678,7 +678,7 @@ func TestLambdaSubscriptionDelivery(t *testing.T) {
 		"Endpoint": "arn:aws:lambda:us-east-1:1:function:notify",
 	}
 	req := &spi.Request{Identity: id, Input: map[string]any{"Subject": "warning"}}
-	event := p.lambdaNotification(req, sub, "hello", "message-1", map[string]any{"severity": "high"})
+	event := (&Pack{deps: deps}).lambdaNotification(req, sub, "hello", "message-1", map[string]any{"severity": "high"})
 	got := event["Records"].([]any)[0].(map[string]any)["Sns"].(map[string]any)
 	if got["Message"] != "hello" || got["TopicArn"] != topic || got["Subject"] != "warning" || !strings.Contains(str(got["SigningCertUrl"]), "SimpleNotificationService.pem") || !strings.Contains(str(got["UnsubscribeURL"]), "Action=Unsubscribe") {
 		t.Fatalf("lambda SNS event %#v", got)
@@ -904,27 +904,27 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 		t.Fatalf("SMS attributes %#v", attrs)
 	}
 	phone := "+15555550100"
-	_ = p.col(&spi.Request{Identity: id}, "smsopt").Put(ctx, phone, []byte("true"))
-	if must("CheckIfPhoneNumberIsOptedOut", map[string]any{"PhoneNumber": phone}).Output["isOptedOut"] != true {
+	_ = (&Pack{deps: deps}).col(&spi.Request{Identity: id}, "smsopt").Put(ctx, phone, mustJSON(map[string]any{"phoneNumber": phone}))
+	if must("CheckIfPhoneNumberIsOptedOut", map[string]any{"phoneNumber": phone}).Output["isOptedOut"] != true {
 		t.Fatal("phone was not opted out")
 	}
 	if numbers := must("ListPhoneNumbersOptedOut", nil).Output["phoneNumbers"].([]any); len(numbers) != 1 {
 		t.Fatalf("opted-out numbers %#v", numbers)
 	}
 	must("OptInPhoneNumber", map[string]any{"phoneNumber": phone})
-	if must("CheckIfPhoneNumberIsOptedOut", map[string]any{"PhoneNumber": phone}).Output["isOptedOut"] != false {
+	if must("CheckIfPhoneNumberIsOptedOut", map[string]any{"phoneNumber": phone}).Output["isOptedOut"] != false {
 		t.Fatal("phone remained opted out")
 	}
 	must("CreateSMSSandboxPhoneNumber", map[string]any{"PhoneNumber": phone})
-	must("VerifySMSSandboxPhoneNumber", map[string]any{"PhoneNumber": phone})
-	if phones := must("ListSMSSandboxPhoneNumbers", nil).Output["PhoneNumbers"].([]any); len(phones) != 1 {
+	must("VerifySMSSandboxPhoneNumber", map[string]any{"PhoneNumber": phone, "OneTimePassword": "123456"})
+	if phones := must("ListSMSSandboxPhoneNumbers", nil).Output["PhoneNumbers"].([]any); len(phones) != 1 || asMap(phones[0])["Status"] != "Verified" {
 		t.Fatalf("sandbox phones %#v", phones)
 	}
-	if status := must("GetSMSSandboxAccountStatus", nil).Output; status["Verified"] != 1 || status["IsInSandbox"] != true {
+	if status := must("GetSMSSandboxAccountStatus", nil).Output; status["IsInSandbox"] != true {
 		t.Fatalf("sandbox status %#v", status)
 	}
 	must("DeleteSMSSandboxPhoneNumber", map[string]any{"PhoneNumber": phone})
-	_ = p.col(&spi.Request{Identity: id}, "orig").Put(ctx, phone, mustJSON(map[string]any{"PhoneNumber": phone}))
+	_ = (&Pack{deps: deps}).col(&spi.Request{Identity: id}, "orig").Put(ctx, phone, mustJSON(map[string]any{"PhoneNumber": phone}))
 	if numbers := must("ListOriginationNumbers", nil).Output["PhoneNumbers"].([]any); len(numbers) != 1 {
 		t.Fatalf("origination numbers %#v", numbers)
 	}
@@ -2252,7 +2252,7 @@ func TestSNSSMSOptOutSuppressesDelivery(t *testing.T) {
 	received := make(chan []byte, 1)
 	cancel := deps.Bus.Subscribe("sns:sms:"+phone, func(_ context.Context, body []byte) { received <- body })
 	defer cancel()
-	if err := p.col(&spi.Request{Identity: id}, "smsopt").Put(ctx, phone, []byte("true")); err != nil {
+	if err := (&Pack{deps: deps}).col(&spi.Request{Identity: id}, "smsopt").Put(ctx, phone, mustJSON(map[string]any{"phoneNumber": phone})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
@@ -2300,15 +2300,13 @@ func TestSNSOptInPhoneValidation(t *testing.T) {
 	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
-	for _, key := range []string{"PhoneNumber", "phoneNumber"} {
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "OptInPhoneNumber", Input: map[string]any{key: "invalid"}}); err == nil {
-			t.Fatalf("accepted invalid phone key %s", key)
-		}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "OptInPhoneNumber", Input: map[string]any{"phoneNumber": "invalid"}}); err == nil {
+		t.Fatal("accepted invalid phone")
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CheckIfPhoneNumberIsOptedOut", Input: map[string]any{"PhoneNumber": "invalid"}}); err == nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CheckIfPhoneNumberIsOptedOut", Input: map[string]any{"phoneNumber": "invalid"}}); err == nil {
 		t.Fatal("checked invalid opt-out phone")
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "OptInPhoneNumber", Input: map[string]any{"PhoneNumber": "+15555550103"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "OptInPhoneNumber", Input: map[string]any{"phoneNumber": "+15555550103"}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2321,7 +2319,7 @@ func TestSNSSandboxPhoneValidation(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSMSSandboxPhoneNumber", Input: map[string]any{"PhoneNumber": "invalid"}}); err == nil {
 		t.Fatal("accepted invalid sandbox phone")
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "VerifySMSSandboxPhoneNumber", Input: map[string]any{"PhoneNumber": "+15555550999"}}); err == nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "VerifySMSSandboxPhoneNumber", Input: map[string]any{"PhoneNumber": "+15555550999", "OneTimePassword": "123456"}}); err == nil {
 		t.Fatal("verified an unregistered sandbox phone")
 	}
 }
@@ -3819,7 +3817,7 @@ func TestSNSEmailDeliveredThroughSES(t *testing.T) {
 	}
 	token := str(asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])["Token"])
 	if token == "" {
-		b, ok, _ := p.col(&spi.Request{Identity: id}, "subs").Get(context.Background(), str(sub.Output["SubscriptionArn"]))
+		b, ok, _ := (&Pack{deps: deps}).col(&spi.Request{Identity: id}, "subs").Get(context.Background(), str(sub.Output["SubscriptionArn"]))
 		var rec map[string]any
 		if !ok || json.Unmarshal(b, &rec) != nil {
 			t.Fatal("missing email token")
@@ -3913,7 +3911,7 @@ func TestSNSRetrospectSMSAndPlatform(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invokeSNS(t, p, id, "Publish", map[string]any{"PhoneNumber": "+15555550123", "Message": "sms-direct"})
-	b, ok, _ := p.col(&spi.Request{Identity: id}, "snssms").Get(ctx, "+15555550123")
+	b, ok, _ := (&Pack{deps: deps}).col(&spi.Request{Identity: id}, "snssms").Get(ctx, "+15555550123")
 	var msgs []any
 	if !ok || json.Unmarshal(b, &msgs) != nil || len(msgs) != 1 {
 		t.Fatalf("sms retrospect %s ok=%v", b, ok)
@@ -3921,7 +3919,7 @@ func TestSNSRetrospectSMSAndPlatform(t *testing.T) {
 	app := invokeSNS(t, p, id, "CreatePlatformApplication", map[string]any{"Name": "retro", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"}})
 	ep := invokeSNS(t, p, id, "CreatePlatformEndpoint", map[string]any{"PlatformApplicationArn": app.Output["PlatformApplicationArn"], "Token": "tok"})
 	invokeSNS(t, p, id, "Publish", map[string]any{"TargetArn": ep.Output["EndpointArn"], "Message": "push"})
-	pb, ok, _ := p.col(&spi.Request{Identity: id}, "snsplat").Get(ctx, str(ep.Output["EndpointArn"]))
+	pb, ok, _ := (&Pack{deps: deps}).col(&spi.Request{Identity: id}, "snsplat").Get(ctx, str(ep.Output["EndpointArn"]))
 	var pushes []any
 	if !ok || json.Unmarshal(pb, &pushes) != nil || len(pushes) != 1 {
 		t.Fatalf("platform retrospect %s ok=%v", pb, ok)

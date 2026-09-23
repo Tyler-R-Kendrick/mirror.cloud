@@ -1491,3 +1491,15 @@ The recording is re-cut where the pack echoed its records instead of the model's
 - **Partner sources.** A partner source's ARN has no account, and its account appears only under ListPartnerEventSourceAccounts.
 - **Replays.** Replays answer their declared members.
 - **Removals.** Untag removes only the named keys.
+
+### SNS: the SMS surface is records; publishing stays Go
+
+SNS is a hybrid bundle. Nine operations are YAML: the SMS sandbox, opt-out and origination-number operations. The other 33 are natives on the Go pack, because publishing fans out to SQS, Lambda, HTTP, email and Firehose subscribers.
+
+Two changes came with the move:
+- **Dedup lock.** The FIFO deduplication lock is package-level, because natives build a pack per call.
+- **`New`.** It answers with the bundle, so callers in other packages reach the YAML operations too.
+
+The opt-out and phone-number operations bind only the model's `phoneNumber`. The pack also accepted `PhoneNumber`, which no client sends.
+
+One step of the recording is re-cut. GetSMSSandboxAccountStatus answered a `Verified` count, but `GetSMSSandboxAccountStatusResult` has no such member.

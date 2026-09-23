@@ -1,0 +1,128 @@
+schema: bir/1
+service: aws.sns
+
+# Transcribed from the hand-written pack, not established against the real
+# service. The SMS sandbox, opt-out and origination-number surface is records.
+# Topics, subscriptions, publishing and delivery, platform applications and
+# endpoints, and topic and SMS attributes are Go, in internal/services/aws/sns:
+# publishing fans out to SQS, Lambda, HTTP, email and Firehose subscribers,
+# which records cannot do.
+provenance: authored
+
+native:
+  - CreateTopic
+  - DeleteTopic
+  - ListTopics
+  - GetTopicAttributes
+  - SetTopicAttributes
+  - Subscribe
+  - ConfirmSubscription
+  - Unsubscribe
+  - ListSubscriptions
+  - ListSubscriptionsByTopic
+  - Publish
+  - PublishBatch
+  - TagResource
+  - UntagResource
+  - AddPermission
+  - RemovePermission
+  - GetSubscriptionAttributes
+  - SetSubscriptionAttributes
+  - ListTagsForResource
+  - PutDataProtectionPolicy
+  - GetDataProtectionPolicy
+  - CreatePlatformApplication
+  - GetPlatformApplicationAttributes
+  - SetPlatformApplicationAttributes
+  - ListPlatformApplications
+  - DeletePlatformApplication
+  - CreatePlatformEndpoint
+  - GetEndpointAttributes
+  - SetEndpointAttributes
+  - ListEndpointsByPlatformApplication
+  - DeleteEndpoint
+  - SetSMSAttributes
+  - GetSMSAttributes
+
+resources:
+  sandbox:
+    collection: smssandbox
+    id: { input_members: [PhoneNumber] }
+    record: { PhoneNumber: input.PhoneNumber }
+  # Opted-out numbers, recorded as {phoneNumber} by the edge's
+  # /_aws/sns/phone-opt-outs; Publish reads the key to skip SMS.
+  optout:
+    collection: smsopt
+    id: { input_members: [phoneNumber] }
+    record: {}
+  origination:
+    collection: orig
+    id: { input_members: [PhoneNumber] }
+    record: {}
+
+errors:
+  InvalidPhone: { code: InvalidParameter, http: 400, fault: client, message: "Invalid parameter: PhoneNumber" }
+  NotRegistered: { code: NotFound, http: 404, fault: client, message: Phone number is not registered }
+
+operations:
+  CreateSMSSandboxPhoneNumber:
+    require:
+      - &phone
+        cond: >-
+          'PhoneNumber' in input && size(string(input.PhoneNumber)) >= 3 && size(string(input.PhoneNumber)) <= 16
+          && string(input.PhoneNumber).matches('^\\+[1-9](?:[/.-]?[0-9])+$')
+        error: InvalidPhone
+    effects:
+      - put: { resource: sandbox, record: { Status: "'Pending'" } }
+    output: {}
+
+  VerifySMSSandboxPhoneNumber:
+    reads: { r: { resource: sandbox } }
+    require:
+      - { cond: r_found, error: NotRegistered }
+    effects:
+      - patch: { resource: sandbox, record: { Status: "'Verified'" } }
+    output: {}
+
+  DeleteSMSSandboxPhoneNumber:
+    effects:
+      - delete: { resource: sandbox, missing: ignore }
+    output: {}
+
+  ListSMSSandboxPhoneNumbers:
+    list: { resource: sandbox, member: PhoneNumbers }
+    output:
+      PhoneNumbers: "size(items) == 0 ? dyn(null) : items.map(r, {'PhoneNumber': r.PhoneNumber, 'Status': r.Status})"
+
+  # The account never leaves the sandbox. The pack also counted verified
+  # numbers, which the result shape has no member for.
+  GetSMSSandboxAccountStatus:
+    output:
+      IsInSandbox: "true"
+
+  OptInPhoneNumber:
+    require:
+      - &optPhone
+        cond: >-
+          'phoneNumber' in input && size(string(input.phoneNumber)) >= 3 && size(string(input.phoneNumber)) <= 16
+          && string(input.phoneNumber).matches('^\\+[1-9](?:[/.-]?[0-9])+$')
+        error: InvalidPhone
+    effects:
+      - delete: { resource: optout, missing: ignore }
+    output: {}
+
+  CheckIfPhoneNumberIsOptedOut:
+    reads: { o: { resource: optout } }
+    require: [*optPhone]
+    output:
+      isOptedOut: o_found
+
+  ListPhoneNumbersOptedOut:
+    list: { resource: optout, member: phoneNumbers }
+    output:
+      phoneNumbers: "size(items) == 0 ? dyn(null) : items.map(r, r.phoneNumber)"
+
+  ListOriginationNumbers:
+    list: { resource: origination, member: PhoneNumbers }
+    output:
+      PhoneNumbers: "size(items) == 0 ? dyn(null) : items"

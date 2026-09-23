@@ -1,4 +1,5 @@
-// Package cloudformation emulates CreateStack for a fixed resource-type set.
+// Package cloudformation is CloudFormation's template engine: the operations
+// behavior/aws/cloudformation lists as native.
 package cloudformation
 
 import (
@@ -10,38 +11,36 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
+// natives are the operations behavior/aws/cloudformation lists as native:
+// the template engine. Parsing a template, resolving its intrinsics and
+// provisioning resources through their owning services is Go; the stack,
+// change set, stack set and type bookkeeping is the bundle's.
+var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports"}
+
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.cloudformation", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range natives {
+		bundled.RegisterNative("aws.cloudformation", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return New(deps).Invoke(ctx, req)
+		})
+	}
 }
 
-// Pack implements CloudFormation-lite.
+// Pack is the template engine behind the native operations.
 type Pack struct{ deps spi.Deps }
 
-// New constructs the pack.
+// New constructs the template engine.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
-
-func (p *Pack) ServiceID() string { return "aws.cloudformation" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	core := []string{"CreateStack", "UpdateStack", "DeleteStack", "DescribeStacks", "ListStacks",
-		"GetTemplate", "ListStackResources", "DescribeStackEvents", "ValidateTemplate",
-		"DescribeStackResource", "GetTemplateSummary", "ListExports",
-		"CreateChangeSet", "DescribeChangeSet", "ExecuteChangeSet", "DeleteChangeSet", "ListChangeSets",
-		"UpdateTerminationProtection", "SignalResource"}
-	return append(core, extraOps()...)
-}
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
 }
 
+// Invoke serves one native operation.
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := first(req.Input, "StackName")
 	switch req.Operation {
@@ -59,59 +58,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.upsert(ctx, req, name, req.Operation == "UpdateStack")
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
-	case "DescribeStacks":
-		return p.describe(ctx, req, name)
-	case "ListStacks":
-		kvs, _, _ := p.col(req, "cfn").List(ctx, "", "", 0)
-		var sums []any
-		for _, kv := range kvs {
-			var st stack
-			_ = json.Unmarshal(kv.Value, &st)
-			sums = append(sums, map[string]any{"StackName": st.Name, "StackId": st.ID, "StackStatus": st.Status})
-		}
-		return &spi.Response{Output: map[string]any{"StackSummaries": sums}}, nil
-	case "GetTemplate":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{"TemplateBody": st.Template, "StagesAvailable": []any{"Original"}}}, nil
-	case "ListStackResources":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		var rs []any
-		for _, r := range st.Resources {
-			rs = append(rs, map[string]any{"LogicalResourceId": r.Logical, "PhysicalResourceId": r.Physical, "ResourceType": r.Type, "ResourceStatus": "CREATE_COMPLETE"})
-		}
-		return &spi.Response{Output: map[string]any{"StackResourceSummaries": rs}}, nil
-	case "DescribeStackEvents":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		var ev []any
-		for _, r := range st.Resources {
-			ev = append(ev, map[string]any{"LogicalResourceId": r.Logical, "PhysicalResourceId": r.Physical, "ResourceType": r.Type, "ResourceStatus": "CREATE_COMPLETE", "StackName": st.Name, "StackId": st.ID})
-		}
-		ev = append(ev, map[string]any{"LogicalResourceId": st.Name, "ResourceType": "AWS::CloudFormation::Stack", "ResourceStatus": st.Status, "StackName": st.Name, "StackId": st.ID})
-		return &spi.Response{Output: map[string]any{"StackEvents": ev}}, nil
-	case "DescribeStackResource":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		want := first(req.Input, "LogicalResourceId")
-		for _, r := range st.Resources {
-			if r.Logical == want {
-				return &spi.Response{Output: map[string]any{"StackResourceDetail": map[string]any{
-					"LogicalResourceId": r.Logical, "PhysicalResourceId": r.Physical, "ResourceType": r.Type,
-					"ResourceStatus": "CREATE_COMPLETE", "StackName": st.Name, "StackId": st.ID,
-				}}}, nil
-			}
-		}
-		return nil, &spi.Fault{Code: "ValidationError", Message: "resource not found", HTTPStatus: 400, Fault: "client"}
 	case "GetTemplateSummary":
 		body, bodyErr := p.templateBody(ctx, req)
 		tpl, err := parseTemplate(body)
@@ -154,35 +100,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
-	case "CreateChangeSet":
-		csn := first(req.Input, "ChangeSetName")
-		body, err := p.templateBody(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8)
-		rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": id, "StackName": name, "Status": "CREATE_COMPLETE", "TemplateBody": body}
-		b, _ := json.Marshal(rec)
-		_ = p.col(req, "cfn-cs").Put(ctx, name+":"+csn, b)
-		return &spi.Response{Output: map[string]any{"Id": id, "StackId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name}}, nil
-	case "DescribeChangeSet":
-		csn := first(req.Input, "ChangeSetName")
-		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, name+":"+csn)
-		if !ok {
-			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: rec}, nil
-	case "ListChangeSets":
-		kvs, _, _ := p.col(req, "cfn-cs").List(ctx, name+":", "", 0)
-		var items []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			items = append(items, rec)
-		}
-		return &spi.Response{Output: map[string]any{"Summaries": items}}, nil
 	case "ExecuteChangeSet":
 		csn := first(req.Input, "ChangeSetName")
 		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, name+":"+csn)
@@ -197,22 +114,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
-	case "DeleteChangeSet":
-		_ = p.col(req, "cfn-cs").Delete(ctx, name+":"+first(req.Input, "ChangeSetName"))
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "UpdateTerminationProtection":
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		st.Protect = truthy(req.Input["EnableTerminationProtection"])
-		raw, _ := json.Marshal(st)
-		_ = p.col(req, "cfn").Put(ctx, name, raw)
-		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, nil
-	case "SignalResource":
-		return &spi.Response{Output: map[string]any{}}, nil
 	default:
-		return p.extra(ctx, req)
+		return nil, spi.NotImplemented("aws.cloudformation", req.Operation, "emulate")
 	}
 }
 
@@ -337,29 +240,6 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	}
 	_ = p.col(req, "cfn").Delete(ctx, name)
 	return &spi.Response{Output: map[string]any{}}, nil
-}
-
-func (p *Pack) describe(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
-	var stacks []any
-	if name != "" {
-		st, err := p.load(ctx, req, name)
-		if err != nil {
-			return nil, err
-		}
-		stacks = append(stacks, wireStack(st))
-	} else {
-		kvs, _, _ := p.col(req, "cfn").List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			var st stack
-			_ = json.Unmarshal(kv.Value, &st)
-			stacks = append(stacks, wireStack(st))
-		}
-	}
-	return &spi.Response{Output: map[string]any{"Stacks": stacks}}, nil
-}
-
-func wireStack(st stack) map[string]any {
-	return map[string]any{"StackName": st.Name, "StackId": st.ID, "StackStatus": st.Status, "Outputs": st.Outputs}
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
@@ -788,14 +668,4 @@ func lastColon(s string) string {
 		return s[i+1:]
 	}
 	return s
-}
-
-func truthy(v any) bool {
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		return t == "true" || t == "True"
-	}
-	return false
 }

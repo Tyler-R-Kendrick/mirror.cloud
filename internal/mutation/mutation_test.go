@@ -4283,6 +4283,14 @@ var mutants = []mutant{
 		run: "TestCloudFormationProvisionedResourceLifecycle",
 	},
 	{
+		name: "cloudformation-describe-stack-resources-answers-none",
+		file: filepath.Join("behavior", "aws", "cloudformation", "service.yaml"),
+		old:  `        s_found && 'Resources' in s && s.Resources != null`,
+		new:  `        false`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationProvisionedResourceLifecycle",
+	},
+	{
 		name: "cloudformation-provision-queue-without-creating-it",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `p.call(ctx, req, "aws.sqs", "CreateQueue",`,

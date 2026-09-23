@@ -1278,6 +1278,8 @@ IAM's shadow gave NewAuthorizer as a reason the pack had to stay. That was never
 - CreateVirtualMFADevice answered `MFADevice` and a bare `SerialNumber`, neither of them a member of the output, so the wire carried nothing. It now answers `VirtualMFADevice`, as AWS does.
 - Several tests pinned pack answers AWS does not give: names in UpdateRole, UpdateUser, UpdateGroup and GetSAMLProvider results, and `PolicyName` accepted where the model requires `PolicyArn`. They now expect AWS's answers.
 
+CloudFormation is the last of the shadow set that needed nothing new. It first had to stop writing other services' storage: a role under the pack's old `iam` prefix, a KMS key in base64, an S3 bucket's versioning as raw bytes. Each of the eleven resource types is now created and deleted through its owning service's operation, and the lifecycle test checks each in its owner. Then the template engine (CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports) went native. `DescribeStackResources` had never been tested and was never recorded; it is now a line of YAML over the stack record, with a test and a needle.
+
 ### A sixth of the mutation suite had never run
 
 `TestMutantsAreKilled` counted any failing `go test` as a kill, and a mutant that doesn't compile fails `go test`. A rewrite like `if false {` that leaves a variable unused, or a type change that stops a package building, "passed" without a single test running. A compile sweep over every needle found **408 such mutants**, out of about 2,450: 327 died on "declared and not used" and the rest on undefined names, type errors, unused imports and vet's `bool` check. One of them named a variable that has never existed in the code it mutates.

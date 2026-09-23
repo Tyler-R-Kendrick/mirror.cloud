@@ -41,7 +41,7 @@ func TestTemplateURLLoadsFromS3(t *testing.T) {
 	if _, err := s3Pack.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "templates", "Key": "stack.json"}, Body: io.NopCloser(strings.NewReader(template))}); err != nil {
 		t.Fatal(err)
 	}
-	p := New(deps)
+	p := bundled.Handler("aws.cloudformation", deps)
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "url", "TemplateURL": "s3://templates/stack.json"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestKinesisResourcePolicyLifecycle(t *testing.T) {
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	arn := "arn:aws:kinesis:us-east-1:000000000000:stream/events"
 	template := `{"Resources":{"Policy":{"Type":"AWS::Kinesis::ResourcePolicy","Properties":{"ResourceArn":"` + arn + `","ResourcePolicy":{"Version":"2012-10-17","Statement":[]}}}}}`
-	p := New(deps)
+	p := bundled.Handler("aws.cloudformation", deps)
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "policy", "TemplateBody": template}}); err != nil {
 		t.Fatal(err)
 	}
@@ -273,13 +273,6 @@ func TestBootedServerCloudFormationRemainder(t *testing.T) {
 	call(url.Values{"Action": {"RollbackStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}})
 }
 
-func TestCloudFormationHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 90 {
-		t.Fatalf("cfn Operations() %d want 90", n)
-	}
-}
-
 func TestBootedServerCloudFormationExtraOps(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.cloudformation"}
@@ -291,25 +284,6 @@ func TestBootedServerCloudFormationExtraOps(t *testing.T) {
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/cloudformation/aws4_request, SignedHeaders=host, Signature=00"
-	soft := func(vals url.Values) string {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(vals.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("Authorization", auth)
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(res.Body)
-		res.Body.Close()
-		if res.Header.Get("x-mirror-fidelity") != "emulate" {
-			t.Fatalf("%s fidelity %q %s", vals.Get("Action"), res.Header.Get("x-mirror-fidelity"), b)
-		}
-		if res.StatusCode >= 500 {
-			t.Fatalf("%s %d %s", vals.Get("Action"), res.StatusCode, b)
-		}
-		return string(b)
-	}
 	hard := func(vals url.Values) string {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(vals.Encode()))
@@ -339,20 +313,6 @@ func TestBootedServerCloudFormationExtraOps(t *testing.T) {
 	if strings.Contains(listed, "<StackSetName>ssboot</StackSetName>") {
 		t.Fatalf("stackset still present %s", listed)
 	}
-	base := url.Values{
-		"Version": {"2010-05-15"}, "StackSetName": {"ssboot"}, "StackName": {"s1"},
-		"TypeName": {"AWS::S3::Bucket"}, "GeneratedTemplateName": {"gt1"}, "GeneratedTemplateId": {"gt1"},
-		"ResourceScanId": {"rs1"}, "StackRefactorId": {"rf1"}, "OperationId": {"op1"},
-		"StackPolicyBody": {"{}"}, "TemplateBody": {`{"AWSTemplateFormatVersion":"2010-09-09","Resources":{}}`},
-	}
-	for _, op := range extraOps() {
-		vals := url.Values{}
-		for k, v := range base {
-			vals[k] = v
-		}
-		vals.Set("Action", op)
-		soft(vals)
-	}
 }
 
 func TestParseYAMLRefGetAtt(t *testing.T) {
@@ -371,7 +331,7 @@ func TestParseYAMLRefGetAtt(t *testing.T) {
 
 func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.cloudformation", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	resources := map[string]any{
@@ -421,16 +381,25 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 	if len(stacks) != 1 || len(stacks[0].(map[string]any)["Outputs"].([]any)) != 5 {
 		t.Fatalf("stack outputs %#v", stacks)
 	}
+	stackResources, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeStackResources", Input: map[string]any{"StackName": "all"}})
+	if err != nil || len(stackResources.Output["StackResources"].([]any)) != len(resources) {
+		t.Fatalf("DescribeStackResources %#v %v", stackResources, err)
+	}
+	for _, raw := range stackResources.Output["StackResources"].([]any) {
+		if r := raw.(map[string]any); r["PhysicalResourceId"] == "" || r["ResourceType"] == "" {
+			t.Fatalf("stack resource %#v", r)
+		}
+	}
 	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListStackResources", Input: map[string]any{"StackName": "all"}})
 	if err != nil || len(listed.Output["StackResourceSummaries"].([]any)) != len(resources) {
 		t.Fatalf("resources %#v %v", listed, err)
 	}
 	// Each resource exists in its owning service, as that service stores it.
 	owned := func(svc, op string, in map[string]any) error {
-		_, err := p.call(ctx, &spi.Request{Identity: id}, svc, op, in)
+		_, err := New(deps).call(ctx, &spi.Request{Identity: id}, svc, op, in)
 		return err
 	}
-	versioning, err := p.call(ctx, &spi.Request{Identity: id}, "aws.s3", "GetBucketVersioning", map[string]any{"Bucket": "all-bucket"})
+	versioning, err := New(deps).call(ctx, &spi.Request{Identity: id}, "aws.s3", "GetBucketVersioning", map[string]any{"Bucket": "all-bucket"})
 	if err != nil || versioning["Status"] != "Enabled" {
 		t.Fatalf("bucket versioning %#v %v", versioning, err)
 	}
@@ -513,7 +482,7 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	if params["Explicit"] != "set" || params["Defaulted"] != "fallback" || len(paramDecls(tpl)) != 3 {
 		t.Fatalf("parameters %#v %#v", params, tpl)
 	}
-	if lastSlash("plain") != "plain" || lastColon("plain") != "plain" || !truthy(true) || truthy("false") {
+	if lastSlash("plain") != "plain" || lastColon("plain") != "plain" {
 		t.Fatal("scalar helpers")
 	}
 }

@@ -165,6 +165,9 @@ func merge(dst, src *Service, name string) error {
 		dst.Shadow = src.Shadow
 	}
 	dst.Native = append(dst.Native, src.Native...)
+	if src.Worker != "" {
+		dst.Worker = src.Worker
+	}
 	if src.MissingInput != "" {
 		dst.MissingInput = src.MissingInput
 	}

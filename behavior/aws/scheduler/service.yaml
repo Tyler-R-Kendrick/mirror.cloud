@@ -6,32 +6,18 @@ service: aws.scheduler
 # fires on its own in this bundle.
 provenance: authored
 
-# Complete and gated for the CRUD surface, but not yet serving: the pack's
-# reason to exist is the delivery worker, and none of it is expressible. A
-# background loop wakes on the clock, walks every account/region scope,
-# parses cron/rate/at expressions (internal/services/aws/scheduleexpr) to find
-# due schedules, offsets flexible-window invocations by a Rand.Derive draw,
-# renders <aws.scheduler.*> template tokens into the payload, and delivers
-# through events.DeliverTarget to arbitrary targets -- SQS, Lambda, HTTP API
-# destinations -- with exponential-backoff retries and dead-lettering into
-# aws.sqs via a cross-service SendMessage. That is a time-driven effect, a
-# cross-scope iteration, several cross-service calls, and a cron parser; the
-# effect vocabulary has none of them and no primitive registry exists. Even
-# CreateSchedule's stored record carries _mirrorNextInvocation, computed from
-# the expression parser, the clock and the flexible-window draw, so the
-# record below omits it -- it is stripped from every answer the pack gives,
-# so the omission is unobservable over the API. The bundle takes over when
-# deadlines can fire cross-service delivery and an aws.scheduler/schedule
-# primitive carries the expression arithmetic, moved verbatim.
-shadow: >
-  The delivery worker is the service: a clock-driven loop across every scope
-  parses schedule expressions, draws flexible-window offsets from the
-  deterministic Rand, and delivers to arbitrary targets through
-  events.DeliverTarget with retries and SQS dead-lettering. None of that is
-  expressible without time-triggered cross-service effects and a schedule
-  expression primitive, and no primitive registry exists yet. The CRUD and
-  validation surface is transcribed and gated below; CreateSchedule no longer
-  rejects an unparseable ScheduleExpression, which is the same gap.
+# Delivery is a Go worker, in internal/services/aws/scheduler: a loop that
+# wakes on the clock, walks every scope's schedules below, computes each one's
+# next invocation from its expression (and, for a flexible window, a
+# deterministic offset), renders the <aws.scheduler.*> template tokens into
+# the payload, delivers through events.DeliverTarget with retries, and
+# dead-letters into aws.sqs. It keeps its own bookkeeping on the schedule
+# record under _mirror-prefixed members, which no answer below carries.
+worker: fires due schedules on the clock and delivers them to their targets
+
+# The at/rate/cron grammar and the IANA zone lookup, which CEL has neither of.
+primitives:
+  expression_error: { name: scheduler.expression_error, version: 1 }
 
 resources:
   schedule_group:
@@ -86,6 +72,15 @@ operations:
         error: NotFound
         message: Schedule group does not exist.
       - { cond: "!s_found", error: Conflict, message: Schedule already exists. }
+      - cond: >
+          prim('scheduler.expression_error', [
+            'ScheduleExpression' in input ? string(input.ScheduleExpression) : '',
+            'ScheduleExpressionTimezone' in input ? string(input.ScheduleExpressionTimezone) : '']) == ''
+        error: Validation
+        message_expr: >
+          prim('scheduler.expression_error', [
+            'ScheduleExpression' in input ? string(input.ScheduleExpression) : '',
+            'ScheduleExpressionTimezone' in input ? string(input.ScheduleExpressionTimezone) : ''])
       - cond: >
           'Arn' in input.Target && string(input.Target.Arn) != ''
             && 'RoleArn' in input.Target
@@ -162,7 +157,14 @@ operations:
     effects:
       # The pack stored the request verbatim, so this is a create (no merge)
       # with a spread; Name, GroupName, Arn and State are forced back on top.
-      - create: { resource: schedule, spread: input }
+      # The worker computes the first invocation from when the schedule was
+      # written, so the time is recorded rather than assumed.
+      - create:
+          resource: schedule
+          spread: input
+          record:
+            CreationDate: now
+            LastModificationDate: now
     output:
       ScheduleArn: rec.Arn
 
@@ -179,6 +181,8 @@ operations:
       ScheduleExpression: s.ScheduleExpression
       FlexibleTimeWindow: s.FlexibleTimeWindow
       Target: s.Target
+      CreationDate: s.CreationDate
+      LastModificationDate: s.LastModificationDate
       ActionAfterCompletion: "'ActionAfterCompletion' in s ? s.ActionAfterCompletion : null"
       Description: "'Description' in s ? s.Description : null"
       EndDate: "'EndDate' in s ? s.EndDate : null"
@@ -201,6 +205,15 @@ operations:
       s: { resource: schedule }
     require:
       - { cond: s_found, error: NotFound, message: Schedule does not exist. }
+      - cond: >
+          prim('scheduler.expression_error', [
+            'ScheduleExpression' in input ? string(input.ScheduleExpression) : '',
+            'ScheduleExpressionTimezone' in input ? string(input.ScheduleExpressionTimezone) : '']) == ''
+        error: Validation
+        message_expr: >
+          prim('scheduler.expression_error', [
+            'ScheduleExpression' in input ? string(input.ScheduleExpression) : '',
+            'ScheduleExpressionTimezone' in input ? string(input.ScheduleExpressionTimezone) : ''])
       - cond: >
           'Arn' in input.Target && string(input.Target.Arn) != ''
             && 'RoleArn' in input.Target
@@ -282,6 +295,8 @@ operations:
           spread: input
           record:
             Arn: s.Arn
+            CreationDate: "'CreationDate' in s ? s.CreationDate : now"
+            LastModificationDate: now
     output:
       ScheduleArn: s.Arn
 

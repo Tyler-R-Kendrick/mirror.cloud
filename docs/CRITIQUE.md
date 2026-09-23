@@ -1280,6 +1280,12 @@ IAM's shadow gave NewAuthorizer as a reason the pack had to stay. That was never
 
 CloudFormation is the last of the shadow set that needed nothing new. It first had to stop writing other services' storage: a role under the pack's old `iam` prefix, a KMS key in base64, an S3 bucket's versioning as raw bytes. Each of the eleven resource types is now created and deleted through its owning service's operation, and the lifecycle test checks each in its owner. Then the template engine (CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports) went native. `DescribeStackResources` had never been tested and was never recorded; it is now a line of YAML over the stack record, with a test and a needle.
 
+Scheduler needed one more mechanism: a bundle can declare `worker:`, and the Go registered with `bundled.RegisterWorker` runs for as long as the registry-built service does. A cross-service call that builds the bundle does not start it. Its delivery loop now walks the bundle's schedule records. Two things changed along the way:
+- **The first invocation counts from `LastModificationDate`.** The pack computed each schedule's next run when the schedule was created. The worker now counts from the write time, which the bundle records together with `CreationDate`, so a loop that first sees a schedule late does not skip it. AWS answers both dates, and the pack never did. The recording was re-cut for them, citing the model.
+- **Unparseable expressions are rejected again.** A `scheduler.expression_error` primitive runs the at/rate/cron parser, so CreateSchedule and UpdateSchedule once again reject an expression that doesn't parse, which the bundle alone could not do. Nothing had tested that rejection; a test does now.
+
+The loop polls once a second because the bundle's writes don't wake it. It is marked `ponytail:`, and a store change feed is the upgrade.
+
 ### A sixth of the mutation suite had never run
 
 `TestMutantsAreKilled` counted any failing `go test` as a kill, and a mutant that doesn't compile fails `go test`. A rewrite like `if false {` that leaves a variable unused, or a type change that stops a package building, "passed" without a single test running. A compile sweep over every needle found **408 such mutants**, out of about 2,450: 327 died on "declared and not used" and the rest on undefined names, type errors, unused imports and vet's `bool` check. One of them named a variable that has never existed in the code it mutates.

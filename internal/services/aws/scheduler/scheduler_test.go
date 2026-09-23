@@ -23,13 +23,16 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/store"
 )
 
-func TestSchedulerHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	defer p.Close()
-	if n := len(p.Operations()); n != 9 {
-		t.Fatalf("scheduler Operations() %d want 9", n)
-	}
+// scheduler is the served service as the registry builds it: the bundle, with
+// the delivery worker running until Close.
+type scheduler struct {
+	spi.BehaviorPack
+	stop func() error
 }
+
+func (s scheduler) Close() error { return s.stop() }
+
+func New(d spi.Deps) scheduler { return scheduler{bundled.Handler("aws.scheduler", d), Start(d)} }
 
 type deadlineRaceClock struct {
 	*clock.Controllable
@@ -61,12 +64,7 @@ func TestSchedulerWaitsForAbsoluteDeadline(t *testing.T) {
 	if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "jobs"}}); err != nil {
 		t.Fatal(err)
 	}
-	arn := "arn:aws:scheduler:us-east-1:123456789012:schedule/default/once"
-	rec, fault := (&Pack{deps: deps}).scheduleRecord(scheduleInput("once", "at(1970-01-01T00:01:00)", time.Time{}, "jobs", "work"), "once", "default", arn)
-	if fault != nil {
-		t.Fatal(fault)
-	}
-	if err := putRecord(ctx, deps.Store.Scope(id.Account, id.Region).Collection("sch:default"), "once", rec); err != nil {
+	if _, err := bundled.Handler("aws.scheduler", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: scheduleInput("once", "at(1970-01-01T00:01:00)", time.Time{}, "jobs", "work")}); err != nil {
 		t.Fatal(err)
 	}
 	p := New(deps)
@@ -142,7 +140,11 @@ func TestBootedServerSchedulerCreateGetDelete(t *testing.T) {
 
 func TestChangeRecordIfUnchangedRejectsStaleWorkerState(t *testing.T) {
 	ctx := context.Background()
-	collection := spitest.Deps(t).Store.Scope("123456789012", "us-east-1").Collection("sch:default")
+	collection := spitest.Deps(t).Store.Scope("123456789012", "us-east-1").Collection("sch")
+	putRecord := func(ctx context.Context, collection spi.Collection, key string, rec map[string]any) error {
+		b, _ := json.Marshal(rec)
+		return collection.Put(ctx, key, b)
+	}
 	original := map[string]any{"Name": "job", "State": "ENABLED"}
 	if err := putRecord(ctx, collection, "job", original); err != nil {
 		t.Fatal(err)
@@ -169,7 +171,9 @@ func TestChangeRecordIfUnchangedRejectsStaleWorkerState(t *testing.T) {
 	if err := changeRecordIfUnchanged(ctx, collection, "job", expected, nil); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := getRecord(ctx, collection, "job")
+	raw, ok, err := collection.Get(ctx, "job")
+	var got map[string]any
+	_ = json.Unmarshal(raw, &got)
 	if err != nil || !ok || got["State"] != "DISABLED" {
 		t.Fatalf("stale worker deleted replacement: %v, %v, %v", got, ok, err)
 	}
@@ -314,11 +318,12 @@ func TestSchedulerFlexibleWindowRetryAndDLQ(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: flexible}); err != nil {
 		t.Fatal(err)
 	}
-	rec := storedSchedule(t, deps, id, "flexible")
-	next, ok := inputTime(rec[nextInvocation])
+	// The worker offsets a flexible schedule inside its window, from the
+	// stored record, before it is ever due.
+	_, next := (&worker{deps: deps}).recordNext(storedSchedule(t, deps, id, "flexible"), clock.Now())
 	windowStart := time.Unix(60, 0).UTC()
-	if !ok || !next.After(windowStart) || next.After(windowStart.Add(time.Minute)) {
-		t.Fatalf("flexible invocation %v", rec[nextInvocation])
+	if !next.After(windowStart) || next.After(windowStart.Add(time.Minute)) {
+		t.Fatalf("flexible invocation %v", next)
 	}
 	_ = clock.Advance(2 * time.Minute)
 	eventually(t, func() bool {
@@ -397,7 +402,7 @@ func queueBodies(t *testing.T, deps spi.Deps, id spi.Identity, queue string) []s
 
 func storedSchedule(t *testing.T, deps spi.Deps, id spi.Identity, name string) map[string]any {
 	t.Helper()
-	b, ok, err := deps.Store.Scope(id.Account, id.Region).Collection("sch:default").Get(context.Background(), name)
+	b, ok, err := deps.Store.Scope(id.Account, id.Region).Collection("sch").Get(context.Background(), "default/"+name)
 	if err != nil || !ok {
 		t.Fatalf("schedule %s: found=%v err=%v", name, ok, err)
 	}
@@ -444,6 +449,25 @@ func eventually(t *testing.T, condition func() bool) {
 			t.Fatal("the expected state did not arrive within 60s of advancing the clock")
 		default:
 			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func TestCreateScheduleRejectsUnparseableExpressions(t *testing.T) {
+	p := bundled.Handler("aws.scheduler", spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for name, input := range map[string]map[string]any{
+		"zero rate": scheduleInput("zero", "rate(0 minutes)", time.Time{}, "jobs", "x"),
+		"bad cron":  scheduleInput("cron", "cron(nonsense)", time.Time{}, "jobs", "x"),
+		"unknown zone": func() map[string]any {
+			in := scheduleInput("zone", "rate(1 minute)", time.Time{}, "jobs", "x")
+			in["ScheduleExpressionTimezone"] = "Mars/Olympus"
+			return in
+		}(),
+	} {
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSchedule", Input: input})
+		if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ValidationException" {
+			t.Errorf("%s: %v, want ValidationException", name, err)
 		}
 	}
 }

@@ -1,0 +1,84 @@
+schema: bir/1
+service: aws.qldb
+
+# Transcribed from the hand-written pack, not established against the real
+# service, which AWS retired in 2025. A ledger is a record: it is ACTIVE at
+# once and has no journal, so the journal operations (GetBlock, GetDigest,
+# GetRevision and the exports and streams) are mock-tier.
+provenance: authored
+
+resources:
+  ledger:
+    collection: qldb
+    id:
+      input_members: [Name]
+    record:
+      Name: id
+      Arn: "'arn:aws:qldb:' + identity.region + ':' + identity.account + ':ledger/' + id"
+      State: "'ACTIVE'"
+      PermissionsMode: "'PermissionsMode' in input ? input.PermissionsMode : null"
+      DeletionProtection: "'DeletionProtection' in input ? input.DeletionProtection : null"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 404
+    fault: client
+  AlreadyExists:
+    code: ResourceAlreadyExistsException
+    http: 409
+    fault: client
+
+operations:
+  CreateLedger:
+    reads:
+      l: { resource: ledger }
+    require:
+      - { cond: "!l_found", error: AlreadyExists }
+    effects:
+      - put: { resource: ledger }
+    output:
+      Name: rec.Name
+      Arn: rec.Arn
+      State: rec.State
+      PermissionsMode: "'PermissionsMode' in rec ? rec.PermissionsMode : null"
+      DeletionProtection: "'DeletionProtection' in rec ? rec.DeletionProtection : null"
+
+  DescribeLedger: {get: {resource: ledger, error: NotFound}}
+
+  UpdateLedger:
+    reads:
+      l: { resource: ledger }
+    require:
+      - { cond: l_found, error: NotFound }
+    effects:
+      - patch:
+          resource: ledger
+          record:
+            DeletionProtection: "'DeletionProtection' in input ? input.DeletionProtection : ('DeletionProtection' in l ? l.DeletionProtection : null)"
+    output:
+      Name: rec.Name
+      Arn: rec.Arn
+      State: rec.State
+      DeletionProtection: "'DeletionProtection' in rec ? rec.DeletionProtection : null"
+
+  ListLedgers:
+    list: { resource: ledger, member: Ledgers, paginate: model }
+    output:
+      Ledgers: "items.map(l, {'Name': l.Name, 'State': l.State})"
+
+  DeleteLedger: {delete: {resource: ledger, missing: ignore}}
+
+quirks:
+  - operation: CreateLedger
+    note: >
+      A ledger is ACTIVE when it is created; AWS answers CREATING and moves it
+      to ACTIVE later. Transcribed from the pack.
+    provenance: authored
+  - operation: GetDigest
+    note: >
+      There is no journal. The pack answered GetDigest with a hash of nothing
+      and GetBlock with an empty block, and served SendCommand, which belongs
+      to QLDB Session, a separate service no request to QLDB can reach. None
+      of the three held state worth emulating, so they are mock-tier.
+    provenance: authored

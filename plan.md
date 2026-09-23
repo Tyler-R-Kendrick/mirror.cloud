@@ -56,8 +56,6 @@ program. Everything still counting is wave-3-blocked or owner-active:
   the wave-3 unlocks below.
 - organizations/cloudcontrol: cross-scope writes / raw store reads.
 - sns/states/firehose: hard tail. s3/dynamodb: owner-active (their PRs).
-- elastictranscoder/qldb/lookoutmetrics: need authored specs (deprecated
-  upstream).
 - eventhttp/scheduleexpr: helpers counted but not packs — they die with
   the packs they serve, never by moving (C55).
 
@@ -101,9 +99,8 @@ delete the two known-red.json entries, both ratchet tests go green.
    QueueName must satisfy QueueUrl's requirement for the emulator's internal
    delivery paths). Then 153 mutation needles retarget to engine mutants
    (the ec2 pattern) and 25 callers reroute to bundled.Handler.
-3. **elastictranscoder/qldb/lookoutmetrics** need authored specs (deprecated
-   upstream; mirror.set already declares them; specs-sync says "3 with no
-   upstream spec").
+3. ~~elastictranscoder/qldb/lookoutmetrics~~ done: their last published
+   models are vendored through specs/urls.tsv and all three are bundles.
 
 ## Environment traps
 

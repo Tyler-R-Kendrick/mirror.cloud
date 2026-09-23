@@ -1317,6 +1317,12 @@ The claim was wrong. api-models-aws had published all three and then deleted the
 
 `specs/urls.tsv` now serves each model from that commit, under `specs/aws-retired/`. `specs/aws-dirs.json` says why they are there, and the hand table is gone.
 
-The models answer something the hand table could not: **all three are `restJson1`**. The emulator had been accepting a wire format no SDK sends to these services. Their packs are still the hand-written ones. Two of them name operations that match the models. The QLDB pack also serves `SendCommand`, which belongs to a separate service, QLDB Session, and no request to QLDB can reach it now. Moving the three to bundles against their real models is the next step.
+The models answer something the hand table could not: **all three are `restJson1`**. The emulator had been accepting a wire format no SDK sends to these services. With real models behind them, the three packs became bundles. Each was recorded from its pack first and gated against that recording. A step was re-cut only where the model shows the pack was wrong:
+- DescribeAlert answered the alert's members at the top level, where the model wraps them in `Alert`.
+- QLDB's not-found fault answered 400 where the model declares 404, and its ledger summaries listed members `LedgerSummary` does not have.
+- DeletePipeline answered a `Success` member its empty response shape does not declare.
+- Pipelines and jobs dropped `InputBucket`, `OutputBucket`, `Role` and `Input`, which the model declares and the request supplies.
+
+QLDB's GetDigest and GetBlock were hollow: a hash of nothing and an empty block. Its `SendCommand` belongs to a separate service, QLDB Session, and no request to QLDB can reach it. All three are mock-tier now.
 
 The lesson is the one "Reviewing the exemptions" records: an exemption must say why, and the why is a claim. This one was never checked against the upstream history, where it was false.

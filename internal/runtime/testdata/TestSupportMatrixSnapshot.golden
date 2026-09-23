@@ -110,7 +110,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.pipes` | `restJson1` | 10 | 0 |
 | `aws.polly` | `restJson1` | 5 | 5 |
 | `aws.proton` | `awsJson1_0` | 6 | 81 |
-| `aws.qldb` | `restJson1` | 8 | 12 |
+| `aws.qldb` | `restJson1` | 5 | 15 |
 | `aws.quicksight` | `restJson1` | 8 | 285 |
 | `aws.ram` | `restJson1` | 8 | 27 |
 | `aws.rds` | `awsQuery` | 164 | 0 |

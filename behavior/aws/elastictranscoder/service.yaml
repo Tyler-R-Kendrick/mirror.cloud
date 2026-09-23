@@ -1,0 +1,77 @@
+schema: bir/1
+service: aws.elastictranscoder
+
+# Transcribed from the hand-written pack, not established against the real
+# service, which AWS retired in 2025. A pipeline and a job are records; nothing
+# is transcoded, and a job is Complete the moment it is created.
+provenance: authored
+
+resources:
+  pipeline:
+    collection: etpipe
+    id:
+      input_members: [Id]
+    record: {}
+  job:
+    collection: etjob
+    id:
+      input_members: [Id]
+    record: {}
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreatePipeline:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: pipeline
+          key: fx.id
+          record:
+            Id: fx.id
+            Name: string(input.Name)
+            InputBucket: string(input.InputBucket)
+            OutputBucket: "'OutputBucket' in input ? string(input.OutputBucket) : ''"
+            Role: string(input.Role)
+            Status: "'Active'"
+            Arn: "'arn:aws:elastictranscoder:' + identity.region + ':' + identity.account + ':pipeline/' + fx.id"
+    output:
+      Pipeline: rec
+
+  ReadPipeline: {get: {resource: pipeline, error: NotFound, wrap: Pipeline}}
+  ListPipelines:
+    list: { resource: pipeline, member: Pipelines, paginate: model }
+  DeletePipeline: {delete: {resource: pipeline, missing: ignore}}
+
+  CreateJob:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: job
+          key: fx.id
+          record:
+            Id: fx.id
+            PipelineId: string(input.PipelineId)
+            Input: "'Input' in input ? input.Input : {}"
+            Status: "'Complete'"
+    output:
+      Job: rec
+
+  ReadJob: {get: {resource: job, error: NotFound, wrap: Job}}
+  ListJobsByPipeline:
+    list:
+      resource: job
+      member: Jobs
+      paginate: model
+      filter: string(item.PipelineId) == string(input.PipelineId)
+
+quirks:
+  - operation: CreateJob
+    note: >
+      Nothing is transcoded. A job is recorded as Complete when it is created,
+      transcribed from the pack.
+    provenance: authored

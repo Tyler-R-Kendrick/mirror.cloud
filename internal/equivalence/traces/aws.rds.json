@@ -1,0 +1,1313 @@
+{
+  "schema": "trace/1",
+  "service": "aws.rds",
+  "source": "pack:internal/services/aws/rds@8bbca64",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateDBInstance",
+      "input": {
+        "DBInstanceClass": "db.t3.micro",
+        "DBInstanceIdentifier": "db1",
+        "Engine": "mysql",
+        "MasterUsername": "admin"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.micro",
+          "DBInstanceIdentifier": "db1",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "db1.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql",
+          "MasterUsername": "admin"
+        }
+      }
+    },
+    {
+      "operation": "CreateDBInstance",
+      "input": {
+        "DBInstanceClass": "db.t3.micro",
+        "DBInstanceIdentifier": "pg1",
+        "Engine": "postgres",
+        "MasterUsername": "admin"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.micro",
+          "DBInstanceIdentifier": "pg1",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "pg1.us-east-1.rds.amazonaws.com",
+            "Port": 5432
+          },
+          "Engine": "postgres",
+          "MasterUsername": "admin"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {
+        "DBInstanceIdentifier": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": [
+          {
+            "DBInstanceClass": "db.t3.micro",
+            "DBInstanceIdentifier": "db1",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "db1.us-east-1.rds.amazonaws.com",
+              "Port": 3306
+            },
+            "Engine": "mysql",
+            "MasterUsername": "admin"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": [
+          {
+            "DBInstanceClass": "db.t3.micro",
+            "DBInstanceIdentifier": "db1",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "db1.us-east-1.rds.amazonaws.com",
+              "Port": 3306
+            },
+            "Engine": "mysql",
+            "MasterUsername": "admin"
+          },
+          {
+            "DBInstanceClass": "db.t3.micro",
+            "DBInstanceIdentifier": "pg1",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "pg1.us-east-1.rds.amazonaws.com",
+              "Port": 5432
+            },
+            "Engine": "postgres",
+            "MasterUsername": "admin"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {
+        "DBInstanceIdentifier": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DBInstanceNotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ModifyDBInstance",
+      "input": {
+        "DBInstanceClass": "db.t3.small",
+        "DBInstanceIdentifier": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.small",
+          "DBInstanceIdentifier": "db1",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "db1.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql",
+          "MasterUsername": "admin"
+        }
+      }
+    },
+    {
+      "operation": "StopDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.small",
+          "DBInstanceIdentifier": "db1",
+          "DBInstanceStatus": "stopped",
+          "Endpoint": {
+            "Address": "db1.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql",
+          "MasterUsername": "admin"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {
+        "DBInstanceIdentifier": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": [
+          {
+            "DBInstanceClass": "db.t3.small",
+            "DBInstanceIdentifier": "db1",
+            "DBInstanceStatus": "stopped",
+            "Endpoint": {
+              "Address": "db1.us-east-1.rds.amazonaws.com",
+              "Port": 3306
+            },
+            "Engine": "mysql",
+            "MasterUsername": "admin"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.small",
+          "DBInstanceIdentifier": "db1",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "db1.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql",
+          "MasterUsername": "admin"
+        }
+      }
+    },
+    {
+      "operation": "RebootDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.small",
+          "DBInstanceIdentifier": "db1",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "db1.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql",
+          "MasterUsername": "admin"
+        }
+      }
+    },
+    {
+      "operation": "CreateDBSnapshot",
+      "input": {
+        "DBInstanceIdentifier": "db1",
+        "DBSnapshotIdentifier": "snap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSnapshot": {
+          "DBInstanceIdentifier": "db1",
+          "DBSnapshotIdentifier": "snap1",
+          "Engine": "mysql",
+          "Status": "available"
+        }
+      },
+      "recut": "The model's DBSnapshot and DBClusterSnapshot declare Engine, the engine of the source; the pack left it out, so a restore from a snapshot had no engine."
+    },
+    {
+      "operation": "DescribeDBSnapshots",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSnapshots": [
+          {
+            "DBInstanceIdentifier": "db1",
+            "DBSnapshotIdentifier": "snap1",
+            "Engine": "mysql",
+            "Status": "available"
+          }
+        ]
+      },
+      "recut": "The model's DBSnapshot and DBClusterSnapshot declare Engine, the engine of the source; the pack left it out, so a restore from a snapshot had no engine."
+    },
+    {
+      "operation": "CopyDBSnapshot",
+      "input": {
+        "SourceDBSnapshotIdentifier": "snap1",
+        "TargetDBSnapshotIdentifier": "snap2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSnapshot": {
+          "DBInstanceIdentifier": "db1",
+          "DBSnapshotIdentifier": "snap2",
+          "Engine": "mysql",
+          "Status": "available"
+        }
+      },
+      "recut": "The model's DBSnapshot and DBClusterSnapshot declare Engine, the engine of the source; the pack left it out, so a restore from a snapshot had no engine."
+    },
+    {
+      "operation": "DescribeDBSnapshots",
+      "input": {
+        "DBSnapshotIdentifier": "snap2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSnapshots": [
+          {
+            "DBInstanceIdentifier": "db1",
+            "DBSnapshotIdentifier": "snap2",
+            "Engine": "mysql",
+            "Status": "available"
+          }
+        ]
+      },
+      "recut": "The model's DBSnapshot and DBClusterSnapshot declare Engine, the engine of the source; the pack left it out, so a restore from a snapshot had no engine."
+    },
+    {
+      "operation": "RestoreDBInstanceFromDBSnapshot",
+      "input": {
+        "DBInstanceIdentifier": "db-restored",
+        "DBSnapshotIdentifier": "snap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceIdentifier": "db-restored",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "db-restored.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql"
+        }
+      },
+      "recut": "The model's DBSnapshot and DBClusterSnapshot declare Engine, the engine of the source; the pack left it out, so a restore from a snapshot had no engine."
+    },
+    {
+      "operation": "CreateDBInstanceReadReplica",
+      "input": {
+        "DBInstanceIdentifier": "db1-rr",
+        "SourceDBInstanceIdentifier": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.small",
+          "DBInstanceIdentifier": "db1-rr",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "db1-rr.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql",
+          "MasterUsername": "admin",
+          "ReadReplicaSourceDBInstanceIdentifier": "db1"
+        }
+      },
+      "recut": "Each DB instance has its own Endpoint; the pack copied the source instance's Address onto the read replica."
+    },
+    {
+      "operation": "PromoteReadReplica",
+      "input": {
+        "DBInstanceIdentifier": "db1-rr"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.small",
+          "DBInstanceIdentifier": "db1-rr",
+          "DBInstanceStatus": "available",
+          "Endpoint": {
+            "Address": "db1-rr.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql",
+          "MasterUsername": "admin",
+          "ReadReplicaSourceDBInstanceIdentifier": null
+        }
+      },
+      "recut": "Each DB instance has its own Endpoint; the pack copied the source instance's Address onto the read replica."
+    },
+    {
+      "operation": "DescribeDBInstances",
+      "input": {
+        "DBInstanceIdentifier": "db1-rr"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstances": [
+          {
+            "DBInstanceClass": "db.t3.small",
+            "DBInstanceIdentifier": "db1-rr",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+              "Address": "db1-rr.us-east-1.rds.amazonaws.com",
+              "Port": 3306
+            },
+            "Engine": "mysql",
+            "MasterUsername": "admin",
+            "ReadReplicaSourceDBInstanceIdentifier": null
+          }
+        ]
+      },
+      "recut": "Each DB instance has its own Endpoint; the pack copied the source instance's Address onto the read replica."
+    },
+    {
+      "operation": "DeleteDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBInstance": {
+          "DBInstanceClass": "db.t3.small",
+          "DBInstanceIdentifier": "db1",
+          "DBInstanceStatus": "deleting",
+          "Endpoint": {
+            "Address": "db1.us-east-1.rds.amazonaws.com",
+            "Port": 3306
+          },
+          "Engine": "mysql",
+          "MasterUsername": "admin"
+        }
+      }
+    },
+    {
+      "operation": "DeleteDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DBInstanceNotFound",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model declares a not-found fault here; the pack answered success for an instance that does not exist."
+    },
+    {
+      "operation": "CreateDBCluster",
+      "input": {
+        "DBClusterIdentifier": "c1",
+        "Engine": "aurora-mysql"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "DBClusterIdentifier": "c1",
+          "Endpoint": "c1.cluster-us-east-1.rds.amazonaws.com",
+          "Engine": "aurora-mysql",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBClusters",
+      "input": {
+        "DBClusterIdentifier": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusters": [
+          {
+            "DBClusterIdentifier": "c1",
+            "Endpoint": "c1.cluster-us-east-1.rds.amazonaws.com",
+            "Engine": "aurora-mysql",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyDBCluster",
+      "input": {
+        "BackupRetentionPeriod": 7,
+        "DBClusterIdentifier": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "BackupRetentionPeriod": 7,
+          "DBClusterIdentifier": "c1",
+          "Endpoint": "c1.cluster-us-east-1.rds.amazonaws.com",
+          "Engine": "aurora-mysql",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "FailoverDBCluster",
+      "input": {
+        "DBClusterIdentifier": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "BackupRetentionPeriod": 7,
+          "DBClusterIdentifier": "c1",
+          "Endpoint": "c1.cluster-us-east-1.rds.amazonaws.com",
+          "Engine": "aurora-mysql",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "CreateDBClusterSnapshot",
+      "input": {
+        "DBClusterIdentifier": "c1",
+        "DBClusterSnapshotIdentifier": "csnap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusterSnapshot": {
+          "DBClusterIdentifier": "c1",
+          "DBClusterSnapshotIdentifier": "csnap1",
+          "Engine": "aurora-mysql",
+          "Status": "available"
+        }
+      },
+      "recut": "The model's DBSnapshot and DBClusterSnapshot declare Engine, the engine of the source; the pack left it out, so a restore from a snapshot had no engine."
+    },
+    {
+      "operation": "DescribeDBClusterSnapshots",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusterSnapshots": [
+          {
+            "DBClusterIdentifier": "c1",
+            "DBClusterSnapshotIdentifier": "csnap1",
+            "Engine": "aurora-mysql",
+            "Status": "available"
+          }
+        ]
+      },
+      "recut": "The model's DBSnapshot and DBClusterSnapshot declare Engine, the engine of the source; the pack left it out, so a restore from a snapshot had no engine."
+    },
+    {
+      "operation": "RestoreDBClusterFromSnapshot",
+      "input": {
+        "DBClusterIdentifier": "c-restored",
+        "Engine": "aurora-mysql",
+        "SnapshotIdentifier": "csnap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "DBClusterIdentifier": "c-restored",
+          "Endpoint": "c-restored.cluster-us-east-1.rds.amazonaws.com",
+          "Engine": "aurora-mysql",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DeleteDBClusterSnapshot",
+      "input": {
+        "DBClusterSnapshotIdentifier": "csnap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusterSnapshot": {
+          "DBClusterIdentifier": "c1",
+          "DBClusterSnapshotIdentifier": "csnap1",
+          "Engine": "aurora-mysql",
+          "Status": "deleted"
+        }
+      },
+      "recut": "The model's delete output is the resource being deleted; the pack answered only its identifier, or nothing."
+    },
+    {
+      "operation": "DeleteDBCluster",
+      "input": {
+        "DBClusterIdentifier": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBCluster": {
+          "BackupRetentionPeriod": 7,
+          "DBClusterIdentifier": "c1",
+          "Endpoint": "c1.cluster-us-east-1.rds.amazonaws.com",
+          "Engine": "aurora-mysql",
+          "Status": "deleting"
+        }
+      },
+      "recut": "The model's delete output is the resource being deleted; the pack answered only its identifier, or nothing."
+    },
+    {
+      "operation": "DescribeDBClusters",
+      "input": {
+        "DBClusterIdentifier": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DBClusterNotFoundFault",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's DescribeDBClusters fault for an unknown cluster is DBClusterNotFoundFault; the pack answered DBInstanceNotFound."
+    },
+    {
+      "operation": "DescribeDBClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusters": [
+          {
+            "DBClusterIdentifier": "c-restored",
+            "Endpoint": "c-restored.cluster-us-east-1.rds.amazonaws.com",
+            "Engine": "aurora-mysql",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateDBSubnetGroup",
+      "input": {
+        "DBSubnetGroupDescription": "d",
+        "DBSubnetGroupName": "sg1",
+        "SubnetIds": [
+          "subnet-1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSubnetGroup": {
+          "DBSubnetGroupDescription": "d",
+          "DBSubnetGroupName": "sg1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBSubnetGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSubnetGroups": [
+          {
+            "DBSubnetGroupDescription": "d",
+            "DBSubnetGroupName": "sg1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDBSubnetGroup",
+      "input": {
+        "DBSubnetGroupName": "sg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateDBParameterGroup",
+      "input": {
+        "DBParameterGroupFamily": "mysql8.0",
+        "DBParameterGroupName": "pg1",
+        "Description": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBParameterGroup": {
+          "DBParameterGroupFamily": "mysql8.0",
+          "DBParameterGroupName": "pg1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBParameterGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBParameterGroups": [
+          {
+            "DBParameterGroupFamily": "mysql8.0",
+            "DBParameterGroupName": "pg1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyDBParameterGroup",
+      "input": {
+        "DBParameterGroupName": "pg1",
+        "Parameters": [
+          {
+            "ParameterName": "max_connections",
+            "ParameterValue": "100"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBParameterGroupName": "pg1"
+      },
+      "recut": "The model's ModifyDBParameterGroup and ResetDBParameterGroup output is DBParameterGroupName; the pack answered nothing."
+    },
+    {
+      "operation": "DescribeDBParameters",
+      "input": {
+        "DBParameterGroupName": "pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameters": [
+          {
+            "ParameterName": "max_connections",
+            "ParameterValue": "100"
+          }
+        ]
+      },
+      "recut": "The model's Parameters is a list of Parameter; the pack answered the whole stored request as one element."
+    },
+    {
+      "operation": "ResetDBParameterGroup",
+      "input": {
+        "DBParameterGroupName": "pg1",
+        "ResetAllParameters": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBParameterGroupName": "pg1"
+      },
+      "recut": "The model's ModifyDBParameterGroup and ResetDBParameterGroup output is DBParameterGroupName; the pack answered nothing."
+    },
+    {
+      "operation": "DescribeDBParameters",
+      "input": {
+        "DBParameterGroupName": "pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameters": []
+      },
+      "recut": "ResetAllParameters returns every parameter to its default, and a group with no engine defaults then has none set; the pack answered the reset request itself as a parameter."
+    },
+    {
+      "operation": "DeleteDBParameterGroup",
+      "input": {
+        "DBParameterGroupName": "pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateDBClusterParameterGroup",
+      "input": {
+        "DBClusterParameterGroupName": "cpg1",
+        "DBParameterGroupFamily": "aurora-mysql8.0",
+        "Description": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusterParameterGroup": {
+          "DBClusterParameterGroupName": "cpg1",
+          "DBParameterGroupFamily": "aurora-mysql8.0"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDBClusterParameterGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBClusterParameterGroups": [
+          {
+            "DBClusterParameterGroupName": "cpg1",
+            "DBParameterGroupFamily": "aurora-mysql8.0"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDBClusterParameterGroup",
+      "input": {
+        "DBClusterParameterGroupName": "cpg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateOptionGroup",
+      "input": {
+        "EngineName": "mysql",
+        "MajorEngineVersion": "8.0",
+        "OptionGroupDescription": "d",
+        "OptionGroupName": "og1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OptionGroup": {
+          "EngineName": "mysql",
+          "MajorEngineVersion": "8.0",
+          "OptionGroupName": "og1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeOptionGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OptionGroupsList": [
+          {
+            "EngineName": "mysql",
+            "MajorEngineVersion": "8.0",
+            "OptionGroupName": "og1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteOptionGroup",
+      "input": {
+        "OptionGroupName": "og1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AddRoleToDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "pg1",
+        "FeatureName": "s3Import",
+        "RoleArn": "arn:aws:iam::000000000000:role/rds"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "RemoveRoleFromDBInstance",
+      "input": {
+        "DBInstanceIdentifier": "pg1",
+        "FeatureName": "s3Import",
+        "RoleArn": "arn:aws:iam::000000000000:role/rds"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateEventSubscription",
+      "input": {
+        "SnsTopicArn": "arn:aws:sns:us-east-1:000000000000:t",
+        "SubscriptionName": "ev1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSubscription": {
+          "CustSubscriptionId": "ev1",
+          "SnsTopicArn": "arn:aws:sns:us-east-1:000000000000:t",
+          "Status": "active"
+        }
+      }
+    },
+    {
+      "operation": "DescribeEventSubscriptions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSubscriptionsList": [
+          {
+            "CustSubscriptionId": "ev1",
+            "SnsTopicArn": "arn:aws:sns:us-east-1:000000000000:t",
+            "Status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteEventSubscription",
+      "input": {
+        "SubscriptionName": "ev1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSubscription": {
+          "CustSubscriptionId": "ev1",
+          "SnsTopicArn": "arn:aws:sns:us-east-1:000000000000:t",
+          "Status": "deleting"
+        }
+      },
+      "recut": "The model's delete output is the resource being deleted; the pack answered only its identifier, or nothing."
+    },
+    {
+      "operation": "AddTagsToResource",
+      "input": {
+        "ResourceName": "arn:aws:rds:us-east-1:000000000000:db:pg1",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          },
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceName": "arn:aws:rds:us-east-1:000000000000:db:pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": [
+          {
+            "Key": "k",
+            "Value": "v"
+          },
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RemoveTagsFromResource",
+      "input": {
+        "ResourceName": "arn:aws:rds:us-east-1:000000000000:db:pg1",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceName": "arn:aws:rds:us-east-1:000000000000:db:pg1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": [
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      },
+      "recut": "RemoveTagsFromResource removes only the named TagKeys; the pack removed every tag."
+    },
+    {
+      "operation": "DeleteDBSnapshot",
+      "input": {
+        "DBSnapshotIdentifier": "snap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DBSnapshot": {
+          "DBInstanceIdentifier": "db1",
+          "DBSnapshotIdentifier": "snap1",
+          "Engine": "mysql",
+          "Status": "deleted"
+        }
+      },
+      "recut": "The model's delete output is the resource being deleted; the pack answered only its identifier, or nothing."
+    },
+    {
+      "operation": "DescribeDBSnapshots",
+      "input": {
+        "DBSnapshotIdentifier": "snap1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DBSnapshotNotFound",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's DescribeDBSnapshots fault for an unknown snapshot is DBSnapshotNotFound; the pack answered DBInstanceNotFound."
+    },
+    {
+      "operation": "CreateDBInstance",
+      "input": {
+        "DBInstanceClass": "db.t3.micro",
+        "DBInstanceIdentifier": "pg1",
+        "Engine": "postgres",
+        "MasterUsername": "admin"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DBInstanceAlreadyExists",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "The model declares DBInstanceAlreadyExists for CreateDBInstance; the pack overwrote the existing instance."
+    }
+  ]
+}

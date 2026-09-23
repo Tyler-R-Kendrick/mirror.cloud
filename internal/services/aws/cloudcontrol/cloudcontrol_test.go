@@ -13,7 +13,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudformation"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/rds"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3" // CloudFormation creates buckets through it
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -56,9 +55,12 @@ func TestReadsAPIGatewayV2AndRDSResources(t *testing.T) {
 		t.Fatal(err)
 	}
 	apiID := api.Output["ApiId"].(string)
-	rdsPack := rds.New(deps)
+	rdsPack, err := bundled.New("aws.rds", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for operation, input := range map[string]map[string]any{
-		"CreateDBInstance": {"DBInstanceIdentifier": "database", "Engine": "postgres"},
+		"CreateDBInstance": {"DBInstanceIdentifier": "database", "Engine": "postgres", "DBInstanceClass": "db.t3.micro"},
 		"CreateDBCluster":  {"DBClusterIdentifier": "cluster", "Engine": "aurora-postgresql"},
 	} {
 		if _, err := rdsPack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input}); err != nil {

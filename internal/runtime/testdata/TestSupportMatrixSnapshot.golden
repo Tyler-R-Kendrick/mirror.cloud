@@ -113,7 +113,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.qldb` | `restJson1` | 5 | 15 |
 | `aws.quicksight` | `restJson1` | 8 | 285 |
 | `aws.ram` | `restJson1` | 8 | 27 |
-| `aws.rds` | `awsQuery` | 164 | 0 |
+| `aws.rds` | `awsQuery` | 46 | 118 |
 | `aws.redshift` | `awsQuery` | 145 | 0 |
 | `aws.rekognition` | `awsJson1_1` | 10 | 65 |
 | `aws.resiliencehub` | `restJson1` | 6 | 57 |

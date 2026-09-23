@@ -1372,3 +1372,15 @@ The pack is now a bundle keyed by ARN throughout. That removes the pack's raw AR
 Cloud Control's own CRUD is now bundle YAML: CreateResource, UpdateResource, DeleteResource and GetResourceRequestStatus. GetResource and ListResources remain Go natives. That is because they also answer resources other services own, such as an S3 bucket with its configuration, an API Gateway v2 API, or an RDS instance or cluster. They read those out of the owners' stores in each owner's layout. This is the same reach CloudFormation had before #423. It is marked `ponytail:`, and the upgrade is to ask each owner through its own Describe operation.
 
 The recording is re-cut in two places. At steps 5 and 8, the pack answered ResourceNotFoundException with 400. The model declares that error's httpError as 404.
+
+### RDS: 120 operations were one echo, and are mock tier now
+
+The RDS pack claimed 166 emulate-tier operations. Only 46 of them had behavior of their own. The other 120 were one function that guessed a resource kind from the operation name, stored the request under that guess, and echoed it back. That is the "tier labels became advertising" pattern above, and it contradicts SUPPORT's own note that extra RDS operations are "named control-plane records, not leftover-KV sold as emulate". Those operations now answer at mock tier, from the model's shapes, and say so in `x-mirror-fidelity`. The 46 real operations are bundle YAML. The instance and cluster collections keep their names and layout because Cloud Control reads them.
+
+The recording is re-cut where the model says the pack was wrong:
+- **Not-found faults.** The pack answered DBInstanceNotFound for every kind of resource. The model gives clusters and snapshots their own codes. A second CreateDBInstance now answers DBInstanceAlreadyExists instead of overwriting the instance, and deleting an unknown instance now answers DBInstanceNotFound instead of succeeding.
+- **Snapshots.** Snapshots now carry the source's Engine, which the model declares. Before, a restore from a snapshot had no engine.
+- **Read replicas.** A read replica now has its own endpoint address instead of its source's.
+- **Delete operations.** Deletes answer the resource being deleted, as the model's outputs declare.
+- **Parameters.** DescribeDBParameters answers the Parameter list that was set, not the stored request.
+- **Tags.** RemoveTagsFromResource removes only the named keys.

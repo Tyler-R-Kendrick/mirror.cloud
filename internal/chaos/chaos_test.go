@@ -108,24 +108,30 @@ func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
 	}
 	call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
 	call("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
-	call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": "-1"}}})
-	counts := make(chan int, 32)
-	var wg sync.WaitGroup
-	for range 32 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			counts <- call("ExpireItems", nil).Output["ExpiredItems"].(int)
-		}()
-	}
-	wg.Wait()
-	close(counts)
-	total := 0
-	for count := range counts {
-		total += count
-	}
-	if total != 1 {
-		t.Fatalf("concurrent expiration count %d", total)
+	// Many gated rounds: one round rarely lines two scans up on the same item.
+	for round := range 50 {
+		call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": strconv.Itoa(round)}, "ttl": map[string]any{"N": "-1"}}})
+		counts := make(chan int, 32)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for range 32 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				counts <- call("ExpireItems", nil).Output["ExpiredItems"].(int)
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(counts)
+		total := 0
+		for count := range counts {
+			total += count
+		}
+		if total != 1 {
+			t.Fatalf("round %d: concurrent expiration count %d", round, total)
+		}
 	}
 }
 

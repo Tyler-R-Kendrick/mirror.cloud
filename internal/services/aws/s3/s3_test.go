@@ -39,7 +39,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/logging"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -50,11 +50,11 @@ func ident() spi.Identity {
 	return spi.Identity{Account: "123456789012", Region: "us-east-1"}
 }
 
-func invoke(t *testing.T, p *s3.Pack, op string, in map[string]any, body []byte) (*spi.Response, error) {
+func invoke(t *testing.T, p spi.BehaviorPack, op string, in map[string]any, body []byte) (*spi.Response, error) {
 	return invokeAs(t, p, ident(), op, in, body)
 }
 
-func invokeAs(t *testing.T, p *s3.Pack, id spi.Identity, op string, in map[string]any, body []byte) (*spi.Response, error) {
+func invokeAs(t *testing.T, p spi.BehaviorPack, id spi.Identity, op string, in map[string]any, body []byte) (*spi.Response, error) {
 	t.Helper()
 	var rc io.ReadCloser
 	if body != nil {
@@ -72,7 +72,7 @@ func invokeAs(t *testing.T, p *s3.Pack, id spi.Identity, op string, in map[strin
 	})
 }
 
-func mustInvokeAs(t *testing.T, p *s3.Pack, id spi.Identity, op string, in map[string]any, body []byte) *spi.Response {
+func mustInvokeAs(t *testing.T, p spi.BehaviorPack, id spi.Identity, op string, in map[string]any, body []byte) *spi.Response {
 	t.Helper()
 	resp, err := invokeAs(t, p, id, op, in, body)
 	if err != nil {
@@ -81,7 +81,7 @@ func mustInvokeAs(t *testing.T, p *s3.Pack, id spi.Identity, op string, in map[s
 	return resp
 }
 
-func mustInvoke(t *testing.T, p *s3.Pack, op string, in map[string]any, body []byte) *spi.Response {
+func mustInvoke(t *testing.T, p spi.BehaviorPack, op string, in map[string]any, body []byte) *spi.Response {
 	t.Helper()
 	resp, err := invoke(t, p, op, in, body)
 	if err != nil {
@@ -665,7 +665,7 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 	id := ident()
 	path := t.TempDir() + "/event.json"
 	source := "import json\n\ndef lambda_handler(event, context):\n    open(" + strconv.Quote(path) + ", 'a').write(json.dumps(event) + '\\n')\n"
-	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "handler", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(source))},
 	}}); err != nil {

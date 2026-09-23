@@ -31,35 +31,9 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		t.Fatal(codec.Protocol())
 	}
 	for _, test := range []struct{ service, method, path, target, want string }{
-		{"aws.lambda", http.MethodPost, "/2015-03-31/functions/f/invocations", "", "Invoke"},
-		{"aws.lambda", http.MethodPost, "/2015-03-31/event-source-mappings", "", "CreateEventSourceMapping"},
-		{"aws.lambda", http.MethodPut, "/2015-03-31/event-source-mappings/id", "", "UpdateEventSourceMapping"},
-		{"aws.lambda", http.MethodDelete, "/2015-03-31/event-source-mappings/id", "", "DeleteEventSourceMapping"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/event-source-mappings", "", "ListEventSourceMappings"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/event-source-mappings/id", "", "GetEventSourceMapping"},
-		{"aws.lambda", http.MethodPost, "/2015-03-31/tags/arn", "", "TagResource"},
-		{"aws.lambda", http.MethodDelete, "/2015-03-31/tags/arn", "", "UntagResource"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/tags/arn", "", "ListTags"},
-		{"aws.lambda", http.MethodPut, "/2015-03-31/functions/f/code", "", "UpdateFunctionCode"},
-		{"aws.lambda", http.MethodPut, "/2015-03-31/functions/f/configuration", "", "UpdateFunctionConfiguration"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/configuration", "", "GetFunctionConfiguration"},
-		{"aws.lambda", http.MethodPost, "/2015-03-31/functions/f/versions", "", "PublishVersion"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/versions", "", "ListVersionsByFunction"},
-		{"aws.lambda", http.MethodPost, "/2015-03-31/functions/f/aliases", "", "CreateAlias"},
-		{"aws.lambda", http.MethodPut, "/2015-03-31/functions/f/aliases/a", "", "UpdateAlias"},
-		{"aws.lambda", http.MethodDelete, "/2015-03-31/functions/f/aliases/a", "", "DeleteAlias"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/aliases", "", "ListAliases"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/aliases/a", "", "GetAlias"},
-		{"aws.lambda", http.MethodPost, "/2015-03-31/functions/f/policy", "", "AddPermission"},
-		{"aws.lambda", http.MethodDelete, "/2015-03-31/functions/f/policy/sid", "", "RemovePermission"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f/policy", "", "GetPolicy"},
-		{"aws.lambda", http.MethodPut, "/2017-10-31/functions/f/concurrency", "", "PutFunctionConcurrency"},
-		{"aws.lambda", http.MethodDelete, "/2017-10-31/functions/f/concurrency", "", "DeleteFunctionConcurrency"},
-		{"aws.lambda", http.MethodGet, "/2017-10-31/functions/f/concurrency", "", "GetFunctionConcurrency"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/functions/f", "", "GetFunction"},
-		{"aws.lambda", http.MethodGet, "/2015-03-31/functions", "", "ListFunctions"},
-		{"aws.lambda", http.MethodDelete, "/2015-03-31/functions/f", "", "DeleteFunction"},
-		{"aws.lambda", http.MethodPost, "/2015-03-31/functions", "", "CreateFunction"},
+		// Lambda's rows are gone with its route guess: it is served from a
+		// bundle now, so httpuri.Match routes it from the generated model.
+		// Only the RPC-style ?Action= form this project's tests use remains.
 
 		{"aws.apigateway", http.MethodPost, "/restapis", "", "CreateRestApi"},
 		{"aws.apigateway", http.MethodGet, "/restapis", "", "GetRestApis"},

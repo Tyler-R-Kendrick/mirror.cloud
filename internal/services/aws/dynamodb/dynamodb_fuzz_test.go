@@ -20,7 +20,8 @@ import (
 func FuzzTableLifecycle(f *testing.F) {
 	f.Add([]byte("table"))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		p := New(spitest.Deps(t))
+		deps := spitest.Deps(t)
+		p := New(deps)
 		ctx := context.Background()
 		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 		name := hex.EncodeToString(raw)
@@ -40,7 +41,7 @@ func FuzzTableLifecycle(f *testing.F) {
 		_, invalidProjection := call("Query", map[string]any{"TableName": name, "IndexName": "keys", "Select": "ALL_ATTRIBUTES"})
 		_, ttlEnable := call("UpdateTimeToLive", map[string]any{"TableName": name, "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
 		_, expiredPut := call("PutItem", map[string]any{"TableName": name, "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": "-1"}}})
-		expiration, expirationErr := call("ExpireItems", nil)
+		expired, expirationErr := ExpireItems(ctx, deps, id)
 		expiredItem, expiredGet := call("GetItem", map[string]any{"TableName": name, "Key": map[string]any{"id": map[string]any{"S": "expired"}}})
 		_, deleted := call("DeleteTable", table)
 		_, missing := call("DeleteTable", table)
@@ -49,7 +50,7 @@ func FuzzTableLifecycle(f *testing.F) {
 		_, ttlDescribe := call("DescribeTimeToLive", table)
 		_, ttlUpdate := call("UpdateTimeToLive", table)
 		tags := asSlice(listed.Output["Tags"])
-		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || firstPut != nil || firstReturn.Output["Attributes"] != nil || putErr != nil || secondReturn.Output["Attributes"] == nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || invalidProjection == nil || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expiration.Output["ExpiredItems"] != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
+		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || firstPut != nil || firstReturn.Output["Attributes"] != nil || putErr != nil || secondReturn.Output["Attributes"] == nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || invalidProjection == nil || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expired != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
 			t.Fatal("table lifecycle was not create/tag/conflict/delete/missing")
 		}
 	})

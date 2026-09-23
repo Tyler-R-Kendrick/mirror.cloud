@@ -141,7 +141,11 @@ func TestBootedServerDynamoDBExtraEngines(t *testing.T) {
 		if res.StatusCode >= 300 {
 			t.Fatalf("%s %d %s", op, res.StatusCode, raw)
 		}
-		if res.Header.Get("x-mirror-fidelity") != "emulate" {
+		want := "emulate"
+		if strings.HasSuffix(op, "TableReplicaAutoScaling") {
+			want = "mock" // it echoed its request, so it is not emulated
+		}
+		if res.Header.Get("x-mirror-fidelity") != want {
 			t.Fatalf("%s fidelity %q", op, res.Header.Get("x-mirror-fidelity"))
 		}
 		return res.StatusCode, out
@@ -442,7 +446,7 @@ func TestBootedServerDynamoDBSection48(t *testing.T) {
 	if tagsOut["Tags"] == nil {
 		t.Fatalf("tags %v", tagsOut)
 	}
-	call("UntagResource", `{"ResourceArn":"arn:t"}`)
+	call("UntagResource", `{"ResourceArn":"arn:t","TagKeys":["k"]}`)
 	_, ttl := call("DescribeTimeToLive", `{"TableName":"T"}`)
 	if asM(ttl["TimeToLiveDescription"])["TimeToLiveStatus"] != "DISABLED" {
 		t.Fatalf("ttl %v", ttl)

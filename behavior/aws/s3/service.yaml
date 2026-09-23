@@ -1,0 +1,130 @@
+schema: bir/1
+service: aws.s3
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Every operation is Go, in internal/services/aws/s3. S3 routes by
+# the request's shape -- host, path, method, query and headers -- rather
+# than by the operation the codec decoded; it answers a bucket's CORS rules
+# on every response and preflight; and objects are streamed blobs with
+# versions, multipart uploads, checksums, encryption, object lock and
+# notifications. None of that is records yet, so the bundle declares the
+# surface and the Go serves it.
+provenance: authored
+
+native:
+  - CreateBucket
+  - DeleteBucket
+  - HeadBucket
+  - ListBuckets
+  - GetBucketLocation
+  - GetBucketVersioning
+  - PutBucketVersioning
+  - GetBucketTagging
+  - PutBucketTagging
+  - GetBucketNotificationConfiguration
+  - PutBucketNotificationConfiguration
+  - GetBucketAcl
+  - PutBucketAcl
+  - GetObjectAcl
+  - PutObjectAcl
+  - GetBucketPolicy
+  - PutBucketPolicy
+  - DeleteBucketPolicy
+  - GetBucketCors
+  - PutBucketCors
+  - DeleteBucketCors
+  - GetBucketWebsite
+  - PutBucketWebsite
+  - DeleteBucketWebsite
+  - GetBucketLogging
+  - PutBucketLogging
+  - GetBucketLifecycleConfiguration
+  - PutBucketLifecycleConfiguration
+  - DeleteBucketLifecycle
+  - GetBucketReplication
+  - PutBucketReplication
+  - GetBucketEncryption
+  - PutBucketEncryption
+  - DeleteBucketEncryption
+  - GetBucketObjectLockConfiguration
+  - PutBucketObjectLockConfiguration
+  - GetBucketRequestPayment
+  - PutBucketRequestPayment
+  - GetBucketAccelerateConfiguration
+  - PutBucketAccelerateConfiguration
+  - PutObject
+  - PostObject
+  - GetObject
+  - HeadObject
+  - DeleteObject
+  - DeleteObjects
+  - CopyObject
+  - ListObjects
+  - ListObjectsV2
+  - ListObjectVersions
+  - CreateMultipartUpload
+  - UploadPart
+  - UploadPartCopy
+  - CompleteMultipartUpload
+  - AbortMultipartUpload
+  - ListParts
+  - ListMultipartUploads
+  - GetObjectTagging
+  - PutObjectTagging
+  - PutPublicAccessBlock
+  - GetPublicAccessBlock
+  - DeletePublicAccessBlock
+  - PutBucketOwnershipControls
+  - GetBucketOwnershipControls
+  - DeleteBucketOwnershipControls
+  - GetBucketPolicyStatus
+  - GetObjectAttributes
+  - DeleteBucketTagging
+  - DeleteObjectTagging
+  - PutObjectLegalHold
+  - GetObjectLegalHold
+  - PutObjectRetention
+  - GetObjectRetention
+  - RestoreObject
+  - PutBucketAnalyticsConfiguration
+  - GetBucketAnalyticsConfiguration
+  - DeleteBucketAnalyticsConfiguration
+  - ListBucketAnalyticsConfigurations
+  - PutBucketInventoryConfiguration
+  - GetBucketInventoryConfiguration
+  - DeleteBucketInventoryConfiguration
+  - ListBucketInventoryConfigurations
+  - PutBucketMetricsConfiguration
+  - GetBucketMetricsConfiguration
+  - DeleteBucketMetricsConfiguration
+  - ListBucketMetricsConfigurations
+  - PutBucketIntelligentTieringConfiguration
+  - GetBucketIntelligentTieringConfiguration
+  - DeleteBucketIntelligentTieringConfiguration
+  - ListBucketIntelligentTieringConfigurations
+  - CreateBucketMetadataConfiguration
+  - CreateBucketMetadataTableConfiguration
+  - CreateSession
+  - DeleteBucketMetadataConfiguration
+  - DeleteBucketMetadataTableConfiguration
+  - DeleteBucketReplication
+  - DeleteObjectAnnotation
+  - GetBucketAbac
+  - GetBucketMetadataConfiguration
+  - GetBucketMetadataTableConfiguration
+  - GetObjectAnnotation
+  - GetObjectLockConfiguration
+  - GetObjectTorrent
+  - ListDirectoryBuckets
+  - ListObjectAnnotations
+  - PutBucketAbac
+  - PutObjectAnnotation
+  - PutObjectLockConfiguration
+  - RenameObject
+  - SelectObjectContent
+  - UpdateBucketMetadataAnnotationTableConfiguration
+  - UpdateBucketMetadataInventoryTableConfiguration
+  - UpdateBucketMetadataJournalTableConfiguration
+  - UpdateObjectEncryption
+  - WriteGetObjectResponse
+operations: {}

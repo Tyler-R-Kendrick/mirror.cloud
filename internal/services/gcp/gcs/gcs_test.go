@@ -3,6 +3,7 @@ package gcs
 import (
 	"bytes"
 	"context"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,18 +17,22 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
+// New builds the service the way the registry does: the bundle, with the
+// object natives this package registers.
+func New(d spi.Deps) spi.BehaviorPack { return bundled.Handler("gcp.storage", d) }
+
 func TestBucketInsertRejectsEmptyAndDuplicate(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{}})
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p"}})
 	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Code != "invalid" {
 		t.Fatalf("empty %#v", err)
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "dup"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "dup"}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "dup"}})
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "dup"}})
 	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 409 || f.Code != "conflict" {
 		t.Fatalf("duplicate %#v", err)
 	}
@@ -41,7 +46,7 @@ func TestMissingObjectAndBucket(t *testing.T) {
 	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "notFound" {
 		t.Fatalf("missing bucket %#v", err)
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b"}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.get", Input: map[string]any{"bucket": "b", "object": "missing"}})
@@ -54,7 +59,7 @@ func TestDeleteMissingObjectAndBucket(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b"}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.delete", Input: map[string]any{"bucket": "b", "object": "missing"}})
@@ -70,7 +75,7 @@ func TestDeleteMissingObjectAndBucket(t *testing.T) {
 func TestBucketCRUD(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
-	req := &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}, Input: map[string]any{"name": "b1"}, Operation: "storage.buckets.insert"}
+	req := &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}, Input: map[string]any{"project": "p", "name": "b1"}, Operation: "storage.buckets.insert"}
 	res, err := p.Invoke(ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +83,7 @@ func TestBucketCRUD(t *testing.T) {
 	if res.Output["name"] != "b1" {
 		t.Fatalf("%v", res.Output)
 	}
+	req.Input["bucket"] = "b1"
 	req.Operation = "storage.buckets.get"
 	if _, err := p.Invoke(ctx, req); err != nil {
 		t.Fatal(err)
@@ -106,7 +112,7 @@ func TestObjectMediaAndRange(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b"}}); err != nil {
 		t.Fatal(err)
 	}
 	body := []byte("abcdefghij")
@@ -153,7 +159,7 @@ func TestListPrefixDelimiter(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "a", Region: "r"}
-	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}})
+	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b"}})
 	for _, n := range []string{"a/x", "a/y", "a/n/z", "z"} {
 		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.insert", Input: map[string]any{"bucket": "b", "name": n}, Body: io.NopCloser(strings.NewReader("1"))})
 		if err != nil {
@@ -188,7 +194,7 @@ func TestGenerationMatch(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "a", Region: "r"}
-	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}})
+	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b"}})
 	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.insert", Input: map[string]any{"bucket": "b", "name": "o"}, Body: io.NopCloser(strings.NewReader("1"))})
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.get", Input: map[string]any{"bucket": "b", "object": "o", "ifGenerationMatch": "nope"}})
 	if err == nil {
@@ -210,7 +216,7 @@ func TestResumable(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "a", Region: "r"}
-	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}})
+	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b"}})
 	sess, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.insert", Input: map[string]any{"bucket": "b", "name": "o", "uploadType": "resumable"}})
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +246,7 @@ func TestCopyComposeDelete(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "a", Region: "r"}
-	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}})
+	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b"}})
 	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.insert", Input: map[string]any{"bucket": "b", "name": "a"}, Body: io.NopCloser(strings.NewReader("AA"))})
 	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.insert", Input: map[string]any{"bucket": "b", "name": "c"}, Body: io.NopCloser(strings.NewReader("CC"))})
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.copy", Input: map[string]any{"bucket": "b", "object": "a", "destinationBucket": "b", "destinationObject": "a2"}})
@@ -293,23 +299,16 @@ func TestCopyComposeDelete(t *testing.T) {
 	if f := err.(*spi.Fault); f.Code != "MirrorNotImplemented" || f.HTTPStatus != 501 {
 		t.Fatalf("batch %v", f)
 	}
-	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b2"}})
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b2"}})
 	if err != nil {
 		t.Fatal(err)
-	}
-	acl, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.bucketAccessControls.insert", Input: map[string]any{"bucket": "b2", "entity": "allUsers", "role": "READER"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if acl.Output == nil {
-		t.Fatalf("acl %v", acl)
 	}
 }
 
 func TestGCSHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 13+len(extraOps()) {
-		t.Fatalf("gcs Operations() %d want %d", n, 13+len(extraOps()))
+	if n := len(p.Operations()); n != 13 {
+		t.Fatalf("gcs Operations() %d want 13", n)
 	}
 }
 
@@ -337,30 +336,21 @@ func TestBootedServerGCSExtraACL(t *testing.T) {
 		res.Body.Close()
 		return res.StatusCode, string(raw)
 	}
-	code, created := call("/storage/v1/b", `{"name":"bacl"}`)
+	code, created := call("/storage/v1/b?project=p", `{"name":"bacl"}`)
 	if code >= 300 {
 		t.Fatalf("bucket %d %s", code, created)
 	}
-	code, acl := call("/storage/v1/b/bacl/acl?Action=storage.bucketAccessControls.insert", `{"bucket":"bacl","entity":"user-alice","role":"READER"}`)
-	if code >= 300 || !strings.Contains(acl, "user-alice") {
-		t.Fatalf("acl insert %d %s", code, acl)
+	// Access controls were one of the echoing key-value extras; they are mock
+	// tier now, and say so.
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/storage/v1/b/bacl/acl?Action=storage.bucketAccessControls.insert", strings.NewReader(`{"bucket":"bacl","entity":"user-alice","role":"READER"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-	code, got := call("/storage/v1/b/bacl/acl?Action=storage.bucketAccessControls.get", `{"bucket":"bacl","entity":"user-alice"}`)
-	if code >= 300 || !strings.Contains(got, "user-alice") {
-		t.Fatalf("acl get %d %s", code, got)
-	}
-	code, _ = call("/storage/v1/b/bacl/acl?Action=storage.bucketAccessControls.delete", `{"bucket":"bacl","entity":"user-alice"}`)
-	if code >= 300 && code != 204 {
-		t.Fatalf("acl delete %d", code)
-	}
-	code, miss := call("/storage/v1/b/bacl/acl?Action=storage.bucketAccessControls.get", `{"bucket":"bacl","entity":"user-alice"}`)
-	if code < 300 && strings.Contains(miss, `"entity":"user-alice"`) {
-		t.Fatalf("acl still present %s", miss)
-	}
-	for _, op := range extraOps() {
-		c2, body := call("/storage/v1/b/bacl/acl?Action="+op, `{"bucket":"bacl","entity":"user-alice","role":"READER","name":"n"}`)
-		if c2 >= 500 {
-			t.Fatalf("%s %d %s", op, c2, body)
-		}
+	res.Body.Close()
+	if res.Header.Get("x-mirror-fidelity") == "emulate" {
+		t.Fatal("bucketAccessControls.insert claims emulate")
 	}
 }

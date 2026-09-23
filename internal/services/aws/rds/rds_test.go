@@ -1,4 +1,4 @@
-package rds
+package rds_test
 
 import (
 	"io"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -73,32 +74,34 @@ func TestBootedServerRDSCreateDescribe(t *testing.T) {
 	call(url.Values{"Action": {"DescribeDBClusterSnapshots"}, "Version": {"2014-10-31"}})
 	call(url.Values{"Action": {"RestoreDBClusterFromSnapshot"}, "Version": {"2014-10-31"}, "DBClusterIdentifier": {"c-restored"}, "SnapshotIdentifier": {"csnap1"}, "Engine": {"aurora-mysql"}})
 	call(url.Values{"Action": {"DeleteDBClusterSnapshot"}, "Version": {"2014-10-31"}, "DBClusterSnapshotIdentifier": {"csnap1"}})
-	call(url.Values{"Action": {"CreateDBSubnetGroup"}, "Version": {"2014-10-31"}, "DBSubnetGroupName": {"sg1"}, "DBSubnetGroupDescription": {"d"}})
+	call(url.Values{"Action": {"CreateDBSubnetGroup"}, "Version": {"2014-10-31"}, "DBSubnetGroupName": {"sg1"}, "DBSubnetGroupDescription": {"d"}, "SubnetIds.member.1": {"subnet-1"}})
 	call(url.Values{"Action": {"DescribeDBSubnetGroups"}, "Version": {"2014-10-31"}})
 	call(url.Values{"Action": {"DeleteDBSubnetGroup"}, "Version": {"2014-10-31"}, "DBSubnetGroupName": {"sg1"}})
-	call(url.Values{"Action": {"CreateDBParameterGroup"}, "Version": {"2014-10-31"}, "DBParameterGroupName": {"pg1"}, "DBParameterGroupFamily": {"mysql8.0"}})
+	call(url.Values{"Action": {"CreateDBParameterGroup"}, "Version": {"2014-10-31"}, "DBParameterGroupName": {"pg1"}, "DBParameterGroupFamily": {"mysql8.0"}, "Description": {"d"}})
 	call(url.Values{"Action": {"DescribeDBParameterGroups"}, "Version": {"2014-10-31"}})
-	call(url.Values{"Action": {"ModifyDBParameterGroup"}, "Version": {"2014-10-31"}, "DBParameterGroupName": {"pg1"}})
+	call(url.Values{"Action": {"ModifyDBParameterGroup"}, "Version": {"2014-10-31"}, "DBParameterGroupName": {"pg1"}, "Parameters.member.1.ParameterName": {"max_connections"}, "Parameters.member.1.ParameterValue": {"100"}})
 	call(url.Values{"Action": {"DescribeDBParameters"}, "Version": {"2014-10-31"}, "DBParameterGroupName": {"pg1"}})
 	call(url.Values{"Action": {"ResetDBParameterGroup"}, "Version": {"2014-10-31"}, "DBParameterGroupName": {"pg1"}})
 	call(url.Values{"Action": {"DeleteDBParameterGroup"}, "Version": {"2014-10-31"}, "DBParameterGroupName": {"pg1"}})
-	call(url.Values{"Action": {"CreateDBClusterParameterGroup"}, "Version": {"2014-10-31"}, "DBClusterParameterGroupName": {"cpg1"}, "DBParameterGroupFamily": {"aurora-mysql8.0"}})
+	call(url.Values{"Action": {"CreateDBClusterParameterGroup"}, "Version": {"2014-10-31"}, "DBClusterParameterGroupName": {"cpg1"}, "DBParameterGroupFamily": {"aurora-mysql8.0"}, "Description": {"d"}})
 	call(url.Values{"Action": {"DescribeDBClusterParameterGroups"}, "Version": {"2014-10-31"}})
 	call(url.Values{"Action": {"DeleteDBClusterParameterGroup"}, "Version": {"2014-10-31"}, "DBClusterParameterGroupName": {"cpg1"}})
-	call(url.Values{"Action": {"CreateOptionGroup"}, "Version": {"2014-10-31"}, "OptionGroupName": {"og1"}, "EngineName": {"mysql"}, "MajorEngineVersion": {"8.0"}})
+	call(url.Values{"Action": {"CreateOptionGroup"}, "Version": {"2014-10-31"}, "OptionGroupName": {"og1"}, "EngineName": {"mysql"}, "MajorEngineVersion": {"8.0"}, "OptionGroupDescription": {"d"}})
 	call(url.Values{"Action": {"DescribeOptionGroups"}, "Version": {"2014-10-31"}})
 	call(url.Values{"Action": {"DeleteOptionGroup"}, "Version": {"2014-10-31"}, "OptionGroupName": {"og1"}})
-	call(url.Values{"Action": {"AddRoleToDBInstance"}, "Version": {"2014-10-31"}, "DBInstanceIdentifier": {"db1"}, "RoleArn": {"arn:aws:iam::000000000000:role/rds"}})
-	call(url.Values{"Action": {"RemoveRoleFromDBInstance"}, "Version": {"2014-10-31"}, "DBInstanceIdentifier": {"db1"}, "RoleArn": {"arn:aws:iam::000000000000:role/rds"}})
+	call(url.Values{"Action": {"AddRoleToDBInstance"}, "Version": {"2014-10-31"}, "DBInstanceIdentifier": {"db1"}, "RoleArn": {"arn:aws:iam::000000000000:role/rds"}, "FeatureName": {"s3Import"}})
+	call(url.Values{"Action": {"RemoveRoleFromDBInstance"}, "Version": {"2014-10-31"}, "DBInstanceIdentifier": {"db1"}, "RoleArn": {"arn:aws:iam::000000000000:role/rds"}, "FeatureName": {"s3Import"}})
 	call(url.Values{"Action": {"CreateEventSubscription"}, "Version": {"2014-10-31"}, "SubscriptionName": {"ev1"}, "SnsTopicArn": {"arn:aws:sns:us-east-1:000000000000:t"}})
 	call(url.Values{"Action": {"DescribeEventSubscriptions"}, "Version": {"2014-10-31"}})
 	call(url.Values{"Action": {"DeleteEventSubscription"}, "Version": {"2014-10-31"}, "SubscriptionName": {"ev1"}})
 	call(url.Values{"Action": {"AddTagsToResource"}, "Version": {"2014-10-31"}, "ResourceName": {"arn:aws:rds:us-east-1:000000000000:db:db1"}, "Tags.member.1.Key": {"k"}, "Tags.member.1.Value": {"v"}})
 	call(url.Values{"Action": {"ListTagsForResource"}, "Version": {"2014-10-31"}, "ResourceName": {"arn:aws:rds:us-east-1:000000000000:db:db1"}})
-	call(url.Values{"Action": {"RemoveTagsFromResource"}, "Version": {"2014-10-31"}, "ResourceName": {"arn:aws:rds:us-east-1:000000000000:db:db1"}})
+	call(url.Values{"Action": {"RemoveTagsFromResource"}, "Version": {"2014-10-31"}, "ResourceName": {"arn:aws:rds:us-east-1:000000000000:db:db1"}, "TagKeys.member.1": {"k"}})
 	call(url.Values{"Action": {"DeleteDBSnapshot"}, "Version": {"2014-10-31"}, "DBSnapshotIdentifier": {"snap1"}})
 	call(url.Values{"Action": {"DeleteDBCluster"}, "Version": {"2014-10-31"}, "DBClusterIdentifier": {"c1"}})
 	call(url.Values{"Action": {"DeleteDBInstance"}, "Version": {"2014-10-31"}, "DBInstanceIdentifier": {"db1"}})
+	// The pack answered some 120 further operations from one echoing
+	// key-value store; they are mock tier now, and say so.
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(url.Values{
 		"Action": {"CreateDBProxy"}, "Version": {"2014-10-31"}, "DBProxyName": {"p1"},
 	}.Encode()))
@@ -108,37 +111,18 @@ func TestBootedServerRDSCreateDescribe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := io.ReadAll(res.Body)
 	res.Body.Close()
-	if res.StatusCode >= 300 || res.Header.Get("x-mirror-fidelity") != "emulate" {
-		t.Fatalf("CreateDBProxy %d %s %s", res.StatusCode, res.Header.Get("x-mirror-fidelity"), raw)
-	}
-	listed := call(url.Values{"Action": {"DescribeDBProxies"}, "Version": {"2014-10-31"}, "DBProxyName": {"p1"}})
-	if !strings.Contains(listed, "p1") {
-		t.Fatalf("describe proxy %s", listed)
-	}
-	call(url.Values{"Action": {"DeleteDBProxy"}, "Version": {"2014-10-31"}, "DBProxyName": {"p1"}})
-	gone := call(url.Values{"Action": {"DescribeDBProxies"}, "Version": {"2014-10-31"}, "DBProxyName": {"p1"}})
-	if strings.Contains(gone, "p1") && strings.Contains(gone, "DBProxyName") {
-		if strings.Count(gone, "<DBProxyName>p1</DBProxyName>") > 0 {
-			t.Fatalf("proxy still present %s", gone)
-		}
-	}
-	for _, op := range extraOps() {
-		body := call(url.Values{
-			"Action": {op}, "Version": {"2014-10-31"},
-			"DBProxyName": {"p1"}, "DBClusterIdentifier": {"c1"}, "DBInstanceIdentifier": {"db1"},
-			"GlobalClusterIdentifier": {"g1"}, "DBSecurityGroupName": {"sg"},
-		})
-		if body == "" {
-			t.Fatalf("%s empty", op)
-		}
+	if res.Header.Get("x-mirror-fidelity") == "emulate" {
+		t.Fatalf("CreateDBProxy claims emulate")
 	}
 }
 
 func TestRDSHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 46+len(extraOps()) {
-		t.Fatalf("rds Operations() %d want %d", n, 46+len(extraOps()))
+	p, err := bundled.New("aws.rds", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.Operations()); n != 46 {
+		t.Fatalf("rds Operations() %d want 46", n)
 	}
 }

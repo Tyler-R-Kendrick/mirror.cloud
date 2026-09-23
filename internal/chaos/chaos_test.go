@@ -33,7 +33,7 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs" // natives the GCS bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -96,7 +96,8 @@ func TestConcurrentDynamoDBTableCreatesHaveOneWinner(t *testing.T) {
 }
 
 func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
-	p := dynamodb.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := dynamodb.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) *spi.Response {
@@ -119,7 +120,11 @@ func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				counts <- call("ExpireItems", nil).Output["ExpiredItems"].(int)
+				n, err := dynamodb.ExpireItems(ctx, deps, id)
+				if err != nil {
+					t.Error(err)
+				}
+				counts <- n
 			}()
 		}
 		close(start)
@@ -1664,7 +1669,7 @@ func TestConcurrentDynamoDBBackupsRemainConsistent(t *testing.T) {
 			}
 			if err == nil && operation == "UpdateContinuousBackups" {
 				recovery := response.Output["ContinuousBackupsDescription"].(map[string]any)["PointInTimeRecoveryDescription"].(map[string]any)
-				if recovery["PointInTimeRecoveryStatus"] != "ENABLED" || recovery["EarliestRestorableDateTime"] != int64(0) || recovery["LatestRestorableDateTime"] != int64(3600) {
+				if recovery["PointInTimeRecoveryStatus"] != "ENABLED" || fmt.Sprint(recovery["EarliestRestorableDateTime"]) != "0" || fmt.Sprint(recovery["LatestRestorableDateTime"]) != "3600" {
 					err = fmt.Errorf("inconsistent recovery window %#v", recovery)
 				}
 			}
@@ -7821,7 +7826,7 @@ func TestHostingerConcurrentDNSPutGet(t *testing.T) {
 }
 
 func TestGCSConcurrentDuplicateBuckets(t *testing.T) {
-	p := gcs.New(spitest.Deps(t))
+	p := bundled.Handler("gcp.storage", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	errCh := make(chan error, 16)
@@ -7830,7 +7835,7 @@ func TestGCSConcurrentDuplicateBuckets(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "race"}})
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "race"}})
 			errCh <- err
 		}()
 	}
@@ -7853,10 +7858,10 @@ func TestGCSConcurrentDuplicateBuckets(t *testing.T) {
 }
 
 func TestGCSConcurrentObjectPutGet(t *testing.T) {
-	p := gcs.New(spitest.Deps(t))
+	p := bundled.Handler("gcp.storage", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "race"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "race"}}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup

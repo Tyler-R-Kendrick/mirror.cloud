@@ -1,4 +1,5 @@
-// Package gcs is the emulate-tier Google Cloud Storage pack (cross-cloud proof).
+// Package gcs is Google Cloud Storage's object plane: the operations
+// behavior/gcp/storage declares native. Buckets are the bundle's.
 package gcs
 
 import (
@@ -17,25 +18,31 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "gcp.storage", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range []string{"insert", "get", "list", "delete", "copy", "rewrite", "compose", "patch"} {
+		bundled.RegisterNative("gcp.storage", "storage.objects."+op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return (&objects{deps: deps}).invoke(ctx, req)
+		})
+	}
 }
 
-// Pack implements spi.BehaviorPack for GCS JSON API v1.
-type Pack struct {
-	deps spi.Deps
-	mu   sync.Mutex
-	sess map[string]*session
-}
+// objects serves the object plane of behavior/gcp/storage. Buckets are the
+// bundle's, read here from its collection in its layout.
+type objects struct{ deps spi.Deps }
+
+// sessions holds resumable uploads between their requests, by upload id.
+//
+// ponytail: in process memory, as the pack held them; an upload in flight
+// does not survive a restart. Persisting the buffer to the blob store is the
+// upgrade.
+var sessions sync.Map
 
 type session struct {
+	mu                        sync.Mutex
 	bucket, name, contentType string
 	buf                       []byte
 	total                     int64
@@ -65,51 +72,12 @@ type objectRec struct {
 	StorageClass   string `json:"storageClass"`
 }
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d, sess: map[string]*session{}} }
-
-// ServiceID returns gcp.storage.
-func (p *Pack) ServiceID() string { return "gcp.storage" }
-
-// Tier returns emulate.
-func (p *Pack) Tier() model.Tier { return model.TierEmulate }
-
-// Operations lists emulate-tier GCS JSON API operations.
-func (p *Pack) Operations() []string {
-	core := []string{
-		"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list",
-		"storage.buckets.delete", "storage.buckets.patch",
-		"storage.objects.insert", "storage.objects.get", "storage.objects.list",
-		"storage.objects.delete", "storage.objects.copy", "storage.objects.rewrite",
-		"storage.objects.compose", "storage.objects.patch",
-	}
-	return append(core, extraOps()...)
-}
-
-// Invoke dispatches one GCS JSON API operation.
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	p.hydrate(req)
-	path := str(req.Input["_path"])
-	if req.HTTP != nil && req.HTTP.URL != nil {
-		path = req.HTTP.URL.Path
-	}
-	if strings.Contains(path, "/batch") {
+	if strings.Contains(str(req.Input["_path"]), "/batch") {
 		return nil, spi.NotImplemented("gcp.storage", req.Operation, "emulate")
 	}
-	if req.HTTP != nil {
-		req.Operation = p.route(req)
-	}
 	switch req.Operation {
-	case "storage.buckets.insert":
-		return p.bucketInsert(ctx, req)
-	case "storage.buckets.get":
-		return p.bucketGet(ctx, req)
-	case "storage.buckets.list":
-		return p.bucketList(ctx, req)
-	case "storage.buckets.delete":
-		return p.bucketDelete(ctx, req)
-	case "storage.buckets.patch":
-		return p.bucketPatch(ctx, req)
 	case "storage.objects.insert":
 		return p.objectInsert(ctx, req)
 	case "storage.objects.get":
@@ -124,84 +92,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.objectRewrite(ctx, req)
 	case "storage.objects.compose":
 		return p.objectCompose(ctx, req)
-	case "storage.objects.patch":
+	default: // storage.objects.patch
 		return p.objectPatch(ctx, req)
-	default:
-		return p.extra(ctx, req)
 	}
 }
 
-func (p *Pack) route(req *spi.Request) string {
-	r := req.HTTP
-	path := r.URL.Path
-	q := r.URL.Query()
-	if req.Input == nil {
-		req.Input = map[string]any{}
-	}
-	if q.Get("name") != "" {
-		req.Input["name"] = q.Get("name")
-	}
-	if q.Get("uploadType") != "" {
-		req.Input["uploadType"] = q.Get("uploadType")
-	}
-	if q.Get("upload_id") != "" {
-		req.Input["upload_id"] = q.Get("upload_id")
-	}
-	bkt, obj := parsePath(path)
-	if bkt != "" && req.Input["bucket"] == nil {
-		req.Input["bucket"] = bkt
-	}
-	if obj != "" && req.Input["object"] == nil {
-		req.Input["object"] = obj
-		if req.Input["name"] == nil {
-			req.Input["name"] = obj
-		}
-	}
-	if a := q.Get("Action"); a != "" {
-		return a
-	}
-	if strings.Contains(path, "/upload/") && r.Method == http.MethodPut {
-		return "storage.objects.insert"
-	}
-	if strings.Contains(path, "/rewriteTo/") {
-		return "storage.objects.rewrite"
-	}
-	if strings.Contains(path, "/copyTo/") {
-		return "storage.objects.copy"
-	}
-	if strings.HasSuffix(path, "/compose") {
-		return "storage.objects.compose"
-	}
-	switch {
-	case r.Method == http.MethodPost && strings.Contains(path, "/upload/"):
-		return "storage.objects.insert"
-	case r.Method == http.MethodPost && strings.Contains(path, "/o") && q.Get("uploadType") != "":
-		return "storage.objects.insert"
-	case r.Method == http.MethodPatch && obj != "":
-		return "storage.objects.patch"
-	case r.Method == http.MethodPatch && bkt != "":
-		return "storage.buckets.patch"
-	case r.Method == http.MethodDelete && obj != "":
-		return "storage.objects.delete"
-	case r.Method == http.MethodDelete:
-		return "storage.buckets.delete"
-	case r.Method == http.MethodGet && obj != "":
-		return "storage.objects.get"
-	case r.Method == http.MethodGet && strings.HasSuffix(strings.TrimSuffix(path, "/"), "/o"):
-		return "storage.objects.list"
-	case r.Method == http.MethodGet && bkt != "":
-		return "storage.buckets.get"
-	case r.Method == http.MethodGet && (strings.HasSuffix(path, "/b") || strings.HasSuffix(path, "/b/")):
-		return "storage.buckets.list"
-	case r.Method == http.MethodPost && bkt == "":
-		return "storage.buckets.insert"
-	case r.Method == http.MethodPost:
-		return "storage.objects.insert"
-	}
-	return req.Operation
-}
-
-func (p *Pack) hydrate(req *spi.Request) {
+func (p *objects) hydrate(req *spi.Request) {
 	if req.Input == nil {
 		req.Input = map[string]any{}
 	}
@@ -299,93 +195,11 @@ func parsePath(path string) (bucket, object string) {
 	return bucket, object
 }
 
-func (p *Pack) col(req *spi.Request, name string) spi.Collection {
-	acct := req.Identity.Account
-	if acct == "" {
-		acct = "000000000000"
-	}
-	reg := req.Identity.Region
-	if reg == "" {
-		reg = "us-east-1"
-	}
-	if req.Identity.Project != "" {
-		acct = req.Identity.Project
-	}
-	return p.deps.Store.Scope(acct, reg).Collection(name)
+func (p *objects) col(req *spi.Request, name string) spi.Collection {
+	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(name)
 }
 
-func (p *Pack) bucketInsert(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := str(req.Input["name"])
-	if name == "" {
-		return nil, fault("invalid", "bucket name required", 400)
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, exists, _ := p.col(req, "buckets").Get(ctx, name); exists {
-		return nil, fault("conflict", "The requested bucket name is not available.", 409)
-	}
-	now := p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05Z")
-	rec := bucketRec{Name: name, Metageneration: "1", TimeCreated: now, Updated: now, Location: "US", StorageClass: "STANDARD"}
-	b, _ := json.Marshal(rec)
-	_ = p.col(req, "buckets").Put(ctx, name, b)
-	return &spi.Response{Status: 200, Output: p.bucketResource(req, rec)}, nil
-}
-
-func (p *Pack) bucketGet(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	rec, err := p.loadBucket(ctx, req, p.bucketName(req))
-	if err != nil {
-		return nil, err
-	}
-	return &spi.Response{Output: p.bucketResource(req, rec)}, nil
-}
-
-func (p *Pack) bucketList(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	kvs, _, err := p.col(req, "buckets").List(ctx, "", "", 0)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]any, 0, len(kvs))
-	for _, kv := range kvs {
-		var rec bucketRec
-		_ = json.Unmarshal(kv.Value, &rec)
-		items = append(items, p.bucketResource(req, rec))
-	}
-	return &spi.Response{Output: map[string]any{"kind": "storage#buckets", "items": items}}, nil
-}
-
-func (p *Pack) bucketDelete(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := p.bucketName(req)
-	if _, err := p.loadBucket(ctx, req, name); err != nil {
-		return nil, err
-	}
-	objs, _, _ := p.col(req, "objects").List(ctx, name+"/", "", 1)
-	if len(objs) > 0 {
-		return nil, fault("conflict", "bucket not empty", 409)
-	}
-	_ = p.col(req, "buckets").Delete(ctx, name)
-	return &spi.Response{Status: 204}, nil
-}
-
-func (p *Pack) bucketPatch(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	rec, err := p.loadBucket(ctx, req, p.bucketName(req))
-	if err != nil {
-		return nil, err
-	}
-	if loc := str(req.Input["location"]); loc != "" {
-		rec.Location = loc
-	}
-	if sc := str(req.Input["storageClass"]); sc != "" {
-		rec.StorageClass = sc
-	}
-	n, _ := strconv.ParseInt(rec.Metageneration, 10, 64)
-	rec.Metageneration = strconv.FormatInt(n+1, 10)
-	rec.Updated = p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05Z")
-	b, _ := json.Marshal(rec)
-	_ = p.col(req, "buckets").Put(ctx, rec.Name, b)
-	return &spi.Response{Output: p.bucketResource(req, rec)}, nil
-}
-
-func (p *Pack) objectInsert(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) objectInsert(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	bucket := p.bucketName(req)
 	if _, err := p.loadBucket(ctx, req, bucket); err != nil {
 		return nil, err
@@ -401,9 +215,7 @@ func (p *Pack) objectInsert(ctx context.Context, req *spi.Request) (*spi.Respons
 	}
 	if uploadType == "resumable" && (req.HTTP == nil || req.HTTP.Method == http.MethodPost) {
 		id := p.deps.Rand.Hex(16)
-		p.mu.Lock()
-		p.sess[id] = &session{bucket: bucket, name: name, contentType: str(req.Input["contentType"])}
-		p.mu.Unlock()
+		sessions.Store(id, &session{bucket: bucket, name: name, contentType: str(req.Input["contentType"])})
 		h := http.Header{}
 		loc := p.base(req) + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=resumable&upload_id=" + id
 		if name != "" {
@@ -434,13 +246,14 @@ func (p *Pack) objectInsert(ctx context.Context, req *spi.Request) (*spi.Respons
 	return p.storeObject(ctx, req, bucket, name, ctype, body)
 }
 
-func (p *Pack) resumablePut(ctx context.Context, req *spi.Request, id string) (*spi.Response, error) {
-	p.mu.Lock()
-	s := p.sess[id]
-	p.mu.Unlock()
-	if s == nil {
+func (p *objects) resumablePut(ctx context.Context, req *spi.Request, id string) (*spi.Response, error) {
+	v, ok := sessions.Load(id)
+	if !ok {
 		return nil, fault("notFound", "unknown upload_id", 404)
 	}
+	s := v.(*session)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	chunk, _ := io.ReadAll(readerOf(req))
 	cr := ""
 	if req.HTTP != nil {
@@ -476,7 +289,7 @@ func (p *Pack) resumablePut(ctx context.Context, req *spi.Request, id string) (*
 	return &spi.Response{Status: 308, Headers: h}, nil
 }
 
-func (p *Pack) objectGet(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) objectGet(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	bucket := p.bucketName(req)
 	name := p.objectName(req)
 	rec, err := p.loadObject(ctx, req, bucket, name)
@@ -524,7 +337,7 @@ func (p *Pack) objectGet(ctx context.Context, req *spi.Request) (*spi.Response, 
 	return &spi.Response{Output: p.objectResource(req, rec)}, nil
 }
 
-func (p *Pack) objectList(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) objectList(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	bucket := p.bucketName(req)
 	if _, err := p.loadBucket(ctx, req, bucket); err != nil {
 		return nil, err
@@ -580,7 +393,7 @@ func (p *Pack) objectList(ctx context.Context, req *spi.Request) (*spi.Response,
 	return &spi.Response{Output: out}, nil
 }
 
-func (p *Pack) objectDelete(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) objectDelete(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	bucket, name := p.bucketName(req), p.objectName(req)
 	if _, err := p.loadObject(ctx, req, bucket, name); err != nil {
 		return nil, err
@@ -590,7 +403,7 @@ func (p *Pack) objectDelete(ctx context.Context, req *spi.Request) (*spi.Respons
 	return &spi.Response{Status: 204}, nil
 }
 
-func (p *Pack) objectCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) objectCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	srcB, srcN := p.bucketName(req), p.objectName(req)
 	dstB, dstN := dest(req)
 	if dstB == "" {
@@ -613,7 +426,7 @@ func (p *Pack) objectCopy(ctx context.Context, req *spi.Request) (*spi.Response,
 	return p.storeObject(ctx, req, dstB, dstN, rec.ContentType, data)
 }
 
-func (p *Pack) objectRewrite(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) objectRewrite(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	resp, err := p.objectCopy(ctx, req)
 	if err != nil {
 		return nil, err
@@ -622,7 +435,7 @@ func (p *Pack) objectRewrite(ctx context.Context, req *spi.Request) (*spi.Respon
 	return resp, nil
 }
 
-func (p *Pack) objectCompose(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) objectCompose(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	bucket := p.bucketName(req)
 	name := p.objectName(req)
 	if name == "" {
@@ -648,7 +461,7 @@ func (p *Pack) objectCompose(ctx context.Context, req *spi.Request) (*spi.Respon
 	return p.storeObject(ctx, req, bucket, name, "application/octet-stream", buf)
 }
 
-func (p *Pack) objectPatch(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *objects) objectPatch(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	bucket, name := p.bucketName(req), p.objectName(req)
 	rec, err := p.loadObject(ctx, req, bucket, name)
 	if err != nil {
@@ -668,7 +481,7 @@ func (p *Pack) objectPatch(ctx context.Context, req *spi.Request) (*spi.Response
 	return &spi.Response{Output: p.objectResource(req, rec)}, nil
 }
 
-func (p *Pack) storeObject(ctx context.Context, req *spi.Request, bucket, name, ctype string, body []byte) (*spi.Response, error) {
+func (p *objects) storeObject(ctx context.Context, req *spi.Request, bucket, name, ctype string, body []byte) (*spi.Response, error) {
 	if _, err := p.loadBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
@@ -699,7 +512,7 @@ func (p *Pack) storeObject(ctx context.Context, req *spi.Request, bucket, name, 
 	return &spi.Response{Status: 200, Output: p.objectResource(req, rec)}, nil
 }
 
-func (p *Pack) readInsertBody(req *spi.Request, name string) ([]byte, string, string, error) {
+func (p *objects) readInsertBody(req *spi.Request, name string) ([]byte, string, string, error) {
 	ctype := str(req.Input["contentType"])
 	r := readerOf(req)
 	if req.HTTP != nil {
@@ -742,7 +555,7 @@ func (p *Pack) readInsertBody(req *spi.Request, name string) ([]byte, string, st
 	return b, name, ctype, nil
 }
 
-func (p *Pack) loadBucket(ctx context.Context, req *spi.Request, name string) (bucketRec, error) {
+func (p *objects) loadBucket(ctx context.Context, req *spi.Request, name string) (bucketRec, error) {
 	b, ok, err := p.col(req, "buckets").Get(ctx, name)
 	if err != nil {
 		return bucketRec{}, err
@@ -755,7 +568,7 @@ func (p *Pack) loadBucket(ctx context.Context, req *spi.Request, name string) (b
 	return rec, nil
 }
 
-func (p *Pack) loadObject(ctx context.Context, req *spi.Request, bucket, name string) (objectRec, error) {
+func (p *objects) loadObject(ctx context.Context, req *spi.Request, bucket, name string) (objectRec, error) {
 	b, ok, err := p.col(req, "objects").Get(ctx, bucket+"/"+name)
 	if err != nil {
 		return objectRec{}, err
@@ -768,7 +581,7 @@ func (p *Pack) loadObject(ctx context.Context, req *spi.Request, bucket, name st
 	return rec, nil
 }
 
-func (p *Pack) checkPreconditions(req *spi.Request, rec objectRec) error {
+func (p *objects) checkPreconditions(req *spi.Request, rec objectRec) error {
 	if v := str(req.Input["ifGenerationMatch"]); v != "" && v != rec.Generation {
 		return fault("conditionNotMet", "ifGenerationMatch", 412)
 	}
@@ -787,7 +600,7 @@ func (p *Pack) checkPreconditions(req *spi.Request, rec objectRec) error {
 	return nil
 }
 
-func (p *Pack) checkCreatePreconditions(ctx context.Context, req *spi.Request, bucket, name string) error {
+func (p *objects) checkCreatePreconditions(ctx context.Context, req *spi.Request, bucket, name string) error {
 	v := str(req.Input["ifGenerationMatch"])
 	if req.HTTP != nil && v == "" {
 		v = req.HTTP.URL.Query().Get("ifGenerationMatch")
@@ -809,21 +622,21 @@ func (p *Pack) checkCreatePreconditions(ctx context.Context, req *spi.Request, b
 	return nil
 }
 
-func (p *Pack) bucketName(req *spi.Request) string {
+func (p *objects) bucketName(req *spi.Request) string {
 	if v := str(req.Input["bucket"]); v != "" {
 		return v
 	}
 	return str(req.Input["name"])
 }
 
-func (p *Pack) objectName(req *spi.Request) string {
+func (p *objects) objectName(req *spi.Request) string {
 	if v := str(req.Input["object"]); v != "" {
 		return v
 	}
 	return str(req.Input["name"])
 }
 
-func (p *Pack) base(req *spi.Request) string {
+func (p *objects) base(req *spi.Request) string {
 	if req.HTTP != nil && req.HTTP.Host != "" {
 		scheme := "http"
 		if req.HTTP.TLS != nil {
@@ -834,17 +647,7 @@ func (p *Pack) base(req *spi.Request) string {
 	return "http://127.0.0.1:4566"
 }
 
-func (p *Pack) bucketResource(req *spi.Request, rec bucketRec) map[string]any {
-	base := p.base(req)
-	return map[string]any{
-		"kind": "storage#bucket", "id": rec.Name, "name": rec.Name,
-		"selfLink":       base + "/storage/v1/b/" + rec.Name,
-		"metageneration": rec.Metageneration, "timeCreated": rec.TimeCreated,
-		"updated": rec.Updated, "location": rec.Location, "storageClass": rec.StorageClass,
-	}
-}
-
-func (p *Pack) objectResource(req *spi.Request, rec objectRec) map[string]any {
+func (p *objects) objectResource(req *spi.Request, rec objectRec) map[string]any {
 	base := p.base(req)
 	enc := url.PathEscape(rec.Name)
 	return map[string]any{

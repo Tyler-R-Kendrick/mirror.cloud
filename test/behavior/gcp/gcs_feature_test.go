@@ -50,13 +50,13 @@ func TestGCSJSONBehavior(t *testing.T) {
 		return res.StatusCode, b, res.Header
 	}
 	t.Run("Given a bucket When created Then it is listed and fetched", func(t *testing.T) {
-		code, raw, _ := call(http.MethodPost, "/storage/v1/b", `{"name":"bdd"}`, "application/json")
+		code, raw, _ := call(http.MethodPost, "/storage/v1/b?project=p", `{"name":"bdd"}`, "application/json")
 		got := map[string]any{}
 		_ = json.Unmarshal(raw, &got)
 		if code != 200 || got["name"] != "bdd" {
 			t.Fatalf("create %d %s", code, raw)
 		}
-		code, raw, _ = call(http.MethodGet, "/storage/v1/b", "", "")
+		code, raw, _ = call(http.MethodGet, "/storage/v1/b?project=p", "", "")
 		if code != 200 || !strings.Contains(string(raw), `"bdd"`) {
 			t.Fatalf("list %d %s", code, raw)
 		}
@@ -67,7 +67,7 @@ func TestGCSJSONBehavior(t *testing.T) {
 		}
 	})
 	t.Run("Given a duplicate bucket When created Then 409 is returned", func(t *testing.T) {
-		code, raw, _ := call(http.MethodPost, "/storage/v1/b", `{"name":"bdd"}`, "application/json")
+		code, raw, _ := call(http.MethodPost, "/storage/v1/b?project=p", `{"name":"bdd"}`, "application/json")
 		if code != 409 {
 			t.Fatalf("dup %d %s", code, raw)
 		}

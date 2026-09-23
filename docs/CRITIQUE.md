@@ -1366,3 +1366,189 @@ The ECS test that follows a task through RUNNING, STOPPED and FAILED passes agai
 The pack is now a bundle keyed by ARN throughout. That removes the pack's raw ARN-to-name index collections, which a bundle could not have read. The recording is re-cut in three places:
 - **DescribeLoadBalancers.** The pack ignored `Names` (it read a `LoadBalancerNames` member the request does not have) and answered every load balancer for an unknown name.
 - **CreateTrustStore and DescribeTrustStores.** The pack answered a `CaCertificatesBundleS3Bucket` member that the model's `TrustStore` does not declare.
+
+### Cloud Control: its own records moved; the reads of other services' did not
+
+Cloud Control's own CRUD is now bundle YAML: CreateResource, UpdateResource, DeleteResource and GetResourceRequestStatus. GetResource and ListResources remain Go natives. That is because they also answer resources other services own, such as an S3 bucket with its configuration, an API Gateway v2 API, or an RDS instance or cluster. They read those out of the owners' stores in each owner's layout. This is the same reach CloudFormation had before #423. It is marked `ponytail:`, and the upgrade is to ask each owner through its own Describe operation.
+
+The recording is re-cut in two places. At steps 5 and 8, the pack answered ResourceNotFoundException with 400. The model declares that error's httpError as 404.
+
+### RDS: 120 operations were one echo, and are mock tier now
+
+The RDS pack claimed 166 emulate-tier operations. Only 46 of them had behavior of their own. The other 120 were one function that guessed a resource kind from the operation name, stored the request under that guess, and echoed it back. That is the "tier labels became advertising" pattern above, and it contradicts SUPPORT's own note that extra RDS operations are "named control-plane records, not leftover-KV sold as emulate". Those operations now answer at mock tier, from the model's shapes, and say so in `x-mirror-fidelity`. The 46 real operations are bundle YAML. The instance and cluster collections keep their names and layout because Cloud Control reads them.
+
+The recording is re-cut where the model says the pack was wrong:
+- **Not-found faults.** The pack answered DBInstanceNotFound for every kind of resource. The model gives clusters and snapshots their own codes. A second CreateDBInstance now answers DBInstanceAlreadyExists instead of overwriting the instance, and deleting an unknown instance now answers DBInstanceNotFound instead of succeeding.
+- **Snapshots.** Snapshots now carry the source's Engine, which the model declares. Before, a restore from a snapshot had no engine.
+- **Read replicas.** A read replica now has its own endpoint address instead of its source's.
+- **Delete operations.** Deletes answer the resource being deleted, as the model's outputs declare.
+- **Parameters.** DescribeDBParameters answers the Parameter list that was set, not the stored request.
+- **Tags.** RemoveTagsFromResource removes only the named keys.
+
+### SSM: the same echo, and a SecureString that decrypted itself
+
+SSM had the same shape as RDS. Its 64 declared operations are bundle YAML. The other 88 (activations, sessions, inventory, patch groups, compliance and more) were one prefix-guessed key-value echo, and they are mock tier now.
+
+Parameter Store changed where the model or AWS's documented behavior disagreed with the pack. The recording is re-cut at each step:
+- **Overwrites.** A PutParameter to an existing name without `Overwrite` now answers ParameterAlreadyExists instead of overwriting.
+- **SecureString reads.** A SecureString is answered in its stored form unless the read sets `WithDecryption`. The pack decrypted it for every caller.
+- **History.** GetParameterHistory answers each version once. The pack re-recorded the previous version on every overwrite.
+- **Metadata.** DescribeParameters answers metadata without values.
+- **Deletes.** DeleteParameter of an unknown name faults. DeleteParameters reports DeletedParameters and InvalidParameters.
+- **Labels.** Labels go on the latest version by default. Unlabel reports RemovedLabels and InvalidLabels.
+- **Tags.** Tag removal removes only the named keys.
+- **Command invocations.** Command invocations are one per targeted instance, not a fixed `i-0`.
+
+Several deletes and deregistrations now answer the identifiers their model outputs declare.
+
+The spine and conformance tests had been sending requests that the model rejects: missing required members, and an overwrite without `Overwrite`. They now send what an SDK would send.
+
+### ECS: extras that a valid request could not reach
+
+ECS's records are bundle YAML. The task lifecycle stays Go: CreateService, RunTask, StartTask, StopTask and the three Submit*StateChange operations. A task behind a load balancer registers with ELB as it runs and deregisters as it stops, and a bundle cannot call another service yet: `emit` is declared in the B-IR but not implemented.
+
+Unlike RDS and SSM, most of ECS's extras were written per operation. Twenty-two of them could not be reached by a request the model accepts:
+- **Daemon operations.** DescribeDaemon, DeleteDaemon and UpdateDaemon require `daemonArn`, but the pack keyed daemons by a `daemonName` the inputs do not carry. CreateDaemon answered a `daemon` member its output does not declare.
+- **Express gateway services.** Describe and Delete read a `serviceName` their inputs do not have.
+- **Service deployments and revisions.** Nothing creates them except Continue and Stop, which keyed them by whatever identifier was at hand.
+- **ListServicesByNamespace.** It listed every service regardless of namespace.
+
+Those 22 are mock tier now, which at least answers the declared shapes.
+
+The recording is re-cut where the pack answered something other than the model's output:
+- **Deletes and deregistrations.** Delete and Deregister operations answer the resource they removed. A deregistered task definition stays describable as INACTIVE.
+- **Updates.** UpdateService changes only the members the request names. The pack dropped the service's task definition.
+- **Task sets.** A task set's `serviceArn` is an ARN. UpdateServicePrimaryTaskSet answers the task set it made PRIMARY.
+- **Protection and agents.** Task protection answers ProtectedTask shapes. UpdateContainerAgent answers one instance and leaves its status alone.
+- **Removals.** Untag and DeleteAttributes remove only what they name.
+- **DescribeClusters.** DescribeClusters reports missing clusters in `failures`.
+
+### Pipes: the control plane had one validator for two shapes
+
+Pipes follows Scheduler's shape. The pipe records are bundle YAML, and delivery is a Go worker registered under `worker:`. The worker now wakes on the engine's `collection:pipe` publish, which the pack did with a direct `notify()`. DeletePipe stays native because it also clears the worker's checkpoint and its per-pipe retry counts.
+
+The source and target validation is now `require` rules shared between CreatePipe and UpdatePipe. That sharing exposed a pack bug. UpdatePipe's source parameters have no StartingPosition, because it cannot change. The pack replaced the stored parameters with the update's and then validated the result, so every update that touched a Kinesis or DynamoDB stream pipe's source parameters rejected itself. The bundle merges the update's block over the stored one.
+
+UpdatePipe's input has no Source either. A request that carries one leaves the pipe's source unchanged, which is what the mutant formerly aimed at the pack's check now guards.
+
+The recording is re-cut in three places:
+- **Outputs.** Outputs carry the DesiredState their models declare.
+- **NotFoundException.** It is 404, not 400.
+- **Summaries.** ListPipes answers summaries, and DeletePipe answers the pipe it deleted.
+
+### Lambda: a router in the codec, and a query no bundle had read
+
+Lambda's records are bundle YAML: functions, versions, aliases, permissions, layers, code signing, event-source mappings and the per-function configurations. Invoke and its two variants stay Go, because they run a handler in a process. The SQS event-source consumer is the bundle's worker.
+
+The pack's consumer used to subscribe once for every `lambda.New`. Every service that invoked a function constructed one, so one runtime could deliver the same message several times. Callers now reach Lambda through `bundled.Handler`, and one worker consumes.
+
+Two things outside the pack moved with it:
+- **The Lambda router in the restJson1 codec.** It guessed operations from path substrings ahead of the model's URIs, and accepted API-date prefixes that Lambda does not publish. For example, `/2015-03-31/tags` is really `/2017-03-31/tags`. Lambda now routes by `httpuri.Match` like every other bundle. Only the `?Action=` form this project's tests use survives.
+- **Query-bound members.** They were stored under their wire name, so UntagResource's `?tagKeys=` never reached `TagKeys`. This held for every restJson1 bundle that binds a query member under a different name. The decoder now maps the wire name to the member, as it already did for headers.
+
+The model requires `Role` on CreateFunction, and many tests across packages created functions without one. They now send it.
+
+Nine durable-execution extras are mock tier. They stored records keyed by whatever the request named, with the operation's own name as the status.
+
+The recording is re-cut where the pack answered outside its models:
+- **Function configurations.** They carry Role, Version and FunctionArn. Published versions snapshot the configuration.
+- **Model shapes.** Event-source mappings, URL configs, layers and the per-function configurations answer the shapes their models declare, not the request echoed with FunctionName.
+- **Layer versions.** GetLayerVersion answers the version it names, rather than the latest.
+- **Removals.** Untag removes only the named keys.
+
+### GCS: buckets moved; the object plane is Go, and the codec learned labels
+
+GCS buckets are bundle YAML: insert, get, list, patch and delete. A bucket that still holds an object cannot be deleted. The object plane stays Go: multipart and resumable uploads, ranged media reads, and generation preconditions over blob-stored bodies. It reads buckets from the bundle's collection. Resumable sessions move from the pack's struct to a package-level map, marked `ponytail:`, because a native is constructed for each call.
+
+The recording matched the pack on every step with nothing re-cut, because the bundle's buckets answer exactly what the pack's did.
+
+Two things outside the pack moved:
+- **Path labels in gcprest.** The codec never bound path parameters, and only the pack's own path parsing knew which bucket a request named. It now matches the model's URIs below `/storage/v1`, as restJson1 does.
+- **The `project` parameter.** `storage.buckets.insert` and `list` require `project`, which every real client sends. The tests now send it too.
+
+About eighty further operations were one suffix-guessed key-value echo. They are mock tier, as RDS's and SSM's were. This contradicted SUPPORT's own claim that extra GCS operations were named control-plane records.
+
+### EventBridge: records to YAML, delivery stays Go
+
+EventBridge's records are bundle YAML: rule listings and deletes, targets' listing and removal, event buses and their permission statements, archives, endpoints, partner and consumer event sources, replays and tags.
+
+The operations that validate or deliver stay Go:
+- PutRule, which computes a schedule's next firing.
+- PutTargets, with its per-target validation.
+- PutEvents and PutPartnerEvents, which match rules and deliver.
+- TestEventPattern, which runs the pattern matcher.
+- Connections and API-destination writes, whose auth parameters delivery reads.
+
+The retry and schedule loop is the bundle's worker. Natives wake it through the bus now, rather than through a channel on the pack.
+
+Two layouts changed so a bundle could read them:
+- **Targets.** A rule's targets were stored as a bare JSON array. They are now `{Bus, Rule, Targets}`, which also lets ListRuleNamesByTarget filter by bus without parsing a NUL-joined key.
+- **Tags.** Tags were a bare array too, and are now `{Tags}`.
+
+The recording is re-cut where the pack echoed its records instead of the model's shapes:
+- **ARNs.** Rules carry their ARN, and buses answer Arn and a Policy rather than a Statements list.
+- **Archives.** UpdateArchive merges, where it used to replace the archive and lose its source.
+- **Partner sources.** A partner source's ARN has no account, and its account appears only under ListPartnerEventSourceAccounts.
+- **Replays.** Replays answer their declared members.
+- **Removals.** Untag removes only the named keys.
+
+### SNS: the SMS surface is records; publishing stays Go
+
+SNS is a hybrid bundle. Nine operations are YAML: the SMS sandbox, opt-out and origination-number operations. The other 33 are natives on the Go pack, because publishing fans out to SQS, Lambda, HTTP, email and Firehose subscribers.
+
+Two changes came with the move:
+- **Dedup lock.** The FIFO deduplication lock is package-level, because natives build a pack per call.
+- **`New`.** It answers with the bundle, so callers in other packages reach the YAML operations too.
+
+The opt-out and phone-number operations bind only the model's `phoneNumber`. The pack also accepted `PhoneNumber`, which no client sends.
+
+One step of the recording is re-cut. GetSMSSandboxAccountStatus answered a `Verified` count, but `GetSMSSandboxAccountStatusResult` has no such member.
+
+### Firehose: a delivery engine with one record operation
+
+Firehose is a hybrid bundle. ListDeliveryStreams is YAML. The other eleven operations are natives, because creating or updating a stream validates nested source and destination shapes, and putting a record buffers, transforms and delivers it. Kinesis and MSK consumption and the buffer and retry loop are the bundle's worker.
+
+Natives wake the worker through the bus, because they build a pack per call and hold no channel. Two things moved to package level for the same reason:
+- **HTTP client.** Tests swap the HTTP client for their TLS server's.
+- **OpenSearch lock.** The OpenSearch work lock.
+
+The worker runs its loop from the start rather than probing the store for persisted work first. The probe had existed so that a pack with nothing to deliver ran no goroutine, and a worker is exactly that goroutine.
+
+### DynamoDB: the configuration surface is records; the data plane is Go
+
+DynamoDB is a hybrid bundle. About twenty operations are YAML: TTL, point-in-time recovery, resource policies, tags, contributor insights, the backup, export and import listings, ListTables, DescribeLimits and DescribeEndpoints. The rest are natives: tables, items, expressions, transactions, PartiQL, streams, global tables and the operations that copy a table's items.
+
+Four layouts changed so a bundle could read them:
+- **Tags.** Tags were a bare array and are now `{Tags}`.
+- **Point-in-time recovery.** Recovery settings are now `{Recovery}`.
+- **Resource policies.** A policy was stored as its raw string and is now `{Policy}`.
+- **Contributor insights.** Nothing else reads them, so their layout is unchanged.
+
+The replica auto-scaling pair echoed its request back as a description, so it drops to mock tier, following the echo-KV precedent.
+
+TTL expiry is not an operation. The edge's `/_aws/dynamodb/expired` reached it as a pseudo-operation named ExpireItems, which a bundle cannot serve, so it is now an exported function the edge calls. The booted-server stream test moved to an external test package, because the edge now imports this package.
+
+One step of the recording is re-cut. DescribeBackup answered the backup's snapshot, meaning the table as a JSON string and its items, inside `BackupDetails`, which has no such members.
+
+### Step Functions: an interpreter with three record operations
+
+Step Functions is a hybrid bundle. DescribeStateMachineAlias, DeleteStateMachineAlias and DescribeMapRun are YAML. Everything else is natives, because a state machine is an Amazon States Language program, and creating, versioning, routing and running one is an interpreter. The durable Wait loop is the bundle's worker, and natives that park an execution wake it through the bus.
+
+**Workers per call.** Pipes and EventBridge started executions through `states.New`, which started a Wait worker on every call and never stopped it. They now call the served bundle, and `New` is reserved for tests that want the worker running.
+
+**Tests.** The tests that zeroed retry jitter did it by swapping the random source on a pack mid-test. Natives run on the bundle's dependencies, so those tests now set it before building the service.
+
+**Re-cut.** One step of the recording is re-cut. DescribeMapRun answered its stored record whole, including a `stateMachineArn` that `DescribeMapRunOutput` does not declare.
+
+### S3: a bundle that declares the surface and serves none of it as records
+
+S3 is the last hand-written pack, and the ratchet now counts zero. Its bundle lists all 115 operations as natives. None of them are records yet, because three things S3 does sit outside what the engine expresses:
+- **Routing.** It re-derives the operation from the request's host, path, method, query and headers rather than trusting the decoded one.
+- **CORS.** It answers a bucket's CORS rules on every response, as well as on preflight.
+- **Objects.** Its objects are streamed blobs with versions, multipart uploads, checksums, encryption, object lock and notifications.
+
+Moving S3's configuration surface into YAML first needs a response hook in the engine that a bundle can declare, for CORS. Without one, the configuration operations would stop carrying CORS headers.
+
+**Multipart state.** Multipart uploads in flight live in memory. Natives build a pack per call, so that state and its locks are kept per store in a package-level map. The map is marked `ponytail:`, because an entry is never freed.
+
+**Recording.** The recording covers the bucket surface. It exists so that when an operation does move to YAML, it has a pack answer to meet.

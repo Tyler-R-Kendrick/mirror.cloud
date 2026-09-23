@@ -28,8 +28,8 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"    // natives the ECS bundle serves
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -2733,6 +2733,8 @@ func TestStatesServiceIntegrations(t *testing.T) {
 
 func TestStatesCallbackServiceIntegration(t *testing.T) {
 	deps := spitest.Deps(t)
+	// Zero jitter, so a retried task is due at once.
+	deps.Rand = zeroIntRand{deps.Rand}
 	p := New(deps)
 	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
@@ -2785,7 +2787,6 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	retrying := must(p, "StartExecution", map[string]any{"stateMachineArn": arn, "name": "retry"})["executionArn"].(string)
 	firstToken, firstHandle := task()
 	must(queue, "DeleteMessage", map[string]any{"QueueUrl": queueURL, "ReceiptHandle": firstHandle})
-	p.deps.Rand = zeroIntRand{p.deps.Rand}
 	must(p, "SendTaskFailure", map[string]any{"taskToken": firstToken, "error": "Retryable"})
 	secondToken, secondHandle := task()
 	if secondToken == firstToken {
@@ -2902,7 +2903,7 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 	var ecsOutput map[string]any
 	_ = json.Unmarshal([]byte(ecsExecution["output"].(string)), &ecsOutput)
 	task := ecsOutput["tasks"].([]any)[0].(map[string]any)
-	storedTasks := must(ecs.New(deps), "DescribeTasks", map[string]any{"cluster": "default", "tasks": []any{task["taskArn"]}})["tasks"].([]any)
+	storedTasks := must(bundled.Handler("aws.ecs", deps), "DescribeTasks", map[string]any{"cluster": "default", "tasks": []any{task["taskArn"]}})["tasks"].([]any)
 	if ecsExecution["status"] != "SUCCEEDED" || task["lastStatus"] != "STOPPED" || task["taskDefinitionArn"] != "web" || len(storedTasks) != 1 || storedTasks[0].(map[string]any)["lastStatus"] != "STOPPED" {
 		t.Fatalf("ECS sync execution %#v stored=%#v", ecsExecution, storedTasks)
 	}
@@ -3414,7 +3415,10 @@ func TestStatesTestStateReaderDataFormats(t *testing.T) {
 }
 
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	// Zero jitter, so a retried task is due at once.
+	deps.Rand = zeroIntRand{deps.Rand}
+	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -3501,7 +3505,6 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	recoveryARN := must("StartExecution", map[string]any{"StateMachineArn": recoveryMachine, "Name": "recovery", "Input": `{"keep":true}`}).Output["executionArn"].(string)
 	firstToken := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
 	must("SendTaskHeartbeat", map[string]any{"TaskToken": firstToken})
-	p.deps.Rand = zeroIntRand{p.deps.Rand}
 	must("SendTaskFailure", map[string]any{"TaskToken": firstToken, "Error": "Retryable", "Cause": "try again"})
 	if retrying := must("DescribeExecution", map[string]any{"ExecutionArn": recoveryARN}).Output; retrying["status"] != "RUNNING" {
 		t.Fatalf("activity retry %#v", retrying)
@@ -4455,7 +4458,7 @@ func TestBootedServerStatesMapLambdaActivity(t *testing.T) {
 		return
 	}
 	src := "def lambda_handler(event, context):\n    return {\"n\": event.get(\"n\", 0) + 1}\n"
-	create := `{"FunctionName":"inc","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(src)) + `"}}`
+	create := `{"Role":"arn:aws:iam::000000000000:role/lambda","FunctionName":"inc","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(src)) + `"}}`
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(create))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", lamAuth)
@@ -4554,7 +4557,7 @@ def lambda_handler(event, context):
     change(event["path"], -1)
     return event
 `
-	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "concurrency-worker", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(src))},
 	}}); err != nil {

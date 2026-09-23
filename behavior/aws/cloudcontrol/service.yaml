@@ -1,0 +1,67 @@
+schema: bir/1
+service: aws.cloudcontrol
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A resource created here is a record of its desired state; no
+# resource handler runs and every request succeeds at once.
+provenance: authored
+
+# Reading a resource also answers resources other services own -- an S3
+# bucket, an API Gateway v2 API, an RDS instance or cluster -- so GetResource
+# and ListResources are Go.
+native: [GetResource, ListResources]
+
+resources:
+  resource:
+    collection: ccres
+    id: { input_members: [Identifier] }
+    record: {}
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateResource:
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8 }
+      - put:
+          resource: resource
+          key: fx.rid
+          record:
+            Identifier: fx.rid
+            TypeName: string(input.TypeName)
+            Properties: string(input.DesiredState)
+    output:
+      ProgressEvent: "{'Identifier': fx.rid, 'OperationStatus': 'SUCCESS', 'TypeName': string(input.TypeName)}"
+
+  UpdateResource:
+    reads: { r: { resource: resource } }
+    require:
+      - { cond: r_found, error: NotFound }
+    effects:
+      - patch:
+          resource: resource
+          record:
+            Properties: "'PatchDocument' in input ? string(input.PatchDocument) : string(r.Properties)"
+    output:
+      ProgressEvent: "{'Identifier': string(input.Identifier), 'OperationStatus': 'SUCCESS'}"
+
+  DeleteResource:
+    effects:
+      - delete: { resource: resource, missing: ignore }
+    output:
+      ProgressEvent: "{'OperationStatus': 'SUCCESS'}"
+
+  GetResourceRequestStatus:
+    output:
+      ProgressEvent: "{'OperationStatus': 'SUCCESS'}"
+
+quirks:
+  - operation: UpdateResource
+    note: >
+      The patch document replaces the stored properties instead of being
+      applied to them as a JSON Patch. Transcribed from the pack.
+    provenance: authored

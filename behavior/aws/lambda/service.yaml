@@ -1,0 +1,692 @@
+schema: bir/1
+service: aws.lambda
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Functions, versions, aliases, permissions, layers, event-source
+# mappings and the per-function configurations are records; function code is
+# stored as the caller sent it. Invoke runs a python3 or node handler in a
+# fresh process, which is Go, and so is the event-source worker that delivers
+# SQS messages to mapped functions.
+provenance: authored
+
+native: [Invoke, InvokeAsync, InvokeWithResponseStream]
+worker: delivers SQS messages to the functions their event-source mappings name
+
+resources:
+  # Invoke reads functions from this collection, keyed by name, in this
+  # layout: Runtime, Handler, Code, Environment, DeadLetterConfig.
+  function:
+    collection: lambda
+    id: { input_members: [FunctionName] }
+    record: {}
+  version:
+    collection: lambdaver
+    id: { derive: "string(input.FunctionName) + ':' + string(input.Qualifier)" }
+    record: {}
+  alias:
+    collection: lambdaalias
+    id: { derive: "string(input.FunctionName) + ':' + string(input.Name)" }
+    record: {}
+  permission:
+    collection: lambdaperm
+    id: { derive: "string(input.FunctionName) + ':' + string(input.StatementId)" }
+    record: {}
+  tags:
+    collection: lambdatags
+    id: { input_members: [Resource] }
+    record: {}
+  concurrency:
+    collection: lambdaconc
+    id: { input_members: [FunctionName] }
+    record: {}
+  # The worker reads mappings from this collection: EventSourceArn,
+  # FunctionName and State.
+  mapping:
+    collection: lambdaesm
+    id: { input_members: [UUID] }
+    record: {}
+  url:
+    collection: lambdaurl
+    id: { input_members: [FunctionName] }
+    record: {}
+  layer:
+    collection: lambdalayer
+    id: { derive: "string(input.LayerName) + ':' + string(input.VersionNumber)" }
+    record: {}
+  latestlayer:
+    collection: lambdalayerlatest
+    id: { input_members: [LayerName] }
+    record: {}
+  layerpolicy:
+    collection: lambdalayerpol
+    id: { derive: "string(input.LayerName) + ':' + string(input.VersionNumber) + ':' + string(input.StatementId)" }
+    record: {}
+  signing:
+    collection: lambdacsc
+    id: { derive: "lastSegment(string(input.CodeSigningConfigArn), ':')" }
+    record: {}
+  functionsigning:
+    collection: lambdafcsc
+    id: { input_members: [FunctionName] }
+    record: {}
+  invokeconfig:
+    collection: lambdaeic
+    id: { input_members: [FunctionName] }
+    record: {}
+  provisioned:
+    collection: lambdapc
+    id: { derive: "string(input.FunctionName) + ':' + string(input.Qualifier)" }
+    record: {}
+  scaling:
+    collection: lambdascale
+    id: { derive: "string(input.FunctionName) + ':' + string(input.Qualifier)" }
+    record: {}
+  recursion:
+    collection: lambdarec
+    id: { input_members: [FunctionName] }
+    record: {}
+  runtime:
+    collection: lambdart
+    id: { input_members: [FunctionName] }
+    record: {}
+  policy:
+    collection: lambdarpol
+    id: { input_members: [ResourceArn] }
+    record: {}
+  capacity:
+    collection: lambdacp
+    id: { input_members: [CapacityProviderName] }
+    record: {}
+
+errors:
+  NotFound: { code: ResourceNotFoundException, http: 404, fault: client }
+  Conflict: { code: ResourceConflictException, http: 409, fault: client }
+
+operations:
+  # --- functions -------------------------------------------------------------
+
+  CreateFunction:
+    reads: { f: { resource: function } }
+    require:
+      - { cond: "!f_found", error: Conflict }
+    effects:
+      - put: { resource: function, spread: input }
+    output: &config
+      FunctionName: rec.FunctionName
+      FunctionArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(rec.FunctionName)"
+      Runtime: "'Runtime' in rec ? rec.Runtime : null"
+      Role: "'Role' in rec ? rec.Role : null"
+      Handler: "'Handler' in rec ? rec.Handler : null"
+      Description: "'Description' in rec ? rec.Description : null"
+      Timeout: "'Timeout' in rec ? rec.Timeout : null"
+      MemorySize: "'MemorySize' in rec ? rec.MemorySize : null"
+      Environment: "'Environment' in rec ? rec.Environment : null"
+      DeadLetterConfig: "'DeadLetterConfig' in rec ? rec.DeadLetterConfig : null"
+      Version: "'$LATEST'"
+
+  GetFunctionConfiguration:
+    reads: { rec: { resource: function } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output: *config
+
+  GetFunction:
+    reads: { rec: { resource: function } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output:
+      Configuration: "merge(without(rec, ['Code', 'LatestPublished']), {'FunctionArn': 'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(rec.FunctionName), 'Version': '$LATEST'})"
+
+  ListFunctions:
+    list: { resource: function, member: Functions }
+    output:
+      Functions: "items.map(rec, merge(without(rec, ['Code', 'LatestPublished']), {'FunctionArn': 'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(rec.FunctionName), 'Version': '$LATEST'}))"
+
+  UpdateFunctionConfiguration:
+    reads: { f: { resource: function } }
+    require:
+      - { cond: f_found, error: NotFound }
+    effects:
+      - patch: { resource: function, spread: input }
+    output: *config
+
+  UpdateFunctionCode:
+    reads: { f: { resource: function } }
+    require:
+      - { cond: f_found, error: NotFound }
+    effects:
+      - patch:
+          resource: function
+          record:
+            Code: "'ZipFile' in input ? {'ZipFile': input.ZipFile} : f.Code"
+    output: *config
+
+  DeleteFunction:
+    reads: { f: { resource: function } }
+    require:
+      - { cond: f_found, error: NotFound }
+    effects:
+      - delete: { resource: function }
+    output: {}
+
+  # A published version is a snapshot of the function's configuration, and
+  # its number is one more than the last published.
+  PublishVersion:
+    reads: { f: { resource: function } }
+    require:
+      - { cond: f_found, error: NotFound }
+    let:
+      n: "'LatestPublished' in f ? int(f.LatestPublished) + 1 : 1"
+    effects:
+      - patch: { resource: function, record: { LatestPublished: n } }
+      - put:
+          resource: version
+          key: "string(input.FunctionName) + ':' + string(n)"
+          record:
+            FunctionName: input.FunctionName
+            FunctionArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(input.FunctionName) + ':' + string(n)"
+            Version: string(n)
+            Runtime: "'Runtime' in f ? f.Runtime : null"
+            Role: "'Role' in f ? f.Role : null"
+            Handler: "'Handler' in f ? f.Handler : null"
+            Description: "'Description' in f ? f.Description : null"
+            Timeout: "'Timeout' in f ? f.Timeout : null"
+            MemorySize: "'MemorySize' in f ? f.MemorySize : null"
+    output:
+      FunctionName: rec.FunctionName
+      FunctionArn: rec.FunctionArn
+      Version: rec.Version
+      Runtime: rec.Runtime
+      Role: rec.Role
+      Handler: rec.Handler
+      Description: rec.Description
+      Timeout: rec.Timeout
+      MemorySize: rec.MemorySize
+
+  ListVersionsByFunction:
+    list:
+      resource: version
+      member: Versions
+      filter: item.FunctionName == input.FunctionName
+
+  # --- aliases, permissions, tags and concurrency ----------------------------
+
+  CreateAlias:
+    reads:
+      f: { resource: function }
+      a: { resource: alias }
+    require:
+      - { cond: f_found, error: NotFound }
+      - { cond: "!a_found", error: Conflict }
+    effects:
+      - put:
+          resource: alias
+          record:
+            AliasArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(input.FunctionName) + ':' + string(input.Name)"
+            Name: input.Name
+            FunctionVersion: input.FunctionVersion
+            Description: "'Description' in input ? input.Description : ''"
+    output: &aliasOut
+      AliasArn: rec.AliasArn
+      Name: rec.Name
+      FunctionVersion: rec.FunctionVersion
+      Description: rec.Description
+  GetAlias:
+    reads: { rec: { resource: alias } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output: *aliasOut
+  UpdateAlias:
+    reads: { a: { resource: alias } }
+    require:
+      - { cond: a_found, error: NotFound }
+    effects:
+      - patch:
+          resource: alias
+          record:
+            FunctionVersion: "'FunctionVersion' in input ? input.FunctionVersion : a.FunctionVersion"
+            Description: "'Description' in input ? input.Description : a.Description"
+    output: *aliasOut
+  DeleteAlias: {delete: {resource: alias, missing: ignore}}
+  ListAliases:
+    let:
+      prefix: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(input.FunctionName) + ':'"
+    list:
+      resource: alias
+      member: Aliases
+      filter: item.AliasArn.startsWith(prefix)
+
+  AddPermission:
+    reads: { f: { resource: function } }
+    require:
+      - { cond: f_found, error: NotFound }
+    effects:
+      - put:
+          resource: permission
+          record: { FunctionName: input.FunctionName, Sid: input.StatementId, Effect: "'Allow'", Action: input.Action, Principal: input.Principal }
+    output:
+      Statement: "toJSON(without(rec, ['FunctionName']))"
+  RemovePermission: {delete: {resource: permission, missing: ignore}}
+  GetPolicy:
+    list:
+      resource: permission
+      member: Policy
+      filter: item.FunctionName == input.FunctionName
+    output:
+      Policy: "toJSON({'Version': '2012-10-17', 'Statement': items.map(s, without(s, ['FunctionName']))})"
+
+  TagResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - put: { resource: tags, record: { Tags: "merge(t_found ? t.Tags : {}, input.Tags)" } }
+    output: {}
+  UntagResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - put: { resource: tags, record: { Tags: "without(t_found ? t.Tags : {}, input.TagKeys)" } }
+    output: {}
+  ListTags:
+    reads: { t: { resource: tags } }
+    output:
+      Tags: "t_found ? t.Tags : {}"
+
+  PutFunctionConcurrency:
+    effects:
+      - put: { resource: concurrency, record: { ReservedConcurrentExecutions: input.ReservedConcurrentExecutions } }
+    output:
+      ReservedConcurrentExecutions: input.ReservedConcurrentExecutions
+  # A function with no reserved concurrency has none to answer.
+  GetFunctionConcurrency:
+    reads: { c: { resource: concurrency } }
+    output:
+      ReservedConcurrentExecutions: "c_found ? c.ReservedConcurrentExecutions : null"
+  DeleteFunctionConcurrency: {delete: {resource: concurrency, missing: ignore}}
+
+  # --- event-source mappings --------------------------------------------------
+
+  CreateEventSourceMapping:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: mapping
+          key: fx.id
+          spread: input
+          record:
+            UUID: fx.id
+            FunctionArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(input.FunctionName)"
+            State: "'Enabled' in input && !input.Enabled ? 'Disabled' : 'Enabled'"
+    output: &mappingOut
+      UUID: rec.UUID
+      FunctionArn: rec.FunctionArn
+      EventSourceArn: "'EventSourceArn' in rec ? rec.EventSourceArn : null"
+      BatchSize: "'BatchSize' in rec ? rec.BatchSize : null"
+      State: rec.State
+  GetEventSourceMapping:
+    reads: { rec: { resource: mapping } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output: *mappingOut
+  UpdateEventSourceMapping:
+    reads: { m: { resource: mapping } }
+    require:
+      - { cond: m_found, error: NotFound }
+    effects:
+      - patch:
+          resource: mapping
+          spread: input
+          record:
+            State: "'Enabled' in input ? (input.Enabled ? 'Enabled' : 'Disabled') : m.State"
+    output: *mappingOut
+  DeleteEventSourceMapping:
+    reads: { rec: { resource: mapping } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    effects:
+      - delete: { resource: mapping }
+    output: *mappingOut
+  ListEventSourceMappings:
+    list:
+      resource: mapping
+      member: EventSourceMappings
+      filter: >-
+        (!('FunctionName' in input) || item.FunctionName == input.FunctionName)
+        && (!('EventSourceArn' in input) || item.EventSourceArn == input.EventSourceArn)
+    output:
+      EventSourceMappings: >-
+        items.map(m, {'UUID': m.UUID, 'FunctionArn': m.FunctionArn, 'State': m.State,
+        'EventSourceArn': 'EventSourceArn' in m ? m.EventSourceArn : null,
+        'BatchSize': 'BatchSize' in m ? m.BatchSize : null})
+
+  # --- function URLs, layers and code signing ---------------------------------
+
+  CreateFunctionUrlConfig:
+    effects:
+      - put:
+          resource: url
+          spread: input
+          record:
+            FunctionUrl: "'http://127.0.0.1/lambda-url/' + string(input.FunctionName)"
+            FunctionArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(input.FunctionName)"
+            AuthType: "'AuthType' in input ? input.AuthType : 'NONE'"
+    output: &urlOut
+      FunctionUrl: rec.FunctionUrl
+      FunctionArn: rec.FunctionArn
+      AuthType: rec.AuthType
+      Cors: "'Cors' in rec ? rec.Cors : null"
+      InvokeMode: "'InvokeMode' in rec ? rec.InvokeMode : null"
+  UpdateFunctionUrlConfig:
+    reads: { u: { resource: url } }
+    require:
+      - { cond: u_found, error: NotFound }
+    effects:
+      - patch: { resource: url, spread: input }
+    output: *urlOut
+  GetFunctionUrlConfig:
+    reads: { rec: { resource: url } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output: *urlOut
+  ListFunctionUrlConfigs:
+    list:
+      resource: url
+      member: FunctionUrlConfigs
+      filter: item.FunctionName == input.FunctionName
+    output:
+      FunctionUrlConfigs: "items.map(u, {'FunctionUrl': u.FunctionUrl, 'FunctionArn': u.FunctionArn, 'AuthType': u.AuthType})"
+  DeleteFunctionUrlConfig: {delete: {resource: url, missing: ignore}}
+
+  PublishLayerVersion:
+    reads: { l: { resource: latestlayer } }
+    let:
+      n: "l_found ? int(l.Version) + 1 : 1"
+      layerArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':layer:' + string(input.LayerName)"
+    effects:
+      - put:
+          resource: layer
+          key: "string(input.LayerName) + ':' + string(n)"
+          record: &layerRecord
+            LayerName: input.LayerName
+            LayerArn: layerArn
+            LayerVersionArn: "layerArn + ':' + string(n)"
+            Version: n
+            Description: "'Description' in input ? input.Description : ''"
+      - put: { resource: latestlayer, record: *layerRecord }
+    output: &layerOut
+      LayerArn: rec.LayerArn
+      LayerVersionArn: rec.LayerVersionArn
+      Version: rec.Version
+      Description: rec.Description
+  GetLayerVersion:
+    reads: { rec: { resource: layer } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output: *layerOut
+  GetLayerVersionByArn:
+    reads: { rec: { resource: layer, key: "split(string(input.Arn), ':layer:')[1]" } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output: *layerOut
+  ListLayerVersions:
+    list:
+      resource: layer
+      member: LayerVersions
+      filter: item.LayerName == input.LayerName
+    output:
+      LayerVersions: "items.map(l, {'LayerVersionArn': l.LayerVersionArn, 'Version': l.Version, 'Description': l.Description})"
+  ListLayers:
+    list: { resource: latestlayer, member: Layers }
+    output:
+      Layers: >-
+        items.map(l, {'LayerName': l.LayerName, 'LayerArn': l.LayerArn,
+        'LatestMatchingVersion': {'LayerVersionArn': l.LayerVersionArn, 'Version': l.Version, 'Description': l.Description}})
+  DeleteLayerVersion: {delete: {resource: layer, missing: ignore}}
+
+  AddLayerVersionPermission:
+    effects:
+      - generate: { bind: revision, kind: hex, bytes: 4 }
+      - put:
+          resource: layerpolicy
+          record:
+            Layer: "string(input.LayerName) + ':' + string(input.VersionNumber)"
+            Sid: input.StatementId
+            Action: input.Action
+            Principal: input.Principal
+    output:
+      Statement: "toJSON(without(rec, ['Layer']))"
+      RevisionId: fx.revision
+  GetLayerVersionPolicy:
+    let:
+      layer: "string(input.LayerName) + ':' + string(input.VersionNumber)"
+    list:
+      resource: layerpolicy
+      member: Policy
+      filter: item.Layer == layer
+    output:
+      Policy: "toJSON({'Version': '2012-10-17', 'Statement': items.map(s, without(s, ['Layer']))})"
+  RemoveLayerVersionPermission: {delete: {resource: layerpolicy, missing: ignore}}
+
+  CreateCodeSigningConfig:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: signing
+          key: fx.id
+          spread: input
+          record:
+            CodeSigningConfigId: fx.id
+            CodeSigningConfigArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':code-signing-config:' + fx.id"
+    output:
+      CodeSigningConfig: rec
+  UpdateCodeSigningConfig:
+    reads: { s: { resource: signing } }
+    require:
+      - { cond: s_found, error: NotFound }
+    effects:
+      - patch: { resource: signing, spread: input }
+    output:
+      CodeSigningConfig: rec
+  GetCodeSigningConfig:
+    reads: { s: { resource: signing } }
+    require:
+      - { cond: s_found, error: NotFound }
+    output:
+      CodeSigningConfig: s
+  ListCodeSigningConfigs:
+    list: { resource: signing, member: CodeSigningConfigs }
+  DeleteCodeSigningConfig: {delete: {resource: signing, missing: ignore}}
+
+  PutFunctionCodeSigningConfig:
+    effects:
+      - put: { resource: functionsigning, record: { FunctionName: input.FunctionName, CodeSigningConfigArn: input.CodeSigningConfigArn } }
+    output:
+      FunctionName: input.FunctionName
+      CodeSigningConfigArn: input.CodeSigningConfigArn
+  GetFunctionCodeSigningConfig:
+    reads: { s: { resource: functionsigning } }
+    output:
+      FunctionName: input.FunctionName
+      CodeSigningConfigArn: "s_found ? s.CodeSigningConfigArn : ''"
+  DeleteFunctionCodeSigningConfig: {delete: {resource: functionsigning, missing: ignore}}
+  ListFunctionsByCodeSigningConfig:
+    list:
+      resource: functionsigning
+      member: FunctionArns
+      filter: item.CodeSigningConfigArn == input.CodeSigningConfigArn
+    output:
+      FunctionArns: "items.map(s, 'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(s.FunctionName))"
+
+  # --- per-function configuration -------------------------------------------
+
+  PutFunctionEventInvokeConfig:
+    effects:
+      - put:
+          resource: invokeconfig
+          record:
+            FunctionName: input.FunctionName
+            FunctionArn: &functionArnInput "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(input.FunctionName)"
+            MaximumRetryAttempts: "'MaximumRetryAttempts' in input ? input.MaximumRetryAttempts : null"
+            MaximumEventAgeInSeconds: "'MaximumEventAgeInSeconds' in input ? input.MaximumEventAgeInSeconds : null"
+            DestinationConfig: "'DestinationConfig' in input ? input.DestinationConfig : null"
+    output: &invokeConfigOut
+      FunctionArn: rec.FunctionArn
+      MaximumRetryAttempts: rec.MaximumRetryAttempts
+      MaximumEventAgeInSeconds: rec.MaximumEventAgeInSeconds
+      DestinationConfig: rec.DestinationConfig
+  UpdateFunctionEventInvokeConfig:
+    reads: { c: { resource: invokeconfig } }
+    require:
+      - { cond: c_found, error: NotFound }
+    effects:
+      - patch:
+          resource: invokeconfig
+          record:
+            MaximumRetryAttempts: "'MaximumRetryAttempts' in input ? input.MaximumRetryAttempts : c.MaximumRetryAttempts"
+            MaximumEventAgeInSeconds: "'MaximumEventAgeInSeconds' in input ? input.MaximumEventAgeInSeconds : c.MaximumEventAgeInSeconds"
+            DestinationConfig: "'DestinationConfig' in input ? input.DestinationConfig : c.DestinationConfig"
+    output: *invokeConfigOut
+  GetFunctionEventInvokeConfig:
+    reads: { rec: { resource: invokeconfig } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output: *invokeConfigOut
+  ListFunctionEventInvokeConfigs:
+    list:
+      resource: invokeconfig
+      member: FunctionEventInvokeConfigs
+      filter: item.FunctionName == input.FunctionName
+    output:
+      FunctionEventInvokeConfigs: "items.map(c, without(c, ['FunctionName']))"
+  DeleteFunctionEventInvokeConfig: {delete: {resource: invokeconfig, missing: ignore}}
+
+  PutProvisionedConcurrencyConfig:
+    effects:
+      - put:
+          resource: provisioned
+          record:
+            FunctionName: input.FunctionName
+            FunctionArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(input.FunctionName) + ':' + string(input.Qualifier)"
+            RequestedProvisionedConcurrentExecutions: input.ProvisionedConcurrentExecutions
+            AllocatedProvisionedConcurrentExecutions: input.ProvisionedConcurrentExecutions
+            AvailableProvisionedConcurrentExecutions: input.ProvisionedConcurrentExecutions
+            Status: "'READY'"
+    output: &provisionedOut
+      RequestedProvisionedConcurrentExecutions: rec.RequestedProvisionedConcurrentExecutions
+      AllocatedProvisionedConcurrentExecutions: rec.AllocatedProvisionedConcurrentExecutions
+      AvailableProvisionedConcurrentExecutions: rec.AvailableProvisionedConcurrentExecutions
+      Status: rec.Status
+  GetProvisionedConcurrencyConfig:
+    reads: { rec: { resource: provisioned } }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output: *provisionedOut
+  ListProvisionedConcurrencyConfigs:
+    list:
+      resource: provisioned
+      member: ProvisionedConcurrencyConfigs
+      filter: item.FunctionName == input.FunctionName
+    output:
+      ProvisionedConcurrencyConfigs: "items.map(c, without(c, ['FunctionName']))"
+  DeleteProvisionedConcurrencyConfig: {delete: {resource: provisioned, missing: ignore}}
+
+  # Scaling applies at once: what was requested is what is applied.
+  PutFunctionScalingConfig:
+    effects:
+      - put:
+          resource: scaling
+          record:
+            FunctionScalingConfig: "'FunctionScalingConfig' in input ? input.FunctionScalingConfig : null"
+    output:
+      FunctionState: "'Active'"
+  GetFunctionScalingConfig:
+    reads: { c: { resource: scaling } }
+    output:
+      FunctionArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':function:' + string(input.FunctionName) + ':' + string(input.Qualifier)"
+      RequestedFunctionScalingConfig: "c_found ? c.FunctionScalingConfig : null"
+      AppliedFunctionScalingConfig: "c_found ? c.FunctionScalingConfig : null"
+
+  PutFunctionRecursionConfig:
+    effects:
+      - put: { resource: recursion, record: { RecursiveLoop: input.RecursiveLoop } }
+    output:
+      RecursiveLoop: input.RecursiveLoop
+  GetFunctionRecursionConfig:
+    reads: { r: { resource: recursion } }
+    output:
+      RecursiveLoop: "r_found ? r.RecursiveLoop : 'Allow'"
+
+  PutRuntimeManagementConfig:
+    effects:
+      - put:
+          resource: runtime
+          record:
+            UpdateRuntimeOn: input.UpdateRuntimeOn
+            RuntimeVersionArn: "'RuntimeVersionArn' in input ? input.RuntimeVersionArn : null"
+    output:
+      UpdateRuntimeOn: rec.UpdateRuntimeOn
+      FunctionArn: *functionArnInput
+      RuntimeVersionArn: rec.RuntimeVersionArn
+  GetRuntimeManagementConfig:
+    reads: { r: { resource: runtime } }
+    output:
+      UpdateRuntimeOn: "r_found ? r.UpdateRuntimeOn : 'Auto'"
+      FunctionArn: *functionArnInput
+      RuntimeVersionArn: "r_found ? r.RuntimeVersionArn : null"
+
+  PutResourcePolicy:
+    effects:
+      - generate: { bind: revision, kind: hex, bytes: 4 }
+      - put: { resource: policy, record: { Policy: input.Policy, RevisionId: fx.revision } }
+    output:
+      Policy: input.Policy
+      RevisionId: fx.revision
+  GetResourcePolicy:
+    reads: { p: { resource: policy } }
+    output:
+      Policy: "p_found ? p.Policy : '{}'"
+      RevisionId: "p_found ? p.RevisionId : null"
+  DeleteResourcePolicy: {delete: {resource: policy, missing: ignore}}
+
+  GetAccountSettings:
+    select: { binding: functions, resource: function }
+    output:
+      AccountLimit: "{'ConcurrentExecutions': 1000, 'TotalCodeSize': 80530636800.0}"
+      AccountUsage: "{'FunctionCount': size(functions), 'TotalCodeSize': 0}"
+
+  CreateCapacityProvider:
+    effects:
+      - put:
+          resource: capacity
+          spread: input
+          record:
+            CapacityProviderArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':capacity-provider:' + string(input.CapacityProviderName)"
+            State: "'Active'"
+    output:
+      CapacityProvider: rec
+  UpdateCapacityProvider:
+    reads: { c: { resource: capacity } }
+    require:
+      - { cond: c_found, error: NotFound }
+    effects:
+      - patch: { resource: capacity, spread: input }
+    output:
+      CapacityProvider: rec
+  GetCapacityProvider:
+    reads: { c: { resource: capacity } }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      CapacityProvider: c
+  ListCapacityProviders:
+    list: { resource: capacity, member: CapacityProviders }
+  DeleteCapacityProvider:
+    reads: { c: { resource: capacity } }
+    require:
+      - { cond: c_found, error: NotFound }
+    effects:
+      - delete: { resource: capacity }
+    output:
+      CapacityProvider: "merge(c, {'State': 'Deleting'})"
+  ListFunctionVersionsByCapacityProvider:
+    output:
+      CapacityProviderArn: "'arn:aws:lambda:' + identity.region + ':' + identity.account + ':capacity-provider:' + string(input.CapacityProviderName)"
+      FunctionVersions: "[]"

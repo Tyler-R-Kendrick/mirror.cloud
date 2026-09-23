@@ -1,0 +1,1526 @@
+{
+  "schema": "trace/1",
+  "service": "aws.ecs",
+  "source": "pack:internal/services/aws/ecs@2026185",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "clusterName": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "clusterName": "c1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/default",
+          "clusterName": "default",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "clusters": [
+          "c1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": [
+          {
+            "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+            "clusterName": "c1",
+            "status": "ACTIVE"
+          }
+        ],
+        "failures": []
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": [
+          {
+            "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+            "clusterName": "c1",
+            "status": "ACTIVE"
+          },
+          {
+            "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/default",
+            "clusterName": "default",
+            "status": "ACTIVE"
+          }
+        ],
+        "failures": []
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusterArns": [
+          "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "arn:aws:ecs:us-east-1:000000000000:cluster/default"
+        ]
+      }
+    },
+    {
+      "operation": "UpdateClusterSettings",
+      "input": {
+        "cluster": "c1",
+        "settings": [
+          {
+            "name": "containerInsights",
+            "value": "enabled"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "clusterName": "c1",
+          "settings": [
+            {
+              "name": "containerInsights",
+              "value": "enabled"
+            }
+          ],
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "PutClusterCapacityProviders",
+      "input": {
+        "capacityProviders": [
+          "FARGATE"
+        ],
+        "cluster": "c1",
+        "defaultCapacityProviderStrategy": [
+          {
+            "capacityProvider": "FARGATE"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "capacityProviders": [
+            "FARGATE"
+          ],
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "clusterName": "c1",
+          "settings": [
+            {
+              "name": "containerInsights",
+              "value": "enabled"
+            }
+          ],
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "RegisterTaskDefinition",
+      "input": {
+        "containerDefinitions": [
+          {
+            "image": "nginx",
+            "name": "app"
+          }
+        ],
+        "family": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskDefinition": {
+          "containerDefinitions": [
+            {
+              "image": "nginx",
+              "name": "app"
+            }
+          ],
+          "family": "web",
+          "revision": 1,
+          "status": "ACTIVE",
+          "taskDefinitionArn": "arn:aws:ecs:us-east-1:000000000000:task-definition/web:1"
+        }
+      }
+    },
+    {
+      "operation": "RegisterTaskDefinition",
+      "input": {
+        "containerDefinitions": [
+          {
+            "image": "nginx:2",
+            "name": "app"
+          }
+        ],
+        "family": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskDefinition": {
+          "containerDefinitions": [
+            {
+              "image": "nginx:2",
+              "name": "app"
+            }
+          ],
+          "family": "web",
+          "revision": 2,
+          "status": "ACTIVE",
+          "taskDefinitionArn": "arn:aws:ecs:us-east-1:000000000000:task-definition/web:2"
+        }
+      }
+    },
+    {
+      "operation": "DescribeTaskDefinition",
+      "input": {
+        "taskDefinition": "web:1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskDefinition": {
+          "containerDefinitions": [
+            {
+              "image": "nginx",
+              "name": "app"
+            }
+          ],
+          "family": "web",
+          "revision": 1,
+          "status": "ACTIVE",
+          "taskDefinitionArn": "arn:aws:ecs:us-east-1:000000000000:task-definition/web:1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeTaskDefinition",
+      "input": {
+        "taskDefinition": "web"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskDefinition": {
+          "containerDefinitions": [
+            {
+              "image": "nginx:2",
+              "name": "app"
+            }
+          ],
+          "family": "web",
+          "revision": 2,
+          "status": "ACTIVE",
+          "taskDefinitionArn": "arn:aws:ecs:us-east-1:000000000000:task-definition/web:2"
+        }
+      }
+    },
+    {
+      "operation": "ListTaskDefinitions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskDefinitionArns": [
+          "arn:aws:ecs:us-east-1:000000000000:task-definition/web:1",
+          "arn:aws:ecs:us-east-1:000000000000:task-definition/web:2"
+        ]
+      }
+    },
+    {
+      "operation": "ListTaskDefinitionFamilies",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "families": [
+          "web"
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTaskDefinition",
+      "input": {
+        "taskDefinition": "nope:1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ClientException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateService",
+      "input": {
+        "cluster": "c1",
+        "desiredCount": 2,
+        "serviceName": "s1",
+        "taskDefinition": "web:2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "service": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "desiredCount": 2,
+          "loadBalancers": null,
+          "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+          "serviceName": "s1",
+          "status": "ACTIVE",
+          "taskDefinition": "web:2"
+        }
+      }
+    },
+    {
+      "operation": "DescribeServices",
+      "input": {
+        "cluster": "c1",
+        "services": [
+          "s1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "services": [
+          {
+            "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+            "desiredCount": 2,
+            "loadBalancers": null,
+            "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+            "serviceName": "s1",
+            "status": "ACTIVE",
+            "taskDefinition": "web:2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListServices",
+      "input": {
+        "cluster": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "serviceArns": [
+          "arn:aws:ecs:us-east-1:000000000000:service/c1/s1"
+        ]
+      }
+    },
+    {
+      "operation": "UpdateService",
+      "input": {
+        "cluster": "c1",
+        "desiredCount": 3,
+        "service": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "service": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "desiredCount": 3,
+          "loadBalancers": null,
+          "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+          "serviceName": "s1",
+          "status": "ACTIVE",
+          "taskDefinition": "web:2"
+        }
+      },
+      "recut": "UpdateService changes only the members the request names; the pack replaced the service with the request, dropping its taskDefinition."
+    },
+    {
+      "operation": "ListTasks",
+      "input": {
+        "cluster": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskArns": [
+          "arn:aws:ecs:us-east-1:000000000000:task/c1/5f59f223",
+          "arn:aws:ecs:us-east-1:000000000000:task/c1/7c589129"
+        ]
+      }
+    },
+    {
+      "operation": "RunTask",
+      "input": {
+        "cluster": "c1",
+        "taskDefinition": "web:1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "tasks": [
+          {
+            "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+            "desiredStatus": "RUNNING",
+            "lastStatus": "RUNNING",
+            "privateIPv4Address": "10.0.0.4",
+            "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0",
+            "taskDefinitionArn": "web:1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTasks",
+      "input": {
+        "cluster": "c1",
+        "tasks": [
+          {
+            "$fromPath": "tasks.0.taskArn",
+            "$fromStep": 19
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "tasks": [
+          {
+            "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+            "desiredStatus": "RUNNING",
+            "lastStatus": "RUNNING",
+            "privateIPv4Address": "10.0.0.4",
+            "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0",
+            "taskDefinitionArn": "web:1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StopTask",
+      "input": {
+        "cluster": "c1",
+        "task": {
+          "$fromPath": "tasks.0.taskArn",
+          "$fromStep": 19
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "task": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "desiredStatus": "STOPPED",
+          "lastStatus": "STOPPED",
+          "privateIPv4Address": "10.0.0.4",
+          "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0",
+          "taskDefinitionArn": "web:1"
+        }
+      }
+    },
+    {
+      "operation": "ListTasks",
+      "input": {
+        "cluster": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskArns": [
+          "arn:aws:ecs:us-east-1:000000000000:task/c1/5f59f223",
+          "arn:aws:ecs:us-east-1:000000000000:task/c1/7c589129",
+          "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0"
+        ]
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "resourceArn": {
+          "$fromPath": "cluster.clusterArn",
+          "$fromStep": 0
+        },
+        "tags": [
+          {
+            "key": "k",
+            "value": "v"
+          },
+          {
+            "key": "k2",
+            "value": "v2"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "resourceArn": {
+          "$fromPath": "cluster.clusterArn",
+          "$fromStep": 0
+        },
+        "tagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "resourceArn": {
+          "$fromPath": "cluster.clusterArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "tags": [
+          {
+            "key": "k2",
+            "value": "v2"
+          }
+        ]
+      },
+      "recut": "UntagResource removes only the named tagKeys; the pack removed every tag."
+    },
+    {
+      "operation": "PutAccountSetting",
+      "input": {
+        "name": "serviceLongArnFormat",
+        "value": "enabled"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "setting": {
+          "name": "serviceLongArnFormat",
+          "value": "enabled"
+        }
+      }
+    },
+    {
+      "operation": "ListAccountSettings",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "settings": [
+          {
+            "name": "serviceLongArnFormat",
+            "value": "enabled"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAccountSetting",
+      "input": {
+        "name": "serviceLongArnFormat"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "setting": {
+          "name": "serviceLongArnFormat",
+          "value": "enabled"
+        }
+      },
+      "recut": "The model's DeleteAccountSetting output declares setting, the one deleted; the pack answered nothing."
+    },
+    {
+      "operation": "CreateTaskSet",
+      "input": {
+        "cluster": "c1",
+        "service": "s1",
+        "taskDefinition": "web:2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskSet": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "id": "33f6fc5d",
+          "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+          "status": "ACTIVE",
+          "taskDefinition": "web:2",
+          "taskSetArn": "arn:aws:ecs:us-east-1:000000000000:task-set/c1/s1/33f6fc5d"
+        }
+      },
+      "recut": "A task set's serviceArn is the service's ARN, as the model's TaskSet declares; the pack stored the name the request gave."
+    },
+    {
+      "operation": "DescribeTaskSets",
+      "input": {
+        "cluster": "c1",
+        "service": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "taskSets": [
+          {
+            "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+            "id": "33f6fc5d",
+            "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+            "status": "ACTIVE",
+            "taskDefinition": "web:2",
+            "taskSetArn": "arn:aws:ecs:us-east-1:000000000000:task-set/c1/s1/33f6fc5d"
+          }
+        ]
+      },
+      "recut": "A task set's serviceArn is the service's ARN, as the model's TaskSet declares; the pack stored the name the request gave."
+    },
+    {
+      "operation": "UpdateTaskSet",
+      "input": {
+        "cluster": "c1",
+        "scale": {
+          "unit": "PERCENT",
+          "value": 50
+        },
+        "service": "s1",
+        "taskSet": {
+          "$fromPath": "taskSet.taskSetArn",
+          "$fromStep": 29
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskSet": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "id": "33f6fc5d",
+          "scale": {
+            "unit": "PERCENT",
+            "value": 50
+          },
+          "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+          "status": "ACTIVE",
+          "taskDefinition": "web:2",
+          "taskSetArn": "arn:aws:ecs:us-east-1:000000000000:task-set/c1/s1/33f6fc5d"
+        }
+      },
+      "recut": "A task set's serviceArn is the service's ARN, as the model's TaskSet declares; the pack stored the name the request gave."
+    },
+    {
+      "operation": "UpdateServicePrimaryTaskSet",
+      "input": {
+        "cluster": "c1",
+        "primaryTaskSet": {
+          "$fromPath": "taskSet.taskSetArn",
+          "$fromStep": 29
+        },
+        "service": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskSet": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "id": "33f6fc5d",
+          "scale": {
+            "unit": "PERCENT",
+            "value": 50
+          },
+          "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+          "status": "PRIMARY",
+          "taskDefinition": "web:2",
+          "taskSetArn": "arn:aws:ecs:us-east-1:000000000000:task-set/c1/s1/33f6fc5d"
+        }
+      },
+      "recut": "The model's UpdateServicePrimaryTaskSet output is the task set made PRIMARY; the pack answered the service record, with the task set ARN stored as its taskSets."
+    },
+    {
+      "operation": "DeleteTaskSet",
+      "input": {
+        "cluster": "c1",
+        "service": "s1",
+        "taskSet": {
+          "$fromPath": "taskSet.taskSetArn",
+          "$fromStep": 29
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskSet": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "id": "33f6fc5d",
+          "scale": {
+            "unit": "PERCENT",
+            "value": 50
+          },
+          "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+          "status": "DRAINING",
+          "taskDefinition": "web:2",
+          "taskSetArn": "arn:aws:ecs:us-east-1:000000000000:task-set/c1/s1/33f6fc5d"
+        }
+      },
+      "recut": "The model's DeleteTaskSet output is the task set being deleted; the pack answered only its id."
+    },
+    {
+      "operation": "PutAttributes",
+      "input": {
+        "attributes": [
+          {
+            "name": "stack",
+            "value": "prod"
+          }
+        ],
+        "cluster": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "attributes": [
+          {
+            "name": "stack",
+            "value": "prod"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListAttributes",
+      "input": {
+        "cluster": "c1",
+        "targetType": "container-instance"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "attributes": [
+          {
+            "name": "stack",
+            "value": "prod"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAttributes",
+      "input": {
+        "attributes": [
+          {
+            "name": "stack"
+          }
+        ],
+        "cluster": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "attributes": [
+          {
+            "name": "stack"
+          }
+        ]
+      },
+      "recut": "The model's DeleteAttributes output declares the attributes deleted; the pack answered none, and deleted every attribute rather than the named ones."
+    },
+    {
+      "operation": "RegisterContainerInstance",
+      "input": {
+        "cluster": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "containerInstance": {
+          "containerInstanceArn": "arn:aws:ecs:us-east-1:000000000000:container-instance/c1/83d4958a",
+          "ec2InstanceId": "i-83d4958a",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeContainerInstances",
+      "input": {
+        "cluster": "c1",
+        "containerInstances": [
+          {
+            "$fromPath": "containerInstance.containerInstanceArn",
+            "$fromStep": 37
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "containerInstances": [
+          {
+            "containerInstanceArn": "arn:aws:ecs:us-east-1:000000000000:container-instance/c1/83d4958a",
+            "ec2InstanceId": "i-83d4958a",
+            "status": "ACTIVE"
+          }
+        ],
+        "failures": []
+      }
+    },
+    {
+      "operation": "ListContainerInstances",
+      "input": {
+        "cluster": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "containerInstanceArns": [
+          "arn:aws:ecs:us-east-1:000000000000:container-instance/c1/83d4958a"
+        ]
+      }
+    },
+    {
+      "operation": "UpdateContainerInstancesState",
+      "input": {
+        "cluster": "c1",
+        "containerInstances": [
+          {
+            "$fromPath": "containerInstance.containerInstanceArn",
+            "$fromStep": 37
+          }
+        ],
+        "status": {
+          "$fromPath": "taskSet.status",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "containerInstances": [
+          {
+            "containerInstanceArn": "arn:aws:ecs:us-east-1:000000000000:container-instance/c1/83d4958a",
+            "ec2InstanceId": "i-83d4958a",
+            "status": "DRAINING"
+          }
+        ],
+        "failures": []
+      }
+    },
+    {
+      "operation": "UpdateContainerAgent",
+      "input": {
+        "cluster": "c1",
+        "containerInstance": {
+          "$fromPath": "containerInstance.containerInstanceArn",
+          "$fromStep": 37
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "containerInstance": {
+          "agentUpdateStatus": "UPDATED",
+          "containerInstanceArn": "arn:aws:ecs:us-east-1:000000000000:container-instance/c1/83d4958a",
+          "ec2InstanceId": "i-83d4958a",
+          "status": "DRAINING"
+        }
+      },
+      "recut": "The model's UpdateContainerAgent output is one containerInstance, and an agent update does not change the instance's status; the pack answered a list and reset DRAINING to ACTIVE."
+    },
+    {
+      "operation": "DeregisterContainerInstance",
+      "input": {
+        "cluster": "c1",
+        "containerInstance": {
+          "$fromPath": "containerInstance.containerInstanceArn",
+          "$fromStep": 37
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "containerInstance": {
+          "agentUpdateStatus": "UPDATED",
+          "containerInstanceArn": "arn:aws:ecs:us-east-1:000000000000:container-instance/c1/83d4958a",
+          "ec2InstanceId": "i-83d4958a",
+          "status": "INACTIVE"
+        }
+      },
+      "recut": "The model's DeregisterContainerInstance output is the container instance deregistered; the pack answered the id as its ARN."
+    },
+    {
+      "operation": "CreateCapacityProvider",
+      "input": {
+        "autoScalingGroupProvider": {
+          "autoScalingGroupArn": "arn:aws:autoscaling:us-east-1:000000000000:autoScalingGroup:g"
+        },
+        "name": "cp1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capacityProvider": {
+          "autoScalingGroupProvider": {
+            "autoScalingGroupArn": "arn:aws:autoscaling:us-east-1:000000000000:autoScalingGroup:g"
+          },
+          "capacityProviderArn": "arn:aws:ecs:us-east-1:000000000000:capacity-provider/cp1",
+          "name": "cp1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "UpdateCapacityProvider",
+      "input": {
+        "autoScalingGroupProvider": {
+          "managedTerminationProtection": "DISABLED"
+        },
+        "name": "cp1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capacityProvider": {
+          "autoScalingGroupProvider": {
+            "managedTerminationProtection": "DISABLED"
+          },
+          "capacityProviderArn": "arn:aws:ecs:us-east-1:000000000000:capacity-provider/cp1",
+          "name": "cp1",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeCapacityProviders",
+      "input": {
+        "capacityProviders": [
+          "cp1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capacityProviders": [
+          {
+            "autoScalingGroupProvider": {
+              "managedTerminationProtection": "DISABLED"
+            },
+            "capacityProviderArn": "arn:aws:ecs:us-east-1:000000000000:capacity-provider/cp1",
+            "name": "cp1",
+            "status": "ACTIVE"
+          }
+        ],
+        "failures": []
+      }
+    },
+    {
+      "operation": "DeleteCapacityProvider",
+      "input": {
+        "capacityProvider": "cp1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "capacityProvider": {
+          "autoScalingGroupProvider": {
+            "managedTerminationProtection": "DISABLED"
+          },
+          "capacityProviderArn": "arn:aws:ecs:us-east-1:000000000000:capacity-provider/cp1",
+          "name": "cp1",
+          "status": "INACTIVE"
+        }
+      },
+      "recut": "The model's DeleteCapacityProvider output is the capacity provider deleted; the pack answered only its name."
+    },
+    {
+      "operation": "DiscoverPollEndpoint",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "endpoint": "http://127.0.0.1/ecs-agent",
+        "telemetryEndpoint": "http://127.0.0.1/ecs-telemetry"
+      }
+    },
+    {
+      "operation": "ExecuteCommand",
+      "input": {
+        "cluster": "c1",
+        "command": "ls",
+        "interactive": true,
+        "task": {
+          "$fromPath": "tasks.0.taskArn",
+          "$fromStep": 19
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+        "interactive": true,
+        "session": {
+          "sessionId": "100aa4e6",
+          "streamUrl": "http://127.0.0.1/ecs-exec/100aa4e6"
+        },
+        "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0"
+      },
+      "recut": "The model's ExecuteCommand output declares clusterArn, taskArn and interactive alongside the session; the pack answered only the session."
+    },
+    {
+      "operation": "GetTaskProtection",
+      "input": {
+        "cluster": "c1",
+        "tasks": [
+          {
+            "$fromPath": "tasks.0.taskArn",
+            "$fromStep": 19
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "protectedTasks": [
+          {
+            "protectionEnabled": false,
+            "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0"
+          }
+        ]
+      },
+      "recut": "The model's protectedTasks are ProtectedTask shapes: taskArn and protectionEnabled. The pack answered whole task records."
+    },
+    {
+      "operation": "UpdateTaskProtection",
+      "input": {
+        "cluster": "c1",
+        "protectionEnabled": true,
+        "tasks": [
+          {
+            "$fromPath": "tasks.0.taskArn",
+            "$fromStep": 19
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "protectedTasks": [
+          {
+            "protectionEnabled": true,
+            "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0"
+          }
+        ]
+      },
+      "recut": "The model's protectedTasks are ProtectedTask shapes: taskArn and protectionEnabled. The pack answered whole task records."
+    },
+    {
+      "operation": "GetTaskProtection",
+      "input": {
+        "cluster": "c1",
+        "tasks": [
+          {
+            "$fromPath": "tasks.0.taskArn",
+            "$fromStep": 19
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "protectedTasks": [
+          {
+            "protectionEnabled": true,
+            "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0"
+          }
+        ]
+      },
+      "recut": "The model's protectedTasks are ProtectedTask shapes: taskArn and protectionEnabled. The pack answered whole task records."
+    },
+    {
+      "operation": "DeleteTaskDefinitions",
+      "input": {
+        "taskDefinitions": [
+          "web:1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "taskDefinitions": [
+          {
+            "containerDefinitions": [
+              {
+                "image": "nginx",
+                "name": "app"
+              }
+            ],
+            "family": "web",
+            "revision": 1,
+            "status": "DELETE_IN_PROGRESS",
+            "taskDefinitionArn": "arn:aws:ecs:us-east-1:000000000000:task-definition/web:1"
+          }
+        ]
+      },
+      "recut": "The model's DeleteTaskDefinitions output declares the task definitions deleted; the pack answered none."
+    },
+    {
+      "operation": "DeregisterTaskDefinition",
+      "input": {
+        "taskDefinition": "web:2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "taskDefinition": {
+          "containerDefinitions": [
+            {
+              "image": "nginx:2",
+              "name": "app"
+            }
+          ],
+          "family": "web",
+          "revision": 2,
+          "status": "INACTIVE",
+          "taskDefinitionArn": "arn:aws:ecs:us-east-1:000000000000:task-definition/web:2"
+        }
+      },
+      "recut": "A deregistered task definition stays describable as INACTIVE, and the model's output is the whole task definition; the pack deleted it and answered the name as its ARN."
+    },
+    {
+      "operation": "SubmitTaskStateChange",
+      "input": {
+        "cluster": "c1",
+        "status": "RUNNING",
+        "task": {
+          "$fromPath": "tasks.0.taskArn",
+          "$fromStep": 19
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "acknowledgment": "OK"
+      }
+    },
+    {
+      "operation": "DescribeTasks",
+      "input": {
+        "cluster": "c1",
+        "tasks": [
+          {
+            "$fromPath": "tasks.0.taskArn",
+            "$fromStep": 19
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "failures": [],
+        "tasks": [
+          {
+            "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+            "desiredStatus": "STOPPED",
+            "lastStatus": "RUNNING",
+            "privateIPv4Address": "10.0.0.4",
+            "protectionEnabled": true,
+            "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c1/9c8e2cb0",
+            "taskDefinitionArn": "web:1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteService",
+      "input": {
+        "cluster": "c1",
+        "service": "s1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "service": {
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "desiredCount": 3,
+          "loadBalancers": null,
+          "serviceArn": "arn:aws:ecs:us-east-1:000000000000:service/c1/s1",
+          "serviceName": "s1",
+          "status": "DRAINING",
+          "taskDefinition": "web:2"
+        }
+      },
+      "recut": "The model's DeleteService output is the service, which drains before it is inactive; the pack answered only its name as INACTIVE."
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "cluster": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "cluster": {
+          "capacityProviders": [
+            "FARGATE"
+          ],
+          "clusterArn": "arn:aws:ecs:us-east-1:000000000000:cluster/c1",
+          "clusterName": "c1",
+          "settings": [
+            {
+              "name": "containerInsights",
+              "value": "enabled"
+            }
+          ],
+          "status": "INACTIVE"
+        }
+      },
+      "recut": "The model's DeleteCluster output is the cluster deleted; the pack answered only its name."
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "clusters": [
+          "c1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": [],
+        "failures": [
+          {
+            "arn": "c1",
+            "reason": "MISSING"
+          }
+        ]
+      },
+      "recut": "DescribeClusters reports a named cluster that does not exist in failures with reason MISSING; the pack answered no failure."
+    }
+  ]
+}

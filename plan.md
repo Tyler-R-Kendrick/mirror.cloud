@@ -54,7 +54,8 @@ program. Everything still counting is wave-3-blocked or owner-active:
   scheduler, kinesis, kms, cloudformation, redshift, iam, apigateway):
   each bundle's `shadow:` names its takeover condition; all funnel into
   the wave-3 unlocks below.
-- cloudcontrol: raw store reads. (organizations is a bundle; it used `global: true`.)
+- cloudcontrol: a bundle; GetResource/ListResources stay native over other
+  owners' stores until each owner is asked through its own Describe op.
 - sns/states/firehose: hard tail. s3/dynamodb: owner-active (their PRs).
 - eventhttp/scheduleexpr: helpers counted but not packs — they die with
   the packs they serve, never by moving (C55).
@@ -89,9 +90,8 @@ delete the two known-red.json entries, both ratchet tests go green.
    - athena `StartQueryExecution` (#393 shadowed): reads glue GetTable + s3
      object bodies, evaluates the query (the "fat moved-verbatim primitive"
      of BEHAVIOR_IR wave 3).
-   Also blocked on engine gaps, from wave A stop reports: cloudcontrol needs
-   raw/non-object store reads + multi-source conditional list; organizations
-   needs cross-scope store writes (`_mirror/global` orgmembers read by IAM's
+   Also blocked on engine gaps, from wave A stop reports: organizations
+   needed cross-scope store writes (`_mirror/global` orgmembers read by IAM's
    SCP authorizer) — a per-resource scope override also unblocks sts/s3.
 2. **sqs unshadow** — its bundle is complete+gated (behavior/aws/sqs, 715
    lines); blocked on resource-declared addressing members satisfying

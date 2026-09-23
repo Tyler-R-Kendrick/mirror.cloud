@@ -15,20 +15,25 @@ import (
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states" // natives the Step Functions bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.events", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range []string{
+		"PutRule", "EnableRule", "DisableRule", "PutTargets", "PutEvents", "PutPartnerEvents", "TestEventPattern",
+		"CreateConnection", "UpdateConnection", "DescribeConnection", "ListConnections", "DeleteConnection",
+		"DeauthorizeConnection", "CreateApiDestination", "UpdateApiDestination",
+	} {
+		bundled.RegisterNative("aws.events", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return (&Pack{deps: deps}).Invoke(ctx, req)
+		})
+	}
+	bundled.RegisterWorker("aws.events", func(d spi.Deps) func() error { return Start(d).Close })
 }
 
 const (
@@ -38,21 +43,28 @@ const (
 	eventRuleNext      = "_mirrorNextInvocation"
 )
 
-// Pack implements EventBridge.
+// Pack delivers the events behavior/aws/events routes: its natives match
+// rules and deliver to targets, and as a worker it retries failed deliveries
+// and fires scheduled rules.
 type Pack struct {
 	deps      spi.Deps
 	wake      chan struct{}
 	stop      chan struct{}
 	done      chan struct{}
-	cancelS3  func()
+	cancels   []func()
 	closeOnce sync.Once
 }
 
-// New constructs the pack and resumes persisted target retries.
-func New(d spi.Deps) *Pack {
+// wakeTopic is published by a native that changed what the worker waits on.
+const wakeTopic = "events:wake"
+
+// Start runs the retry and schedule worker against d and resumes persisted
+// target retries.
+func Start(d spi.Deps) *Pack {
 	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
 	if d.Bus != nil {
-		p.cancelS3 = d.Bus.Subscribe("events:s3", p.consumeS3)
+		p.cancels = append(p.cancels, d.Bus.Subscribe("events:s3", p.consumeS3),
+			d.Bus.Subscribe(wakeTopic, func(context.Context, []byte) { p.notify() }))
 	}
 	if d.Store == nil || d.Clock == nil {
 		close(p.done)
@@ -65,14 +77,31 @@ func New(d spi.Deps) *Pack {
 // Close stops the target retry worker.
 func (p *Pack) Close() error {
 	p.closeOnce.Do(func() {
-		if p.cancelS3 != nil {
-			p.cancelS3()
+		for _, cancel := range p.cancels {
+			cancel()
 		}
-		close(p.stop)
+		if p.stop != nil {
+			close(p.stop)
+		}
 	})
-	<-p.done
+	if p.done != nil {
+		<-p.done
+	}
 	return nil
 }
+
+// Served is the service as the registry builds it: the bundle, with the
+// worker running until Close.
+type Served struct {
+	spi.BehaviorPack
+	worker *Pack
+}
+
+// Close stops the worker.
+func (s Served) Close() error { return s.worker.Close() }
+
+// New builds the served service for tests that need delivery running.
+func New(d spi.Deps) Served { return Served{bundled.Handler("aws.events", d), Start(d)} }
 
 func (p *Pack) consumeS3(ctx context.Context, payload []byte) {
 	var event struct {
@@ -83,12 +112,6 @@ func (p *Pack) consumeS3(ctx context.Context, payload []byte) {
 		return
 	}
 	_, _ = p.Invoke(ctx, &spi.Request{Identity: event.Identity, Operation: "PutEvents", Input: map[string]any{"Entries": []any{event.Entry}}})
-}
-
-func (p *Pack) ServiceID() string { return "aws.events" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return append([]string{"PutEvents", "PutRule", "PutTargets", "ListRules", "ListTargetsByRule", "DeleteRule", "RemoveTargets"}, extraOps()...)
 }
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
@@ -143,21 +166,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		arn := "arn:aws:events:" + req.Identity.Region + ":" + req.Identity.Account + ":rule/" + path
 		return &spi.Response{Output: map[string]any{"RuleArn": arn}}, nil
-	case "ListRules":
-		kvs, _, _ := p.col(req, "rules").List(ctx, "", "", 0)
-		var rs []any
-		for _, kv := range kvs {
-			var m map[string]any
-			_ = json.Unmarshal(kv.Value, &m)
-			if eventBus(m) == eventBus(req.Input) {
-				delete(m, eventRuleNext)
-				rs = append(rs, m)
-			}
-		}
-		return &spi.Response{Output: map[string]any{"Rules": rs}}, nil
-	case "DeleteRule":
-		_ = p.col(req, "rules").Delete(ctx, eventKey(eventBus(req.Input), str(req.Input["Name"])))
-		return &spi.Response{Output: map[string]any{}}, nil
 	case "PutTargets":
 		requested := asSlice(req.Input["Targets"])
 		if len(requested) < 1 || len(requested) > 10 {
@@ -191,27 +199,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(targets) > 5 {
 			return nil, &spi.Fault{Code: "LimitExceededException", Message: "A rule cannot have more than five targets.", HTTPStatus: 400, Fault: "client"}
 		}
-		b, _ := json.Marshal(targets)
+		b, _ := json.Marshal(map[string]any{"Bus": eventBus(req.Input), "Rule": str(req.Input["Rule"]), "Targets": targets})
 		_ = p.col(req, "targets").Put(ctx, key, b)
 		return &spi.Response{Output: map[string]any{"FailedEntryCount": len(failed), "FailedEntries": failed}}, nil
-	case "ListTargetsByRule":
-		return &spi.Response{Output: map[string]any{"Targets": p.targets(ctx, req, eventKey(eventBus(req.Input), str(req.Input["Rule"])))}}, nil
-	case "RemoveTargets":
-		key := eventKey(eventBus(req.Input), str(req.Input["Rule"]))
-		remove := map[string]bool{}
-		for _, id := range asSlice(req.Input["Ids"]) {
-			remove[str(id)] = true
-		}
-		var keep []any
-		for _, target := range p.targets(ctx, req, key) {
-			m, _ := target.(map[string]any)
-			if !remove[str(m["Id"])] {
-				keep = append(keep, target)
-			}
-		}
-		b, _ := json.Marshal(keep)
-		_ = p.col(req, "targets").Put(ctx, key, b)
-		return &spi.Response{Output: map[string]any{"FailedEntryCount": 0, "FailedEntries": []any{}}}, nil
 	case "PutEvents":
 		entries, _ := req.Input["Entries"].([]any)
 		if err := validatePutEvents(entries); err != nil {
@@ -298,9 +288,12 @@ func (p *Pack) targetsFor(ctx context.Context, identity spi.Identity, key string
 	if !ok {
 		return []any{}
 	}
-	var targets []any
-	_ = json.Unmarshal(b, &targets)
-	return targets
+	var rec struct{ Targets []any }
+	_ = json.Unmarshal(b, &rec)
+	if rec.Targets == nil {
+		return []any{}
+	}
+	return rec.Targets
 }
 
 func eventBus(in map[string]any) string {
@@ -642,6 +635,13 @@ func (p *Pack) deadLetter(ctx context.Context, identity spi.Identity, rec, targe
 }
 
 func (p *Pack) notify() {
+	if p.wake == nil {
+		// A native: wake the worker, which owns the channel.
+		if p.deps.Bus != nil {
+			_ = p.deps.Bus.Publish(context.Background(), wakeTopic, nil)
+		}
+		return
+	}
 	select {
 	case p.wake <- struct{}{}:
 	default:
@@ -886,7 +886,7 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 		}
 		in["FunctionName"] = name
 		in["InvocationType"] = "Event"
-		_, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: in, Body: io.NopCloser(bytes.NewReader(payload))})
+		_, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: in, Body: io.NopCloser(bytes.NewReader(payload))})
 		return err
 	case strings.Contains(arn, ":states:"):
 		parameters, _ := target["StateMachineParameters"].(map[string]any)
@@ -897,7 +897,7 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 		} else if invocation != "" && invocation != "FIRE_AND_FORGET" {
 			return &spi.Fault{Code: "ValidationException", Message: "Invalid Step Functions invocation type.", HTTPStatus: 400, Fault: "client"}
 		}
-		response, err := states.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: operation, Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
+		response, err := bundled.Handler("aws.states", deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: operation, Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
 		if err != nil {
 			return err
 		}

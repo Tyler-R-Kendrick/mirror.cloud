@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"maps"
 	"math"
@@ -38,7 +39,7 @@ import (
 	internalrand "github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -48,23 +49,44 @@ import (
 var jsonataMu sync.Mutex
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.states", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return New(d), nil
-	}})
+	for _, op := range []string{
+		"CreateStateMachine", "UpdateStateMachine", "DeleteStateMachine", "DescribeStateMachine", "ListStateMachines",
+		"PublishStateMachineVersion", "ListStateMachineVersions", "DeleteStateMachineVersion",
+		"CreateStateMachineAlias", "ListStateMachineAliases", "UpdateStateMachineAlias",
+		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
+		"DescribeStateMachineForExecution", "RedriveExecution", "ListMapRuns", "UpdateMapRun",
+		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
+		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
+		"TestState", "ValidateStateMachineDefinition",
+		"TagResource", "UntagResource", "ListTagsForResource",
+	} {
+		bundled.RegisterNative("aws.states", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return (&Pack{deps: deps}).Invoke(ctx, req)
+		})
+	}
+	bundled.RegisterWorker("aws.states", func(d spi.Deps) func() error { return Start(d).Close })
 }
 
-// Pack implements Step Functions-lite.
+// Pack is both the receiver the natives run on, built per call, and the
+// worker, which alone owns the wake channel.
 type Pack struct {
 	deps      spi.Deps
 	wake      chan struct{}
 	stop      chan struct{}
 	done      chan struct{}
 	closeOnce sync.Once
+	cancel    func()
 }
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack {
+// wakeTopic is published by a native that parked an execution.
+const wakeTopic = "states:wake"
+
+// Start runs the worker that resumes parked executions.
+func Start(d spi.Deps) *Pack {
 	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
+	if d.Bus != nil {
+		p.cancel = d.Bus.Subscribe(wakeTopic, func(context.Context, []byte) { p.signalWaits() })
+	}
 	if d.Store == nil || d.Clock == nil {
 		close(p.done)
 		return p
@@ -72,6 +94,20 @@ func New(d spi.Deps) *Pack {
 	go p.waitLoop()
 	return p
 }
+
+// Served is the service with its worker running.
+type Served struct {
+	spi.BehaviorPack
+	*Pack
+}
+
+// Invoke answers through the bundle.
+func (s Served) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	return s.BehaviorPack.Invoke(ctx, req)
+}
+
+// New builds the served service for tests that need parked executions resumed.
+func New(d spi.Deps) Served { return Served{bundled.Handler("aws.states", d), Start(d)} }
 
 func (p *Pack) derived(key string) *Pack {
 	child := &Pack{deps: p.deps, wake: p.wake, stop: p.stop, done: p.done}
@@ -81,26 +117,14 @@ func (p *Pack) derived(key string) *Pack {
 
 // Close stops the durable Wait worker.
 func (p *Pack) Close() error {
-	p.closeOnce.Do(func() { close(p.stop) })
+	p.closeOnce.Do(func() {
+		if p.cancel != nil {
+			p.cancel()
+		}
+		close(p.stop)
+	})
 	<-p.done
 	return nil
-}
-
-func (p *Pack) ServiceID() string { return "aws.states" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return []string{
-		"CreateStateMachine", "UpdateStateMachine", "DeleteStateMachine", "DescribeStateMachine", "ListStateMachines",
-		"PublishStateMachineVersion", "ListStateMachineVersions", "DeleteStateMachineVersion",
-		"CreateStateMachineAlias", "DescribeStateMachineAlias", "ListStateMachineAliases", "UpdateStateMachineAlias", "DeleteStateMachineAlias",
-		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
-		"DescribeStateMachineForExecution", "RedriveExecution",
-		"DescribeMapRun", "ListMapRuns", "UpdateMapRun",
-		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
-		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
-		"TestState", "ValidateStateMachineDefinition",
-		"TagResource", "UntagResource", "ListTagsForResource",
-	}
 }
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
@@ -108,6 +132,13 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p *Pack) signalWaits() {
+	if p.wake == nil {
+		// A native: wake the worker, which owns the channel.
+		if p.deps.Bus != nil {
+			_ = p.deps.Bus.Publish(context.Background(), wakeTopic, nil)
+		}
+		return
+	}
 	select {
 	case p.wake <- struct{}{}:
 	default:
@@ -584,15 +615,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		encoded, _ := json.Marshal(record)
 		_ = p.col(req, "alias").Put(ctx, aliasARN, encoded)
 		return &spi.Response{Output: map[string]any{"stateMachineAliasArn": aliasARN, "creationDate": float64(now)}}, nil
-	case "DescribeStateMachineAlias":
-		arn := first(req.Input, "stateMachineAliasArn", "StateMachineAliasArn")
-		b, ok, _ := p.col(req, "alias").Get(ctx, arn)
-		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
-		}
-		var record map[string]any
-		_ = json.Unmarshal(b, &record)
-		return &spi.Response{Output: record}, nil
 	case "ListStateMachineAliases":
 		requestedARN := first(req.Input, "stateMachineArn", "StateMachineArn")
 		baseARN := stateMachineBaseARN(requestedARN)
@@ -640,13 +662,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		encoded, _ := json.Marshal(record)
 		_ = p.col(req, "alias").Put(ctx, arn, encoded)
 		return &spi.Response{Output: map[string]any{"updateDate": float64(now)}}, nil
-	case "DeleteStateMachineAlias":
-		arn := first(req.Input, "stateMachineAliasArn", "StateMachineAliasArn")
-		if _, found := getRecord(ctx, p.col(req, "alias"), arn); !found {
-			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
-		}
-		_ = p.col(req, "alias").Delete(ctx, arn)
-		return &spi.Response{Output: map[string]any{}}, nil
 	case "StartExecution", "StartSyncExecution":
 		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
 		if len(arn) < 1 || len(arn) > 256 || strings.Contains(arn, "/") {
@@ -851,13 +866,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return toFloat(items[i].(map[string]any)["startDate"]) > toFloat(items[j].(map[string]any)["startDate"])
 		})
 		return pagedResponse(req.Input, items, "executions")
-	case "DescribeMapRun":
-		arn := first(req.Input, "mapRunArn", "MapRunArn")
-		record, ok := getRecord(ctx, p.col(req, "maprun"), arn)
-		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
-		}
-		return &spi.Response{Output: record}, nil
 	case "ListMapRuns":
 		executionARN := first(req.Input, "executionArn", "ExecutionArn")
 		if _, ok := getRecord(ctx, p.col(req, "ex"), executionARN); !ok {
@@ -5121,7 +5129,7 @@ func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource stri
 	default:
 		in["input"] = m
 	}
-	lp := lambda.New(p.deps)
+	lp := bundled.Handler("aws.lambda", p.deps)
 	resp, err := lp.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
 	if err != nil {
 		return nil, err

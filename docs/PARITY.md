@@ -1328,7 +1328,7 @@ The seven-form evidence below covers the original eight Blob CRUD YAML ops. It i
 
 ## GCS baseline
 
-Authority: official GCS JSON API v1 (`storage.googleapis.com` `/storage/v1/...` and `/upload/storage/v1/...`). There is no LocalStack GCS inventory; rows are operation → Mirror evidence, not a live `storage.googleapis.com` differential. Leftover Discovery extraOps remain named control-plane records and are not in this denominator.
+Authority: official GCS JSON API v1 (`storage.googleapis.com` `/storage/v1/...` and `/upload/storage/v1/...`). There is no LocalStack GCS inventory; rows are operation → Mirror evidence, not a live `storage.googleapis.com` differential. Discovery operations beyond the emulated slice are mock tier and are not in this denominator.
 
 | Measure | Current evidence |
 |---|---:|

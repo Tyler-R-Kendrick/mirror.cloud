@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -50,7 +50,7 @@ func Execute(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Respons
 	for k, v := range event {
 		in[k] = v
 	}
-	resp, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
+	resp, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
 	if err != nil {
 		return nil, err
 	}

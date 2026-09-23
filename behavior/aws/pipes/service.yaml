@@ -1,0 +1,185 @@
+schema: bir/1
+service: aws.pipes
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A pipe is a record; delivery is a Go worker, in
+# internal/services/aws/pipes: a loop that polls each RUNNING pipe's SQS,
+# Kinesis or DynamoDB stream source, filters, enriches and delivers to the
+# target, and keeps its own checkpoints and retry counts. The worker wakes on
+# this bundle's writes to the pipe collection.
+provenance: authored
+
+# Deleting a pipe also clears the worker's checkpoint and retry counts for
+# it, which live in collections the worker names per pipe.
+native: [DeletePipe]
+worker: polls running pipes' sources and delivers their events to targets
+
+resources:
+  pipe:
+    collection: pipe
+    id: { input_members: [Name] }
+    record: {}
+  tags:
+    collection: pipetag
+    id: { input_members: [resourceArn] }
+    record: {}
+
+errors:
+  Validation: { code: ValidationException, http: 400, fault: client }
+  Conflict: { code: ConflictException, http: 409, fault: client, message: Pipe already exists. }
+  NotFound: { code: NotFoundException, http: 404, fault: client, message: Pipe does not exist. }
+
+operations:
+  CreatePipe:
+    reads: { r: { resource: pipe } }
+    let:
+      source: "'Source' in input ? string(input.Source) : ''"
+      target: "'Target' in input ? string(input.Target) : ''"
+      kind: &kind >-
+        source.contains(':kinesis:') ? 'KinesisStreamParameters'
+        : (source.contains(':dynamodb:') && source.contains('/stream/') ? 'DynamoDBStreamParameters' : '')
+      block: >-
+        kind != '' && 'SourceParameters' in input && kind in input.SourceParameters
+        ? input.SourceParameters[kind] : {}
+      state: "'DesiredState' in input ? string(input.DesiredState) : 'RUNNING'"
+      update: "false"
+    require: &validate
+      - { cond: "!update || r_found", error: NotFound }
+      - cond: "update || (source != '' && target != '' && 'RoleArn' in input && string(input.RoleArn) != '')"
+        error: Validation
+        message: Name, Source, Target, and RoleArn are required.
+      - cond: "state == 'RUNNING' || state == 'STOPPED'"
+        error: Validation
+        message: DesiredState must be RUNNING or STOPPED.
+      - cond: >-
+          kind == '' || ('StartingPosition' in block && string(block.StartingPosition) in
+          (kind == 'KinesisStreamParameters' ? ['TRIM_HORIZON', 'LATEST', 'AT_TIMESTAMP'] : ['TRIM_HORIZON', 'LATEST']))
+        error: Validation
+        message_expr: "kind + '.StartingPosition is invalid.'"
+      - cond: "!('BatchSize' in block) || (int(block.BatchSize) >= 1 && int(block.BatchSize) <= 10000)"
+        error: Validation
+        message_expr: "kind + '.BatchSize must be between 1 and 10000.'"
+      - cond: "!('MaximumBatchingWindowInSeconds' in block) || (int(block.MaximumBatchingWindowInSeconds) >= 0 && int(block.MaximumBatchingWindowInSeconds) <= 300)"
+        error: Validation
+        message_expr: "kind + '.MaximumBatchingWindowInSeconds must be between 0 and 300.'"
+      - cond: "!('MaximumRecordAgeInSeconds' in block) || (int(block.MaximumRecordAgeInSeconds) >= -1 && int(block.MaximumRecordAgeInSeconds) <= 604800)"
+        error: Validation
+        message_expr: "kind + '.MaximumRecordAgeInSeconds must be between -1 and 604800.'"
+      - cond: "!('MaximumRetryAttempts' in block) || (int(block.MaximumRetryAttempts) >= -1 && int(block.MaximumRetryAttempts) <= 10000)"
+        error: Validation
+        message_expr: "kind + '.MaximumRetryAttempts must be between -1 and 10000.'"
+      - cond: "!('ParallelizationFactor' in block) || (int(block.ParallelizationFactor) >= 1 && int(block.ParallelizationFactor) <= 10)"
+        error: Validation
+        message_expr: "kind + '.ParallelizationFactor must be between 1 and 10.'"
+      - cond: "!('OnPartialBatchItemFailure' in block) || string(block.OnPartialBatchItemFailure) == 'AUTOMATIC_BISECT'"
+        error: Validation
+        message_expr: "kind + '.OnPartialBatchItemFailure is invalid.'"
+      - cond: >-
+          !('DeadLetterConfig' in block) || ((string(block.DeadLetterConfig.Arn).contains(':sqs:')
+          || string(block.DeadLetterConfig.Arn).contains(':sns:')) && !string(block.DeadLetterConfig.Arn).endsWith('.fifo'))
+        error: Validation
+        message_expr: "kind + '.DeadLetterConfig.Arn must be a standard SQS queue or SNS topic ARN.'"
+      - cond: >-
+          !target.contains(':states:') || !('TargetParameters' in input) || !('StateMachineParameters' in input.TargetParameters)
+          || !('InvocationType' in input.TargetParameters.StateMachineParameters)
+          || string(input.TargetParameters.StateMachineParameters.InvocationType) in ['REQUEST_RESPONSE', 'FIRE_AND_FORGET']
+        error: Validation
+        message: StateMachineParameters.InvocationType must be REQUEST_RESPONSE or FIRE_AND_FORGET.
+      - { cond: "update || !r_found", error: Conflict }
+    effects:
+      - put:
+          resource: pipe
+          spread: input
+          record:
+            Arn: &arn "'arn:aws:pipes:' + identity.region + ':' + identity.account + ':pipe/' + string(input.Name)"
+            CurrentState: state
+            DesiredState: state
+    output: &stateOut
+      Name: rec.Name
+      Arn: rec.Arn
+      CurrentState: rec.CurrentState
+      DesiredState: rec.DesiredState
+
+  # Source cannot change, so the kind of source and its parameters block are
+  # the stored pipe's, with the request's block merged over it member by
+  # member: an update that sends only a new BatchSize keeps its
+  # StartingPosition.
+  UpdatePipe:
+    reads: { r: { resource: pipe } }
+    let:
+      source: "r_found ? string(r.Source) : ''"
+      target: "'Target' in input ? string(input.Target) : (r_found ? string(r.Target) : '')"
+      kind: *kind
+      stored: "r_found && 'SourceParameters' in r ? r.SourceParameters : {}"
+      sent: "'SourceParameters' in input ? input.SourceParameters : {}"
+      block: "merge(kind != '' && kind in stored ? stored[kind] : {}, kind != '' && kind in sent ? sent[kind] : {})"
+      state: "'DesiredState' in input ? string(input.DesiredState) : (r_found ? string(r.CurrentState) : 'RUNNING')"
+      update: "true"
+    require: *validate
+    effects:
+      - patch:
+          resource: pipe
+          spread: input
+          record:
+            # Not in UpdatePipe's input, and a pipe's source never changes.
+            Source: r.Source
+            SourceParameters: "kind == '' ? merge(stored, sent) : merge(merge(stored, sent), {kind: block})"
+            CurrentState: state
+            DesiredState: state
+    output: *stateOut
+
+  DescribePipe:
+    reads: { r: { resource: pipe } }
+    require:
+      - { cond: r_found, error: NotFound }
+    output:
+      Name: r.Name
+      Arn: r.Arn
+      Description: "'Description' in r ? r.Description : null"
+      DesiredState: r.DesiredState
+      CurrentState: r.CurrentState
+      Source: r.Source
+      SourceParameters: "'SourceParameters' in r ? r.SourceParameters : null"
+      Enrichment: "'Enrichment' in r ? r.Enrichment : null"
+      EnrichmentParameters: "'EnrichmentParameters' in r ? r.EnrichmentParameters : null"
+      Target: r.Target
+      TargetParameters: "'TargetParameters' in r ? r.TargetParameters : null"
+      RoleArn: r.RoleArn
+      Tags: "'Tags' in r ? r.Tags : null"
+      LogConfiguration: "'LogConfiguration' in r ? r.LogConfiguration : null"
+      KmsKeyIdentifier: "'KmsKeyIdentifier' in r ? r.KmsKeyIdentifier : null"
+
+  ListPipes:
+    list: { resource: pipe, member: Pipes }
+    output:
+      Pipes: >-
+        items.map(p, {'Name': p.Name, 'Arn': p.Arn, 'DesiredState': p.DesiredState,
+        'CurrentState': p.CurrentState, 'Source': p.Source, 'Target': p.Target,
+        'Enrichment': 'Enrichment' in p ? p.Enrichment : null})
+
+  StartPipe: &setState
+    reads: { r: { resource: pipe } }
+    require:
+      - { cond: r_found, error: NotFound }
+    effects:
+      - patch: { resource: pipe, record: { CurrentState: "'RUNNING'", DesiredState: "'RUNNING'" } }
+    output: *stateOut
+  StopPipe:
+    <<: *setState
+    effects:
+      - patch: { resource: pipe, record: { CurrentState: "'STOPPED'", DesiredState: "'STOPPED'" } }
+
+  TagResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - put: { resource: tags, record: { tags: "merge(t_found ? t.tags : {}, input.tags)" } }
+    output: {}
+  UntagResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - put: { resource: tags, record: { tags: "without(t_found ? t.tags : {}, input.tagKeys)" } }
+    output: {}
+  ListTagsForResource:
+    reads: { t: { resource: tags } }
+    output:
+      tags: "t_found ? t.tags : {}"

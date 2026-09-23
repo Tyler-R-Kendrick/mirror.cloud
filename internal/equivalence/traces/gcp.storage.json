@@ -1,0 +1,430 @@
+{
+  "schema": "trace/1",
+  "service": "gcp.storage",
+  "source": "pack:internal/services/gcp/gcs@739e164",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "storage.buckets.insert",
+      "input": {
+        "name": "b1",
+        "project": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "id": "b1",
+        "kind": "storage#bucket",
+        "location": "US",
+        "metageneration": "1",
+        "name": "b1",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "storage.buckets.insert",
+      "input": {
+        "name": "b1",
+        "project": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "fault": {
+        "code": "conflict",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "storage.buckets.insert",
+      "input": {
+        "name": "b2",
+        "project": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "id": "b2",
+        "kind": "storage#bucket",
+        "location": "US",
+        "metageneration": "1",
+        "name": "b2",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/b2",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "storage.buckets.get",
+      "input": {
+        "bucket": "b1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "id": "b1",
+        "kind": "storage#bucket",
+        "location": "US",
+        "metageneration": "1",
+        "name": "b1",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "storage.buckets.get",
+      "input": {
+        "bucket": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "fault": {
+        "code": "notFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "storage.buckets.list",
+      "input": {
+        "project": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "items": [
+          {
+            "id": "b1",
+            "kind": "storage#bucket",
+            "location": "US",
+            "metageneration": "1",
+            "name": "b1",
+            "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1",
+            "storageClass": "STANDARD",
+            "timeCreated": "1970-01-01T00:00:00Z",
+            "updated": "1970-01-01T00:00:00Z"
+          },
+          {
+            "id": "b2",
+            "kind": "storage#bucket",
+            "location": "US",
+            "metageneration": "1",
+            "name": "b2",
+            "selfLink": "http://127.0.0.1:4566/storage/v1/b/b2",
+            "storageClass": "STANDARD",
+            "timeCreated": "1970-01-01T00:00:00Z",
+            "updated": "1970-01-01T00:00:00Z"
+          }
+        ],
+        "kind": "storage#buckets"
+      }
+    },
+    {
+      "operation": "storage.buckets.patch",
+      "input": {
+        "bucket": "b1",
+        "location": "EU",
+        "storageClass": "NEARLINE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "id": "b1",
+        "kind": "storage#bucket",
+        "location": "EU",
+        "metageneration": "2",
+        "name": "b1",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1",
+        "storageClass": "NEARLINE",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "storage.buckets.get",
+      "input": {
+        "bucket": "b1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "id": "b1",
+        "kind": "storage#bucket",
+        "location": "EU",
+        "metageneration": "2",
+        "name": "b1",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1",
+        "storageClass": "NEARLINE",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "storage.objects.insert",
+      "input": {
+        "bucket": "b1",
+        "name": "o1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "bucket": "b1",
+        "contentType": "application/octet-stream",
+        "etag": "d41d8cd98f00b204e9800998ecf8427e",
+        "generation": "526682617",
+        "id": "b1/o1/526682617",
+        "kind": "storage#object",
+        "md5Hash": "1B2M2Y8AsgTpgAmY7PhCfg==",
+        "mediaLink": "http://127.0.0.1:4566/storage/v1/b/b1/o/o1?alt=media",
+        "metageneration": "1",
+        "name": "o1",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1/o/o1",
+        "size": "0",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "storage.buckets.delete",
+      "input": {
+        "bucket": "b1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "fault": {
+        "code": "conflict",
+        "http_status": 409,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "storage.objects.get",
+      "input": {
+        "bucket": "b1",
+        "object": "o1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "bucket": "b1",
+        "contentType": "application/octet-stream",
+        "etag": "d41d8cd98f00b204e9800998ecf8427e",
+        "generation": "526682617",
+        "id": "b1/o1/526682617",
+        "kind": "storage#object",
+        "md5Hash": "1B2M2Y8AsgTpgAmY7PhCfg==",
+        "mediaLink": "http://127.0.0.1:4566/storage/v1/b/b1/o/o1?alt=media",
+        "metageneration": "1",
+        "name": "o1",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1/o/o1",
+        "size": "0",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "storage.objects.list",
+      "input": {
+        "bucket": "b1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "items": [
+          {
+            "bucket": "b1",
+            "contentType": "application/octet-stream",
+            "etag": "d41d8cd98f00b204e9800998ecf8427e",
+            "generation": "526682617",
+            "id": "b1/o1/526682617",
+            "kind": "storage#object",
+            "md5Hash": "1B2M2Y8AsgTpgAmY7PhCfg==",
+            "mediaLink": "http://127.0.0.1:4566/storage/v1/b/b1/o/o1?alt=media",
+            "metageneration": "1",
+            "name": "o1",
+            "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1/o/o1",
+            "size": "0",
+            "storageClass": "STANDARD",
+            "timeCreated": "1970-01-01T00:00:00Z",
+            "updated": "1970-01-01T00:00:00Z"
+          }
+        ],
+        "kind": "storage#objects"
+      }
+    },
+    {
+      "operation": "storage.objects.patch",
+      "input": {
+        "bucket": "b1",
+        "contentType": "text/plain",
+        "object": "o1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "bucket": "b1",
+        "contentType": "text/plain",
+        "etag": "d41d8cd98f00b204e9800998ecf8427e",
+        "generation": "526682617",
+        "id": "b1/o1/526682617",
+        "kind": "storage#object",
+        "md5Hash": "1B2M2Y8AsgTpgAmY7PhCfg==",
+        "mediaLink": "http://127.0.0.1:4566/storage/v1/b/b1/o/o1?alt=media",
+        "metageneration": "2",
+        "name": "o1",
+        "selfLink": "http://127.0.0.1:4566/storage/v1/b/b1/o/o1",
+        "size": "0",
+        "storageClass": "STANDARD",
+        "timeCreated": "1970-01-01T00:00:00Z",
+        "updated": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "operation": "storage.objects.delete",
+      "input": {
+        "bucket": "b1",
+        "object": "o1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      }
+    },
+    {
+      "operation": "storage.buckets.delete",
+      "input": {
+        "bucket": "b1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      }
+    },
+    {
+      "operation": "storage.buckets.delete",
+      "input": {
+        "bucket": "b1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "fault": {
+        "code": "notFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "storage.buckets.list",
+      "input": {
+        "project": "p"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": "000000000000"
+      },
+      "output": {
+        "items": [
+          {
+            "id": "b2",
+            "kind": "storage#bucket",
+            "location": "US",
+            "metageneration": "1",
+            "name": "b2",
+            "selfLink": "http://127.0.0.1:4566/storage/v1/b/b2",
+            "storageClass": "STANDARD",
+            "timeCreated": "1970-01-01T00:00:00Z",
+            "updated": "1970-01-01T00:00:00Z"
+          }
+        ],
+        "kind": "storage#buckets"
+      }
+    }
+  ]
+}

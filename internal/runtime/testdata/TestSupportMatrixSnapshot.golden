@@ -48,9 +48,9 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.docdb` | `awsQuery` | 14 | 41 |
 | `aws.ds` | `awsJson1_1` | 6 | 74 |
 | `aws.dsql` | `restJson1` | 6 | 10 |
-| `aws.dynamodb` | `awsJson1_0` | 62 | 0 |
+| `aws.dynamodb` | `awsJson1_0` | 60 | 2 |
 | `aws.ec2` | `ec2Query` | 12 | 789 |
-| `aws.ecs` | `awsJson1_1` | 77 | 0 |
+| `aws.ecs` | `awsJson1_1` | 55 | 22 |
 | `aws.eks` | `restJson1` | 70 | 0 |
 | `aws.elasticache` | `awsQuery` | 75 | 0 |
 | `aws.elasticbeanstalk` | `awsQuery` | 11 | 36 |
@@ -85,7 +85,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.kinesisanalyticsv2` | `awsJson1_1` | 6 | 27 |
 | `aws.kms` | `awsJson1_1` | 54 | 0 |
 | `aws.lakeformation` | `restJson1` | 8 | 53 |
-| `aws.lambda` | `restJson1` | 88 | 0 |
+| `aws.lambda` | `restJson1` | 79 | 9 |
 | `aws.lex-models` | `restJson1` | 7 | 35 |
 | `aws.lightsail` | `awsJson1_1` | 7 | 154 |
 | `aws.location` | `restJson1` | 8 | 56 |
@@ -113,7 +113,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.qldb` | `restJson1` | 5 | 15 |
 | `aws.quicksight` | `restJson1` | 8 | 285 |
 | `aws.ram` | `restJson1` | 8 | 27 |
-| `aws.rds` | `awsQuery` | 164 | 0 |
+| `aws.rds` | `awsQuery` | 46 | 118 |
 | `aws.redshift` | `awsQuery` | 145 | 0 |
 | `aws.rekognition` | `awsJson1_1` | 10 | 65 |
 | `aws.resiliencehub` | `restJson1` | 6 | 57 |
@@ -138,7 +138,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.shield` | `awsJson1_1` | 6 | 30 |
 | `aws.sns` | `awsQuery` | 42 | 0 |
 | `aws.sqs` | `awsJson1_0` | 23 | 0 |
-| `aws.ssm` | `awsJson1_1` | 152 | 0 |
+| `aws.ssm` | `awsJson1_1` | 64 | 88 |
 | `aws.sso-admin` | `awsJson1_1` | 7 | 72 |
 | `aws.states` | `awsJson1_0` | 37 | 0 |
 | `aws.storagegateway` | `awsJson1_1` | 7 | 89 |
@@ -164,7 +164,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `cloudflare.api` | `restJson1` | 40 | 4 |
 | `digitalocean.v2` | `restJson1` | 8 | 32 |
 | `fly.machines` | `restJson1` | 8 | 90 |
-| `gcp.storage` | `gcpRestJson` | 87 | 0 |
+| `gcp.storage` | `gcpRestJson` | 13 | 74 |
 | `hetzner.v1` | `restJson1` | 8 | 181 |
 | `hostinger.api` | `restJson1` | 6 | 371 |
 | `railway.graphql` | `graphql` | 7 | 0 |
@@ -233,7 +233,7 @@ S3 GLACIER and DEEP_ARCHIVE objects remain visible to HeadObject but GetObject, 
 S3 bucket and object operations validate x-amz-expected-bucket-owner as a 12-digit account ID and return AccessDenied on owner mismatch. CopyObject and UploadPartCopy additionally validate x-amz-source-expected-bucket-owner and return NoSuchBucket for missing source buckets. Every emulated operation whose AWS input supports ExpectedBucketOwner now shares the bucket-existence guard, including multipart operations, versioning, copies, multi-delete, SelectObjectContent, GetObjectTorrent, and object annotations; missing buckets return NoSuchBucket without mutation.
 
 IAM evaluates user, group, role, and Organizations SCP policies: explicit Deny, then Allow. A principal with policies and no matching Allow is denied; no policies still allows. Access keys and `X-Mirror-Role` select principals. SimulatePrincipalPolicy/SimulateCustomPolicy use the same evaluator. Ops not in pack Operations() are mock-tier (or 501 under --strict), not leftover-KV sold as emulate.
-SSM `SecureString` uses a reversible local encoding, not real encryption. Leftover SSM ops (activations, sessions, inventory, patch groups, compliance, …) are control-plane records only — no SSM agent.
+SSM `SecureString` uses a reversible local encoding, not real encryption, and a read answers the encoded form unless it sets WithDecryption. SSM activations, sessions, inventory, patch groups, compliance and the other operations the bundle does not declare are mock tier — no SSM agent.
 Lambda CreateFunction/Invoke run a local python3 or node handler when that interpreter exists; other runtimes return `MirrorNotImplemented`.
 S3 ListObjects and ListObjectsV2 return SDK-compatible flattened REST/XML members and RFC 3339 timestamps, paginate lexically across objects and common prefixes, count both against MaxKeys, and honor V1 Marker/NextMarker or V2 continuation/start-after fields. ListObjectVersions returns flattened version, delete-marker, and common-prefix members in key/newest-version order with millisecond timestamps, prefix/delimiter filtering, URL encoding, coherent latest flags, and paired key/version marker pagination. ListObjects, ListObjectsV2, ListObjectVersions, and ListMultipartUploads accept only encoding-type=url and reject empty or unknown encoding methods with AWS-compatible InvalidArgument details.
 CloudFormation accepts JSON/YAML TemplateBody and TemplateURL objects from local S3. YAML is a maps/lists/scalars + !Ref/!GetAtt/!Sub subset. Supported resource types: AWS::S3::Bucket (including versioning, CORS, encryption, lifecycle, replication, notifications, tags, and ownership/public-access settings), AWS::SQS::Queue, AWS::SNS::Topic, AWS::DynamoDB::Table, AWS::IAM::Role, AWS::SSM::Parameter, AWS::SecretsManager::Secret, AWS::KMS::Key, AWS::Logs::LogGroup, AWS::Events::Rule, AWS::Lambda::Function, AWS::Kinesis::Stream, AWS::Kinesis::ResourcePolicy, AWS::ApiGateway::RestApi. Cloud Control reads/lists S3 buckets, API Gateway V2 APIs, and RDS instances/clusters from service state. Unknown types fail CloudFormation stacks.
@@ -264,7 +264,7 @@ API Gateway is REST + Lambda AWS_PROXY; invoke at `/restapis/{id}/{stage}/_user_
 CloudWatch metrics store PutMetricData datapoints in memory; GetMetricStatistics is a sum/min/max/avg of those points, not AWS aggregation windows.
 Route 53 is hosted zones + resource record sets only. ACM issues local untrusted certificates with Status=ISSUED immediately.
 RDS/ECS/ELBv2/ElastiCache/Auto Scaling/ECR store control-plane records listed in Operations() only (no real database, containers, Redis, or registry daemon). ECS service task IPs register with ELBv2 target groups on RUNNING and deregister on STOPPED/FAILED.
-EC2 is control-plane records (VPC/subnet/security group/instance ids) on the ec2Query wire — no hypervisor. Extra IAM/RDS/Redshift/API Gateway/SSM/GCS ops are named control-plane records, not leftover-KV sold as emulate.
+EC2 is control-plane records (VPC/subnet/security group/instance ids) on the ec2Query wire — no hypervisor. Extra IAM/Redshift/API Gateway ops are named control-plane records, not leftover-KV sold as emulate; RDS, SSM and GCS operations beyond those their bundles declare are mock tier.
 Firehose preserves disabled data-format-conversion configuration, but enabled JSON-to-Parquet/ORC conversion returns `MirrorNotImplemented` instead of delivering falsely labeled raw bytes.
 Firehose validates and describes MSK source configuration, consumes persisted and future local topic messages from the configured start timestamp, and ignores other clusters and topics; it does not expose or poll a Kafka broker.
 Firehose validates and describes database source endpoint, pattern, Secrets Manager, and VPC configuration, but does not connect to a database or ingest changes.

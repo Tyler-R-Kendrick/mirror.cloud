@@ -20,47 +20,41 @@ import (
 	"unicode"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.sns", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return &Pack{deps: d}, nil
-	}})
+	for _, op := range natives {
+		bundled.RegisterNative("aws.sns", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return (&Pack{deps: deps}).Invoke(ctx, req)
+		})
+	}
 	lambda.PublishSNS = func(ctx context.Context, deps spi.Deps, id spi.Identity, topicARN, message string) {
 		_, _ = New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": topicARN, "Message": message}})
 	}
 }
 
-// Pack implements SNS.
-type Pack struct {
-	deps    spi.Deps
-	dedupMu sync.Mutex
-}
+// natives are the operations behavior/aws/sns declares native.
+var natives = []string{"CreateTopic", "DeleteTopic", "ListTopics", "GetTopicAttributes", "SetTopicAttributes",
+	"Subscribe", "ConfirmSubscription", "Unsubscribe", "ListSubscriptions",
+	"ListSubscriptionsByTopic", "Publish", "PublishBatch", "TagResource", "UntagResource",
+	"AddPermission", "RemovePermission", "GetSubscriptionAttributes", "SetSubscriptionAttributes",
+	"ListTagsForResource", "PutDataProtectionPolicy", "GetDataProtectionPolicy",
+	"CreatePlatformApplication", "GetPlatformApplicationAttributes", "SetPlatformApplicationAttributes",
+	"ListPlatformApplications", "DeletePlatformApplication",
+	"CreatePlatformEndpoint", "GetEndpointAttributes", "SetEndpointAttributes",
+	"ListEndpointsByPlatformApplication", "DeleteEndpoint",
+	"SetSMSAttributes", "GetSMSAttributes"}
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
+// Pack is the receiver the natives run on; it is built per call.
+type Pack struct{ deps spi.Deps }
 
-func (p *Pack) ServiceID() string { return "aws.sns" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	return []string{"CreateTopic", "DeleteTopic", "ListTopics", "GetTopicAttributes", "SetTopicAttributes",
-		"Subscribe", "ConfirmSubscription", "Unsubscribe", "ListSubscriptions",
-		"ListSubscriptionsByTopic", "Publish", "PublishBatch", "TagResource", "UntagResource",
-		"AddPermission", "RemovePermission", "GetSubscriptionAttributes", "SetSubscriptionAttributes",
-		"ListTagsForResource", "PutDataProtectionPolicy", "GetDataProtectionPolicy",
-		"CreatePlatformApplication", "GetPlatformApplicationAttributes", "SetPlatformApplicationAttributes",
-		"ListPlatformApplications", "DeletePlatformApplication",
-		"CreatePlatformEndpoint", "GetEndpointAttributes", "SetEndpointAttributes",
-		"ListEndpointsByPlatformApplication", "DeleteEndpoint",
-		"SetSMSAttributes", "GetSMSAttributes",
-		"OptInPhoneNumber", "CheckIfPhoneNumberIsOptedOut", "ListPhoneNumbersOptedOut",
-		"CreateSMSSandboxPhoneNumber", "VerifySMSSandboxPhoneNumber", "DeleteSMSSandboxPhoneNumber",
-		"ListSMSSandboxPhoneNumbers", "GetSMSSandboxAccountStatus", "ListOriginationNumbers"}
-}
+// dedupMu serialises FIFO deduplication across the per-call packs.
+var dedupMu sync.Mutex
+
+// New answers with the SNS service, bundle and natives together.
+func New(d spi.Deps) spi.BehaviorPack { return bundled.Handler("aws.sns", d) }
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
@@ -687,20 +681,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.platformEndpoint(ctx, req)
 	case "SetSMSAttributes", "GetSMSAttributes":
 		return p.smsAttrs(ctx, req)
-	case "OptInPhoneNumber", "CheckIfPhoneNumberIsOptedOut", "ListPhoneNumbersOptedOut":
-		return p.smsOpt(ctx, req)
-	case "CreateSMSSandboxPhoneNumber", "VerifySMSSandboxPhoneNumber", "DeleteSMSSandboxPhoneNumber",
-		"ListSMSSandboxPhoneNumbers", "GetSMSSandboxAccountStatus":
-		return p.smsSandbox(ctx, req)
-	case "ListOriginationNumbers":
-		kvs, _, _ := p.col(req, "orig").List(ctx, "", "", 0)
-		var nums []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			nums = append(nums, rec)
-		}
-		return &spi.Response{Output: map[string]any{"PhoneNumbers": nums}}, nil
 	default:
 		return nil, spi.NotImplemented("aws.sns", req.Operation, "emulate")
 	}
@@ -757,8 +737,8 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		}
 	}
 	if dedupKey != "" {
-		p.dedupMu.Lock()
-		defer p.dedupMu.Unlock()
+		dedupMu.Lock()
+		defer dedupMu.Unlock()
 		if b, found, _ := p.col(req, "snsdedup").Get(ctx, arn+"\x1f"+dedupKey); found {
 			var prior map[string]any
 			until, _ := strconv.ParseInt(fmt.Sprint(prior["until"]), 10, 64)
@@ -1144,7 +1124,7 @@ func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[stri
 	in := p.lambdaNotification(req, sub, body, messageID, attrs)
 	in["FunctionName"] = name
 	in["InvocationType"] = "Event"
-	_, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
+	_, err := bundled.Handler("aws.lambda", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
 	p.recordLambdaDelivery(ctx, req, sub, messageID, err)
 	return err == nil
 }

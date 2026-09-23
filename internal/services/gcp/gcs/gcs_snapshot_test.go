@@ -34,11 +34,11 @@ func TestGCSJSONCharacterization(t *testing.T) {
 		return res.Output
 	}
 	golden.AssertJSON(t, map[string]any{
-		"create":     inv("storage.buckets.insert", map[string]any{"name": "snap"}, nil),
-		"duplicate":  inv("storage.buckets.insert", map[string]any{"name": "snap"}, nil),
-		"empty":      inv("storage.buckets.insert", map[string]any{}, nil),
+		"create":     inv("storage.buckets.insert", map[string]any{"project": "p", "name": "snap"}, nil),
+		"duplicate":  inv("storage.buckets.insert", map[string]any{"project": "p", "name": "snap"}, nil),
+		"empty":      inv("storage.buckets.insert", map[string]any{"project": "p"}, nil),
 		"get":        inv("storage.buckets.get", map[string]any{"bucket": "snap"}, nil),
-		"list":       inv("storage.buckets.list", map[string]any{}, nil),
+		"list":       inv("storage.buckets.list", map[string]any{"project": "p"}, nil),
 		"insert":     inv("storage.objects.insert", map[string]any{"bucket": "snap", "name": "o"}, []byte("hello")),
 		"meta":       inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "o"}, nil),
 		"media":      inv("storage.objects.get", map[string]any{"bucket": "snap", "object": "o", "alt": "media"}, nil),

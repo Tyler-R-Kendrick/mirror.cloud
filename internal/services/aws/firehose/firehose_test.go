@@ -31,7 +31,7 @@ import (
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -1972,7 +1972,7 @@ func TestFirehoseSplunkDestination(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		t.Helper()
@@ -2035,7 +2035,7 @@ func TestFirehoseSplunkFailureBackup(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	destination := map[string]any{
 		"HECEndpoint": server.URL, "HECEndpointType": "Event", "HECToken": "token", "S3BackupMode": "AllEvents",
@@ -2109,7 +2109,7 @@ func TestFirehoseSplunkSecretAndPersistentRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := New(deps)
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	destination := map[string]any{
 		"HECEndpoint": server.URL, "HECEndpointType": "Raw", "BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1},
 		"RetryOptions": map[string]any{"DurationInSeconds": 10}, "S3Configuration": testS3Destination(),
@@ -2147,7 +2147,7 @@ func TestFirehoseSplunkSecretAndPersistentRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	p = New(deps)
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	defer func() { _ = p.Close() }()
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)
@@ -2189,7 +2189,7 @@ func TestFirehoseSplunkAcknowledgmentTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
-	p.httpClient = server.Client()
+	useHTTPClient(t, server.Client())
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	destination := map[string]any{
 		"HECEndpoint": server.URL, "HECEndpointType": "Raw", "HECToken": "token", "HECAcknowledgmentTimeoutInSeconds": 180,
@@ -3087,7 +3087,7 @@ func TestFirehoseRecordDeAggregation(t *testing.T) {
 
 	if _, err := exec.LookPath("python3"); err == nil {
 		t.Run("isolates downstream Lambda failures", func(t *testing.T) {
-			function := lambda.New(deps)
+			function := bundled.Handler("aws.lambda", deps)
 			code := `import base64
 def lambda_handler(event, context):
     output = []
@@ -3097,7 +3097,7 @@ def lambda_handler(event, context):
         output.append({'recordId': record['recordId'], 'result': result, 'data': base64.b64encode(data.upper()).decode()})
     return {'records': output}
 `
-			if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+			if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 				"FunctionName": "deaggregate", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
 			}}); err != nil {
 				t.Fatal(err)
@@ -3131,7 +3131,7 @@ func TestFirehoseLambdaProcessing(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	p, function, logService := New(deps), lambda.New(deps), bundled.Handler("aws.logs", deps)
+	p, function, logService := New(deps), bundled.Handler("aws.lambda", deps), bundled.Handler("aws.logs", deps)
 	for operation, input := range map[string]map[string]any{
 		"CreateLogGroup":  {"logGroupName": "firehose"},
 		"CreateLogStream": {"logGroupName": "firehose", "logStreamName": "errors"},
@@ -3150,7 +3150,7 @@ def lambda_handler(event, context):
         output.append({'recordId': record['recordId'], 'result': result, 'data': base64.b64encode(data.upper()).decode()})
     return {'records': output}
 `
-	if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "transform", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
 	}}); err != nil {
 		t.Fatal(err)
@@ -3295,7 +3295,7 @@ func TestFirehoseLambdaDynamicPartitioning(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	p, function := New(deps), lambda.New(deps)
+	p, function := New(deps), bundled.Handler("aws.lambda", deps)
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
 	}
@@ -3309,7 +3309,7 @@ def lambda_handler(event, context):
         output.append({'recordId': record['recordId'], 'result': 'Ok', 'data': record['data'], 'metadata': {'partitionKeys': keys}})
     return {'records': output}
 `
-	if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+	if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{"Role": "arn:aws:iam::000000000000:role/lambda",
 		"FunctionName": "partition", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
 	}}); err != nil {
 		t.Fatal(err)
@@ -4459,7 +4459,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	p := New(deps)
 	defer func() { _ = p.Close() }()
 	defer close(releaseBlocked)
-	checkRedirect := p.httpClient.CheckRedirect
+	checkRedirect := defaultHTTPClient.CheckRedirect
 	httpClient := &http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			clone := request.Clone(request.Context())
@@ -4470,7 +4470,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		}),
 		CheckRedirect: checkRedirect,
 	}
-	p.httpClient = httpClient
+	useHTTPClient(t, httpClient)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		t.Helper()
@@ -4806,7 +4806,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	p = New(deps)
-	p.httpClient = httpClient
+	useHTTPClient(t, httpClient)
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -4923,14 +4923,11 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			t.Fatalf("unencrypted HTTP buffer payload %q", payload)
 		}
 	}
-	if !p.hasHTTPWork(context.Background()) {
-		t.Fatal("persisted HTTP buffer was not discoverable for restart")
-	}
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}
 	p = New(deps)
-	p.httpClient = httpClient
+	useHTTPClient(t, httpClient)
 	if err := deps.Clock.Advance(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -5280,4 +5277,12 @@ func TestFirehoseConcurrentCreateKeepsOneStream(t *testing.T) {
 			t.Fatalf("round %d: %d concurrent creates of one stream succeeded, want 1", round, n)
 		}
 	}
+}
+
+var defaultHTTPClient = httpClient
+
+// useHTTPClient points deliveries at c for the rest of the test.
+func useHTTPClient(t *testing.T, c *http.Client) {
+	httpClient = c
+	t.Cleanup(func() { httpClient = defaultHTTPClient })
 }

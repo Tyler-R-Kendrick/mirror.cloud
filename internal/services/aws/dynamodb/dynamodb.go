@@ -10,46 +10,34 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb/expr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func init() {
-	registry.Register(registry.Factory{ServiceID: "aws.dynamodb", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
-		return &Pack{deps: d}, nil
-	}})
-}
-
-// Pack implements DynamoDB.
-type Pack struct{ deps spi.Deps }
-
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
-
-func (p *Pack) ServiceID() string { return "aws.dynamodb" }
-func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
-func (p *Pack) Operations() []string {
-	core := []string{"CreateTable", "DeleteTable", "DescribeTable", "ListTables", "UpdateTable",
+	for _, op := range []string{"CreateTable", "DeleteTable", "DescribeTable", "UpdateTable",
 		"PutItem", "GetItem", "DeleteItem", "UpdateItem", "BatchGetItem", "BatchWriteItem",
 		"Query", "Scan", "TransactGetItems", "TransactWriteItems",
-		"TagResource", "UntagResource", "ListTagsOfResource",
-		"DescribeTimeToLive", "UpdateTimeToLive",
-		"DescribeContinuousBackups", "UpdateContinuousBackups",
-		"DescribeEndpoints", "DescribeLimits",
-		"PutResourcePolicy", "GetResourcePolicy", "DeleteResourcePolicy",
-		"CreateBackup", "ListBackups", "DescribeBackup", "DeleteBackup", "RestoreTableFromBackup",
-		"EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination", "DescribeKinesisStreamingDestination",
-		"BatchExecuteStatement", "CreateGlobalTable", "DescribeContributorInsights", "DescribeExport",
-		"DescribeGlobalTable", "DescribeGlobalTableSettings", "DescribeImport", "DescribeTableReplicaAutoScaling",
-		"ExecuteStatement", "ExecuteTransaction", "ExportTableToPointInTime", "ImportTable",
-		"ListContributorInsights", "ListExports", "ListGlobalTables", "ListImports",
-		"RestoreTableToPointInTime", "SearchVectors", "UpdateContributorInsights", "UpdateGlobalTable",
-		"UpdateGlobalTableSettings", "UpdateKinesisStreamingDestination", "UpdateTableReplicaAutoScaling",
-		"ListStreams", "DescribeStream", "GetShardIterator", "GetRecords"}
-	return core
+		"ExecuteStatement", "BatchExecuteStatement", "ExecuteTransaction",
+		"CreateBackup", "RestoreTableFromBackup", "RestoreTableToPointInTime",
+		"ExportTableToPointInTime", "ImportTable", "SearchVectors",
+		"CreateGlobalTable", "DescribeGlobalTable", "ListGlobalTables", "UpdateGlobalTable",
+		"DescribeGlobalTableSettings", "UpdateGlobalTableSettings",
+		"EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination",
+		"DescribeKinesisStreamingDestination", "UpdateKinesisStreamingDestination",
+		"ListStreams", "DescribeStream", "GetShardIterator", "GetRecords"} {
+		bundled.RegisterNative("aws.dynamodb", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
+			return (&Pack{deps: deps}).Invoke(ctx, req)
+		})
+	}
 }
+
+// Pack is the receiver the natives run on; it is built per call.
+type Pack struct{ deps spi.Deps }
+
+// New answers with the DynamoDB service, bundle and natives together.
+func New(d spi.Deps) spi.BehaviorPack { return bundled.Handler("aws.dynamodb", d) }
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
@@ -68,9 +56,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return nil
 	}
 	switch req.Operation {
-	case "PutItem", "GetItem", "DeleteItem", "UpdateItem", "Query", "Scan",
-		"UpdateContinuousBackups", "DescribeContinuousBackups",
-		"UpdateContributorInsights", "DescribeContributorInsights":
+	case "PutItem", "GetItem", "DeleteItem", "UpdateItem", "Query", "Scan":
 		if err := requireTable(table); err != nil {
 			return nil, err
 		}
@@ -112,7 +98,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, err
 		}
 		if len(asSlice(tags)) > 0 {
-			_, _ = p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "TagResource", Input: map[string]any{"ResourceArn": arn, "Tags": tags}})
+			_, _ = New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "TagResource", Input: map[string]any{"ResourceArn": arn, "Tags": tags}})
 		}
 		description := tableDescription(rec, "CREATING")
 		return &spi.Response{Output: map[string]any{"TableDescription": description}}, nil
@@ -149,13 +135,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
 		return &spi.Response{Output: map[string]any{"Table": tableDescription(m, "ACTIVE")}}, nil
-	case "ListTables":
-		kvs, _, _ := p.col(req, "tables").List(ctx, "", "", 0)
-		var names []any
-		for _, kv := range kvs {
-			names = append(names, kv.Key)
-		}
-		return &spi.Response{Output: map[string]any{"TableNames": names}}, nil
 	case "PutItem":
 		item, _ := req.Input["Item"].(map[string]any)
 		if err := p.validateItemKey(ctx, req, table, item); err != nil {
@@ -257,140 +236,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		p.emitStream(ctx, req, table, ev, item, old)
 		return p.returnValues(req, old, item, touched), nil
-	case "UpdateTimeToLive":
-		if _, ok, _ := p.col(req, "tables").Get(ctx, table); !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Cannot do operations on a non-existent table", HTTPStatus: 400, Fault: "client"}
-		}
-		spec := req.Input["TimeToLiveSpecification"]
-		b, _ := json.Marshal(spec)
-		_ = p.col(req, "ttl").Put(ctx, table, b)
-		return &spi.Response{Output: map[string]any{"TimeToLiveSpecification": spec}}, nil
-	case "DescribeTimeToLive":
-		if _, ok, _ := p.col(req, "tables").Get(ctx, table); !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Cannot do operations on a non-existent table", HTTPStatus: 400, Fault: "client"}
-		}
-		b, ok, _ := p.col(req, "ttl").Get(ctx, table)
-		if !ok {
-			return &spi.Response{Output: map[string]any{"TimeToLiveDescription": map[string]any{"TimeToLiveStatus": "DISABLED"}}}, nil
-		}
-		var spec map[string]any
-		_ = json.Unmarshal(b, &spec)
-		status := "DISABLED"
-		if truthy(spec["Enabled"]) {
-			status = "ENABLED"
-		}
-		out := map[string]any{"TimeToLiveStatus": status, "AttributeName": spec["AttributeName"]}
-		return &spi.Response{Output: map[string]any{"TimeToLiveDescription": out}}, nil
-	case "ExpireItems":
-		tables, _, err := p.col(req, "tables").List(ctx, "", "", 0)
-		if err != nil {
-			return nil, err
-		}
-		expired := 0
-		for _, tableRecord := range tables {
-			table := tableRecord.Key
-			rawTTL, ok, err := p.col(req, "ttl").Get(ctx, table)
-			if err != nil {
-				return nil, err
-			}
-			var ttl map[string]any
-			if !ok || json.Unmarshal(rawTTL, &ttl) != nil || !truthy(ttl["Enabled"]) || str(ttl["AttributeName"]) == "" {
-				continue
-			}
-			items, _, err := p.col(req, "items:"+table).List(ctx, "", "", 0)
-			if err != nil {
-				return nil, err
-			}
-			definition := p.tableDef(ctx, req, table)
-			for _, itemRecord := range items {
-				var item map[string]any
-				_ = json.Unmarshal(itemRecord.Value, &item)
-				expires, err := strconv.ParseInt(str(asMap(item[str(ttl["AttributeName"])])["N"]), 10, 64)
-				if err != nil || expires > p.deps.Clock.Now().Unix() {
-					continue
-				}
-				deleted := false
-				if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
-					if _, ok, err := tx.Get(itemRecord.Key); err != nil || !ok {
-						return err
-					}
-					deleted = true
-					return tx.Delete(itemRecord.Key)
-				}); err != nil {
-					return nil, err
-				}
-				if !deleted {
-					continue
-				}
-				expired++
-				p.emitStream(ctx, req, table, "REMOVE", p.tableKey(definition, item), item)
-			}
-		}
-		return &spi.Response{Output: map[string]any{"ExpiredItems": expired}}, nil
-	case "UpdateContinuousBackups":
-		spec := asMap(req.Input["PointInTimeRecoverySpecification"])
-		enabled := truthy(spec["PointInTimeRecoveryEnabled"])
-		status := "DISABLED"
-		recovery := map[string]any{"PointInTimeRecoveryStatus": status}
-		if enabled {
-			status = "ENABLED"
-			now := p.deps.Clock.Now().Unix()
-			earliest := now
-			if previous, ok, _ := p.col(req, "pitr").Get(ctx, table); ok {
-				var description map[string]any
-				_ = json.Unmarshal(previous, &description)
-				if str(description["PointInTimeRecoveryStatus"]) == "ENABLED" {
-					earliest = int64(asInt(description["EarliestRestorableDateTime"]))
-				}
-			}
-			recovery = map[string]any{
-				"PointInTimeRecoveryStatus":  status,
-				"EarliestRestorableDateTime": earliest,
-				"LatestRestorableDateTime":   now,
-				"RecoveryPeriodInDays":       35,
-			}
-		}
-		b, _ := json.Marshal(recovery)
-		_ = p.col(req, "pitr").Put(ctx, table, b)
-		return &spi.Response{Output: map[string]any{"ContinuousBackupsDescription": map[string]any{
-			"ContinuousBackupsStatus":        "ENABLED",
-			"PointInTimeRecoveryDescription": recovery,
-		}}}, nil
-	case "DescribeContinuousBackups":
-		recovery := map[string]any{"PointInTimeRecoveryStatus": "DISABLED"}
-		if b, ok, _ := p.col(req, "pitr").Get(ctx, table); ok {
-			_ = json.Unmarshal(b, &recovery)
-			if str(recovery["PointInTimeRecoveryStatus"]) == "ENABLED" {
-				recovery["LatestRestorableDateTime"] = p.deps.Clock.Now().Unix()
-			}
-		}
-		return &spi.Response{Output: map[string]any{"ContinuousBackupsDescription": map[string]any{
-			"ContinuousBackupsStatus":        "ENABLED",
-			"PointInTimeRecoveryDescription": recovery,
-		}}}, nil
-	case "DescribeEndpoints":
-		addr := "http://127.0.0.1:4566"
-		if req.HTTP != nil && req.HTTP.Host != "" {
-			addr = "http://" + req.HTTP.Host
-		}
-		return &spi.Response{Output: map[string]any{"Endpoints": []any{map[string]any{"Address": addr, "CachePeriodInMinutes": 1440}}}}, nil
-	case "DescribeLimits":
-		return &spi.Response{Output: map[string]any{
-			"AccountMaxReadCapacityUnits": 80000, "AccountMaxWriteCapacityUnits": 80000,
-			"TableMaxReadCapacityUnits": 40000, "TableMaxWriteCapacityUnits": 40000,
-		}}, nil
-	case "PutResourcePolicy":
-		_ = p.col(req, "ddbpolicy").Put(ctx, first(req.Input, "ResourceArn"), []byte(str(req.Input["Policy"])))
-		return &spi.Response{Output: map[string]any{"RevisionId": "1"}}, nil
-	case "GetResourcePolicy":
-		b, ok, _ := p.col(req, "ddbpolicy").Get(ctx, first(req.Input, "ResourceArn"))
-		if !ok {
-			return nil, &spi.Fault{Code: "PolicyNotFoundException", HTTPStatus: 400, Fault: "client"}
-		}
-		return &spi.Response{Output: map[string]any{"Policy": string(b), "RevisionId": "1"}}, nil
-	case "DeleteResourcePolicy":
-		_ = p.col(req, "ddbpolicy").Delete(ctx, first(req.Input, "ResourceArn"))
-		return &spi.Response{Output: map[string]any{"RevisionId": "1"}}, nil
 	case "CreateBackup":
 		name := first(req.Input, "BackupName")
 		id := p.deps.Rand.Hex(8)
@@ -400,27 +245,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		raw, _ := json.Marshal(rec)
 		_ = p.col(req, "backups").Put(ctx, id, raw)
 		return &spi.Response{Output: map[string]any{"BackupDetails": map[string]any{"BackupArn": rec["BackupArn"], "BackupName": name, "BackupStatus": "AVAILABLE"}}}, nil
-	case "ListBackups":
-		kvs, _, _ := p.col(req, "backups").List(ctx, "", "", 0)
-		var sums []any
-		for _, kv := range kvs {
-			var m map[string]any
-			_ = json.Unmarshal(kv.Value, &m)
-			sums = append(sums, map[string]any{"BackupArn": m["BackupArn"], "BackupName": m["BackupName"], "BackupStatus": m["BackupStatus"], "TableName": m["TableName"]})
-		}
-		return &spi.Response{Output: map[string]any{"BackupSummaries": sums}}, nil
-	case "DescribeBackup":
-		id := backupID(first(req.Input, "BackupArn"))
-		b, ok, _ := p.col(req, "backups").Get(ctx, id)
-		if !ok {
-			return nil, &spi.Fault{Code: "BackupNotFoundException", HTTPStatus: 400, Fault: "client"}
-		}
-		var m map[string]any
-		_ = json.Unmarshal(b, &m)
-		return &spi.Response{Output: map[string]any{"BackupDescription": map[string]any{"BackupDetails": m, "SourceTableDetails": map[string]any{"TableName": m["TableName"]}}}}, nil
-	case "DeleteBackup":
-		_ = p.col(req, "backups").Delete(ctx, backupID(first(req.Input, "BackupArn")))
-		return &spi.Response{Output: map[string]any{"BackupDescription": map[string]any{"BackupDetails": map[string]any{"BackupStatus": "DELETED"}}}}, nil
 	case "RestoreTableFromBackup":
 		id := backupID(first(req.Input, "BackupArn"))
 		b, ok, _ := p.col(req, "backups").Get(ctx, id)
@@ -568,69 +392,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		return &spi.Response{Output: map[string]any{"TableDescription": description}}, nil
-	case "TagResource":
-		arn := str(req.Input["ResourceArn"])
-		var tags []any
-		if b, ok, _ := p.col(req, "tags").Get(ctx, arn); ok {
-			_ = json.Unmarshal(b, &tags)
-		}
-		indexes := map[string]int{}
-		for i, tag := range tags {
-			indexes[str(asMap(tag)["Key"])] = i
-		}
-		for _, tag := range asSlice(req.Input["Tags"]) {
-			key := str(asMap(tag)["Key"])
-			if i, ok := indexes[key]; ok {
-				tags[i] = tag
-			} else {
-				indexes[key] = len(tags)
-				tags = append(tags, tag)
-			}
-		}
-		b, _ := json.Marshal(tags)
-		_ = p.col(req, "tags").Put(ctx, arn, b)
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "UntagResource":
-		arn := str(req.Input["ResourceArn"])
-		var tags []any
-		if b, ok, _ := p.col(req, "tags").Get(ctx, arn); ok {
-			_ = json.Unmarshal(b, &tags)
-		}
-		drop := map[string]bool{}
-		for _, key := range asSlice(req.Input["TagKeys"]) {
-			drop[str(key)] = true
-		}
-		kept := tags[:0]
-		for _, tag := range tags {
-			if !drop[str(asMap(tag)["Key"])] {
-				kept = append(kept, tag)
-			}
-		}
-		b, _ := json.Marshal(kept)
-		_ = p.col(req, "tags").Put(ctx, arn, b)
-		return &spi.Response{Output: map[string]any{}}, nil
-	case "ListTagsOfResource":
-		b, ok, _ := p.col(req, "tags").Get(ctx, str(req.Input["ResourceArn"]))
-		var tags any = []any{}
-		if ok {
-			_ = json.Unmarshal(b, &tags)
-		}
-		return &spi.Response{Output: map[string]any{"Tags": tags}}, nil
 	case "ExecuteStatement", "BatchExecuteStatement", "ExecuteTransaction":
 		return p.partiql(ctx, req)
 	case "CreateGlobalTable", "DescribeGlobalTable", "ListGlobalTables", "UpdateGlobalTable",
 		"DescribeGlobalTableSettings", "UpdateGlobalTableSettings":
 		return p.globalTable(ctx, req)
-	case "UpdateContributorInsights", "DescribeContributorInsights", "ListContributorInsights":
-		return p.insights(ctx, req)
-	case "ExportTableToPointInTime", "DescribeExport", "ListExports":
-		return p.exports(ctx, req)
-	case "ImportTable", "DescribeImport", "ListImports":
-		return p.imports(ctx, req)
+	case "ExportTableToPointInTime":
+		return p.export(ctx, req)
+	case "ImportTable":
+		return p.importTable(ctx, req)
 	case "RestoreTableToPointInTime":
 		return p.restorePITR(ctx, req)
-	case "DescribeTableReplicaAutoScaling", "UpdateTableReplicaAutoScaling":
-		return p.replicaScaling(ctx, req)
 	case "SearchVectors":
 		return p.searchVectors(ctx, req)
 	case "UpdateKinesisStreamingDestination":
@@ -1081,4 +853,56 @@ func itemKeyFromDefinition(definition, attrs map[string]any) string {
 		return itemKey(item)
 	}
 	return itemKey(attrs)
+}
+
+// ExpireItems deletes every item whose TTL attribute has passed, in every
+// table of id's scope with TTL enabled, and reports how many it deleted. It
+// serves the edge's /_aws/dynamodb/expired, which is not an operation.
+func ExpireItems(ctx context.Context, deps spi.Deps, id spi.Identity) (int, error) {
+	p, req := &Pack{deps: deps}, &spi.Request{Identity: id}
+	tables, _, err := p.col(req, "tables").List(ctx, "", "", 0)
+	if err != nil {
+		return 0, err
+	}
+	expired := 0
+	for _, tableRecord := range tables {
+		table := tableRecord.Key
+		rawTTL, ok, err := p.col(req, "ttl").Get(ctx, table)
+		if err != nil {
+			return 0, err
+		}
+		var ttl map[string]any
+		if !ok || json.Unmarshal(rawTTL, &ttl) != nil || !truthy(ttl["Enabled"]) || str(ttl["AttributeName"]) == "" {
+			continue
+		}
+		items, _, err := p.col(req, "items:"+table).List(ctx, "", "", 0)
+		if err != nil {
+			return 0, err
+		}
+		definition := p.tableDef(ctx, req, table)
+		for _, itemRecord := range items {
+			var item map[string]any
+			_ = json.Unmarshal(itemRecord.Value, &item)
+			expires, err := strconv.ParseInt(str(asMap(item[str(ttl["AttributeName"])])["N"]), 10, 64)
+			if err != nil || expires > p.deps.Clock.Now().Unix() {
+				continue
+			}
+			deleted := false
+			if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+				if _, ok, err := tx.Get(itemRecord.Key); err != nil || !ok {
+					return err
+				}
+				deleted = true
+				return tx.Delete(itemRecord.Key)
+			}); err != nil {
+				return 0, err
+			}
+			if !deleted {
+				continue
+			}
+			expired++
+			p.emitStream(ctx, req, table, "REMOVE", p.tableKey(definition, item), item)
+		}
+	}
+	return expired, nil
 }

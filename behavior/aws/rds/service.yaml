@@ -1,0 +1,489 @@
+schema: bir/1
+service: aws.rds
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Instances, clusters, snapshots and their groups are control-plane
+# records: no database engine runs, every change is immediately "available",
+# and an endpoint is a name no one answers on. Cloud Control reads the
+# instance and cluster collections, so their names and layout are kept.
+#
+# The pack also answered some 120 further operations from one prefix-guessed
+# key-value store that echoed the request back. Those are mock tier now rather
+# than emulate: see docs/CRITIQUE.md.
+provenance: authored
+
+resources:
+  instance:
+    collection: dbinst
+    id: { input_members: [DBInstanceIdentifier] }
+    record: {}
+  cluster:
+    collection: dbcluster
+    id: { input_members: [DBClusterIdentifier] }
+    record: {}
+  snapshot:
+    collection: dbsnap
+    id: { input_members: [DBSnapshotIdentifier] }
+    record: {}
+  csnap:
+    collection: dbcsnap
+    id: { input_members: [DBClusterSnapshotIdentifier] }
+    record: {}
+  subnetgroup:
+    collection: dbsubnet
+    id: { input_members: [DBSubnetGroupName] }
+    record: {}
+  pg:
+    collection: dbpg
+    id: { input_members: [DBParameterGroupName] }
+    record: {}
+  params:
+    collection: dbpg-params
+    id: { input_members: [DBParameterGroupName] }
+    record: {}
+  cpg:
+    collection: dbcpg
+    id: { input_members: [DBClusterParameterGroupName] }
+    record: {}
+  og:
+    collection: dbog
+    id: { input_members: [OptionGroupName] }
+    record: {}
+  role:
+    collection: dbrole
+    id: { derive: "string(input.DBInstanceIdentifier) + ':' + string(input.RoleArn)" }
+    record: {}
+  sub:
+    collection: dbev
+    id: { input_members: [SubscriptionName] }
+    record: {}
+  tags:
+    collection: rdstags
+    id: { input_members: [ResourceName] }
+    record: {}
+
+errors:
+  InstanceNotFound: { code: DBInstanceNotFound, http: 404, fault: client }
+  InstanceExists: { code: DBInstanceAlreadyExists, http: 400, fault: client }
+  ClusterNotFound: { code: DBClusterNotFoundFault, http: 404, fault: client }
+  ClusterExists: { code: DBClusterAlreadyExistsFault, http: 400, fault: client }
+  SnapshotNotFound: { code: DBSnapshotNotFound, http: 404, fault: client }
+  SnapshotExists: { code: DBSnapshotAlreadyExists, http: 400, fault: client }
+  ClusterSnapshotNotFound: { code: DBClusterSnapshotNotFoundFault, http: 404, fault: client }
+  SubnetGroupNotFound: { code: DBSubnetGroupNotFoundFault, http: 404, fault: client }
+  ParameterGroupNotFound: { code: DBParameterGroupNotFound, http: 404, fault: client }
+  OptionGroupNotFound: { code: OptionGroupNotFoundFault, http: 404, fault: client }
+  SubscriptionNotFound: { code: SubscriptionNotFound, http: 404, fault: client }
+
+operations:
+  # --- instances -----------------------------------------------------------
+
+  CreateDBInstance:
+    let:
+      id: string(input.DBInstanceIdentifier)
+    reads: { r: { resource: instance } }
+    require:
+      - { cond: "!r_found", error: InstanceExists }
+    effects:
+      - put:
+          resource: instance
+          record:
+            DBInstanceIdentifier: id
+            DBInstanceStatus: "'available'"
+            Engine: input.Engine
+            DBInstanceClass: input.DBInstanceClass
+            MasterUsername: "'MasterUsername' in input ? input.MasterUsername : null"
+            Endpoint: "{'Address': id + '.' + identity.region + '.rds.amazonaws.com', 'Port': lower(string(input.Engine)).contains('postgres') ? 5432 : 3306}"
+    output:
+      DBInstance: rec
+
+  DescribeDBInstances:
+    reads: { r: { resource: instance, key: "'DBInstanceIdentifier' in input ? string(input.DBInstanceIdentifier) : '-'" } }
+    require:
+      - { cond: "!('DBInstanceIdentifier' in input) || r_found", error: InstanceNotFound }
+    list:
+      resource: instance
+      member: DBInstances
+      filter: "!('DBInstanceIdentifier' in input) || item.DBInstanceIdentifier == input.DBInstanceIdentifier"
+
+  ModifyDBInstance: &modifyInstance
+    reads: { r: { resource: instance } }
+    require:
+      - { cond: r_found, error: InstanceNotFound }
+    effects:
+      - patch: { resource: instance, spread: input }
+    output:
+      DBInstance: rec
+  RebootDBInstance: *modifyInstance
+
+  StopDBInstance:
+    <<: *modifyInstance
+    effects:
+      - patch: { resource: instance, record: { DBInstanceStatus: "'stopped'" } }
+  StartDBInstance:
+    <<: *modifyInstance
+    effects:
+      - patch: { resource: instance, record: { DBInstanceStatus: "'available'" } }
+
+  DeleteDBInstance:
+    reads: { r: { resource: instance } }
+    require:
+      - { cond: r_found, error: InstanceNotFound }
+    effects:
+      - delete: { resource: instance }
+    output:
+      DBInstance: "merge(r, {'DBInstanceStatus': 'deleting'})"
+
+  CreateDBInstanceReadReplica:
+    let:
+      id: string(input.DBInstanceIdentifier)
+    reads:
+      r: { resource: instance }
+      src: { resource: instance, key: string(input.SourceDBInstanceIdentifier) }
+    require:
+      - { cond: "!r_found", error: InstanceExists }
+      - { cond: src_found, error: InstanceNotFound }
+    effects:
+      - put:
+          resource: instance
+          key: id
+          record:
+            DBInstanceIdentifier: id
+            DBInstanceStatus: "'available'"
+            ReadReplicaSourceDBInstanceIdentifier: input.SourceDBInstanceIdentifier
+            Engine: src.Engine
+            DBInstanceClass: "'DBInstanceClass' in input ? input.DBInstanceClass : src.DBInstanceClass"
+            MasterUsername: "'MasterUsername' in src ? src.MasterUsername : null"
+            Endpoint: "{'Address': id + '.' + identity.region + '.rds.amazonaws.com', 'Port': src.Endpoint.Port}"
+    output:
+      DBInstance: rec
+
+  PromoteReadReplica:
+    reads: { r: { resource: instance } }
+    require:
+      - { cond: r_found, error: InstanceNotFound }
+    effects:
+      - patch: { resource: instance, record: { ReadReplicaSourceDBInstanceIdentifier: "null" } }
+    output:
+      DBInstance: rec
+
+  RestoreDBInstanceFromDBSnapshot:
+    let:
+      id: string(input.DBInstanceIdentifier)
+    reads:
+      r: { resource: instance }
+      snap: { resource: snapshot }
+    require:
+      - { cond: "!r_found", error: InstanceExists }
+      - { cond: snap_found, error: SnapshotNotFound }
+    effects:
+      - put:
+          resource: instance
+          record:
+            DBInstanceIdentifier: id
+            DBInstanceStatus: "'available'"
+            Engine: snap.Engine
+            Endpoint: "{'Address': id + '.' + identity.region + '.rds.amazonaws.com', 'Port': lower(string(snap.Engine)).contains('postgres') ? 5432 : 3306}"
+    output:
+      DBInstance: rec
+
+  AddRoleToDBInstance:
+    effects:
+      - put: { resource: role, record: { RoleArn: input.RoleArn } }
+    output: {}
+  RemoveRoleFromDBInstance: {delete: {resource: role, missing: ignore}}
+
+  # --- clusters ------------------------------------------------------------
+
+  CreateDBCluster: &createCluster
+    let:
+      id: string(input.DBClusterIdentifier)
+    reads: { r: { resource: cluster } }
+    require:
+      - { cond: "!r_found", error: ClusterExists }
+    effects:
+      - put:
+          resource: cluster
+          record:
+            DBClusterIdentifier: id
+            Status: "'available'"
+            Engine: input.Engine
+            Endpoint: "id + '.cluster-' + identity.region + '.rds.amazonaws.com'"
+    output:
+      DBCluster: rec
+
+  RestoreDBClusterFromSnapshot:
+    <<: *createCluster
+    reads:
+      r: { resource: cluster }
+      snap: { resource: csnap, key: string(input.SnapshotIdentifier) }
+    require:
+      - { cond: "!r_found", error: ClusterExists }
+      - { cond: snap_found, error: ClusterSnapshotNotFound }
+
+  DescribeDBClusters:
+    reads: { r: { resource: cluster, key: "'DBClusterIdentifier' in input ? string(input.DBClusterIdentifier) : '-'" } }
+    require:
+      - { cond: "!('DBClusterIdentifier' in input) || r_found", error: ClusterNotFound }
+    list:
+      resource: cluster
+      member: DBClusters
+      filter: "!('DBClusterIdentifier' in input) || item.DBClusterIdentifier == input.DBClusterIdentifier"
+
+  ModifyDBCluster: &modifyCluster
+    reads: { r: { resource: cluster } }
+    require:
+      - { cond: r_found, error: ClusterNotFound }
+    effects:
+      - patch: { resource: cluster, spread: input }
+    output:
+      DBCluster: rec
+  FailoverDBCluster: *modifyCluster
+
+  DeleteDBCluster:
+    reads: { r: { resource: cluster } }
+    require:
+      - { cond: r_found, error: ClusterNotFound }
+    effects:
+      - delete: { resource: cluster }
+    output:
+      DBCluster: "merge(r, {'Status': 'deleting'})"
+
+  # --- snapshots -----------------------------------------------------------
+
+  CreateDBSnapshot:
+    reads:
+      r: { resource: snapshot }
+      db: { resource: instance }
+    require:
+      - { cond: "!r_found", error: SnapshotExists }
+      - { cond: db_found, error: InstanceNotFound }
+    effects:
+      - put:
+          resource: snapshot
+          record:
+            DBSnapshotIdentifier: input.DBSnapshotIdentifier
+            DBInstanceIdentifier: input.DBInstanceIdentifier
+            Engine: db.Engine
+            Status: "'available'"
+    output:
+      DBSnapshot: rec
+
+  DescribeDBSnapshots:
+    reads: { r: { resource: snapshot, key: "'DBSnapshotIdentifier' in input ? string(input.DBSnapshotIdentifier) : '-'" } }
+    require:
+      - { cond: "!('DBSnapshotIdentifier' in input) || r_found", error: SnapshotNotFound }
+    list:
+      resource: snapshot
+      member: DBSnapshots
+      filter: "!('DBSnapshotIdentifier' in input) || item.DBSnapshotIdentifier == input.DBSnapshotIdentifier"
+
+  CopyDBSnapshot:
+    reads:
+      src: { resource: snapshot, key: string(input.SourceDBSnapshotIdentifier) }
+      dst: { resource: snapshot, key: string(input.TargetDBSnapshotIdentifier) }
+    require:
+      - { cond: src_found, error: SnapshotNotFound }
+      - { cond: "!dst_found", error: SnapshotExists }
+    effects:
+      - put:
+          resource: snapshot
+          key: string(input.TargetDBSnapshotIdentifier)
+          record:
+            DBSnapshotIdentifier: input.TargetDBSnapshotIdentifier
+            DBInstanceIdentifier: src.DBInstanceIdentifier
+            Engine: src.Engine
+            Status: "'available'"
+    output:
+      DBSnapshot: rec
+
+  DeleteDBSnapshot:
+    reads: { r: { resource: snapshot } }
+    require:
+      - { cond: r_found, error: SnapshotNotFound }
+    effects:
+      - delete: { resource: snapshot }
+    output:
+      DBSnapshot: "merge(r, {'Status': 'deleted'})"
+
+  CreateDBClusterSnapshot:
+    reads: { c: { resource: cluster } }
+    require:
+      - { cond: c_found, error: ClusterNotFound }
+    effects:
+      - put:
+          resource: csnap
+          record:
+            DBClusterSnapshotIdentifier: input.DBClusterSnapshotIdentifier
+            DBClusterIdentifier: input.DBClusterIdentifier
+            Engine: c.Engine
+            Status: "'available'"
+    output:
+      DBClusterSnapshot: rec
+
+  DescribeDBClusterSnapshots:
+    list:
+      resource: csnap
+      member: DBClusterSnapshots
+      filter: "!('DBClusterSnapshotIdentifier' in input) || item.DBClusterSnapshotIdentifier == input.DBClusterSnapshotIdentifier"
+
+  DeleteDBClusterSnapshot:
+    reads: { r: { resource: csnap } }
+    require:
+      - { cond: r_found, error: ClusterSnapshotNotFound }
+    effects:
+      - delete: { resource: csnap }
+    output:
+      DBClusterSnapshot: "merge(r, {'Status': 'deleted'})"
+
+  # --- groups and subscriptions --------------------------------------------
+
+  CreateDBSubnetGroup:
+    effects:
+      - put:
+          resource: subnetgroup
+          record:
+            DBSubnetGroupName: input.DBSubnetGroupName
+            DBSubnetGroupDescription: input.DBSubnetGroupDescription
+    output:
+      DBSubnetGroup: rec
+  DescribeDBSubnetGroups:
+    list:
+      resource: subnetgroup
+      member: DBSubnetGroups
+      filter: "!('DBSubnetGroupName' in input) || item.DBSubnetGroupName == input.DBSubnetGroupName"
+  DeleteDBSubnetGroup: {delete: {resource: subnetgroup, missing: ignore}}
+
+  CreateDBParameterGroup:
+    effects:
+      - put:
+          resource: pg
+          record:
+            DBParameterGroupName: input.DBParameterGroupName
+            DBParameterGroupFamily: input.DBParameterGroupFamily
+    output:
+      DBParameterGroup: rec
+  DescribeDBParameterGroups:
+    list:
+      resource: pg
+      member: DBParameterGroups
+      filter: "!('DBParameterGroupName' in input) || item.DBParameterGroupName == input.DBParameterGroupName"
+  DeleteDBParameterGroup: {delete: {resource: pg, missing: ignore}}
+
+  # A group's parameters are the ones set on it, by name; unset parameters
+  # have no engine defaults to fall back to.
+  ModifyDBParameterGroup:
+    reads:
+      g: { resource: pg }
+      p: { resource: params }
+    require:
+      - { cond: g_found, error: ParameterGroupNotFound }
+    effects:
+      - put:
+          resource: params
+          record:
+            Parameters: "(p_found ? p.Parameters.filter(x, !(x.ParameterName in input.Parameters.map(y, y.ParameterName))) : []) + input.Parameters"
+    output:
+      DBParameterGroupName: input.DBParameterGroupName
+  ResetDBParameterGroup:
+    reads:
+      g: { resource: pg }
+      p: { resource: params }
+    require:
+      - { cond: g_found, error: ParameterGroupNotFound }
+    let:
+      all: "('ResetAllParameters' in input && input.ResetAllParameters) || !('Parameters' in input)"
+    effects:
+      - delete: { resource: params, missing: ignore, when: all }
+      - patch:
+          resource: params
+          when: "!all && p_found"
+          record:
+            Parameters: "p.Parameters.filter(x, !(x.ParameterName in input.Parameters.map(y, y.ParameterName)))"
+    output:
+      DBParameterGroupName: input.DBParameterGroupName
+  DescribeDBParameters:
+    reads: { p: { resource: params } }
+    output:
+      Parameters: "p_found ? p.Parameters : []"
+
+  CreateDBClusterParameterGroup:
+    effects:
+      - put:
+          resource: cpg
+          record:
+            DBClusterParameterGroupName: input.DBClusterParameterGroupName
+            DBParameterGroupFamily: input.DBParameterGroupFamily
+    output:
+      DBClusterParameterGroup: rec
+  DescribeDBClusterParameterGroups:
+    list:
+      resource: cpg
+      member: DBClusterParameterGroups
+      filter: "!('DBClusterParameterGroupName' in input) || item.DBClusterParameterGroupName == input.DBClusterParameterGroupName"
+  DeleteDBClusterParameterGroup: {delete: {resource: cpg, missing: ignore}}
+
+  CreateOptionGroup:
+    effects:
+      - put:
+          resource: og
+          record:
+            OptionGroupName: input.OptionGroupName
+            EngineName: input.EngineName
+            MajorEngineVersion: input.MajorEngineVersion
+    output:
+      OptionGroup: rec
+  DescribeOptionGroups:
+    list:
+      resource: og
+      member: OptionGroupsList
+      filter: "!('OptionGroupName' in input) || item.OptionGroupName == input.OptionGroupName"
+  DeleteOptionGroup: {delete: {resource: og, missing: ignore}}
+
+  CreateEventSubscription:
+    effects:
+      - put:
+          resource: sub
+          record:
+            CustSubscriptionId: input.SubscriptionName
+            SnsTopicArn: input.SnsTopicArn
+            Status: "'active'"
+    output:
+      EventSubscription: rec
+  DescribeEventSubscriptions:
+    list:
+      resource: sub
+      member: EventSubscriptionsList
+      filter: "!('SubscriptionName' in input) || item.CustSubscriptionId == input.SubscriptionName"
+  DeleteEventSubscription:
+    reads: { r: { resource: sub } }
+    require:
+      - { cond: r_found, error: SubscriptionNotFound }
+    effects:
+      - delete: { resource: sub }
+    output:
+      EventSubscription: "merge(r, {'Status': 'deleting'})"
+
+  # --- tags ----------------------------------------------------------------
+
+  AddTagsToResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - put:
+          resource: tags
+          record:
+            TagList: "(t_found ? t.TagList.filter(x, !(x.Key in input.Tags.map(y, y.Key))) : []) + input.Tags"
+    output: {}
+  RemoveTagsFromResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - patch:
+          resource: tags
+          when: t_found
+          record:
+            TagList: "t.TagList.filter(x, !(x.Key in input.TagKeys))"
+    output: {}
+  ListTagsForResource:
+    reads: { t: { resource: tags } }
+    output:
+      TagList: "t_found ? t.TagList : []"

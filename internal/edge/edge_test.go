@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -84,9 +85,12 @@ func TestSNSInternalOptOutAndRetrospectEndpoints(t *testing.T) {
 	if opt.StatusCode != http.StatusNoContent {
 		t.Fatalf("opt-out status %d", opt.StatusCode)
 	}
-	chk, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CheckIfPhoneNumberIsOptedOut", Input: map[string]any{"PhoneNumber": "+15555550999"}})
+	chk, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CheckIfPhoneNumberIsOptedOut", Input: map[string]any{"phoneNumber": "+15555550999"}})
 	if err != nil || chk.Output["isOptedOut"] != true {
 		t.Fatalf("opted out %#v err=%v", chk, err)
+	}
+	if out, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "ListPhoneNumbersOptedOut"}); err != nil || fmt.Sprint(out.Output["phoneNumbers"]) != "[+15555550999]" {
+		t.Fatalf("opted-out list %#v err=%v", out, err)
 	}
 	sms, err := http.Get(ts.URL + "/_aws/sns/sms-messages?accountId=1&region=us-east-1")
 	if err != nil {

@@ -1,0 +1,457 @@
+schema: bir/1
+service: aws.events
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Rules, targets, event buses, archives, endpoints, event sources,
+# replays and tags are records. Delivery is Go, in internal/services/aws/events:
+# PutEvents matches rules and delivers to their targets, a worker retries
+# failed deliveries and fires scheduled rules, and the operations that
+# validate a rule's schedule or a target's shape, and the connections and API
+# destinations delivery authenticates with, are natives. No archive stores
+# events and no replay re-sends them.
+provenance: authored
+
+native:
+  - PutRule
+  - EnableRule
+  - DisableRule
+  - PutTargets
+  - PutEvents
+  - PutPartnerEvents
+  - TestEventPattern
+  - CreateConnection
+  - UpdateConnection
+  - DescribeConnection
+  - ListConnections
+  - DeleteConnection
+  - DeauthorizeConnection
+  - CreateApiDestination
+  - UpdateApiDestination
+worker: retries failed target deliveries and fires scheduled rules
+
+resources:
+  # Rules and targets are keyed by bus and name joined by NUL, the layout the
+  # natives and the worker read them in. A bus given as an ARN is its name.
+  rule:
+    collection: rules
+    id:
+      derive: >-
+        ('EventBusName' in input && string(input.EventBusName) != ''
+        ? (string(input.EventBusName).contains(':event-bus/') ? split(string(input.EventBusName), ':event-bus/')[1] : string(input.EventBusName))
+        : 'default') + '\x00' + ('Name' in input ? string(input.Name) : '')
+    record: {}
+  targets:
+    collection: targets
+    id:
+      derive: >-
+        ('EventBusName' in input && string(input.EventBusName) != ''
+        ? (string(input.EventBusName).contains(':event-bus/') ? split(string(input.EventBusName), ':event-bus/')[1] : string(input.EventBusName))
+        : 'default') + '\x00' + ('Rule' in input ? string(input.Rule) : '')
+    record: {}
+  bus:
+    collection: buses
+    id: { derive: "'Name' in input ? string(input.Name) : ('EventBusName' in input ? string(input.EventBusName) : 'default')" }
+    record: {}
+  archive:
+    collection: archives
+    id: { input_members: [ArchiveName] }
+    record: {}
+  globalendpoint:
+    collection: endpoints
+    id: { input_members: [Name] }
+    record: {}
+  partner:
+    collection: partners
+    id: { input_members: [Name] }
+    record: {}
+  source:
+    collection: sources
+    id: { input_members: [Name] }
+    record: {}
+  replay:
+    collection: replays
+    id: { input_members: [ReplayName] }
+    record: {}
+  destination:
+    collection: apidest
+    id: { input_members: [Name] }
+    record: {}
+  tags:
+    collection: evtags
+    id: { input_members: [ResourceARN] }
+    record: {}
+
+errors:
+  RuleNotFound: { code: ResourceNotFoundException, http: 400, fault: client, message: Rule does not exist. }
+  NotFound: { code: ResourceNotFoundException, http: 400, fault: client }
+  Exists: { code: ResourceAlreadyExistsException, http: 400, fault: client }
+
+operations:
+  # --- rules and targets -----------------------------------------------------
+
+  DescribeRule:
+    reads: { r: { resource: rule } }
+    require:
+      - { cond: r_found, error: RuleNotFound }
+    output:
+      Name: r.Name
+      Arn: &ruleArn >-
+        'arn:aws:events:' + identity.region + ':' + identity.account + ':rule/'
+        + ('EventBusName' in r && string(r.EventBusName) != '' && string(r.EventBusName) != 'default' ? string(r.EventBusName) + '/' : '') + string(r.Name)
+      EventPattern: "'EventPattern' in r ? r.EventPattern : null"
+      ScheduleExpression: "'ScheduleExpression' in r ? r.ScheduleExpression : null"
+      State: r.State
+      Description: "'Description' in r ? r.Description : null"
+      RoleArn: "'RoleArn' in r ? r.RoleArn : null"
+      EventBusName: "'EventBusName' in r ? r.EventBusName : null"
+
+  ListRules:
+    let:
+      bus: &bus >-
+        'EventBusName' in input && string(input.EventBusName) != ''
+        ? (string(input.EventBusName).contains(':event-bus/') ? split(string(input.EventBusName), ':event-bus/')[1] : string(input.EventBusName))
+        : 'default'
+    list:
+      resource: rule
+      member: Rules
+      filter: >-
+        ('EventBusName' in item && string(item.EventBusName) != ''
+        ? (string(item.EventBusName).contains(':event-bus/') ? split(string(item.EventBusName), ':event-bus/')[1] : string(item.EventBusName))
+        : 'default') == bus
+        && (!('NamePrefix' in input) || string(item.Name).startsWith(string(input.NamePrefix)))
+    output:
+      Rules: >-
+        items.map(r, {'Name': r.Name,
+        'Arn': 'arn:aws:events:' + identity.region + ':' + identity.account + ':rule/' + (bus == 'default' ? '' : bus + '/') + string(r.Name),
+        'EventPattern': 'EventPattern' in r ? r.EventPattern : null,
+        'ScheduleExpression': 'ScheduleExpression' in r ? r.ScheduleExpression : null,
+        'State': r.State, 'Description': 'Description' in r ? r.Description : null,
+        'EventBusName': 'EventBusName' in r ? r.EventBusName : null})
+
+  DeleteRule:
+    effects:
+      - delete: { resource: rule, missing: ignore }
+    output: {}
+
+  ListTargetsByRule:
+    reads: { t: { resource: targets } }
+    output:
+      Targets: "t_found ? t.Targets : []"
+
+  RemoveTargets:
+    reads: { t: { resource: targets } }
+    effects:
+      - patch:
+          resource: targets
+          when: t_found
+          record:
+            Targets: "t.Targets.filter(x, !(x.Id in input.Ids))"
+    output:
+      FailedEntryCount: "0"
+      FailedEntries: "[]"
+
+  ListRuleNamesByTarget:
+    let:
+      bus: *bus
+    list:
+      resource: targets
+      member: RuleNames
+      filter: item.Bus == bus && item.Targets.exists(x, x.Arn == input.TargetArn)
+    output:
+      RuleNames: items.map(t, t.Rule)
+
+  # --- event buses and permissions ---------------------------------------------
+
+  CreateEventBus:
+    reads: { b: { resource: bus } }
+    require:
+      - { cond: "!b_found", error: Exists, message: Event bus already exists. }
+    effects:
+      - put:
+          resource: bus
+          spread: input
+          record:
+            Arn: &busArn "'arn:aws:events:' + identity.region + ':' + identity.account + ':event-bus/' + string(input.Name)"
+    output:
+      EventBusArn: rec.Arn
+      Description: "'Description' in rec ? rec.Description : null"
+  UpdateEventBus:
+    reads: { b: { resource: bus } }
+    require:
+      - { cond: b_found, error: NotFound, message: Event bus does not exist. }
+    effects:
+      - patch: { resource: bus, spread: input }
+    output:
+      Arn: rec.Arn
+      Name: rec.Name
+      Description: "'Description' in rec ? rec.Description : null"
+  DescribeEventBus:
+    reads: { b: { resource: bus } }
+    output:
+      Name: "b_found ? b.Name : ('Name' in input ? input.Name : 'default')"
+      Arn: "b_found ? b.Arn : 'arn:aws:events:' + identity.region + ':' + identity.account + ':event-bus/' + ('Name' in input ? string(input.Name) : 'default')"
+      Description: "b_found && 'Description' in b ? b.Description : null"
+      Policy: >-
+        b_found && 'Statements' in b && size(b.Statements) > 0
+        ? dyn(toJSON({'Version': '2012-10-17', 'Statement': b.Statements})) : null
+  ListEventBuses:
+    list: { resource: bus, member: EventBuses }
+    output:
+      EventBuses: "items.map(b, {'Name': b.Name, 'Arn': b.Arn, 'Description': 'Description' in b ? b.Description : null})"
+  DeleteEventBus: {delete: {resource: bus, missing: ignore}}
+
+  PutPermission:
+    reads: { b: { resource: bus } }
+    effects:
+      - put:
+          resource: bus
+          record:
+            Name: "b_found ? b.Name : ('EventBusName' in input ? input.EventBusName : 'default')"
+            Arn: "b_found ? b.Arn : 'arn:aws:events:' + identity.region + ':' + identity.account + ':event-bus/' + ('EventBusName' in input ? string(input.EventBusName) : 'default')"
+            Description: "b_found && 'Description' in b ? b.Description : null"
+            Statements: >-
+              (b_found && 'Statements' in b ? b.Statements.filter(s, !('StatementId' in input) || s.Sid != input.StatementId) : [])
+              + [{'Sid': 'StatementId' in input ? input.StatementId : '', 'Effect': 'Allow', 'Principal': 'Principal' in input ? input.Principal : '*', 'Action': 'Action' in input ? input.Action : 'events:PutEvents'}]
+    output: {}
+  RemovePermission:
+    reads: { b: { resource: bus } }
+    effects:
+      - patch:
+          resource: bus
+          when: b_found
+          record:
+            Statements: "'Statements' in b ? b.Statements.filter(s, !('StatementId' in input) || s.Sid != input.StatementId) : []"
+    output: {}
+
+  # --- archives, endpoints, event sources and replays ---------------------------
+
+  CreateArchive:
+    reads: { a: { resource: archive } }
+    require:
+      - { cond: "!a_found", error: Exists, message: Archive already exists. }
+    effects:
+      - put:
+          resource: archive
+          spread: input
+          record:
+            ArchiveArn: "'arn:aws:events:' + identity.region + ':' + identity.account + ':archive/' + string(input.ArchiveName)"
+            State: "'ENABLED'"
+            CreationTime: "double(int(now))"
+    output: &archiveState
+      ArchiveArn: rec.ArchiveArn
+      State: rec.State
+  UpdateArchive:
+    reads: { a: { resource: archive } }
+    require:
+      - { cond: a_found, error: NotFound, message: Archive does not exist. }
+    effects:
+      - patch: { resource: archive, spread: input }
+    output: *archiveState
+  DescribeArchive:
+    reads: { a: { resource: archive } }
+    require:
+      - { cond: a_found, error: NotFound, message: Archive does not exist. }
+    output:
+      ArchiveArn: a.ArchiveArn
+      ArchiveName: a.ArchiveName
+      EventSourceArn: a.EventSourceArn
+      Description: "'Description' in a ? a.Description : null"
+      EventPattern: "'EventPattern' in a ? a.EventPattern : null"
+      RetentionDays: "'RetentionDays' in a ? a.RetentionDays : null"
+      State: a.State
+      EventCount: "0"
+      SizeBytes: "0"
+  ListArchives:
+    list: { resource: archive, member: Archives }
+    output:
+      Archives: "items.map(a, {'ArchiveName': a.ArchiveName, 'EventSourceArn': a.EventSourceArn, 'State': a.State, 'RetentionDays': 'RetentionDays' in a ? a.RetentionDays : null, 'EventCount': 0, 'SizeBytes': 0})"
+  DeleteArchive:
+    reads: { a: { resource: archive } }
+    require:
+      - { cond: a_found, error: NotFound, message: Archive does not exist. }
+    effects:
+      - delete: { resource: archive }
+    output: {}
+
+  CreateEndpoint:
+    effects:
+      - put:
+          resource: globalendpoint
+          spread: input
+          record:
+            Arn: "'arn:aws:events:' + identity.region + ':' + identity.account + ':endpoint/' + string(input.Name)"
+            State: "'ACTIVE'"
+    output: &endpointOut
+      Name: rec.Name
+      Arn: rec.Arn
+      RoutingConfig: rec.RoutingConfig
+      EventBuses: rec.EventBuses
+      RoleArn: "'RoleArn' in rec ? rec.RoleArn : null"
+      State: rec.State
+  UpdateEndpoint:
+    reads: { e: { resource: globalendpoint } }
+    require:
+      - { cond: e_found, error: NotFound, message: Endpoint does not exist. }
+    effects:
+      - patch: { resource: globalendpoint, spread: input }
+    output: *endpointOut
+  DescribeEndpoint:
+    reads: { rec: { resource: globalendpoint } }
+    require:
+      - { cond: rec_found, error: NotFound, message: Endpoint does not exist. }
+    output: *endpointOut
+  ListEndpoints:
+    list: { resource: globalendpoint, member: Endpoints }
+  DeleteEndpoint: {delete: {resource: globalendpoint, missing: ignore}}
+
+  CreatePartnerEventSource:
+    effects:
+      - put:
+          resource: partner
+          record:
+            Name: input.Name
+            Account: input.Account
+            Arn: &sourceArn "'arn:aws:events:' + identity.region + '::event-source/' + string(input.Name)"
+    output:
+      EventSourceArn: rec.Arn
+  DescribePartnerEventSource:
+    reads: { p: { resource: partner } }
+    require:
+      - { cond: p_found, error: NotFound, message: Event source does not exist. }
+    output:
+      Name: p.Name
+      Arn: p.Arn
+  ListPartnerEventSources:
+    list:
+      resource: partner
+      member: PartnerEventSources
+      filter: string(item.Name).startsWith(string(input.NamePrefix))
+    output:
+      PartnerEventSources: "items.map(p, {'Name': p.Name, 'Arn': p.Arn})"
+  ListPartnerEventSourceAccounts:
+    select: { binding: found, resource: partner, filter: item.Name == input.EventSourceName }
+    output:
+      PartnerEventSourceAccounts: "found.map(p, {'Account': p.Account, 'State': 'ACTIVE'})"
+  DeletePartnerEventSource: {delete: {resource: partner, missing: ignore}}
+
+  # An event source is the consumer's view of a partner source: it exists
+  # when the partner created it, and is activated or deactivated here.
+  ActivateEventSource: &activate
+    reads:
+      p: { resource: partner }
+      s: { resource: source }
+    require:
+      - { cond: p_found || s_found, error: NotFound, message: Event source does not exist. }
+    effects:
+      - put:
+          resource: source
+          record:
+            Name: input.Name
+            Arn: *sourceArn
+            State: "'ACTIVE'"
+    output: {}
+  DeactivateEventSource:
+    <<: *activate
+    effects:
+      - put:
+          resource: source
+          record:
+            Name: input.Name
+            Arn: *sourceArn
+            State: "'INACTIVE'"
+  DescribeEventSource:
+    reads:
+      p: { resource: partner }
+      s: { resource: source }
+    require:
+      - { cond: p_found || s_found, error: NotFound, message: Event source does not exist. }
+    output:
+      Name: input.Name
+      Arn: *sourceArn
+      State: "s_found ? s.State : 'PENDING'"
+  ListEventSources:
+    list: { resource: source, member: EventSources }
+
+  StartReplay:
+    reads: { r: { resource: replay } }
+    require:
+      - { cond: "!r_found", error: Exists, message: Replay already exists. }
+    effects:
+      - put:
+          resource: replay
+          spread: input
+          record:
+            ReplayArn: "'arn:aws:events:' + identity.region + ':' + identity.account + ':replay/' + string(input.ReplayName)"
+            State: "'RUNNING'"
+    output:
+      ReplayArn: rec.ReplayArn
+      State: rec.State
+  CancelReplay:
+    reads: { r: { resource: replay } }
+    require:
+      - { cond: r_found, error: NotFound, message: Replay does not exist. }
+    effects:
+      - patch: { resource: replay, record: { State: "'CANCELLED'" } }
+    output:
+      ReplayArn: rec.ReplayArn
+      State: rec.State
+  DescribeReplay:
+    reads: { r: { resource: replay } }
+    require:
+      - { cond: r_found, error: NotFound, message: Replay does not exist. }
+    output:
+      ReplayName: r.ReplayName
+      ReplayArn: r.ReplayArn
+      Description: "'Description' in r ? r.Description : null"
+      State: r.State
+      EventSourceArn: r.EventSourceArn
+      Destination: r.Destination
+      EventStartTime: r.EventStartTime
+      EventEndTime: r.EventEndTime
+  ListReplays:
+    list: { resource: replay, member: Replays }
+    output:
+      Replays: "items.map(r, {'ReplayName': r.ReplayName, 'EventSourceArn': r.EventSourceArn, 'State': r.State, 'EventStartTime': r.EventStartTime, 'EventEndTime': r.EventEndTime})"
+
+  # --- API destinations and tags -------------------------------------------------
+
+  DescribeApiDestination:
+    reads: { d: { resource: destination } }
+    require:
+      - { cond: d_found, error: NotFound, message: API destination does not exist. }
+    output:
+      ApiDestinationArn: d.ApiDestinationArn
+      Name: d.Name
+      Description: "'Description' in d ? d.Description : null"
+      ApiDestinationState: d.ApiDestinationState
+      ConnectionArn: d.ConnectionArn
+      InvocationEndpoint: d.InvocationEndpoint
+      HttpMethod: d.HttpMethod
+      InvocationRateLimitPerSecond: d.InvocationRateLimitPerSecond
+      CreationTime: d.CreationTime
+      LastModifiedTime: d.LastModifiedTime
+  ListApiDestinations:
+    list: { resource: destination, member: ApiDestinations }
+  DeleteApiDestination: {delete: {resource: destination, missing: ignore}}
+
+  TagResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - put:
+          resource: tags
+          record:
+            Tags: "(t_found ? t.Tags.filter(x, !(x.Key in input.Tags.map(y, y.Key))) : []) + input.Tags"
+    output: {}
+  UntagResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - patch:
+          resource: tags
+          when: t_found
+          record:
+            Tags: "t.Tags.filter(x, !(x.Key in input.TagKeys))"
+    output: {}
+  ListTagsForResource:
+    reads: { t: { resource: tags } }
+    output:
+      Tags: "t_found ? t.Tags : []"

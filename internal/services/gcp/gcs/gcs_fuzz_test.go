@@ -28,7 +28,7 @@ func FuzzObjectBytes(f *testing.F) {
 		p := New(spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-		_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"name": "b"}})
+		_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.buckets.insert", Input: map[string]any{"project": "p", "name": "b"}})
 		_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.insert", Input: map[string]any{"bucket": "b", "name": name}, Body: io.NopCloser(bytes.NewReader([]byte(body)))})
 		got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "storage.objects.get", Input: map[string]any{"bucket": "b", "object": name, "alt": "media"}})
 		if err == nil && got != nil && got.Stream != nil {

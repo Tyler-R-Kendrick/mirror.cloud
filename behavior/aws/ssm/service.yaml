@@ -1,0 +1,635 @@
+schema: bir/1
+service: aws.ssm
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Parameter Store keeps every version's history; a SecureString is
+# stored base64-encoded, which is an encoding and not encryption, and a read
+# answers that encoding unless it asks WithDecryption. Documents,
+# associations, commands, patch baselines, maintenance windows, automation
+# executions, OpsItems and service settings are control-plane records: no
+# agent runs a command and every run succeeds at once.
+#
+# The pack also answered 88 further operations from one
+# prefix-guessed key-value store that echoed the request back. Those are mock
+# tier now rather than emulate: see docs/CRITIQUE.md.
+provenance: authored
+
+resources:
+  param:
+    collection: ssm
+    id: { input_members: [Name] }
+    record: {}
+  history:
+    collection: ssmhist
+    id: { input_members: [Name] }
+    record: {}
+  labels:
+    collection: ssmlabels
+    id: { input_members: [Name] }
+    record: {}
+  tags:
+    collection: ssmtags
+    id: { input_members: [ResourceId] }
+    record: {}
+  doc:
+    collection: ssmdoc
+    id: { input_members: [Name] }
+    record: {}
+  docversion:
+    collection: ssmdocver
+    id: { derive: "string(input.Name) + ':' + string(input.DocumentVersion)" }
+    record: {}
+  assoc:
+    collection: ssmassoc
+    id: { input_members: [AssociationId] }
+    record: {}
+  command:
+    collection: ssmcmd
+    id: { input_members: [CommandId] }
+    record: {}
+  baseline:
+    collection: ssmpatch
+    id: { input_members: [BaselineId] }
+    record: {}
+  defaultbaseline:
+    collection: ssmpatchdefault
+    id: { derive: "'default'" }
+    record: {}
+  window:
+    collection: ssmmw
+    id: { input_members: [WindowId] }
+    record: {}
+  windowtarget:
+    collection: ssmmwt
+    id: { derive: "string(input.WindowId) + ':' + string(input.WindowTargetId)" }
+    record: {}
+  windowtask:
+    collection: ssmmwk
+    id: { derive: "string(input.WindowId) + ':' + string(input.WindowTaskId)" }
+    record: {}
+  automation:
+    collection: ssmauto
+    id: { input_members: [AutomationExecutionId] }
+    record: {}
+  opsitem:
+    collection: ssmops
+    id: { input_members: [OpsItemId] }
+    record: {}
+  sync:
+    collection: ssmsync
+    id: { input_members: [SyncName] }
+    record: {}
+  setting:
+    collection: ssmset
+    id: { input_members: [SettingId] }
+    record: {}
+
+errors:
+  ParameterExists: { code: ParameterAlreadyExists, http: 400, fault: client }
+  ParameterNotFound: { code: ParameterNotFound, http: 400, fault: client }
+  ParameterVersionNotFound: { code: ParameterVersionNotFound, http: 400, fault: client }
+  InvalidDocument: { code: InvalidDocument, http: 400, fault: client }
+  DocumentExists: { code: DocumentAlreadyExists, http: 400, fault: client }
+  AssociationNotFound: { code: AssociationDoesNotExist, http: 400, fault: client }
+  InvocationNotFound: { code: InvocationDoesNotExist, http: 400, fault: client }
+  DoesNotExist: { code: DoesNotExistException, http: 400, fault: client }
+  AutomationNotFound: { code: AutomationExecutionNotFoundException, http: 400, fault: client }
+  OpsItemNotFound: { code: OpsItemNotFoundException, http: 400, fault: client }
+  SyncExists: { code: ResourceDataSyncAlreadyExistsException, http: 400, fault: client }
+  SyncNotFound: { code: ResourceDataSyncNotFoundException, http: 400, fault: client }
+
+operations:
+  # --- parameters ----------------------------------------------------------
+
+  PutParameter:
+    reads:
+      r: { resource: param }
+      h: { resource: history }
+    require:
+      - { cond: "!r_found || ('Overwrite' in input && input.Overwrite)", error: ParameterExists }
+    let:
+      type: "'Type' in input ? string(input.Type) : (r_found ? string(r.Type) : 'String')"
+      version: "r_found ? int(r.Version) + 1 : 1"
+      value: "type == 'SecureString' ? b64(string(input.Value)) : string(input.Value)"
+    effects:
+      - put:
+          resource: param
+          record: { Name: input.Name, Type: type, Value: value, Version: version }
+      - put:
+          resource: history
+          record:
+            Name: input.Name
+            Parameters: "(h_found ? h.Parameters : []) + [{'Name': input.Name, 'Type': type, 'Value': value, 'Version': version}]"
+    output:
+      Version: version
+      Tier: "'Standard'"
+
+  GetParameter:
+    reads: { r: { resource: param } }
+    require:
+      - { cond: r_found, error: ParameterNotFound }
+    output:
+      Parameter: "merge(r, {'Value': r.Type == 'SecureString' && 'WithDecryption' in input && input.WithDecryption ? b64decode(r.Value) : r.Value})"
+
+  GetParameters:
+    list:
+      resource: param
+      member: Parameters
+      filter: item.Name in input.Names
+    output:
+      Parameters: &decrypted "items.map(p, merge(p, {'Value': p.Type == 'SecureString' && 'WithDecryption' in input && input.WithDecryption ? b64decode(p.Value) : p.Value}))"
+      InvalidParameters: "input.Names.filter(n, !(n in items.map(p, p.Name)))"
+
+  GetParametersByPath:
+    let:
+      path: "string(input.Path).endsWith('/') ? string(input.Path) : string(input.Path) + '/'"
+      recursive: "'Recursive' in input && input.Recursive"
+    list:
+      resource: param
+      member: Parameters
+      paginate: model
+      filter: >-
+        item.Name.startsWith(path)
+        && (recursive || !substr(item.Name, size(path), size(item.Name)).contains('/'))
+    output:
+      Parameters: *decrypted
+
+  # DescribeParameters answers metadata; a value is never part of it.
+  DescribeParameters:
+    list: { resource: param, member: Parameters, paginate: model }
+    output:
+      Parameters: "items.map(p, {'Name': p.Name, 'Type': p.Type, 'Version': p.Version})"
+
+  GetParameterHistory:
+    reads: { h: { resource: history } }
+    require:
+      - { cond: h_found, error: ParameterNotFound }
+    output:
+      Parameters: "h.Parameters.map(p, merge(p, {'Value': p.Type == 'SecureString' && 'WithDecryption' in input && input.WithDecryption ? b64decode(p.Value) : p.Value}))"
+
+  DeleteParameter:
+    reads: { r: { resource: param } }
+    require:
+      - { cond: r_found, error: ParameterNotFound }
+    effects:
+      - delete: { resource: param }
+      - delete: { resource: history, missing: ignore }
+      - delete: { resource: labels, missing: ignore }
+    output: {}
+
+  DeleteParameters:
+    select: { binding: found, resource: param, filter: item.Name in input.Names }
+    effects:
+      - delete: { resource: param, where: item.Name in input.Names }
+      - delete: { resource: history, where: item.Name in input.Names }
+      - delete: { resource: labels, where: item.Name in input.Names }
+    output:
+      DeletedParameters: "found.map(p, p.Name)"
+      InvalidParameters: "input.Names.filter(n, !(n in found.map(p, p.Name)))"
+
+  # A label names one version of a parameter. The labels are kept together,
+  # beside the parameter, with the version they were attached to.
+  LabelParameterVersion:
+    reads: { r: { resource: param } }
+    let:
+      version: "'ParameterVersion' in input ? int(input.ParameterVersion) : (r_found ? int(r.Version) : 0)"
+    require:
+      - { cond: r_found, error: ParameterNotFound }
+      - { cond: "version >= 1 && version <= int(r.Version)", error: ParameterVersionNotFound }
+    effects:
+      - put: { resource: labels, record: { Name: input.Name, ParameterVersion: version, Labels: input.Labels } }
+    output:
+      ParameterVersion: version
+      InvalidLabels: "[]"
+
+  UnlabelParameterVersion:
+    reads:
+      r: { resource: param }
+      l: { resource: labels }
+    require:
+      - { cond: r_found, error: ParameterNotFound }
+    let:
+      held: "l_found && int(l.ParameterVersion) == int(input.ParameterVersion) ? l.Labels : []"
+    effects:
+      - patch:
+          resource: labels
+          when: l_found
+          record:
+            Labels: "l.Labels.filter(x, !(x in held && x in input.Labels))"
+    output:
+      RemovedLabels: "input.Labels.filter(x, x in held)"
+      InvalidLabels: "input.Labels.filter(x, !(x in held))"
+
+  AddTagsToResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - put:
+          resource: tags
+          record:
+            TagList: "(t_found ? t.TagList.filter(x, !(x.Key in input.Tags.map(y, y.Key))) : []) + input.Tags"
+    output: {}
+  RemoveTagsFromResource:
+    reads: { t: { resource: tags } }
+    effects:
+      - patch:
+          resource: tags
+          when: t_found
+          record:
+            TagList: "t.TagList.filter(x, !(x.Key in input.TagKeys))"
+    output: {}
+  ListTagsForResource:
+    reads: { t: { resource: tags } }
+    output:
+      TagList: "t_found ? t.TagList : []"
+
+  # --- documents -----------------------------------------------------------
+
+  CreateDocument:
+    reads: { d: { resource: doc } }
+    require:
+      - { cond: "!d_found", error: DocumentExists }
+    let:
+      type: "'DocumentType' in input ? string(input.DocumentType) : 'Command'"
+    effects:
+      - put:
+          resource: docversion
+          key: "string(input.Name) + ':1'"
+          record: &docRecord
+            Name: input.Name
+            Content: input.Content
+            DocumentType: type
+            DocumentVersion: "'1'"
+            Status: "'Active'"
+      - put: { resource: doc, record: *docRecord }
+    output:
+      DocumentDescription: rec
+
+  GetDocument:
+    reads: { d: { resource: doc } }
+    require:
+      - { cond: d_found, error: InvalidDocument }
+    output:
+      Name: d.Name
+      Content: d.Content
+      DocumentType: d.DocumentType
+      DocumentVersion: d.DocumentVersion
+      Status: d.Status
+
+  DescribeDocument:
+    reads: { d: { resource: doc } }
+    require:
+      - { cond: d_found, error: InvalidDocument }
+    output:
+      Document: d
+
+  UpdateDocument:
+    reads: { d: { resource: doc } }
+    require:
+      - { cond: d_found, error: InvalidDocument }
+    let:
+      version: "string(int(d.DocumentVersion) + 1)"
+    effects:
+      - put:
+          resource: docversion
+          key: "string(input.Name) + ':' + version"
+          record:
+            Name: input.Name
+            Content: input.Content
+            DocumentType: d.DocumentType
+            DocumentVersion: version
+            Status: "'Active'"
+      - patch: { resource: doc, record: { DocumentVersion: version, Content: input.Content } }
+    output:
+      DocumentDescription: rec
+
+  DeleteDocument:
+    reads: { d: { resource: doc } }
+    require:
+      - { cond: d_found, error: InvalidDocument }
+    effects:
+      - delete: { resource: doc }
+      - delete: { resource: docversion, where: item.Name == input.Name }
+    output: {}
+
+  ListDocuments:
+    list: { resource: doc, member: DocumentIdentifiers, paginate: model }
+  ListDocumentVersions:
+    list:
+      resource: docversion
+      member: DocumentVersions
+      filter: item.Name == input.Name
+
+  UpdateDocumentDefaultVersion:
+    reads: { d: { resource: doc } }
+    require:
+      - { cond: d_found, error: InvalidDocument }
+    effects:
+      - patch: { resource: doc, record: { DefaultVersion: input.DocumentVersion } }
+    output:
+      Description: rec
+
+  # --- associations and commands ---------------------------------------------
+
+  CreateAssociation:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: assoc
+          key: fx.id
+          record:
+            AssociationId: fx.id
+            Name: input.Name
+            AssociationName: "'AssociationName' in input ? input.AssociationName : null"
+            Status: "{'Name': 'Success'}"
+    output:
+      AssociationDescription: rec
+  DescribeAssociation: {get: {resource: assoc, error: AssociationNotFound, wrap: AssociationDescription}}
+  UpdateAssociation:
+    reads: { a: { resource: assoc } }
+    require:
+      - { cond: a_found, error: AssociationNotFound }
+    effects:
+      - patch: { resource: assoc, record: { Name: "'Name' in input ? input.Name : a.Name" } }
+    output:
+      AssociationDescription: rec
+  DeleteAssociation:
+    reads: { a: { resource: assoc } }
+    require:
+      - { cond: a_found, error: AssociationNotFound }
+    effects:
+      - delete: { resource: assoc }
+    output: {}
+  ListAssociations:
+    list: { resource: assoc, member: Associations, paginate: model }
+
+  SendCommand:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: command
+          key: fx.id
+          record:
+            CommandId: fx.id
+            DocumentName: input.DocumentName
+            Status: "'Success'"
+            InstanceIds: "'InstanceIds' in input ? input.InstanceIds : []"
+    output:
+      Command: rec
+  ListCommands:
+    list:
+      resource: command
+      member: Commands
+      filter: "!('CommandId' in input) || item.CommandId == input.CommandId"
+  # A command has one invocation per instance it targeted.
+  ListCommandInvocations:
+    reads: { c: { resource: command, key: "'CommandId' in input ? string(input.CommandId) : '-'" } }
+    output:
+      CommandInvocations: >-
+        c_found ? c.InstanceIds.map(i, {'CommandId': c.CommandId, 'InstanceId': i,
+        'DocumentName': c.DocumentName, 'Status': c.Status}) : []
+  GetCommandInvocation:
+    reads: { c: { resource: command } }
+    require:
+      - { cond: "c_found && input.InstanceId in c.InstanceIds", error: InvocationNotFound }
+    output:
+      CommandId: c.CommandId
+      InstanceId: input.InstanceId
+      DocumentName: c.DocumentName
+      Status: c.Status
+      StandardOutputContent: "''"
+      StandardErrorContent: "''"
+  CancelCommand:
+    reads: { c: { resource: command } }
+    effects:
+      - patch: { resource: command, when: c_found, record: { Status: "'Cancelled'" } }
+    output: {}
+
+  # --- patch baselines -------------------------------------------------------
+
+  CreatePatchBaseline:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: baseline
+          key: fx.id
+          record:
+            BaselineId: fx.id
+            Name: input.Name
+            OperatingSystem: "'OperatingSystem' in input ? input.OperatingSystem : 'WINDOWS'"
+    output:
+      BaselineId: fx.id
+  GetPatchBaseline: &baselineOut
+    reads: { b: { resource: baseline } }
+    require:
+      - { cond: b_found, error: DoesNotExist }
+    output:
+      BaselineId: b.BaselineId
+      Name: b.Name
+      OperatingSystem: b.OperatingSystem
+  UpdatePatchBaseline:
+    <<: *baselineOut
+    effects:
+      - patch: { resource: baseline, record: { Name: "'Name' in input ? input.Name : b.Name" } }
+    output:
+      BaselineId: rec.BaselineId
+      Name: rec.Name
+      OperatingSystem: rec.OperatingSystem
+  DeletePatchBaseline:
+    effects:
+      - delete: { resource: baseline, missing: ignore }
+    output:
+      BaselineId: input.BaselineId
+  DescribePatchBaselines:
+    list: { resource: baseline, member: BaselineIdentities, paginate: model }
+  RegisterDefaultPatchBaseline:
+    reads: { b: { resource: baseline } }
+    require:
+      - { cond: b_found, error: DoesNotExist }
+    effects:
+      - put: { resource: defaultbaseline, record: { BaselineId: input.BaselineId } }
+    output:
+      BaselineId: input.BaselineId
+  GetDefaultPatchBaseline:
+    reads: { d: { resource: defaultbaseline } }
+    output:
+      BaselineId: "d_found ? d.BaselineId : 'arn:aws:ssm:' + identity.region + ':' + identity.account + ':patchbaseline/default'"
+
+  # --- maintenance windows ---------------------------------------------------
+
+  CreateMaintenanceWindow:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: window
+          key: fx.id
+          record:
+            WindowId: fx.id
+            Name: input.Name
+            Schedule: input.Schedule
+            Duration: input.Duration
+            Cutoff: input.Cutoff
+    output:
+      WindowId: fx.id
+  GetMaintenanceWindow: &windowOut
+    reads: { w: { resource: window } }
+    require:
+      - { cond: w_found, error: DoesNotExist }
+    output:
+      WindowId: w.WindowId
+      Name: w.Name
+      Schedule: w.Schedule
+      Duration: w.Duration
+      Cutoff: w.Cutoff
+  UpdateMaintenanceWindow:
+    <<: *windowOut
+    effects:
+      - patch: { resource: window, record: { Name: "'Name' in input ? input.Name : w.Name" } }
+    output:
+      WindowId: rec.WindowId
+      Name: rec.Name
+      Schedule: rec.Schedule
+      Duration: rec.Duration
+      Cutoff: rec.Cutoff
+  DeleteMaintenanceWindow:
+    effects:
+      - delete: { resource: window, missing: ignore }
+    output:
+      WindowId: input.WindowId
+  DescribeMaintenanceWindows:
+    list: { resource: window, member: WindowIdentities, paginate: model }
+
+  RegisterTargetWithMaintenanceWindow:
+    reads: { w: { resource: window } }
+    require:
+      - { cond: w_found, error: DoesNotExist }
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: windowtarget
+          key: "string(input.WindowId) + ':' + fx.id"
+          record: { WindowTargetId: fx.id, WindowId: input.WindowId, ResourceType: input.ResourceType }
+    output:
+      WindowTargetId: fx.id
+  DeregisterTargetFromMaintenanceWindow:
+    effects:
+      - delete: { resource: windowtarget, missing: ignore }
+    output:
+      WindowId: input.WindowId
+      WindowTargetId: input.WindowTargetId
+  DescribeMaintenanceWindowTargets:
+    list:
+      resource: windowtarget
+      member: Targets
+      filter: item.WindowId == input.WindowId
+
+  RegisterTaskWithMaintenanceWindow:
+    reads: { w: { resource: window } }
+    require:
+      - { cond: w_found, error: DoesNotExist }
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: windowtask
+          key: "string(input.WindowId) + ':' + fx.id"
+          record: { WindowTaskId: fx.id, WindowId: input.WindowId, TaskArn: input.TaskArn }
+    output:
+      WindowTaskId: fx.id
+  DeregisterTaskFromMaintenanceWindow:
+    effects:
+      - delete: { resource: windowtask, missing: ignore }
+    output:
+      WindowId: input.WindowId
+      WindowTaskId: input.WindowTaskId
+  DescribeMaintenanceWindowTasks:
+    list:
+      resource: windowtask
+      member: Tasks
+      filter: item.WindowId == input.WindowId
+
+  # --- automation, OpsItems, data syncs and settings -------------------------
+
+  StartAutomationExecution:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: automation
+          key: fx.id
+          record:
+            AutomationExecutionId: fx.id
+            DocumentName: input.DocumentName
+            AutomationExecutionStatus: "'Success'"
+    output:
+      AutomationExecutionId: fx.id
+  GetAutomationExecution: {get: {resource: automation, error: AutomationNotFound, wrap: AutomationExecution}}
+  StopAutomationExecution:
+    reads: { a: { resource: automation } }
+    require:
+      - { cond: a_found, error: AutomationNotFound }
+    effects:
+      - patch: { resource: automation, record: { AutomationExecutionStatus: "'Cancelled'" } }
+    output: {}
+  DescribeAutomationExecutions:
+    list: { resource: automation, member: AutomationExecutionMetadataList, paginate: model }
+
+  CreateOpsItem:
+    effects:
+      - generate: { bind: id, kind: hex, bytes: 8 }
+      - put:
+          resource: opsitem
+          key: fx.id
+          record: { OpsItemId: fx.id, Title: input.Title, Source: input.Source, Status: "'Open'" }
+    output:
+      OpsItemId: fx.id
+      OpsItemArn: "'arn:aws:ssm:' + identity.region + ':' + identity.account + ':opsitem/' + fx.id"
+  GetOpsItem: {get: {resource: opsitem, error: OpsItemNotFound, wrap: OpsItem}}
+  UpdateOpsItem:
+    reads: { o: { resource: opsitem } }
+    require:
+      - { cond: o_found, error: OpsItemNotFound }
+    effects:
+      - patch:
+          resource: opsitem
+          record:
+            Status: "'Status' in input ? input.Status : o.Status"
+            Title: "'Title' in input ? input.Title : o.Title"
+    output: {}
+  DeleteOpsItem: {delete: {resource: opsitem, missing: ignore}}
+  DescribeOpsItems:
+    list: { resource: opsitem, member: OpsItemSummaries, paginate: model }
+
+  CreateResourceDataSync:
+    reads: { s: { resource: sync } }
+    require:
+      - { cond: "!s_found", error: SyncExists }
+    effects:
+      - put:
+          resource: sync
+          record:
+            SyncName: input.SyncName
+            SyncType: "'SyncType' in input ? input.SyncType : null"
+            Status: "'Successful'"
+    output: {}
+  ListResourceDataSync:
+    list: { resource: sync, member: ResourceDataSyncItems, paginate: model }
+  DeleteResourceDataSync:
+    reads: { s: { resource: sync } }
+    require:
+      - { cond: s_found, error: SyncNotFound }
+    effects:
+      - delete: { resource: sync }
+    output: {}
+
+  # A setting nobody has changed answers an empty value.
+  GetServiceSetting:
+    reads: { s: { resource: setting } }
+    output:
+      ServiceSetting: "s_found ? s : {'SettingId': input.SettingId, 'SettingValue': ''}"
+  UpdateServiceSetting:
+    effects:
+      - put: { resource: setting, record: { SettingId: input.SettingId, SettingValue: input.SettingValue } }
+    output: {}
+  ResetServiceSetting:
+    effects:
+      - delete: { resource: setting, missing: ignore }
+    output:
+      ServiceSetting: "{'SettingId': input.SettingId, 'SettingValue': ''}"

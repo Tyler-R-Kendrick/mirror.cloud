@@ -27,7 +27,9 @@ func (Codec) Protocol() model.Protocol { return model.ProtoRESTJSON1 }
 
 func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error) {
 	if svc.ID == "aws.lambda" {
-		return lambdaOp(svc, r), nil
+		if op := lambdaOp(svc, r); op != nil {
+			return op, nil
+		}
 	}
 	if svc.ID == "aws.apigateway" {
 		return apigatewayOp(svc, r), nil
@@ -66,98 +68,17 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	return awsjson.New10().Route(svc, r)
 }
 
+// lambdaOp answers the RPC-style `?Action=` form this project's own tests
+// call Lambda with; every other request routes by the model's URIs.
 func lambdaOp(svc *model.Service, r *http.Request) *model.Operation {
-	if a := r.URL.Query().Get("Action"); a != "" {
-		if op := svc.OperationByName(a); op != nil {
-			return op
-		}
-		return &model.Operation{Name: a, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+	a := r.URL.Query().Get("Action")
+	if a == "" {
+		return nil
 	}
-	path, m := r.URL.Path, r.Method
-	name := "CreateFunction"
-	switch {
-	case strings.Contains(path, "/invocations"):
-		name = "Invoke"
-	case strings.Contains(path, "/event-source-mappings"):
-		switch m {
-		case http.MethodPost:
-			name = "CreateEventSourceMapping"
-		case http.MethodPut:
-			name = "UpdateEventSourceMapping"
-		case http.MethodDelete:
-			name = "DeleteEventSourceMapping"
-		case http.MethodGet:
-			if strings.HasSuffix(path, "/event-source-mappings") || strings.HasSuffix(path, "/event-source-mappings/") {
-				name = "ListEventSourceMappings"
-			} else {
-				name = "GetEventSourceMapping"
-			}
-		}
-	case strings.Contains(path, "/tags"):
-		switch m {
-		case http.MethodPost:
-			name = "TagResource"
-		case http.MethodDelete:
-			name = "UntagResource"
-		default:
-			name = "ListTags"
-		}
-	case strings.Contains(path, "/code") && m == http.MethodPut:
-		name = "UpdateFunctionCode"
-	case strings.Contains(path, "/configuration") && m == http.MethodPut:
-		name = "UpdateFunctionConfiguration"
-	case strings.Contains(path, "/configuration"):
-		name = "GetFunctionConfiguration"
-	case strings.Contains(path, "/versions") && m == http.MethodPost:
-		name = "PublishVersion"
-	case strings.Contains(path, "/versions"):
-		name = "ListVersionsByFunction"
-	case strings.Contains(path, "/aliases"):
-		switch m {
-		case http.MethodPost:
-			name = "CreateAlias"
-		case http.MethodPut:
-			name = "UpdateAlias"
-		case http.MethodDelete:
-			name = "DeleteAlias"
-		case http.MethodGet:
-			if strings.HasSuffix(path, "/aliases") || strings.HasSuffix(path, "/aliases/") {
-				name = "ListAliases"
-			} else {
-				name = "GetAlias"
-			}
-		}
-	case strings.Contains(path, "/policy"):
-		switch m {
-		case http.MethodPost:
-			name = "AddPermission"
-		case http.MethodDelete:
-			name = "RemovePermission"
-		default:
-			name = "GetPolicy"
-		}
-	case strings.Contains(path, "/concurrency"):
-		switch m {
-		case http.MethodPut:
-			name = "PutFunctionConcurrency"
-		case http.MethodDelete:
-			name = "DeleteFunctionConcurrency"
-		default:
-			name = "GetFunctionConcurrency"
-		}
-	case m == http.MethodGet && strings.Contains(path, "/functions/") && !strings.HasSuffix(path, "/functions"):
-		name = "GetFunction"
-	case m == http.MethodGet:
-		name = "ListFunctions"
-	case m == http.MethodDelete:
-		name = "DeleteFunction"
-	case m == http.MethodPost && strings.Contains(path, "/functions"):
-		name = "CreateFunction"
-	}
-	if op := svc.OperationByName(name); op != nil {
+	if op := svc.OperationByName(a); op != nil {
 		return op
 	}
-	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+	return &model.Operation{Name: a, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
 }
 
 func apigatewayOp(svc *model.Service, r *http.Request) *model.Operation {
@@ -547,7 +468,14 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 			fillOpenSearchPath(in, r.URL.Path)
 		}
 	}
-	for k, vs := range r.URL.Query() {
+	queryMembers := queryMemberNames(svc, op)
+	for wire, vs := range r.URL.Query() {
+		// A query-bound member arrives by its wire name: Lambda's
+		// UntagResource sends TagKeys as ?tagKeys=, and nothing else names it.
+		k := wire
+		if name, ok := queryMembers[wire]; ok {
+			k = name
+		}
 		if _, ok := in[k]; !ok {
 			// A member the model declares as a list collects every repeated
 			// value -- Stripe's expand[]=customer&expand[]=charge is one
@@ -1008,6 +936,21 @@ func fillOpenSearchPath(in map[string]any, path string) {
 			in["DomainName"] = parts[i+2]
 		}
 	}
+}
+
+// queryMemberNames maps each query-bound input member's wire name to the
+// member's own name.
+func queryMemberNames(svc *model.Service, op *model.Operation) map[string]string {
+	names := map[string]string{}
+	if op == nil || op.Input == "" {
+		return names
+	}
+	for name, m := range svc.Shapes[op.Input].Members {
+		if m.Binding.Location == "query" && m.Binding.Name != "" {
+			names[m.Binding.Name] = name
+		}
+	}
+	return names
 }
 
 func isListMember(svc *model.Service, op *model.Operation, name string) bool {

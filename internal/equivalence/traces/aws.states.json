@@ -1,0 +1,348 @@
+{
+  "schema": "trace/1",
+  "service": "aws.states",
+  "source": "pack:internal/services/aws/states@9a84d2d1",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateStateMachine",
+      "input": {
+        "definition": "{\"StartAt\":\"P\",\"States\":{\"P\":{\"Type\":\"Pass\",\"End\":true}}}",
+        "name": "sm",
+        "roleArn": "arn:aws:iam::000000000000:role/states"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "creationDate": 0,
+        "stateMachineArn": "arn:aws:states:us-east-1:000000000000:stateMachine:sm"
+      }
+    },
+    {
+      "operation": "PublishStateMachineVersion",
+      "input": {
+        "stateMachineArn": {
+          "$fromPath": "stateMachineArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "creationDate": 0,
+        "stateMachineVersionArn": "arn:aws:states:us-east-1:000000000000:stateMachine:sm:1"
+      }
+    },
+    {
+      "operation": "CreateStateMachineAlias",
+      "input": {
+        "description": "first",
+        "name": "live",
+        "routingConfiguration": [
+          {
+            "stateMachineVersionArn": {
+              "$fromPath": "stateMachineVersionArn",
+              "$fromStep": 1
+            },
+            "weight": 100
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "creationDate": 0,
+        "stateMachineAliasArn": "arn:aws:states:us-east-1:000000000000:stateMachine:sm:live"
+      }
+    },
+    {
+      "operation": "DescribeStateMachineAlias",
+      "input": {
+        "stateMachineAliasArn": {
+          "$fromPath": "stateMachineAliasArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "creationDate": 0,
+        "description": "first",
+        "name": "live",
+        "routingConfiguration": [
+          {
+            "stateMachineVersionArn": "arn:aws:states:us-east-1:000000000000:stateMachine:sm:1",
+            "weight": 100
+          }
+        ],
+        "stateMachineAliasArn": "arn:aws:states:us-east-1:000000000000:stateMachine:sm:live",
+        "updateDate": 0
+      }
+    },
+    {
+      "operation": "UpdateStateMachineAlias",
+      "input": {
+        "description": "second",
+        "stateMachineAliasArn": {
+          "$fromPath": "stateMachineAliasArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "updateDate": 0
+      }
+    },
+    {
+      "operation": "DescribeStateMachineAlias",
+      "input": {
+        "stateMachineAliasArn": {
+          "$fromPath": "stateMachineAliasArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "creationDate": 0,
+        "description": "second",
+        "name": "live",
+        "routingConfiguration": [
+          {
+            "stateMachineVersionArn": "arn:aws:states:us-east-1:000000000000:stateMachine:sm:1",
+            "weight": 100
+          }
+        ],
+        "stateMachineAliasArn": "arn:aws:states:us-east-1:000000000000:stateMachine:sm:live",
+        "updateDate": 0
+      }
+    },
+    {
+      "operation": "DeleteStateMachineAlias",
+      "input": {
+        "stateMachineAliasArn": {
+          "$fromPath": "stateMachineAliasArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeStateMachineAlias",
+      "input": {
+        "stateMachineAliasArn": {
+          "$fromPath": "stateMachineAliasArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFound",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteStateMachineAlias",
+      "input": {
+        "stateMachineAliasArn": {
+          "$fromPath": "stateMachineAliasArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFound",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateStateMachine",
+      "input": {
+        "definition": "{\"StartAt\":\"First\",\"States\":{\"First\":{\"Type\":\"Map\",\"Label\":\"first\",\"ItemsPath\":\"$.items\",\"ItemProcessor\":{\"StartAt\":\"Done\",\"ProcessorConfig\":{\"Mode\":\"DISTRIBUTED\",\"ExecutionType\":\"STANDARD\"},\"States\":{\"Done\":{\"Type\":\"Succeed\"}}},\"End\":true}}}",
+        "name": "mapper",
+        "roleArn": "arn:aws:iam::000000000000:role/states"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "creationDate": 0,
+        "stateMachineArn": "arn:aws:states:us-east-1:000000000000:stateMachine:mapper"
+      }
+    },
+    {
+      "operation": "StartExecution",
+      "input": {
+        "input": "{\"items\":[1,2]}",
+        "stateMachineArn": {
+          "$fromPath": "stateMachineArn",
+          "$fromStep": 9
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "executionArn": "arn:aws:states:us-east-1:000000000000:execution:mapper:9c8e2cb0-0724-481e-a4b2-9522455f06cd",
+        "startDate": 0
+      }
+    },
+    {
+      "operation": "ListMapRuns",
+      "input": {
+        "executionArn": {
+          "$fromPath": "executionArn",
+          "$fromStep": 10
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "mapRuns": [
+          {
+            "executionArn": "arn:aws:states:us-east-1:000000000000:execution:mapper:9c8e2cb0-0724-481e-a4b2-9522455f06cd",
+            "mapRunArn": "arn:aws:states:us-east-1:000000000000:mapRun:mapper/first:33f6fc5d-83b7-4b8e-89c4-f349b79ed4dd",
+            "startDate": 0,
+            "stateMachineArn": "arn:aws:states:us-east-1:000000000000:stateMachine:mapper",
+            "stopDate": 0
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeMapRun",
+      "input": {
+        "mapRunArn": {
+          "$fromPath": "mapRuns.0.mapRunArn",
+          "$fromStep": 11
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "executionArn": "arn:aws:states:us-east-1:000000000000:execution:mapper:9c8e2cb0-0724-481e-a4b2-9522455f06cd",
+        "executionCounts": {
+          "aborted": 0,
+          "failed": 0,
+          "failuresNotRedrivable": 0,
+          "pending": 0,
+          "pendingRedrive": 0,
+          "resultsWritten": 0,
+          "running": 0,
+          "succeeded": 2,
+          "timedOut": 0,
+          "total": 2
+        },
+        "itemCounts": {
+          "aborted": 0,
+          "failed": 0,
+          "failuresNotRedrivable": 0,
+          "pending": 0,
+          "pendingRedrive": 0,
+          "resultsWritten": 0,
+          "running": 0,
+          "succeeded": 2,
+          "timedOut": 0,
+          "total": 2
+        },
+        "mapRunArn": "arn:aws:states:us-east-1:000000000000:mapRun:mapper/first:33f6fc5d-83b7-4b8e-89c4-f349b79ed4dd",
+        "maxConcurrency": 0,
+        "redriveCount": 0,
+        "redriveDate": null,
+        "startDate": 0,
+        "status": "SUCCEEDED",
+        "stopDate": 0,
+        "toleratedFailureCount": 0,
+        "toleratedFailurePercentage": 0
+      },
+      "recut": "DescribeMapRunOutput has no stateMachineArn member; the pack answered its stored record whole"
+    },
+    {
+      "operation": "DescribeMapRun",
+      "input": {
+        "mapRunArn": "arn:aws:states:us-east-1:000000000000:mapRun:mapper/none:none"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFound",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

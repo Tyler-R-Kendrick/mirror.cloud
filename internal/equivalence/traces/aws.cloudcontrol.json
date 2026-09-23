@@ -1,0 +1,207 @@
+{
+  "schema": "trace/1",
+  "service": "aws.cloudcontrol",
+  "source": "pack:internal/services/aws/cloudcontrol@02995dc",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateResource",
+      "input": {
+        "DesiredState": "{\"LogGroupName\":\"g\"}",
+        "TypeName": "AWS::Logs::LogGroup"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressEvent": {
+          "Identifier": "7c589129",
+          "OperationStatus": "SUCCESS",
+          "TypeName": "AWS::Logs::LogGroup"
+        }
+      }
+    },
+    {
+      "operation": "GetResource",
+      "input": {
+        "Identifier": {
+          "$fromPath": "ProgressEvent.Identifier",
+          "$fromStep": 0
+        },
+        "TypeName": "AWS::Logs::LogGroup"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceDescription": {
+          "Identifier": "7c589129",
+          "Properties": "{\"LogGroupName\":\"g\"}",
+          "TypeName": "AWS::Logs::LogGroup"
+        }
+      }
+    },
+    {
+      "operation": "ListResources",
+      "input": {
+        "TypeName": "AWS::Logs::LogGroup"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceDescriptions": [
+          {
+            "Identifier": "7c589129",
+            "Properties": "{\"LogGroupName\":\"g\"}",
+            "TypeName": "AWS::Logs::LogGroup"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateResource",
+      "input": {
+        "Identifier": {
+          "$fromPath": "ProgressEvent.Identifier",
+          "$fromStep": 0
+        },
+        "PatchDocument": "[{\"op\":\"add\",\"path\":\"/RetentionInDays\",\"value\":7}]",
+        "TypeName": "AWS::Logs::LogGroup"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressEvent": {
+          "Identifier": "7c589129",
+          "OperationStatus": "SUCCESS"
+        }
+      }
+    },
+    {
+      "operation": "GetResource",
+      "input": {
+        "Identifier": {
+          "$fromPath": "ProgressEvent.Identifier",
+          "$fromStep": 0
+        },
+        "TypeName": "AWS::Logs::LogGroup"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceDescription": {
+          "Identifier": "7c589129",
+          "Properties": "[{\"op\":\"add\",\"path\":\"/RetentionInDays\",\"value\":7}]",
+          "TypeName": "AWS::Logs::LogGroup"
+        }
+      }
+    },
+    {
+      "operation": "UpdateResource",
+      "input": {
+        "Identifier": "missing",
+        "PatchDocument": "[]",
+        "TypeName": "AWS::Logs::LogGroup"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model declares ResourceNotFoundException with httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "GetResourceRequestStatus",
+      "input": {
+        "RequestToken": "t"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressEvent": {
+          "OperationStatus": "SUCCESS"
+        }
+      }
+    },
+    {
+      "operation": "DeleteResource",
+      "input": {
+        "Identifier": {
+          "$fromPath": "ProgressEvent.Identifier",
+          "$fromStep": 0
+        },
+        "TypeName": "AWS::Logs::LogGroup"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProgressEvent": {
+          "OperationStatus": "SUCCESS"
+        }
+      }
+    },
+    {
+      "operation": "GetResource",
+      "input": {
+        "Identifier": {
+          "$fromPath": "ProgressEvent.Identifier",
+          "$fromStep": 0
+        },
+        "TypeName": "AWS::Logs::LogGroup"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model declares ResourceNotFoundException with httpError 404; the pack answered 400."
+    }
+  ]
+}

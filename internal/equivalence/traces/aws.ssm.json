@@ -1,0 +1,1717 @@
+{
+  "schema": "trace/1",
+  "service": "aws.ssm",
+  "source": "pack:internal/services/aws/ssm@566beac",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "PutParameter",
+      "input": {
+        "Name": "/app/a",
+        "Type": "String",
+        "Value": "one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tier": "Standard",
+        "Version": 1
+      },
+      "recut": "The model's PutParameter output declares Tier; a parameter written without one is Standard."
+    },
+    {
+      "operation": "PutParameter",
+      "input": {
+        "Name": "/app/a",
+        "Overwrite": true,
+        "Type": "String",
+        "Value": "two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tier": "Standard",
+        "Version": 2
+      },
+      "recut": "The model's PutParameter output declares Tier; a parameter written without one is Standard."
+    },
+    {
+      "operation": "PutParameter",
+      "input": {
+        "Name": "/app/a",
+        "Type": "String",
+        "Value": "three"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ParameterAlreadyExists",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "The model declares ParameterAlreadyExists for PutParameter; a write to an existing name without Overwrite is refused. The pack overwrote it."
+    },
+    {
+      "operation": "GetParameter",
+      "input": {
+        "Name": "/app/a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameter": {
+          "Name": "/app/a",
+          "Type": "String",
+          "Value": "two",
+          "Version": 2
+        }
+      },
+      "recut": "Follows from step 2: the write without Overwrite is refused, so /app/a stays at version 2."
+    },
+    {
+      "operation": "PutParameter",
+      "input": {
+        "Name": "/app/db",
+        "Type": "SecureString",
+        "Value": "secret"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tier": "Standard",
+        "Version": 1
+      },
+      "recut": "The model's PutParameter output declares Tier; a parameter written without one is Standard."
+    },
+    {
+      "operation": "GetParameter",
+      "input": {
+        "Name": "/app/db",
+        "WithDecryption": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameter": {
+          "Name": "/app/db",
+          "Type": "SecureString",
+          "Value": "secret",
+          "Version": 1
+        }
+      }
+    },
+    {
+      "operation": "GetParameter",
+      "input": {
+        "Name": "/app/db"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameter": {
+          "Name": "/app/db",
+          "Type": "SecureString",
+          "Value": "c2VjcmV0",
+          "Version": 1
+        }
+      },
+      "recut": "A SecureString is answered in its stored (encoded) form unless the request sets WithDecryption; the pack always decoded it."
+    },
+    {
+      "operation": "PutParameter",
+      "input": {
+        "Name": "/app/sub/x",
+        "Type": "String",
+        "Value": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tier": "Standard",
+        "Version": 1
+      },
+      "recut": "The model's PutParameter output declares Tier; a parameter written without one is Standard."
+    },
+    {
+      "operation": "GetParametersByPath",
+      "input": {
+        "Path": "/app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameters": [
+          {
+            "Name": "/app/a",
+            "Type": "String",
+            "Value": "two",
+            "Version": 2
+          },
+          {
+            "Name": "/app/db",
+            "Type": "SecureString",
+            "Value": "c2VjcmV0",
+            "Version": 1
+          }
+        ]
+      },
+      "recut": "Follows from step 2: the write without Overwrite is refused, so /app/a stays at version 2. A SecureString is answered in its stored (encoded) form unless the request sets WithDecryption; the pack always decoded it."
+    },
+    {
+      "operation": "GetParametersByPath",
+      "input": {
+        "Path": "/app",
+        "Recursive": true,
+        "WithDecryption": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameters": [
+          {
+            "Name": "/app/a",
+            "Type": "String",
+            "Value": "two",
+            "Version": 2
+          },
+          {
+            "Name": "/app/db",
+            "Type": "SecureString",
+            "Value": "secret",
+            "Version": 1
+          },
+          {
+            "Name": "/app/sub/x",
+            "Type": "String",
+            "Value": "1",
+            "Version": 1
+          }
+        ]
+      },
+      "recut": "Follows from step 2: the write without Overwrite is refused, so /app/a stays at version 2."
+    },
+    {
+      "operation": "GetParameters",
+      "input": {
+        "Names": [
+          "/app/a",
+          "/nope"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InvalidParameters": [
+          "/nope"
+        ],
+        "Parameters": [
+          {
+            "Name": "/app/a",
+            "Type": "String",
+            "Value": "two",
+            "Version": 2
+          }
+        ]
+      },
+      "recut": "Follows from step 2: the write without Overwrite is refused, so /app/a stays at version 2. The model's GetParameters output declares InvalidParameters, the names that were not found."
+    },
+    {
+      "operation": "DescribeParameters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameters": [
+          {
+            "Name": "/app/a",
+            "Type": "String",
+            "Version": 2
+          },
+          {
+            "Name": "/app/db",
+            "Type": "SecureString",
+            "Version": 1
+          },
+          {
+            "Name": "/app/sub/x",
+            "Type": "String",
+            "Version": 1
+          }
+        ]
+      },
+      "recut": "Follows from step 2: the write without Overwrite is refused, so /app/a stays at version 2. DescribeParameters answers ParameterMetadata, which has no Value; the pack answered every value."
+    },
+    {
+      "operation": "GetParameterHistory",
+      "input": {
+        "Name": "/app/a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Parameters": [
+          {
+            "Name": "/app/a",
+            "Type": "String",
+            "Value": "one",
+            "Version": 1
+          },
+          {
+            "Name": "/app/a",
+            "Type": "String",
+            "Value": "two",
+            "Version": 2
+          }
+        ]
+      },
+      "recut": "GetParameterHistory answers each version once; the pack recorded the previous version again on every overwrite, and step 2 no longer writes."
+    },
+    {
+      "operation": "LabelParameterVersion",
+      "input": {
+        "Labels": [
+          "live"
+        ],
+        "Name": "/app/a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InvalidLabels": [],
+        "ParameterVersion": 2
+      },
+      "recut": "The model's LabelParameterVersion output is ParameterVersion and InvalidLabels; a label goes on the latest version when none is named. The pack answered a ParameterName the output does not declare, and version 1."
+    },
+    {
+      "operation": "UnlabelParameterVersion",
+      "input": {
+        "Labels": [
+          "live"
+        ],
+        "Name": "/app/a",
+        "ParameterVersion": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InvalidLabels": [],
+        "RemovedLabels": [
+          "live"
+        ]
+      },
+      "recut": "The model's UnlabelParameterVersion output is RemovedLabels and InvalidLabels; the pack answered a ParameterName the output does not declare."
+    },
+    {
+      "operation": "DeleteParameter",
+      "input": {
+        "Name": "/app/a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetParameter",
+      "input": {
+        "Name": "/app/a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ParameterNotFound",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteParameter",
+      "input": {
+        "Name": "/app/a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ParameterNotFound",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "The model declares ParameterNotFound for DeleteParameter; the pack answered success for a parameter that does not exist."
+    },
+    {
+      "operation": "DeleteParameters",
+      "input": {
+        "Names": [
+          "/app/db",
+          "/nope"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeletedParameters": [
+          "/app/db"
+        ],
+        "InvalidParameters": [
+          "/nope"
+        ]
+      },
+      "recut": "The model's DeleteParameters output declares DeletedParameters and InvalidParameters; the pack answered nothing."
+    },
+    {
+      "operation": "AddTagsToResource",
+      "input": {
+        "ResourceId": "/app/sub/x",
+        "ResourceType": "Parameter",
+        "Tags": [
+          {
+            "Key": "k",
+            "Value": "v"
+          },
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "RemoveTagsFromResource",
+      "input": {
+        "ResourceId": "/app/sub/x",
+        "ResourceType": "Parameter",
+        "TagKeys": [
+          "k"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceId": "/app/sub/x",
+        "ResourceType": "Parameter"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TagList": [
+          {
+            "Key": "k2",
+            "Value": "v2"
+          }
+        ]
+      },
+      "recut": "RemoveTagsFromResource removes only the named TagKeys; the pack removed every tag."
+    },
+    {
+      "operation": "CreateDocument",
+      "input": {
+        "Content": "{}",
+        "DocumentType": "Command",
+        "Name": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DocumentDescription": {
+          "Content": "{}",
+          "DocumentType": "Command",
+          "DocumentVersion": "1",
+          "Name": "d",
+          "Status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "GetDocument",
+      "input": {
+        "Name": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Content": "{}",
+        "DocumentType": "Command",
+        "DocumentVersion": "1",
+        "Name": "d",
+        "Status": "Active"
+      }
+    },
+    {
+      "operation": "DescribeDocument",
+      "input": {
+        "Name": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Document": {
+          "Content": "{}",
+          "DocumentType": "Command",
+          "DocumentVersion": "1",
+          "Name": "d",
+          "Status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "UpdateDocument",
+      "input": {
+        "Content": "{\"a\":1}",
+        "Name": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DocumentDescription": {
+          "Content": "{\"a\":1}",
+          "DocumentType": "Command",
+          "DocumentVersion": "2",
+          "Name": "d",
+          "Status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "ListDocumentVersions",
+      "input": {
+        "Name": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DocumentVersions": [
+          {
+            "Content": "{}",
+            "DocumentType": "Command",
+            "DocumentVersion": "1",
+            "Name": "d",
+            "Status": "Active"
+          },
+          {
+            "Content": "{\"a\":1}",
+            "DocumentType": "Command",
+            "DocumentVersion": "2",
+            "Name": "d",
+            "Status": "Active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateDocumentDefaultVersion",
+      "input": {
+        "DocumentVersion": "2",
+        "Name": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Description": {
+          "Content": "{\"a\":1}",
+          "DefaultVersion": "2",
+          "DocumentType": "Command",
+          "DocumentVersion": "2",
+          "Name": "d",
+          "Status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "ListDocuments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DocumentIdentifiers": [
+          {
+            "Content": "{\"a\":1}",
+            "DefaultVersion": "2",
+            "DocumentType": "Command",
+            "DocumentVersion": "2",
+            "Name": "d",
+            "Status": "Active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetDocument",
+      "input": {
+        "Name": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidDocument",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDocument",
+      "input": {
+        "Name": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateAssociation",
+      "input": {
+        "AssociationName": "a1",
+        "Name": "d"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AssociationDescription": {
+          "AssociationId": "7c589129",
+          "AssociationName": "a1",
+          "Name": "d",
+          "Status": {
+            "Name": "Success"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribeAssociation",
+      "input": {
+        "AssociationId": {
+          "$fromPath": "AssociationDescription.AssociationId",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AssociationDescription": {
+          "AssociationId": "7c589129",
+          "AssociationName": "a1",
+          "Name": "d",
+          "Status": {
+            "Name": "Success"
+          }
+        }
+      }
+    },
+    {
+      "operation": "UpdateAssociation",
+      "input": {
+        "AssociationId": {
+          "$fromPath": "AssociationDescription.AssociationId",
+          "$fromStep": 31
+        },
+        "Name": "d2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AssociationDescription": {
+          "AssociationId": "7c589129",
+          "AssociationName": "a1",
+          "Name": "d2",
+          "Status": {
+            "Name": "Success"
+          }
+        }
+      }
+    },
+    {
+      "operation": "ListAssociations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Associations": [
+          {
+            "AssociationId": "7c589129",
+            "AssociationName": "a1",
+            "Name": "d2",
+            "Status": {
+              "Name": "Success"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAssociation",
+      "input": {
+        "AssociationId": {
+          "$fromPath": "AssociationDescription.AssociationId",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeAssociation",
+      "input": {
+        "AssociationId": {
+          "$fromPath": "AssociationDescription.AssociationId",
+          "$fromStep": 31
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AssociationDoesNotExist",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SendCommand",
+      "input": {
+        "DocumentName": "AWS-RunShellScript",
+        "InstanceIds": [
+          "i-1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Command": {
+          "CommandId": "5f59f223",
+          "DocumentName": "AWS-RunShellScript",
+          "InstanceIds": [
+            "i-1"
+          ],
+          "Status": "Success"
+        }
+      }
+    },
+    {
+      "operation": "ListCommands",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Commands": [
+          {
+            "CommandId": "5f59f223",
+            "DocumentName": "AWS-RunShellScript",
+            "InstanceIds": [
+              "i-1"
+            ],
+            "Status": "Success"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListCommandInvocations",
+      "input": {
+        "CommandId": {
+          "$fromPath": "Command.CommandId",
+          "$fromStep": 37
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CommandInvocations": [
+          {
+            "CommandId": "5f59f223",
+            "DocumentName": "AWS-RunShellScript",
+            "InstanceId": "i-1",
+            "Status": "Success"
+          }
+        ]
+      },
+      "recut": "A command has one invocation per instance it targeted; the pack answered a fixed instance i-0."
+    },
+    {
+      "operation": "GetCommandInvocation",
+      "input": {
+        "CommandId": {
+          "$fromPath": "Command.CommandId",
+          "$fromStep": 37
+        },
+        "InstanceId": "i-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CommandId": "5f59f223",
+        "DocumentName": "AWS-RunShellScript",
+        "InstanceId": "i-1",
+        "StandardErrorContent": "",
+        "StandardOutputContent": "",
+        "Status": "Success"
+      }
+    },
+    {
+      "operation": "CancelCommand",
+      "input": {
+        "CommandId": {
+          "$fromPath": "Command.CommandId",
+          "$fromStep": 37
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListCommands",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Commands": [
+          {
+            "CommandId": "5f59f223",
+            "DocumentName": "AWS-RunShellScript",
+            "InstanceIds": [
+              "i-1"
+            ],
+            "Status": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreatePatchBaseline",
+      "input": {
+        "Name": "pb",
+        "OperatingSystem": "AMAZON_LINUX_2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BaselineId": "9c8e2cb0"
+      }
+    },
+    {
+      "operation": "GetPatchBaseline",
+      "input": {
+        "BaselineId": {
+          "$fromPath": "BaselineId",
+          "$fromStep": 43
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BaselineId": "9c8e2cb0",
+        "Name": "pb",
+        "OperatingSystem": "AMAZON_LINUX_2"
+      }
+    },
+    {
+      "operation": "UpdatePatchBaseline",
+      "input": {
+        "BaselineId": {
+          "$fromPath": "BaselineId",
+          "$fromStep": 43
+        },
+        "Name": "pb2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BaselineId": "9c8e2cb0",
+        "Name": "pb2",
+        "OperatingSystem": "AMAZON_LINUX_2"
+      }
+    },
+    {
+      "operation": "DescribePatchBaselines",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BaselineIdentities": [
+          {
+            "BaselineId": "9c8e2cb0",
+            "Name": "pb2",
+            "OperatingSystem": "AMAZON_LINUX_2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RegisterDefaultPatchBaseline",
+      "input": {
+        "BaselineId": {
+          "$fromPath": "BaselineId",
+          "$fromStep": 43
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BaselineId": "9c8e2cb0"
+      }
+    },
+    {
+      "operation": "GetDefaultPatchBaseline",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BaselineId": "9c8e2cb0"
+      }
+    },
+    {
+      "operation": "DeletePatchBaseline",
+      "input": {
+        "BaselineId": {
+          "$fromPath": "BaselineId",
+          "$fromStep": 43
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BaselineId": "9c8e2cb0"
+      },
+      "recut": "The model's DeletePatchBaseline output declares BaselineId; the pack answered nothing."
+    },
+    {
+      "operation": "GetPatchBaseline",
+      "input": {
+        "BaselineId": {
+          "$fromPath": "BaselineId",
+          "$fromStep": 43
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateMaintenanceWindow",
+      "input": {
+        "AllowUnassociatedTargets": false,
+        "Cutoff": 1,
+        "Duration": 2,
+        "Name": "mw",
+        "Schedule": "rate(1 day)"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WindowId": "33f6fc5d"
+      }
+    },
+    {
+      "operation": "GetMaintenanceWindow",
+      "input": {
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cutoff": 1,
+        "Duration": 2,
+        "Name": "mw",
+        "Schedule": "rate(1 day)",
+        "WindowId": "33f6fc5d"
+      }
+    },
+    {
+      "operation": "UpdateMaintenanceWindow",
+      "input": {
+        "Name": "mw2",
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cutoff": 1,
+        "Duration": 2,
+        "Name": "mw2",
+        "Schedule": "rate(1 day)",
+        "WindowId": "33f6fc5d"
+      }
+    },
+    {
+      "operation": "DescribeMaintenanceWindows",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WindowIdentities": [
+          {
+            "Cutoff": 1,
+            "Duration": 2,
+            "Name": "mw2",
+            "Schedule": "rate(1 day)",
+            "WindowId": "33f6fc5d"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RegisterTargetWithMaintenanceWindow",
+      "input": {
+        "ResourceType": "INSTANCE",
+        "Targets": [
+          {
+            "Key": "InstanceIds",
+            "Values": [
+              "i-1"
+            ]
+          }
+        ],
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WindowTargetId": "83d4958a"
+      }
+    },
+    {
+      "operation": "DescribeMaintenanceWindowTargets",
+      "input": {
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Targets": [
+          {
+            "ResourceType": "INSTANCE",
+            "WindowId": "33f6fc5d",
+            "WindowTargetId": "83d4958a"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeregisterTargetFromMaintenanceWindow",
+      "input": {
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        },
+        "WindowTargetId": {
+          "$fromPath": "WindowTargetId",
+          "$fromStep": 55
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WindowId": "33f6fc5d",
+        "WindowTargetId": "83d4958a"
+      },
+      "recut": "The model's DeregisterTargetFromMaintenanceWindow output declares WindowId and WindowTargetId; the pack answered nothing."
+    },
+    {
+      "operation": "RegisterTaskWithMaintenanceWindow",
+      "input": {
+        "TaskArn": "AWS-RunShellScript",
+        "TaskType": "RUN_COMMAND",
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WindowTaskId": "100aa4e6"
+      }
+    },
+    {
+      "operation": "DescribeMaintenanceWindowTasks",
+      "input": {
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tasks": [
+          {
+            "TaskArn": "AWS-RunShellScript",
+            "WindowId": "33f6fc5d",
+            "WindowTaskId": "100aa4e6"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeregisterTaskFromMaintenanceWindow",
+      "input": {
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        },
+        "WindowTaskId": {
+          "$fromPath": "WindowTaskId",
+          "$fromStep": 58
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WindowId": "33f6fc5d",
+        "WindowTaskId": "100aa4e6"
+      },
+      "recut": "The model's DeregisterTaskFromMaintenanceWindow output declares WindowId and WindowTaskId; the pack answered nothing."
+    },
+    {
+      "operation": "DeleteMaintenanceWindow",
+      "input": {
+        "WindowId": {
+          "$fromPath": "WindowId",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WindowId": "33f6fc5d"
+      },
+      "recut": "The model's DeleteMaintenanceWindow output declares WindowId; the pack answered nothing."
+    },
+    {
+      "operation": "StartAutomationExecution",
+      "input": {
+        "DocumentName": "AWS-Hello"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutomationExecutionId": "3ed10eca"
+      }
+    },
+    {
+      "operation": "GetAutomationExecution",
+      "input": {
+        "AutomationExecutionId": {
+          "$fromPath": "AutomationExecutionId",
+          "$fromStep": 62
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutomationExecution": {
+          "AutomationExecutionId": "3ed10eca",
+          "AutomationExecutionStatus": "Success",
+          "DocumentName": "AWS-Hello"
+        }
+      }
+    },
+    {
+      "operation": "StopAutomationExecution",
+      "input": {
+        "AutomationExecutionId": {
+          "$fromPath": "AutomationExecutionId",
+          "$fromStep": 62
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeAutomationExecutions",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AutomationExecutionMetadataList": [
+          {
+            "AutomationExecutionId": "3ed10eca",
+            "AutomationExecutionStatus": "Cancelled",
+            "DocumentName": "AWS-Hello"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateOpsItem",
+      "input": {
+        "Description": "d",
+        "Source": "s",
+        "Title": "t"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OpsItemArn": "arn:aws:ssm:us-east-1:000000000000:opsitem/4da7b6a4",
+        "OpsItemId": "4da7b6a4"
+      },
+      "recut": "The model's CreateOpsItem output declares OpsItemArn; the pack answered only the id."
+    },
+    {
+      "operation": "GetOpsItem",
+      "input": {
+        "OpsItemId": {
+          "$fromPath": "OpsItemId",
+          "$fromStep": 66
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OpsItem": {
+          "OpsItemId": "4da7b6a4",
+          "Source": "s",
+          "Status": "Open",
+          "Title": "t"
+        }
+      }
+    },
+    {
+      "operation": "UpdateOpsItem",
+      "input": {
+        "OpsItemId": {
+          "$fromPath": "OpsItemId",
+          "$fromStep": 66
+        },
+        "Status": "Resolved"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeOpsItems",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OpsItemSummaries": [
+          {
+            "OpsItemId": "4da7b6a4",
+            "Source": "s",
+            "Status": "Resolved",
+            "Title": "t"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteOpsItem",
+      "input": {
+        "OpsItemId": {
+          "$fromPath": "OpsItemId",
+          "$fromStep": 66
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateResourceDataSync",
+      "input": {
+        "SyncName": "s",
+        "SyncType": "SyncFromSource"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListResourceDataSync",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResourceDataSyncItems": [
+          {
+            "Status": "Successful",
+            "SyncName": "s",
+            "SyncType": "SyncFromSource"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteResourceDataSync",
+      "input": {
+        "SyncName": "s"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetServiceSetting",
+      "input": {
+        "SettingId": "/ssm/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSetting": {
+          "SettingId": "/ssm/x",
+          "SettingValue": ""
+        }
+      }
+    },
+    {
+      "operation": "UpdateServiceSetting",
+      "input": {
+        "SettingId": "/ssm/x",
+        "SettingValue": "v"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetServiceSetting",
+      "input": {
+        "SettingId": "/ssm/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSetting": {
+          "SettingId": "/ssm/x",
+          "SettingValue": "v"
+        }
+      }
+    },
+    {
+      "operation": "ResetServiceSetting",
+      "input": {
+        "SettingId": "/ssm/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSetting": {
+          "SettingId": "/ssm/x",
+          "SettingValue": ""
+        }
+      },
+      "recut": "The model's ResetServiceSetting output declares ServiceSetting, the setting at its default; the pack answered nothing."
+    },
+    {
+      "operation": "GetServiceSetting",
+      "input": {
+        "SettingId": "/ssm/x"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSetting": {
+          "SettingId": "/ssm/x",
+          "SettingValue": ""
+        }
+      }
+    }
+  ]
+}

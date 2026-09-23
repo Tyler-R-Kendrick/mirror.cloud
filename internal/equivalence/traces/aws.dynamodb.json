@@ -1,0 +1,1213 @@
+{
+  "schema": "trace/1",
+  "service": "aws.dynamodb",
+  "source": "pack:internal/services/aws/dynamodb@4d7cb03d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateTable",
+      "input": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH"
+          }
+        ],
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableDescription": {
+          "AttributeDefinitions": [
+            {
+              "AttributeName": "id",
+              "AttributeType": "S"
+            }
+          ],
+          "BillingModeSummary": {
+            "BillingMode": "PAY_PER_REQUEST"
+          },
+          "CreationDateTime": 0,
+          "DeletionProtectionEnabled": false,
+          "ItemCount": 0,
+          "KeySchema": [
+            {
+              "AttributeName": "id",
+              "KeyType": "HASH"
+            }
+          ],
+          "ProvisionedThroughput": {
+            "NumberOfDecreasesToday": 0,
+            "ReadCapacityUnits": 0,
+            "WriteCapacityUnits": 0
+          },
+          "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T",
+          "TableId": "79310823-0b1a-444b-9528-357dcebab4fe",
+          "TableName": "T",
+          "TableSizeBytes": 0,
+          "TableStatus": "CREATING"
+        }
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH"
+          }
+        ],
+        "TableName": "U"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableDescription": {
+          "AttributeDefinitions": [
+            {
+              "AttributeName": "id",
+              "AttributeType": "S"
+            }
+          ],
+          "BillingModeSummary": {
+            "BillingMode": "PAY_PER_REQUEST"
+          },
+          "CreationDateTime": 0,
+          "DeletionProtectionEnabled": false,
+          "ItemCount": 0,
+          "KeySchema": [
+            {
+              "AttributeName": "id",
+              "KeyType": "HASH"
+            }
+          ],
+          "ProvisionedThroughput": {
+            "NumberOfDecreasesToday": 0,
+            "ReadCapacityUnits": 0,
+            "WriteCapacityUnits": 0
+          },
+          "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/U",
+          "TableId": "35f584e9-3efc-462f-bbcc-decf26f36743",
+          "TableName": "U",
+          "TableSizeBytes": 0,
+          "TableStatus": "CREATING"
+        }
+      }
+    },
+    {
+      "operation": "ListTables",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableNames": [
+          "T",
+          "U"
+        ]
+      }
+    },
+    {
+      "operation": "DescribeLimits",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AccountMaxReadCapacityUnits": 80000,
+        "AccountMaxWriteCapacityUnits": 80000,
+        "TableMaxReadCapacityUnits": 40000,
+        "TableMaxWriteCapacityUnits": 40000
+      }
+    },
+    {
+      "operation": "DescribeEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": [
+          {
+            "Address": "http://127.0.0.1:4566",
+            "CachePeriodInMinutes": 1440
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTimeToLive",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TimeToLiveDescription": {
+          "TimeToLiveStatus": "DISABLED"
+        }
+      }
+    },
+    {
+      "operation": "UpdateTimeToLive",
+      "input": {
+        "TableName": "T",
+        "TimeToLiveSpecification": {
+          "AttributeName": "exp",
+          "Enabled": true
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TimeToLiveSpecification": {
+          "AttributeName": "exp",
+          "Enabled": true
+        }
+      }
+    },
+    {
+      "operation": "DescribeTimeToLive",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TimeToLiveDescription": {
+          "AttributeName": "exp",
+          "TimeToLiveStatus": "ENABLED"
+        }
+      }
+    },
+    {
+      "operation": "UpdateTimeToLive",
+      "input": {
+        "TableName": "T",
+        "TimeToLiveSpecification": {
+          "AttributeName": "exp",
+          "Enabled": false
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TimeToLiveSpecification": {
+          "AttributeName": "exp",
+          "Enabled": false
+        }
+      }
+    },
+    {
+      "operation": "DescribeTimeToLive",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TimeToLiveDescription": {
+          "AttributeName": "exp",
+          "TimeToLiveStatus": "DISABLED"
+        }
+      }
+    },
+    {
+      "operation": "UpdateTimeToLive",
+      "input": {
+        "TableName": "Z",
+        "TimeToLiveSpecification": {
+          "AttributeName": "exp",
+          "Enabled": true
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeTimeToLive",
+      "input": {
+        "TableName": "Z"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DescribeContinuousBackups",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContinuousBackupsDescription": {
+          "ContinuousBackupsStatus": "ENABLED",
+          "PointInTimeRecoveryDescription": {
+            "PointInTimeRecoveryStatus": "DISABLED"
+          }
+        }
+      }
+    },
+    {
+      "operation": "UpdateContinuousBackups",
+      "input": {
+        "PointInTimeRecoverySpecification": {
+          "PointInTimeRecoveryEnabled": true
+        },
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContinuousBackupsDescription": {
+          "ContinuousBackupsStatus": "ENABLED",
+          "PointInTimeRecoveryDescription": {
+            "EarliestRestorableDateTime": 0,
+            "LatestRestorableDateTime": 0,
+            "PointInTimeRecoveryStatus": "ENABLED",
+            "RecoveryPeriodInDays": 35
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribeContinuousBackups",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContinuousBackupsDescription": {
+          "ContinuousBackupsStatus": "ENABLED",
+          "PointInTimeRecoveryDescription": {
+            "EarliestRestorableDateTime": 0,
+            "LatestRestorableDateTime": 0,
+            "PointInTimeRecoveryStatus": "ENABLED",
+            "RecoveryPeriodInDays": 35
+          }
+        }
+      }
+    },
+    {
+      "operation": "UpdateContinuousBackups",
+      "input": {
+        "PointInTimeRecoverySpecification": {
+          "PointInTimeRecoveryEnabled": false
+        },
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContinuousBackupsDescription": {
+          "ContinuousBackupsStatus": "ENABLED",
+          "PointInTimeRecoveryDescription": {
+            "PointInTimeRecoveryStatus": "DISABLED"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribeContinuousBackups",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContinuousBackupsDescription": {
+          "ContinuousBackupsStatus": "ENABLED",
+          "PointInTimeRecoveryDescription": {
+            "PointInTimeRecoveryStatus": "DISABLED"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribeContinuousBackups",
+      "input": {
+        "TableName": "Z"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutResourcePolicy",
+      "input": {
+        "Policy": "{\"Version\":\"2012-10-17\"}",
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RevisionId": "1"
+      }
+    },
+    {
+      "operation": "GetResourcePolicy",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Policy": "{\"Version\":\"2012-10-17\"}",
+        "RevisionId": "1"
+      }
+    },
+    {
+      "operation": "DeleteResourcePolicy",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RevisionId": "1"
+      }
+    },
+    {
+      "operation": "GetResourcePolicy",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "PolicyNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateBackup",
+      "input": {
+        "BackupName": "b1",
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupDetails": {
+          "BackupArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T/backup/7c589129",
+          "BackupName": "b1",
+          "BackupStatus": "AVAILABLE"
+        }
+      }
+    },
+    {
+      "operation": "ListBackups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupSummaries": [
+          {
+            "BackupArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T/backup/7c589129",
+            "BackupName": "b1",
+            "BackupStatus": "AVAILABLE",
+            "TableName": "T"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeBackup",
+      "input": {
+        "BackupArn": {
+          "$fromPath": "BackupDetails.BackupArn",
+          "$fromStep": 22
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupDescription": {
+          "BackupDetails": {
+            "BackupArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T/backup/7c589129",
+            "BackupName": "b1",
+            "BackupStatus": "AVAILABLE"
+          },
+          "SourceTableDetails": {
+            "TableName": "T"
+          }
+        }
+      },
+      "recut": "BackupDetails carried the backup snapshot (the table as a JSON string and its items), which BackupDetails has no members for"
+    },
+    {
+      "operation": "DeleteBackup",
+      "input": {
+        "BackupArn": {
+          "$fromPath": "BackupDetails.BackupArn",
+          "$fromStep": 22
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupDescription": {
+          "BackupDetails": {
+            "BackupStatus": "DELETED"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DescribeBackup",
+      "input": {
+        "BackupArn": {
+          "$fromPath": "BackupDetails.BackupArn",
+          "$fromStep": 22
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BackupNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListTagsOfResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": []
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        },
+        "Tags": [
+          {
+            "Key": "a",
+            "Value": "1"
+          },
+          {
+            "Key": "b",
+            "Value": "2"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        },
+        "Tags": [
+          {
+            "Key": "a",
+            "Value": "3"
+          },
+          {
+            "Key": "c",
+            "Value": "4"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsOfResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "a",
+            "Value": "3"
+          },
+          {
+            "Key": "b",
+            "Value": "2"
+          },
+          {
+            "Key": "c",
+            "Value": "4"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        },
+        "TagKeys": [
+          "b",
+          "x"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsOfResource",
+      "input": {
+        "ResourceArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": [
+          {
+            "Key": "a",
+            "Value": "3"
+          },
+          {
+            "Key": "c",
+            "Value": "4"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeContributorInsights",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContributorInsightsStatus": "DISABLED",
+        "TableName": "T"
+      }
+    },
+    {
+      "operation": "UpdateContributorInsights",
+      "input": {
+        "ContributorInsightsAction": "ENABLE",
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContributorInsightsStatus": "ENABLED",
+        "TableName": "T"
+      }
+    },
+    {
+      "operation": "DescribeContributorInsights",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContributorInsightsStatus": "ENABLED",
+        "TableName": "T"
+      }
+    },
+    {
+      "operation": "ListContributorInsights",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContributorInsightsSummaries": [
+          {
+            "ContributorInsightsStatus": "ENABLED",
+            "TableName": "T"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateContributorInsights",
+      "input": {
+        "ContributorInsightsAction": "DISABLE",
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContributorInsightsStatus": "DISABLED",
+        "TableName": "T"
+      }
+    },
+    {
+      "operation": "DescribeContributorInsights",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ContributorInsightsStatus": "DISABLED",
+        "TableName": "T"
+      }
+    },
+    {
+      "operation": "ExportTableToPointInTime",
+      "input": {
+        "S3Bucket": "bk",
+        "TableArn": {
+          "$fromPath": "TableDescription.TableArn",
+          "$fromStep": 0
+        },
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ExportDescription": {
+          "ExportArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T/export/5f59f223d797",
+          "ExportStatus": "COMPLETED",
+          "ExportedItemCount": 0,
+          "S3Bucket": "bk",
+          "TableArn": "T"
+        }
+      }
+    },
+    {
+      "operation": "ListExports",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ExportSummaries": [
+          {
+            "ExportArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T/export/5f59f223d797",
+            "ExportStatus": "COMPLETED",
+            "ExportedItemCount": 0,
+            "S3Bucket": "bk",
+            "TableArn": "T"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeExport",
+      "input": {
+        "ExportArn": {
+          "$fromPath": "ExportDescription.ExportArn",
+          "$fromStep": 39
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ExportDescription": {
+          "ExportArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T/export/5f59f223d797",
+          "ExportStatus": "COMPLETED",
+          "ExportedItemCount": 0,
+          "S3Bucket": "bk",
+          "TableArn": "T"
+        }
+      }
+    },
+    {
+      "operation": "DescribeExport",
+      "input": {
+        "ExportArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T/export/none"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ExportNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ImportTable",
+      "input": {
+        "InputFormat": "CSV",
+        "S3BucketSource": {
+          "S3Bucket": "bk"
+        },
+        "TableCreationParameters": {
+          "AttributeDefinitions": [
+            {
+              "AttributeName": "id",
+              "AttributeType": "S"
+            }
+          ],
+          "BillingMode": "PAY_PER_REQUEST",
+          "KeySchema": [
+            {
+              "AttributeName": "id",
+              "KeyType": "HASH"
+            }
+          ],
+          "TableName": "I"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ImportTableDescription": {
+          "ImportArn": "arn:aws:dynamodb:us-east-1:000000000000:table/I/import/9c8e2cb00724",
+          "ImportStatus": "COMPLETED",
+          "TableName": "I"
+        }
+      }
+    },
+    {
+      "operation": "ListImports",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ImportSummaryList": [
+          {
+            "ImportArn": "arn:aws:dynamodb:us-east-1:000000000000:table/I/import/9c8e2cb00724",
+            "ImportStatus": "COMPLETED",
+            "TableName": "I"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeImport",
+      "input": {
+        "ImportArn": {
+          "$fromPath": "ImportTableDescription.ImportArn",
+          "$fromStep": 43
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ImportTableDescription": {
+          "ImportArn": "arn:aws:dynamodb:us-east-1:000000000000:table/I/import/9c8e2cb00724",
+          "ImportStatus": "COMPLETED",
+          "TableName": "I"
+        }
+      }
+    },
+    {
+      "operation": "DescribeImport",
+      "input": {
+        "ImportArn": "arn:aws:dynamodb:us-east-1:000000000000:table/I/import/none"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ImportNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {
+        "TableName": "U"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableDescription": {
+          "DeletionProtectionEnabled": false,
+          "ItemCount": 0,
+          "ProvisionedThroughput": {
+            "NumberOfDecreasesToday": 0,
+            "ReadCapacityUnits": 0,
+            "WriteCapacityUnits": 0
+          },
+          "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/U",
+          "TableId": "35f584e9-3efc-462f-bbcc-decf26f36743",
+          "TableName": "U",
+          "TableStatus": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "ListTables",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableNames": [
+          "I",
+          "T"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {
+        "TableName": "T"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableDescription": {
+          "DeletionProtectionEnabled": false,
+          "ItemCount": 0,
+          "ProvisionedThroughput": {
+            "NumberOfDecreasesToday": 0,
+            "ReadCapacityUnits": 0,
+            "WriteCapacityUnits": 0
+          },
+          "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/T",
+          "TableId": "79310823-0b1a-444b-9528-357dcebab4fe",
+          "TableName": "T",
+          "TableStatus": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {
+        "TableName": "I"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableDescription": {
+          "DeletionProtectionEnabled": false,
+          "ItemCount": 0,
+          "ProvisionedThroughput": {
+            "NumberOfDecreasesToday": 0,
+            "ReadCapacityUnits": 0,
+            "WriteCapacityUnits": 0
+          },
+          "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/I",
+          "TableId": "8f944602-ff41-444d-8972-d47168bdca36",
+          "TableName": "I",
+          "TableStatus": "DELETING"
+        }
+      }
+    },
+    {
+      "operation": "ListTables",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableNames": null
+      }
+    }
+  ]
+}

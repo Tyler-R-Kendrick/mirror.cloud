@@ -3,6 +3,7 @@ package spine
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs" // natives the GCS bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -53,7 +54,7 @@ func TestBootedServerGCSSection48(t *testing.T) {
 		return m
 	}
 
-	code, b, h := do(http.MethodPost, "/storage/v1/b", `{"name":"bk"}`, nil)
+	code, b, h := do(http.MethodPost, "/storage/v1/b?project=p", `{"name":"bk"}`, nil)
 	if code >= 300 || js(b)["name"] != "bk" {
 		t.Fatalf("insert bucket %d %s", code, b)
 	}
@@ -63,7 +64,7 @@ func TestBootedServerGCSSection48(t *testing.T) {
 	if code, b, _ := do(http.MethodGet, "/storage/v1/b/bk", "", nil); code != 200 || js(b)["name"] != "bk" {
 		t.Fatalf("get bucket %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/storage/v1/b", "", nil); code != 200 || !bytes.Contains(b, []byte("bk")) {
+	if code, b, _ := do(http.MethodGet, "/storage/v1/b?project=p", "", nil); code != 200 || !bytes.Contains(b, []byte("bk")) {
 		t.Fatalf("list buckets %d %s", code, b)
 	}
 	if code, b, _ := do(http.MethodPatch, "/storage/v1/b/bk", `{"location":"EU"}`, nil); code >= 300 {
@@ -199,5 +200,5 @@ func TestGCSHTTPProvenOps(t *testing.T) {
 		"storage.objects.compose", "storage.objects.patch",
 	}
 
-	assertSame(t, "gcs", gcs.New(spitest.Deps(t)).Operations(), append(want, gcs.ExtraOps()...))
+	assertSame(t, "gcs", bundled.Handler("gcp.storage", spitest.Deps(t)).Operations(), want)
 }

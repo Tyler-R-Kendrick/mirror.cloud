@@ -1,0 +1,266 @@
+{
+  "schema": "trace/1",
+  "service": "aws.sns",
+  "source": "pack:internal/services/aws/sns@5e355d3",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "CreateSMSSandboxPhoneNumber",
+      "input": {
+        "PhoneNumber": "+15555550100"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateSMSSandboxPhoneNumber",
+      "input": {
+        "PhoneNumber": "5555550100"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateSMSSandboxPhoneNumber",
+      "input": {
+        "PhoneNumber": "+1-555--0100"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateSMSSandboxPhoneNumber",
+      "input": {
+        "PhoneNumber": "+1-555-555-0101"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListSMSSandboxPhoneNumbers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PhoneNumbers": [
+          {
+            "PhoneNumber": "+1-555-555-0101",
+            "Status": "Pending"
+          },
+          {
+            "PhoneNumber": "+15555550100",
+            "Status": "Pending"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "VerifySMSSandboxPhoneNumber",
+      "input": {
+        "OneTimePassword": "123456",
+        "PhoneNumber": "+15555550100"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "VerifySMSSandboxPhoneNumber",
+      "input": {
+        "OneTimePassword": "123456",
+        "PhoneNumber": "+15555550199"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFound",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetSMSSandboxAccountStatus",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsInSandbox": true
+      },
+      "recut": "GetSMSSandboxAccountStatusResult has no Verified member; the pack returned one outside the model"
+    },
+    {
+      "operation": "DeleteSMSSandboxPhoneNumber",
+      "input": {
+        "PhoneNumber": "+15555550100"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListSMSSandboxPhoneNumbers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PhoneNumbers": [
+          {
+            "PhoneNumber": "+1-555-555-0101",
+            "Status": "Pending"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "OptInPhoneNumber",
+      "input": {
+        "phoneNumber": "+15555550100"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "OptInPhoneNumber",
+      "input": {
+        "phoneNumber": "bad"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CheckIfPhoneNumberIsOptedOut",
+      "input": {
+        "phoneNumber": "+15555550100"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "isOptedOut": false
+      }
+    },
+    {
+      "operation": "CheckIfPhoneNumberIsOptedOut",
+      "input": {
+        "phoneNumber": "bad"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListPhoneNumbersOptedOut",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "phoneNumbers": null
+      }
+    },
+    {
+      "operation": "ListOriginationNumbers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PhoneNumbers": null
+      }
+    }
+  ]
+}

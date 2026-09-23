@@ -438,44 +438,9 @@ func clearCollection(ctx context.Context, collection spi.Collection) {
 	}
 }
 
-func (p *Pack) insights(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	table := str(req.Input["TableName"])
-	col := p.col(req, "insights")
-	if req.Operation == "UpdateContributorInsights" {
-		st := str(req.Input["ContributorInsightsAction"])
-		if st == "ENABLE" {
-			st = "ENABLED"
-		}
-		if st == "DISABLE" {
-			st = "DISABLED"
-		}
-		rec := map[string]any{"TableName": table, "ContributorInsightsStatus": st}
-		b, _ := json.Marshal(rec)
-		_ = col.Put(ctx, table, b)
-		return &spi.Response{Output: rec}, nil
-	}
-	if req.Operation == "ListContributorInsights" {
-		kvs, _, _ := col.List(ctx, "", "", 0)
-		var out []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			out = append(out, rec)
-		}
-		return &spi.Response{Output: map[string]any{"ContributorInsightsSummaries": out}}, nil
-	}
-	b, ok, _ := col.Get(ctx, table)
-	if !ok {
-		return &spi.Response{Output: map[string]any{"TableName": table, "ContributorInsightsStatus": "DISABLED"}}, nil
-	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
-	return &spi.Response{Output: rec}, nil
-}
-
-func (p *Pack) exports(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *Pack) export(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	col := p.col(req, "exports")
-	if req.Operation == "ExportTableToPointInTime" {
+	{
 		table := str(req.Input["TableName"])
 		id := p.deps.Rand.Hex(12)
 		arn := "arn:aws:dynamodb:" + req.Identity.Region + ":" + req.Identity.Account + ":table/" + table + "/export/" + id
@@ -485,29 +450,11 @@ func (p *Pack) exports(ctx context.Context, req *spi.Request) (*spi.Response, er
 		_ = col.Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{"ExportDescription": rec}}, nil
 	}
-	if req.Operation == "ListExports" {
-		kvs, _, _ := col.List(ctx, "", "", 0)
-		var out []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			out = append(out, rec)
-		}
-		return &spi.Response{Output: map[string]any{"ExportSummaries": out}}, nil
-	}
-	arn := str(req.Input["ExportArn"])
-	b, ok, _ := col.Get(ctx, arn)
-	if !ok {
-		return nil, &spi.Fault{Code: "ExportNotFoundException", HTTPStatus: 400, Fault: "client"}
-	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
-	return &spi.Response{Output: map[string]any{"ExportDescription": rec}}, nil
 }
 
-func (p *Pack) imports(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *Pack) importTable(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	col := p.col(req, "imports")
-	if req.Operation == "ImportTable" {
+	{
 		tcp := asMap(req.Input["TableCreationParameters"])
 		name := str(tcp["TableName"])
 		if name == "" {
@@ -523,24 +470,6 @@ func (p *Pack) imports(ctx context.Context, req *spi.Request) (*spi.Response, er
 		_ = col.Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{"ImportTableDescription": rec}}, nil
 	}
-	if req.Operation == "ListImports" {
-		kvs, _, _ := col.List(ctx, "", "", 0)
-		var out []any
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			out = append(out, rec)
-		}
-		return &spi.Response{Output: map[string]any{"ImportSummaryList": out}}, nil
-	}
-	arn := str(req.Input["ImportArn"])
-	b, ok, _ := col.Get(ctx, arn)
-	if !ok {
-		return nil, &spi.Fault{Code: "ImportNotFoundException", HTTPStatus: 400, Fault: "client"}
-	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
-	return &spi.Response{Output: map[string]any{"ImportTableDescription": rec}}, nil
 }
 
 func (p *Pack) restorePITR(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -556,23 +485,6 @@ func (p *Pack) restorePITR(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = p.col(req, "items:"+dst).Put(ctx, kv.Key, kv.Value)
 	}
 	return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": dst, "TableStatus": "ACTIVE"}}}, nil
-}
-
-func (p *Pack) replicaScaling(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	table := str(req.Input["TableName"])
-	col := p.col(req, "rscale")
-	if req.Operation == "UpdateTableReplicaAutoScaling" {
-		b, _ := json.Marshal(req.Input)
-		_ = col.Put(ctx, table, b)
-		return &spi.Response{Output: map[string]any{"TableName": table, "TableAutoScalingDescription": req.Input}}, nil
-	}
-	b, ok, _ := col.Get(ctx, table)
-	if !ok {
-		return &spi.Response{Output: map[string]any{"TableAutoScalingDescription": map[string]any{"TableName": table}}}, nil
-	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
-	return &spi.Response{Output: map[string]any{"TableAutoScalingDescription": rec}}, nil
 }
 
 func (p *Pack) searchVectors(ctx context.Context, req *spi.Request) (*spi.Response, error) {

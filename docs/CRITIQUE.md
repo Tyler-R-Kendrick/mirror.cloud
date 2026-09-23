@@ -1552,3 +1552,17 @@ Moving S3's configuration surface into YAML first needs a response hook in the e
 **Multipart state.** Multipart uploads in flight live in memory. Natives build a pack per call, so that state and its locks are kept per store in a package-level map. The map is marked `ponytail:`, because an entry is never freed.
 
 **Recording.** The recording covers the bucket surface. It exists so that when an operation does move to YAML, it has a pack answer to meet.
+
+### S3: a wrap for the request shape, and the first configurations as records
+
+S3's bundle could not serve any operation as records until the engine could run Go around a request. A bundle can now declare `wrap:`, with the Go supplied by `bundled.RegisterWrap`. For S3, the wrap does four things before or after every operation:
+- **Routing.** It re-derives the operation from the request's shape.
+- **Home region.** It points a bucket's records at the region that holds the bucket. This is the lookup `requireBucket` does for the natives.
+- **Preflight.** It answers CORS preflights.
+- **CORS headers.** It puts the bucket's CORS rules on every response.
+
+Ten configuration operations are now YAML: request payment, transfer acceleration, public access block and ownership controls. They keep the `bktcfg` layout, keyed `bucket/kind`, that CreateBucket writes the defaults in. Their validation is `require` rules: owner form, then bucket existence, then owner match, the order `requireBucketOwner` checks in.
+
+Two engine defects surfaced along the way:
+- **Shared collections.** A resource was found by its collection name alone. Four S3 resources share `bktcfg`, so a read could evaluate another resource's key. The lookup now matches the key derivation too.
+- **Status codes.** An engine answer carried status 0, and only the codec filled in the model's code. A delete answered 204 on the wire but 0 to a caller in Go. The engine now sets the model's code itself.

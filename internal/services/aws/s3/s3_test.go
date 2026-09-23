@@ -2653,6 +2653,15 @@ func TestCrossRegionBucketResolutionAndHeadMetadata(t *testing.T) {
 		t.Fatalf("list = %#v headers=%#v", listed.Output, listed.Headers)
 	}
 
+	// The bundle's operations find the bucket's region through the wrap, as
+	// the Go ones do through requireBucket.
+	mustInvokeAs(t, p, east, "PutBucketRequestPayment", map[string]any{"Bucket": "cross-region", "RequestPaymentConfiguration": map[string]any{"Payer": "Requester"}}, nil)
+	west := east
+	west.Region = "us-west-2"
+	if payer := mustInvokeAs(t, p, west, "GetBucketRequestPayment", map[string]any{"Bucket": "cross-region"}, nil).Output["Payer"]; payer != "Requester" {
+		t.Fatalf("payer in the home region = %v", payer)
+	}
+
 	global := east
 	global.Region = "aws-global"
 	_, err := invokeAs(t, p, global, "HeadBucket", map[string]any{"Bucket": "cross-region"}, nil)

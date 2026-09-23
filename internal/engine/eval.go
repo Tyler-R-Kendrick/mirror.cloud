@@ -368,9 +368,12 @@ func (ev *eval) resourceKey(res bir.Resource, keyExpr, keyPath string) (string, 
 	return "", nil
 }
 
+// resourceNameOf finds the name want is declared under. Resources can share
+// a collection -- S3 keeps every bucket configuration in one, keyed by kind
+// -- so the collection alone does not say which derive to evaluate.
 func resourceNameOf(ir *bir.Service, want bir.Resource) string {
 	for name, res := range ir.Resources {
-		if res.Collection == want.Collection {
+		if res.Collection == want.Collection && res.ID.Derive == want.ID.Derive {
 			return name
 		}
 	}

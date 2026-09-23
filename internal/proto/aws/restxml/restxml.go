@@ -1236,7 +1236,9 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
-	if resp.Output == nil {
+	// An operation whose output is Unit has no body, whatever the answer
+	// carries: an engine answers {} where a pack answered nil.
+	if resp.Output == nil || op.Output == "smithy.api#Unit" {
 		return nil
 	}
 	var b strings.Builder

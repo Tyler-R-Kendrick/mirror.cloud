@@ -23,7 +23,7 @@
     "status": 404
   },
   "put": {
-    "output": null,
+    "output": {},
     "status": 200
   }
 }

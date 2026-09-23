@@ -168,6 +168,9 @@ func merge(dst, src *Service, name string) error {
 	if src.Worker != "" {
 		dst.Worker = src.Worker
 	}
+	if src.Wrap != "" {
+		dst.Wrap = src.Wrap
+	}
 	if src.MissingInput != "" {
 		dst.MissingInput = src.MissingInput
 	}

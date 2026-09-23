@@ -95,6 +95,12 @@ type Service struct {
 	// does not.
 	Worker string `yaml:"worker,omitempty"`
 
+	// Wrap, when set, says every request passes through Go before and after
+	// the operation -- S3 re-derives the operation from the request's shape
+	// and answers a bucket's CORS rules on every response -- registered with
+	// bundled.RegisterWrap. The value says what it does.
+	Wrap string `yaml:"wrap,omitempty"`
+
 	// MissingInput names the error table entry the engine answers with when a
 	// required input member is absent. The model says which members are
 	// required; it does not say what a service calls their absence, and

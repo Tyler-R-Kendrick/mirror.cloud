@@ -9,13 +9,13 @@
         }
       ]
     },
-    "status": 0
+    "status": 200
   },
   "create": {
     "output": {
       "name": "snap"
     },
-    "status": 0
+    "status": 201
   },
   "del_miss_b": {
     "error": "BlobNotFound",
@@ -29,7 +29,7 @@
   },
   "delete": {
     "output": {},
-    "status": 0
+    "status": 202
   },
   "duplicate": {
     "error": "ContainerAlreadyExists",
@@ -51,7 +51,7 @@
       "name": "snap",
       "public_access": ""
     },
-    "status": 0
+    "status": 200
   },
   "list": {
     "output": {
@@ -61,11 +61,11 @@
         }
       ]
     },
-    "status": 0
+    "status": 200
   },
   "media": {
     "body": "hello",
-    "status": 0
+    "status": 200
   },
   "missing": {
     "error": "BlobNotFound",
@@ -82,6 +82,6 @@
       "container": "snap",
       "name": "o"
     },
-    "status": 0
+    "status": 201
   }
 }

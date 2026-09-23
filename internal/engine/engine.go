@@ -153,8 +153,18 @@ func (e *Engine) IR() *bir.Service { return e.ir }
 // Operations lists the operations the bundle defines.
 func (e *Engine) Operations() []string { return append([]string(nil), e.ops...) }
 
-// Invoke serves one request.
+// Invoke serves one request. The answer carries the status the model gives
+// the operation -- S3 answers a delete with 204 -- so a caller in Go sees what
+// the wire does.
 func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	resp, err := e.invoke(ctx, req)
+	if resp != nil && resp.Status == 0 {
+		resp.Status = e.modelOps[req.Operation].HTTP.Code
+	}
+	return resp, err
+}
+
+func (e *Engine) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	op, ok := e.ir.Operations[req.Operation]
 	if !ok {
 		return nil, spi.NotImplemented(e.ServiceID(), req.Operation, string(model.TierEmulate))

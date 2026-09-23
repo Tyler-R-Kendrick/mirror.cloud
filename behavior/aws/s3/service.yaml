@@ -2,14 +2,17 @@ schema: bir/1
 service: aws.s3
 
 # Transcribed from the hand-written pack, not established against the real
-# service. Every operation is Go, in internal/services/aws/s3. S3 routes by
-# the request's shape -- host, path, method, query and headers -- rather
-# than by the operation the codec decoded; it answers a bucket's CORS rules
-# on every response and preflight; and objects are streamed blobs with
-# versions, multipart uploads, checksums, encryption, object lock and
-# notifications. None of that is records yet, so the bundle declares the
-# surface and the Go serves it.
+# service. Bucket configurations the rest of S3 does not consult are records
+# here. The rest is Go, in internal/services/aws/s3: objects are streamed
+# blobs with versions, multipart uploads, checksums, encryption, object lock
+# and notifications, and the configurations those read are still validated
+# and stored by the Go that reads them.
 provenance: authored
+
+wrap: >-
+  routes each request by its shape (host, path, method, query and headers),
+  sends a bucket's requests to the region that holds it, answers CORS
+  preflights, and puts the bucket's CORS rules on every response
 
 native:
   - CreateBucket
@@ -48,10 +51,6 @@ native:
   - DeleteBucketEncryption
   - GetBucketObjectLockConfiguration
   - PutBucketObjectLockConfiguration
-  - GetBucketRequestPayment
-  - PutBucketRequestPayment
-  - GetBucketAccelerateConfiguration
-  - PutBucketAccelerateConfiguration
   - PutObject
   - PostObject
   - GetObject
@@ -71,12 +70,6 @@ native:
   - ListMultipartUploads
   - GetObjectTagging
   - PutObjectTagging
-  - PutPublicAccessBlock
-  - GetPublicAccessBlock
-  - DeletePublicAccessBlock
-  - PutBucketOwnershipControls
-  - GetBucketOwnershipControls
-  - DeleteBucketOwnershipControls
   - GetBucketPolicyStatus
   - GetObjectAttributes
   - DeleteBucketTagging
@@ -127,4 +120,158 @@ native:
   - UpdateBucketMetadataJournalTableConfiguration
   - UpdateObjectEncryption
   - WriteGetObjectResponse
-operations: {}
+
+resources:
+  bucket:
+    collection: buckets
+    id: { input_members: [Bucket] }
+    record: {}
+  # Bucket configurations are keyed bucket/kind, the layout CreateBucket
+  # writes the public access block and ownership defaults in.
+  requestpayment:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/requestpayment'" }
+    record: {}
+  accelerate:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/accelerate'" }
+    record: {}
+  publicaccessblock:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/publicaccessblock'" }
+    record: {}
+  ownershipcontrols:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/ownershipcontrols'" }
+    record: {}
+
+errors:
+  NoSuchBucket: { code: NoSuchBucket, http: 404, fault: client, message: The specified bucket does not exist }
+  InvalidOwner: { code: InvalidBucketOwnerAWSAccountID, http: 400, fault: client, message: The value of the expected bucket owner parameter must be an AWS Account ID }
+  AccessDenied: { code: AccessDenied, http: 403, fault: client, message: Access Denied }
+  MalformedXML: { code: MalformedXML, http: 400, fault: client }
+  InvalidRequest: { code: InvalidRequest, http: 400, fault: client }
+  NoPublicAccessBlock: { code: NoSuchPublicAccessBlockConfiguration, http: 404, fault: client, message: The public access block configuration was not found }
+  NoOwnershipControls: { code: OwnershipControlsNotFoundError, http: 404, fault: client, message: The bucket ownership controls were not found }
+
+operations:
+  # Every bucket operation checks the expected owner's form, then that the
+  # bucket exists, then that the owner matches, in that order.
+
+  PutBucketRequestPayment:
+    reads: { b: { resource: bucket } }
+    require:
+      - &ownerForm
+        cond: "!('ExpectedBucketOwner' in input) || string(input.ExpectedBucketOwner) == '' || string(input.ExpectedBucketOwner).matches('^[0-9]{12}$')"
+        error: InvalidOwner
+      - &bucketExists { cond: b_found, error: NoSuchBucket, fields: { BucketName: input.Bucket } }
+      - &ownerMatches
+        cond: "!('ExpectedBucketOwner' in input) || string(input.ExpectedBucketOwner) == '' || string(input.ExpectedBucketOwner) == identity.account"
+        error: AccessDenied
+      - cond: "'RequestPaymentConfiguration' in input && type(input.RequestPaymentConfiguration) == map && 'Payer' in input.RequestPaymentConfiguration && string(input.RequestPaymentConfiguration.Payer) in ['Requester', 'BucketOwner']"
+        error: MalformedXML
+    effects:
+      - put: { resource: requestpayment, record: { RequestPaymentConfiguration: "{'Payer': input.RequestPaymentConfiguration.Payer}" } }
+    output: {}
+
+  GetBucketRequestPayment:
+    reads: { b: { resource: bucket }, r: { resource: requestpayment } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    output:
+      Payer: "r_found ? r.RequestPaymentConfiguration.Payer : 'BucketOwner'"
+
+  PutBucketAccelerateConfiguration:
+    reads: { b: { resource: bucket } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: "!string(input.Bucket).contains('.')"
+        error: InvalidRequest
+        message: S3 Transfer Acceleration is not supported for buckets with periods (.) in their names
+      - cond: "'AccelerateConfiguration' in input && type(input.AccelerateConfiguration) == map && 'Status' in input.AccelerateConfiguration && string(input.AccelerateConfiguration.Status) in ['Enabled', 'Suspended']"
+        error: MalformedXML
+    effects:
+      - put: { resource: accelerate, record: { AccelerateConfiguration: "{'Status': input.AccelerateConfiguration.Status}" } }
+    output: {}
+
+  GetBucketAccelerateConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: accelerate } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    output:
+      Status: "r_found ? r.AccelerateConfiguration.Status : null"
+    omit_null: [Status]
+
+  PutPublicAccessBlock:
+    reads: { b: { resource: bucket } }
+    let:
+      pab: "'PublicAccessBlockConfiguration' in input ? input.PublicAccessBlockConfiguration : null"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: >-
+          type(pab) == map && pab.all(k, k in ['BlockPublicAcls', 'BlockPublicPolicy', 'IgnorePublicAcls', 'RestrictPublicBuckets']
+          && type(pab[k]) == bool)
+        error: MalformedXML
+    effects:
+      - put:
+          resource: publicaccessblock
+          record:
+            PublicAccessBlockConfiguration: >-
+              {'BlockPublicAcls': 'BlockPublicAcls' in pab ? pab.BlockPublicAcls : false,
+               'BlockPublicPolicy': 'BlockPublicPolicy' in pab ? pab.BlockPublicPolicy : false,
+               'IgnorePublicAcls': 'IgnorePublicAcls' in pab ? pab.IgnorePublicAcls : false,
+               'RestrictPublicBuckets': 'RestrictPublicBuckets' in pab ? pab.RestrictPublicBuckets : false}
+    output: {}
+
+  GetPublicAccessBlock:
+    reads: { b: { resource: bucket }, r: { resource: publicaccessblock } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: r_found, error: NoPublicAccessBlock, fields: { BucketName: input.Bucket } }
+    output:
+      PublicAccessBlockConfiguration: r.PublicAccessBlockConfiguration
+
+  DeletePublicAccessBlock:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: publicaccessblock, missing: ignore }
+    output: {}
+
+  PutBucketOwnershipControls:
+    reads: { b: { resource: bucket } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: >-
+          'OwnershipControls' in input && type(input.OwnershipControls) == map && 'Rules' in input.OwnershipControls
+          && type(input.OwnershipControls.Rules) == list && size(input.OwnershipControls.Rules) == 1
+          && type(input.OwnershipControls.Rules[0]) == map
+          && 'ObjectOwnership' in input.OwnershipControls.Rules[0]
+          && string(input.OwnershipControls.Rules[0].ObjectOwnership) in ['BucketOwnerPreferred', 'ObjectWriter', 'BucketOwnerEnforced']
+        error: MalformedXML
+    effects:
+      - put: { resource: ownershipcontrols, record: { OwnershipControls: input.OwnershipControls } }
+    output: {}
+
+  GetBucketOwnershipControls:
+    reads: { b: { resource: bucket }, r: { resource: ownershipcontrols } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: r_found, error: NoOwnershipControls, fields: { BucketName: input.Bucket } }
+    output:
+      OwnershipControls: r.OwnershipControls
+
+  DeleteBucketOwnershipControls:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: ownershipcontrols, missing: ignore }
+    output: {}

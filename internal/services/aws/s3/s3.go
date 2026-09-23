@@ -20,6 +20,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,12 +41,15 @@ import (
 func init() {
 	for _, op := range natives {
 		bundled.RegisterNative("aws.s3", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
-			return packFor(deps).Invoke(ctx, req)
+			return packFor(deps).invoke(ctx, req)
 		})
 	}
+	bundled.RegisterWrap("aws.s3", func(ctx context.Context, deps spi.Deps, req *spi.Request, next func(context.Context, *spi.Request) (*spi.Response, error)) (*spi.Response, error) {
+		return packFor(deps).serve(ctx, req, next)
+	})
 }
 
-// natives are the operations behavior/aws/s3 declares native: all of them.
+// natives are the operations behavior/aws/s3 declares native.
 var natives = []string{
 	"CreateBucket", "DeleteBucket", "HeadBucket", "ListBuckets", "GetBucketLocation",
 	"GetBucketVersioning", "PutBucketVersioning", "GetBucketTagging", "PutBucketTagging",
@@ -59,15 +63,11 @@ var natives = []string{
 	"GetBucketReplication", "PutBucketReplication",
 	"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 	"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
-	"GetBucketRequestPayment", "PutBucketRequestPayment",
-	"GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
 	"PutObject", "PostObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
 	"ListObjects", "ListObjectsV2", "ListObjectVersions",
 	"CreateMultipartUpload", "UploadPart", "UploadPartCopy", "CompleteMultipartUpload",
 	"AbortMultipartUpload", "ListParts", "ListMultipartUploads",
 	"GetObjectTagging", "PutObjectTagging",
-	"PutPublicAccessBlock", "GetPublicAccessBlock", "DeletePublicAccessBlock",
-	"PutBucketOwnershipControls", "GetBucketOwnershipControls", "DeleteBucketOwnershipControls",
 	"GetBucketPolicyStatus", "GetObjectAttributes",
 	"DeleteBucketTagging", "DeleteObjectTagging",
 	"PutObjectLegalHold", "GetObjectLegalHold", "PutObjectRetention", "GetObjectRetention",
@@ -235,14 +235,23 @@ func looksLikeIPv4(name string) bool {
 // New answers with the S3 service, served through its bundle.
 func New(d spi.Deps) spi.BehaviorPack { return bundled.Handler("aws.s3", d) }
 
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+// serve is the bundle's wrap: every request is routed by its shape, a
+// bucket's records are read in its home region, and every response carries
+// the bucket's CORS rules.
+func (p *Pack) serve(ctx context.Context, req *spi.Request, next func(context.Context, *spi.Request) (*spi.Response, error)) (*spi.Response, error) {
 	if req.HTTP != nil && req.Operation != "" {
 		req.Operation = p.route(req)
 	}
 	if req.HTTP != nil && req.HTTP.Method == http.MethodOptions {
 		return p.corsPreflight(ctx, req)
 	}
-	resp, err := p.invoke(ctx, req)
+	if !slices.Contains(natives, req.Operation) {
+		// The natives find the home region themselves, in requireBucket.
+		if err := p.toHomeRegion(ctx, req, str(req.Input["Bucket"])); err != nil {
+			return nil, err
+		}
+	}
+	resp, err := next(ctx, req)
 	if err == nil && resp != nil {
 		if resp.Headers == nil {
 			resp.Headers = http.Header{}
@@ -301,11 +310,7 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
 		"GetObjectLockConfiguration", "PutObjectLockConfiguration",
-		"GetBucketAbac", "PutBucketAbac",
-		"GetBucketRequestPayment", "PutBucketRequestPayment",
-		"GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
-		"PutPublicAccessBlock", "GetPublicAccessBlock", "DeletePublicAccessBlock",
-		"PutBucketOwnershipControls", "GetBucketOwnershipControls", "DeleteBucketOwnershipControls":
+		"GetBucketAbac", "PutBucketAbac":
 		return p.bucketCfg(ctx, req)
 	case "GetObjectAttributes":
 		return p.objectAttributes(ctx, req)
@@ -3658,35 +3663,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			logging["TargetPrefix"] = str(logging["TargetPrefix"])
 			req.Input["BucketLoggingStatus"] = map[string]any{"LoggingEnabled": logging}
 		}
-		if req.Operation == "PutBucketAccelerateConfiguration" {
-			if strings.Contains(b, ".") {
-				return nil, &spi.Fault{Code: "InvalidRequest", Message: "S3 Transfer Acceleration is not supported for buckets with periods (.) in their names", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			status := str(asMap(req.Input["AccelerateConfiguration"])["Status"])
-			if status != "Enabled" && status != "Suspended" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			req.Input["AccelerateConfiguration"] = map[string]any{"Status": status}
-		}
-		if req.Operation == "PutBucketRequestPayment" {
-			payer := str(asMap(req.Input["RequestPaymentConfiguration"])["Payer"])
-			if payer != "Requester" && payer != "BucketOwner" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			req.Input["RequestPaymentConfiguration"] = map[string]any{"Payer": payer}
-		}
-		if req.Operation == "PutPublicAccessBlock" {
-			configuration, err := normalizePublicAccessBlock(req.Input["PublicAccessBlockConfiguration"])
-			if err != nil {
-				return nil, err
-			}
-			req.Input["PublicAccessBlockConfiguration"] = configuration
-		}
-		if req.Operation == "PutBucketOwnershipControls" {
-			if err := validateOwnershipControls(req.Input["OwnershipControls"]); err != nil {
-				return nil, err
-			}
-		}
 		if req.Operation == "PutBucketReplication" {
 			if !p.versioningEnabled(ctx, req, b) {
 				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Versioning must be 'Enabled' on the bucket to apply a replication configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -3739,12 +3715,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		if req.Operation == "GetBucketLogging" {
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
-		if req.Operation == "GetBucketRequestPayment" {
-			return &spi.Response{Output: map[string]any{"Payer": "BucketOwner"}}, nil
-		}
-		if req.Operation == "GetBucketAccelerateConfiguration" {
-			return &spi.Response{Output: map[string]any{}}, nil
-		}
 		if req.Operation == "GetBucketEncryption" {
 			return &spi.Response{Output: map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}}}, nil
 		}
@@ -3761,12 +3731,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			if req.Operation == "GetBucketObjectLockConfiguration" || req.Operation == "GetObjectLockConfiguration" {
 				miss.Fields = map[string]any{"BucketName": b}
 			}
-			if req.Operation == "GetBucketOwnershipControls" {
-				miss.Fields = map[string]any{"BucketName": b}
-			}
-			if req.Operation == "GetPublicAccessBlock" {
-				miss.Fields = map[string]any{"BucketName": b}
-			}
 			return nil, miss
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -3775,12 +3739,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	_ = json.Unmarshal(raw, &doc)
 	if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
 		return &spi.Response{Status: http.StatusOK, Output: doc}, nil
-	}
-	if req.Operation == "GetBucketRequestPayment" {
-		return &spi.Response{Status: 200, Output: map[string]any{"Payer": asMap(doc["RequestPaymentConfiguration"])["Payer"]}}, nil
-	}
-	if req.Operation == "GetBucketAccelerateConfiguration" {
-		return &spi.Response{Status: 200, Output: map[string]any{"Status": asMap(doc["AccelerateConfiguration"])["Status"]}}, nil
 	}
 	if req.Operation == "GetBucketLogging" {
 		return &spi.Response{Status: 200, Output: map[string]any{"LoggingEnabled": asMap(doc["BucketLoggingStatus"])["LoggingEnabled"]}}, nil
@@ -4072,36 +4030,6 @@ func validateWebsiteConfiguration(value any) error {
 	return nil
 }
 
-func normalizePublicAccessBlock(value any) (map[string]any, error) {
-	configuration, ok := value.(map[string]any)
-	if !ok {
-		return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	normalized := map[string]any{"BlockPublicAcls": false, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
-	for field, value := range configuration {
-		if _, ok := normalized[field]; !ok {
-			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		flag, ok := value.(bool)
-		if !ok {
-			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		normalized[field] = flag
-	}
-	return normalized, nil
-}
-
-func validateOwnershipControls(value any) error {
-	rules := asSlice(asMap(value)["Rules"])
-	if len(rules) == 1 {
-		switch str(asMap(rules[0])["ObjectOwnership"]) {
-		case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
-			return nil
-		}
-	}
-	return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-}
-
 func validateObjectLockConfiguration(value any) error {
 	configuration := asMap(value)
 	malformed := func() error {
@@ -4149,16 +4077,8 @@ func cfgKind(op string) (string, *spi.Fault) {
 		return "abac", n("NoSuchAbacConfiguration", "The ABAC configuration does not exist")
 	case strings.Contains(op, "Logging"):
 		return "logging", nil
-	case strings.Contains(op, "RequestPayment"):
-		return "requestpayment", nil
-	case strings.Contains(op, "Accelerate"):
-		return "accelerate", nil
 	case strings.Contains(op, "Acl"):
 		return "acl", nil
-	case strings.Contains(op, "PublicAccessBlock"):
-		return "publicaccessblock", n("NoSuchPublicAccessBlockConfiguration", "The public access block configuration was not found")
-	case strings.Contains(op, "OwnershipControls"):
-		return "ownershipcontrols", n("OwnershipControlsNotFoundError", "The bucket ownership controls were not found")
 	}
 	return strings.ToLower(op), nil
 }
@@ -5415,6 +5335,31 @@ func (p *Pack) requireMultipartBucket(ctx context.Context, req *spi.Request) err
 	return nil
 }
 
+// toHomeRegion points req at the region that holds bucket b, when the caller
+// addressed it from another: a bucket name is global, its records are not.
+func (p *Pack) toHomeRegion(ctx context.Context, req *spi.Request, b string) error {
+	if b == "" {
+		return nil
+	}
+	if _, ok, err := p.col(req, "buckets").Get(ctx, b); err != nil || ok {
+		return err
+	}
+	raw, exists, err := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, b)
+	if err != nil || !exists {
+		return err
+	}
+	var location struct {
+		Region string `json:"region"`
+	}
+	if err := json.Unmarshal(raw, &location); err != nil {
+		return err
+	}
+	if location.Region != "" {
+		req.Identity.Region = location.Region
+	}
+	return nil
+}
+
 func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expected string) error {
 	if expected != "" {
 		if len(expected) != 12 {
@@ -5426,30 +5371,12 @@ func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expe
 			}
 		}
 	}
+	if err := p.toHomeRegion(ctx, req, b); err != nil {
+		return err
+	}
 	_, ok, err := p.col(req, "buckets").Get(ctx, b)
 	if err != nil {
 		return err
-	}
-	if !ok {
-		raw, exists, err := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, b)
-		if err != nil {
-			return err
-		}
-		if exists {
-			var location struct {
-				Region string `json:"region"`
-			}
-			if err := json.Unmarshal(raw, &location); err != nil {
-				return err
-			}
-			if location.Region != "" {
-				req.Identity.Region = location.Region
-				_, ok, err = p.col(req, "buckets").Get(ctx, b)
-				if err != nil {
-					return err
-				}
-			}
-		}
 	}
 	if !ok {
 		return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client", Fields: map[string]any{"BucketName": b}}

@@ -26,7 +26,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	awssns "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 )
 
 type recordingAuthorizer struct{ checks []string }
@@ -479,7 +478,7 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := edge.New(cfg, deps, reg, "test").Handler()
-	if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
+	if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte(`{"Account":"000000000000","SecretAccessKey":"secret","SessionToken":"right"}`)); err != nil {
 		t.Fatal(err)
 	}
 	results := map[string]any{}

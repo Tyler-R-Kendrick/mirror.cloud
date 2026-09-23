@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -76,6 +76,7 @@ func TestBootedServerSTSSection48(t *testing.T) {
 	_, saml := call(url.Values{
 		"Action": {"AssumeRoleWithSAML"}, "Version": {"2011-06-15"},
 		"RoleArn": {"arn:aws:iam::000000000000:role/Admin"}, "SAMLAssertion": {"PHNhbWw+"},
+		"PrincipalArn": {"arn:aws:iam::000000000000:saml-provider/corp"},
 	})
 	if !strings.Contains(saml, "assumed-role/Admin/saml") || !strings.Contains(saml, "AccessKeyId") {
 		t.Fatalf("saml %s", saml)
@@ -83,11 +84,13 @@ func TestBootedServerSTSSection48(t *testing.T) {
 	_, web := call(url.Values{
 		"Action": {"AssumeRoleWithWebIdentity"}, "Version": {"2011-06-15"},
 		"RoleArn": {"arn:aws:iam::000000000000:role/Admin"}, "WebIdentityToken": {"header.payload.sig"},
+		"RoleSessionName": {"web"},
 	})
 	if !strings.Contains(web, "assumed-role/Admin/web") {
 		t.Fatalf("web %s", web)
 	}
-	_, root := call(url.Values{"Action": {"AssumeRoot"}, "Version": {"2011-06-15"}})
+	_, root := call(url.Values{"Action": {"AssumeRoot"}, "Version": {"2011-06-15"}, "TargetPrincipal": {"111111111111"},
+		"TaskPolicyArn.arn": {"arn:aws:iam::aws:policy/root-task/IAMAuditRootUserCredentials"}})
 	if !strings.Contains(root, "AccessKeyId") {
 		t.Fatalf("root %s", root)
 	}
@@ -95,16 +98,18 @@ func TestBootedServerSTSSection48(t *testing.T) {
 	if !strings.Contains(info, "000000000000") {
 		t.Fatalf("key info %s", info)
 	}
-	enc := "7b22616374696f6e223a2273333a4765744f626a656374227d" // {"action":"s3:GetObject"}
+	// Nothing in the emulator issues an encoded message, so the message is answered as given.
+	enc := "7b22616374696f6e223a2273333a4765744f626a656374227d"
 	_, dec := call(url.Values{"Action": {"DecodeAuthorizationMessage"}, "Version": {"2011-06-15"}, "EncodedMessage": {enc}})
-	if !strings.Contains(dec, "s3:GetObject") {
+	if !strings.Contains(dec, enc) {
 		t.Fatalf("decode %s", dec)
 	}
-	_, wit := call(url.Values{"Action": {"GetWebIdentityToken"}, "Version": {"2011-06-15"}})
+	_, wit := call(url.Values{"Action": {"GetWebIdentityToken"}, "Version": {"2011-06-15"},
+		"Audience.member.1": {"sts.amazonaws.com"}, "SigningAlgorithm": {"RS256"}})
 	if !strings.Contains(wit, "WebIdentityToken") {
 		t.Fatalf("wit %s", wit)
 	}
-	_, del := call(url.Values{"Action": {"GetDelegatedAccessToken"}, "Version": {"2011-06-15"}})
+	_, del := call(url.Values{"Action": {"GetDelegatedAccessToken"}, "Version": {"2011-06-15"}, "TradeInToken": {"trade"}})
 	if !strings.Contains(del, "SessionToken") && !strings.Contains(del, "AccessKeyId") {
 		t.Fatalf("delegated %s", del)
 	}
@@ -116,5 +121,9 @@ func TestSTSHTTPProvenOps(t *testing.T) {
 		"AssumeRoleWithSAML", "AssumeRoleWithWebIdentity", "AssumeRoot",
 		"DecodeAuthorizationMessage", "GetAccessKeyInfo", "GetDelegatedAccessToken", "GetWebIdentityToken",
 	}
-	assertSame(t, "sts", sts.New(spitest.Deps(t)).Operations(), want)
+	pack, err := bundled.New("aws.sts", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSame(t, "sts", pack.Operations(), want)
 }

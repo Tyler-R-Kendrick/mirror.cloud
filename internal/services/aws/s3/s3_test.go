@@ -35,6 +35,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/identity"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/logging"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
@@ -222,9 +223,9 @@ func TestCreateSessionRegistersTemporaryCredential(t *testing.T) {
 	}
 	credentials, _ := response.Output["Credentials"].(map[string]any)
 	ak, _ := credentials["AccessKeyId"].(string)
-	account, ok, err := deps.Store.Scope("_mirror", "global").Collection("stsk").Get(context.Background(), ak)
-	if err != nil || !ok || string(account) != ident().Account {
-		t.Fatalf("global session credential marker: account=%q ok=%v err=%v", account, ok, err)
+	secret, token, temporary := identity.S3Credential(context.Background(), deps.Store, deps.Rand, ak)
+	if !temporary || secret != credentials["SecretAccessKey"] || token != credentials["SessionToken"] {
+		t.Fatalf("a request signed with the session's credential would not verify: secret=%q token=%q temporary=%v", secret, token, temporary)
 	}
 }
 
@@ -7999,13 +8000,13 @@ func TestPostObjectPolicySignatureCharacterization(t *testing.T) {
 		t.Fatalf("tampered SigV2 fault = %+v", fault)
 	}
 	temporary := "temporary"
-	if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), temporary, []byte(ident().Account)); err != nil {
+	if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), temporary, []byte(`{"SecretAccessKey":"temporary-secret","SessionToken":"temporary-token"}`)); err != nil {
 		t.Fatal(err)
 	}
 	temporaryV4 := maps.Clone(v4)
 	temporaryV4["x-amz-credential"] = temporary + "/20990101/us-east-1/s3/aws4_request"
-	temporaryV4["x-amz-security-token"] = deps.Rand.Derive(temporary + "tok").Hex(32)
-	signV4(temporaryV4, deps.Rand.Derive(temporary).Hex(40))
+	temporaryV4["x-amz-security-token"] = "temporary-token"
+	signV4(temporaryV4, "temporary-secret")
 	if err := post("temporary", temporaryV4, true); err != nil {
 		t.Fatal(err)
 	}

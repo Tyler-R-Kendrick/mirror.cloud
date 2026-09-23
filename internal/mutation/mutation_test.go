@@ -15566,24 +15566,36 @@ var mutants = []mutant{
 	{
 		name: "edge-ignore-temporary-session-token",
 		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  `if _, temporary, _ := s.deps.Store.Scope("_mirror", "global").Collection("stsk").Get(ctx, id.AccessKeyID); temporary {`,
-		new:  `if false {`,
+		old:  `if temporary {`,
+		new:  `if false && (temporary) {`,
 		pkg:  "./internal/edge",
 		run:  "TestS3PresignedSignatureFaultCharacterization",
 	},
 	{
-		name: "sts-scope-temporary-credentials-regionally",
-		file: filepath.Join("internal", "services", "aws", "sts", "sts.go"),
-		old:  `return p.deps.Store.Scope("_mirror", "global").Collection(n)`,
-		new:  `return p.deps.Store.Scope("_mirror", "us-east-1").Collection(n)`,
-		pkg:  "./internal/services/aws/sts",
-		run:  "TestSessionAndFederationDeterministic",
+		// A global resource that fell back to the caller's scope would hide an
+		// STS credential from the edge and from every other account.
+		name: "engine-scope-global-resources-per-account",
+		file: filepath.Join("internal", "engine", "engine.go"),
+		old:  `if res.Global {`,
+		new:  `if false && (res.Global) {`,
+		pkg:  "./internal/bundled",
+		run:  "TestGlobalResourcesAreSharedAcrossAccounts",
+	},
+	{
+		// A temporary credential's secret and token are whatever was issued with
+		// it, not something derivable from the key, so the verifier must read them.
+		name: "identity-derive-temporary-credential",
+		file: filepath.Join("internal", "identity", "credential.go"),
+		old:  "if b, ok, _ := store.Scope(\"_mirror\", \"global\").Collection(\"stsk\").Get(ctx, accessKey); ok {",
+		new:  "if b, ok, _ := store.Scope(\"_mirror\", \"global\").Collection(\"stsk\").Get(ctx, accessKey); false && ok {",
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateSessionRegistersTemporaryCredential|TestPostObjectPolicySignatureCharacterization",
 	},
 	{
 		name: "s3-ignore-create-session-credential",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3_extra.go"),
-		old:  `_ = p.deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), ak, []byte(req.Identity.Account))`,
-		new:  `_ = ak`,
+		old:  `_ = p.deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), ak, stored)`,
+		new:  `_ = stored`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCreateSessionRegistersTemporaryCredential",
 	},
@@ -15870,8 +15882,8 @@ var mutants = []mutant{
 	{
 		name: "s3-ignore-post-policy-session-token",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if _, temporary, _ := p.deps.Store.Scope("_mirror", "global").Collection("stsk").Get(ctx, accessKey); temporary {`,
-		new:  `if false {`,
+		old:  `if temporary {`,
+		new:  `if false && (temporary) {`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestPostObjectPolicySignatureCharacterization",
 	},

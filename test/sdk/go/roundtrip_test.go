@@ -297,7 +297,7 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	temporaryKey := "temporary"
 	temporarySecret := rt.Deps.Rand.Derive(temporaryKey).Hex(40)
 	temporaryToken := rt.Deps.Rand.Derive(temporaryKey + "tok").Hex(32)
-	if err := rt.Deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), temporaryKey, []byte("000000000000")); err != nil {
+	if err := rt.Deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), temporaryKey, []byte(`{"Account":"000000000000","SecretAccessKey":"`+temporarySecret+`","SessionToken":"`+temporaryToken+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 	temporaryConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(temporaryKey, temporarySecret, temporaryToken)))

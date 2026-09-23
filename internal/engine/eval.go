@@ -79,6 +79,8 @@ func (ev *eval) activation() map[string]any {
 			"region":  ev.req.Identity.Region,
 			"arn":     ev.req.Identity.ARN,
 			"project": ev.req.Identity.Project,
+			// The caller's access key: STS answers it as GetCallerIdentity's UserId.
+			"access_key": ev.req.Identity.AccessKeyID,
 		},
 		"now":      ev.e.deps.Clock.Now(),
 		"now_ms":   ev.e.deps.Clock.Now().UnixMilli(),

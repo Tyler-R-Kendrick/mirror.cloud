@@ -16,15 +16,16 @@ import (
 
 func (p *Pack) createSession(req *spi.Request) (*spi.Response, error) {
 	ak := p.deps.Rand.Derive("s3sess/" + str(req.Input["Bucket"])).Hex(20)
-	_ = p.deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), ak, []byte(req.Identity.Account))
-	return &spi.Response{Output: map[string]any{
-		"Credentials": map[string]any{
-			"AccessKeyId":     ak,
-			"SecretAccessKey": p.deps.Rand.Derive(ak).Hex(40),
-			"SessionToken":    p.deps.Rand.Derive(ak + "tok").Hex(32),
-			"Expiration":      p.deps.Clock.Now().Add(time.Hour).UTC().Format("2006-01-02T15:04:05Z"),
-		},
-	}}, nil
+	credential := map[string]any{
+		"AccessKeyId":     ak,
+		"SecretAccessKey": p.deps.Rand.Derive(ak).Hex(40),
+		"SessionToken":    p.deps.Rand.Derive(ak + "tok").Hex(32),
+		"Expiration":      p.deps.Clock.Now().Add(time.Hour).UTC().Format("2006-01-02T15:04:05Z"),
+	}
+	// The edge verifies requests signed with it by reading this record back.
+	stored, _ := json.Marshal(map[string]any{"Account": req.Identity.Account, "SecretAccessKey": credential["SecretAccessKey"], "SessionToken": credential["SessionToken"]})
+	_ = p.deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), ak, stored)
+	return &spi.Response{Output: map[string]any{"Credentials": credential}}, nil
 }
 
 func (p *Pack) renameObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {

@@ -12346,17 +12346,6 @@ var mutants = []mutant{
 		run:  "TestUnmodeledOperationsSurvive",
 	},
 	{
-		// A service no specification describes is served from a hand table;
-		// one that is neither generated nor recorded in specs/aws-dirs.json as
-		// unavailable upstream is a service nobody ingested.
-		name: "specboot-unmodeled-service-nobody-declared",
-		file: filepath.Join("internal", "specboot", "specboot.go"),
-		old:  "\t\tjson11(\"aws.qldb\", \"qldb\", \"AmazonQLDB\",",
-		new:  "\t\tjson11(\"aws.qldb-mutated\", \"qldb\", \"AmazonQLDB\",",
-		pkg:  "./internal/specboot",
-		run:  "TestEveryServedServiceIsDescribedByASpecification",
-	},
-	{
 		name: "smithy-ignore-the-sigv4-signing-name",
 		file: filepath.Join("internal", "receiver", "aws", "smithy", "smithy.go"),
 		old:  "\treturn []string{strings.ToLower(sig.Name)}",

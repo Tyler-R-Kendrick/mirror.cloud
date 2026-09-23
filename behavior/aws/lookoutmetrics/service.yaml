@@ -1,0 +1,78 @@
+schema: bir/1
+service: aws.lookoutmetrics
+
+# Transcribed from the hand-written pack, not established against the real
+# service, which AWS retired in 2025. Detectors and alerts are records keyed
+# by their ARNs; no metric is read and no anomaly is ever found.
+provenance: authored
+
+resources:
+  detector:
+    collection: lmad
+    id:
+      input_members: [AnomalyDetectorArn]
+    record: {}
+  alert:
+    collection: lmalert
+    id:
+      input_members: [AlertArn]
+    record: {}
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateAnomalyDetector:
+    effects:
+      - put:
+          resource: detector
+          key: &detectorArn >-
+            'arn:aws:lookoutmetrics:' + identity.region + ':' + identity.account
+            + ':AnomalyDetector:' + string(input.AnomalyDetectorName)
+          record:
+            AnomalyDetectorArn: *detectorArn
+            AnomalyDetectorName: string(input.AnomalyDetectorName)
+            Status: "'ACTIVE'"
+    output:
+      AnomalyDetectorArn: rec.AnomalyDetectorArn
+
+  DescribeAnomalyDetector:
+    reads:
+      d: { resource: detector }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      AnomalyDetectorArn: d.AnomalyDetectorArn
+      AnomalyDetectorName: d.AnomalyDetectorName
+      Status: d.Status
+  ListAnomalyDetectors:
+    list: { resource: detector, member: AnomalyDetectorSummaryList, paginate: model }
+  DeleteAnomalyDetector: {delete: {resource: detector, missing: ignore}}
+
+  CreateAlert:
+    effects:
+      - put:
+          resource: alert
+          key: &alertArn >-
+            'arn:aws:lookoutmetrics:' + identity.region + ':' + identity.account
+            + ':Alert:' + string(input.AlertName)
+          record:
+            AlertArn: *alertArn
+            AlertName: string(input.AlertName)
+            AnomalyDetectorArn: string(input.AnomalyDetectorArn)
+    output:
+      AlertArn: rec.AlertArn
+
+  DescribeAlert: {get: {resource: alert, error: NotFound, wrap: Alert}}
+  ListAlerts:
+    list: { resource: alert, member: AlertSummaryList, paginate: model }
+
+quirks:
+  - operation: CreateAnomalyDetector
+    note: >
+      A detector is ACTIVE when it is created and never reads its metric set,
+      so nothing is detected and no alert fires. Transcribed from the pack.
+    provenance: authored

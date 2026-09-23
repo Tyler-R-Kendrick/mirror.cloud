@@ -12,11 +12,11 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
 
-// TestEveryServedServiceIsDescribedByASpecification is the ratchet on the
-// remaining hand-authored description. A few services are described only by
-// the catalog because AWS publishes no model for them in api-models-aws; every
-// other service the runtime serves takes its protocol, its target prefix and
-// its shapes from a vendored specification.
+// TestEveryServedServiceIsDescribedByASpecification is the ratchet on
+// hand-authored description: every service the runtime serves takes its
+// protocol, its target prefix and its shapes from a vendored specification.
+// The three services AWS retired from api-models-aws are no exception; their
+// last published models are vendored through specs/urls.tsv.
 //
 // The list may shrink and must not grow. A service added to the catalog
 // without a spec behind it is the drift this whole pipeline exists to stop.
@@ -55,8 +55,9 @@ func TestEveryServedServiceIsDescribedByASpecification(t *testing.T) {
 	}
 	for _, id := range want {
 		if !have[id] {
-			t.Logf("%s now has a generated model; it can come out of the "+
-				"\"unavailable\" map of specs/aws-dirs.json", id)
+			t.Logf("%s has a generated model, so its \"unavailable\" entry in "+
+				"specs/aws-dirs.json excuses nothing here; it stays only while "+
+				"specs/urls.tsv, not the AWS pin, supplies the model", id)
 		}
 	}
 }

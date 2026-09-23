@@ -1,0 +1,242 @@
+{
+  "schema": "trace/1",
+  "service": "aws.elastictranscoder",
+  "source": "pack:internal/services/aws/elastictranscoder@e5f94a8",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ReadPipeline",
+      "input": {
+        "Id": "1111111111111-abcde1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePipeline",
+      "input": {
+        "InputBucket": "in",
+        "Name": "p1",
+        "OutputBucket": "out",
+        "Role": "arn:aws:iam::000000000000:role/transcoder"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Pipeline": {
+          "Arn": "arn:aws:elastictranscoder:us-east-1:000000000000:pipeline/7c589129",
+          "Id": "7c589129",
+          "InputBucket": "in",
+          "Name": "p1",
+          "OutputBucket": "out",
+          "Role": "arn:aws:iam::000000000000:role/transcoder",
+          "Status": "Active"
+        }
+      },
+      "recut": "The model's Pipeline structure declares InputBucket, OutputBucket and Role, all three supplied by CreatePipelineRequest; the pack dropped them."
+    },
+    {
+      "operation": "ReadPipeline",
+      "input": {
+        "Id": {
+          "$fromPath": "Pipeline.Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Pipeline": {
+          "Arn": "arn:aws:elastictranscoder:us-east-1:000000000000:pipeline/7c589129",
+          "Id": "7c589129",
+          "InputBucket": "in",
+          "Name": "p1",
+          "OutputBucket": "out",
+          "Role": "arn:aws:iam::000000000000:role/transcoder",
+          "Status": "Active"
+        }
+      },
+      "recut": "The model's Pipeline structure declares InputBucket, OutputBucket and Role, all three supplied by CreatePipelineRequest; the pack dropped them."
+    },
+    {
+      "operation": "ListPipelines",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Pipelines": [
+          {
+            "Arn": "arn:aws:elastictranscoder:us-east-1:000000000000:pipeline/7c589129",
+            "Id": "7c589129",
+            "InputBucket": "in",
+            "Name": "p1",
+            "OutputBucket": "out",
+            "Role": "arn:aws:iam::000000000000:role/transcoder",
+            "Status": "Active"
+          }
+        ]
+      },
+      "recut": "The model's Pipeline structure declares InputBucket, OutputBucket and Role, all three supplied by CreatePipelineRequest; the pack dropped them."
+    },
+    {
+      "operation": "CreateJob",
+      "input": {
+        "Input": {
+          "Key": "in.mp4"
+        },
+        "PipelineId": {
+          "$fromPath": "Pipeline.Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Id": "5f59f223",
+          "Input": {
+            "Key": "in.mp4"
+          },
+          "PipelineId": "7c589129",
+          "Status": "Complete"
+        }
+      },
+      "recut": "The model's Job structure declares Input, which CreateJobRequest supplies; the pack dropped it."
+    },
+    {
+      "operation": "ReadJob",
+      "input": {
+        "Id": {
+          "$fromPath": "Job.Id",
+          "$fromStep": 4
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Id": "5f59f223",
+          "Input": {
+            "Key": "in.mp4"
+          },
+          "PipelineId": "7c589129",
+          "Status": "Complete"
+        }
+      },
+      "recut": "The model's Job structure declares Input, which CreateJobRequest supplies; the pack dropped it."
+    },
+    {
+      "operation": "ListJobsByPipeline",
+      "input": {
+        "PipelineId": {
+          "$fromPath": "Pipeline.Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Jobs": [
+          {
+            "Id": "5f59f223",
+            "Input": {
+              "Key": "in.mp4"
+            },
+            "PipelineId": "7c589129",
+            "Status": "Complete"
+          }
+        ]
+      },
+      "recut": "The model's Job structure declares Input, which CreateJobRequest supplies; the pack dropped it."
+    },
+    {
+      "operation": "ReadJob",
+      "input": {
+        "Id": "1111111111111-abcde2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeletePipeline",
+      "input": {
+        "Id": {
+          "$fromPath": "Pipeline.Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "recut": "DeletePipelineResponse has no members in the model; the pack answered a Success member no SDK can read."
+    },
+    {
+      "operation": "ListPipelines",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Pipelines": null
+      }
+    }
+  ]
+}

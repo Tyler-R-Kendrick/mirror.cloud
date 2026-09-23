@@ -47,6 +47,9 @@ azure.blobs	azure/blobs.json	authored
 azure.queue	azure/queue.json	authored
 azure.table	azure/table.json	authored
 railway.graphql	railway/graphql.json	https://backboard.railway.com/graphql/v2	railway/introspect.json
+aws.elastictranscoder	aws-retired/elastic-transcoder-2012-09-25.json	https://raw.githubusercontent.com/aws/api-models-aws/d4b48813ccd7e56507186bfee1811b201cc9ea43/models/elastic-transcoder/service/2012-09-25/elastic-transcoder-2012-09-25.json
+aws.lookoutmetrics	aws-retired/lookoutmetrics-2017-07-25.json	https://raw.githubusercontent.com/aws/api-models-aws/da9aa6ad55c24781d57db722fd41093a90350a1d/models/lookoutmetrics/service/2017-07-25/lookoutmetrics-2017-07-25.json
+aws.qldb	aws-retired/qldb-2019-01-02.json	https://raw.githubusercontent.com/aws/api-models-aws/da9aa6ad55c24781d57db722fd41093a90350a1d/models/qldb/service/2019-01-02/qldb-2019-01-02.json
 aws.appsync	appsync-graphql.json	authored
 aws.es	es-dataplane.json	authored
 aws.timestream	timestream-query.json	authored

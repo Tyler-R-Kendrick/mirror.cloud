@@ -22,6 +22,18 @@
       "source": "authored",
       "ref": "2026-09-20T13:51:57Z"
     },
+    "aws.qldb": {
+      "source": "https://raw.githubusercontent.com/aws/api-models-aws/da9aa6ad55c24781d57db722fd41093a90350a1d/models/qldb/service/2019-01-02/qldb-2019-01-02.json",
+      "ref": "2026-09-23T07:20:10Z"
+    },
+    "aws.elastictranscoder": {
+      "source": "https://raw.githubusercontent.com/aws/api-models-aws/d4b48813ccd7e56507186bfee1811b201cc9ea43/models/elastic-transcoder/service/2012-09-25/elastic-transcoder-2012-09-25.json",
+      "ref": "2026-09-23T07:20:10Z"
+    },
+    "aws.lookoutmetrics": {
+      "source": "https://raw.githubusercontent.com/aws/api-models-aws/da9aa6ad55c24781d57db722fd41093a90350a1d/models/lookoutmetrics/service/2017-07-25/lookoutmetrics-2017-07-25.json",
+      "ref": "2026-09-23T07:20:10Z"
+    },
     "hostinger.api": {
       "source": "https://raw.githubusercontent.com/hostinger/api/main/openapi.json",
       "ref": "2026-09-11T00:55:54Z"
@@ -83,6 +95,30 @@
       "path": "appsync-graphql.json",
       "sha256": "9f9c230ae93f9b160917952e03059b267c150a1a06a3d4f66c047d41045a58ad",
       "ingested": "2026-09-20T13:23:03Z"
+    },
+    {
+      "serviceId": "aws.elastictranscoder",
+      "source": "https://raw.githubusercontent.com/aws/api-models-aws/d4b48813ccd7e56507186bfee1811b201cc9ea43/models/elastic-transcoder/service/2012-09-25/elastic-transcoder-2012-09-25.json",
+      "ref": "2026-09-23T07:20:10Z",
+      "path": "aws-retired/elastic-transcoder-2012-09-25.json",
+      "sha256": "0305c4d76c2cd8ee21ffc314df9d2801912a200152e37933377d9c28ea3934ed",
+      "ingested": "2026-09-23T07:20:11Z"
+    },
+    {
+      "serviceId": "aws.lookoutmetrics",
+      "source": "https://raw.githubusercontent.com/aws/api-models-aws/da9aa6ad55c24781d57db722fd41093a90350a1d/models/lookoutmetrics/service/2017-07-25/lookoutmetrics-2017-07-25.json",
+      "ref": "2026-09-23T07:20:10Z",
+      "path": "aws-retired/lookoutmetrics-2017-07-25.json",
+      "sha256": "c9887d1ff4e28163ff51f6cd771ceb9c263bb23fecc09fe2074160d48227b4ba",
+      "ingested": "2026-09-23T07:20:11Z"
+    },
+    {
+      "serviceId": "aws.qldb",
+      "source": "https://raw.githubusercontent.com/aws/api-models-aws/da9aa6ad55c24781d57db722fd41093a90350a1d/models/qldb/service/2019-01-02/qldb-2019-01-02.json",
+      "ref": "2026-09-23T07:20:10Z",
+      "path": "aws-retired/qldb-2019-01-02.json",
+      "sha256": "059a66d8ffedccc15c6eeb58086f4a3130ba46cf6eb9f5984548be69c6d2fd63",
+      "ingested": "2026-09-23T07:20:11Z"
     },
     {
       "serviceId": "aws.access-analyzer",

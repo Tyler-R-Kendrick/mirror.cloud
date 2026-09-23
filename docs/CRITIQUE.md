@@ -1308,3 +1308,21 @@ Nine needles were pointed at the test that does catch them. Eighteen tests gaine
 - Firehose's unlocked duplicate-stream pre-check, which repeated the check inside the transaction. Without it, a plain duplicate create reaches the guard that matters.
 
 One gap was left named at first: nothing observed Firehose writing an OpenSearch stream's processing failures, so skipping them entirely passed. The OpenSearch destination test now sends a record that fails decompression and reads its envelope back from the error prefix, and a needle drops the write.
+
+### "No model published" was a model deleted, and the packs it excused spoke the wrong protocol
+
+Three services, `aws.qldb`, `aws.lookoutmetrics` and `aws.elastictranscoder`, were recorded in `specs/aws-dirs.json` as having "no model published in aws/api-models-aws". Because of that, `internal/specboot` described them by hand: `awsJson1_1`, a POST to `/`, invented target prefixes and no shapes.
+
+The claim was wrong. api-models-aws had published all three and then deleted them when AWS deprecated the services: QLDB and Lookout for Metrics in `45aa0c8`, Elastic Transcoder in `312fb32`. The last published model for each is still at the parent commit.
+
+`specs/urls.tsv` now serves each model from that commit, under `specs/aws-retired/`. `specs/aws-dirs.json` says why they are there, and the hand table is gone.
+
+The models answer something the hand table could not: **all three are `restJson1`**. The emulator had been accepting a wire format no SDK sends to these services. With real models behind them, the three packs became bundles. Each was recorded from its pack first and gated against that recording. A step was re-cut only where the model shows the pack was wrong:
+- DescribeAlert answered the alert's members at the top level, where the model wraps them in `Alert`.
+- QLDB's not-found fault answered 400 where the model declares 404, and its ledger summaries listed members `LedgerSummary` does not have.
+- DeletePipeline answered a `Success` member its empty response shape does not declare.
+- Pipelines and jobs dropped `InputBucket`, `OutputBucket`, `Role` and `Input`, which the model declares and the request supplies.
+
+QLDB's GetDigest and GetBlock were hollow: a hash of nothing and an empty block. Its `SendCommand` belongs to a separate service, QLDB Session, and no request to QLDB can reach it. All three are mock-tier now.
+
+The lesson is the one "Reviewing the exemptions" records: an exemption must say why, and the why is a claim. This one was never checked against the upstream history, where it was false.

@@ -1,0 +1,182 @@
+{
+  "schema": "trace/1",
+  "service": "aws.lookoutmetrics",
+  "source": "pack:internal/services/aws/lookoutmetrics@e5f94a8",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeAnomalyDetector",
+      "input": {
+        "AnomalyDetectorArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:AnomalyDetector:missing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateAnomalyDetector",
+      "input": {
+        "AnomalyDetectorConfig": {
+          "AnomalyDetectorFrequency": "PT1H"
+        },
+        "AnomalyDetectorName": "d1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyDetectorArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:AnomalyDetector:d1"
+      }
+    },
+    {
+      "operation": "DescribeAnomalyDetector",
+      "input": {
+        "AnomalyDetectorArn": {
+          "$fromPath": "AnomalyDetectorArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyDetectorArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:AnomalyDetector:d1",
+        "AnomalyDetectorName": "d1",
+        "Status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "ListAnomalyDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyDetectorSummaryList": [
+          {
+            "AnomalyDetectorArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:AnomalyDetector:d1",
+            "AnomalyDetectorName": "d1",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateAlert",
+      "input": {
+        "Action": {},
+        "AlertName": "a1",
+        "AlertSensitivityThreshold": 50,
+        "AnomalyDetectorArn": {
+          "$fromPath": "AnomalyDetectorArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AlertArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:Alert:a1"
+      }
+    },
+    {
+      "operation": "DescribeAlert",
+      "input": {
+        "AlertArn": {
+          "$fromPath": "AlertArn",
+          "$fromStep": 4
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Alert": {
+          "AlertArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:Alert:a1",
+          "AlertName": "a1",
+          "AnomalyDetectorArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:AnomalyDetector:d1"
+        }
+      },
+      "recut": "The model's DescribeAlertResponse has a single member, Alert, holding the alert; the pack answered the alert's members at the top level, where no SDK reads them."
+    },
+    {
+      "operation": "ListAlerts",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AlertSummaryList": [
+          {
+            "AlertArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:Alert:a1",
+            "AlertName": "a1",
+            "AnomalyDetectorArn": "arn:aws:lookoutmetrics:us-east-1:000000000000:AnomalyDetector:d1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAnomalyDetector",
+      "input": {
+        "AnomalyDetectorArn": {
+          "$fromPath": "AnomalyDetectorArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAnomalyDetectors",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AnomalyDetectorSummaryList": null
+      }
+    }
+  ]
+}

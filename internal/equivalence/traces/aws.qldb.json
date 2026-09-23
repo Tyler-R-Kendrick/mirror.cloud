@@ -1,0 +1,152 @@
+{
+  "schema": "trace/1",
+  "service": "aws.qldb",
+  "source": "pack:internal/services/aws/qldb@e5f94a8",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeLedger",
+      "input": {
+        "Name": "missing"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's ResourceNotFoundException carries httpError 404; the pack answered 400."
+    },
+    {
+      "operation": "CreateLedger",
+      "input": {
+        "Name": "l1",
+        "PermissionsMode": "STANDARD"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:qldb:us-east-1:000000000000:ledger/l1",
+        "Name": "l1",
+        "PermissionsMode": "STANDARD",
+        "State": "ACTIVE"
+      }
+    },
+    {
+      "operation": "DescribeLedger",
+      "input": {
+        "Name": "l1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:qldb:us-east-1:000000000000:ledger/l1",
+        "Name": "l1",
+        "PermissionsMode": "STANDARD",
+        "State": "ACTIVE"
+      }
+    },
+    {
+      "operation": "UpdateLedger",
+      "input": {
+        "DeletionProtection": false,
+        "Name": "l1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:qldb:us-east-1:000000000000:ledger/l1",
+        "DeletionProtection": false,
+        "Name": "l1",
+        "State": "ACTIVE"
+      }
+    },
+    {
+      "operation": "ListLedgers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Ledgers": [
+          {
+            "Name": "l1",
+            "State": "ACTIVE"
+          }
+        ]
+      },
+      "recut": "The model's LedgerSummary declares only Name, State and CreationDateTime; the pack listed Arn and DeletionProtection, which no SDK can read from a summary."
+    },
+    {
+      "operation": "DeleteLedger",
+      "input": {
+        "Name": "l1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListLedgers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Ledgers": null
+      }
+    },
+    {
+      "operation": "DescribeLedger",
+      "input": {
+        "Name": "l1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      },
+      "recut": "The model's ResourceNotFoundException carries httpError 404; the pack answered 400."
+    }
+  ]
+}

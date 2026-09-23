@@ -34,12 +34,6 @@ func TestBundleServesEveryGeneratedService(t *testing.T) {
 	if gcs == nil || gcs.Protocol != model.ProtoGCPRESTSON {
 		t.Fatalf("gcp.storage = %v", gcs)
 	}
-	for _, u := range unmodeled() {
-		got := b.ServiceByID(u.ID)
-		if got == nil || len(got.Operations) != len(u.Operations) {
-			t.Errorf("%s: served %v, want %d operations", u.ID, got, len(u.Operations))
-		}
-	}
 	for i := 1; i < len(b.Services); i++ {
 		if b.Services[i-1].ID >= b.Services[i].ID {
 			t.Fatalf("services are not sorted by ID at %s", b.Services[i].ID)

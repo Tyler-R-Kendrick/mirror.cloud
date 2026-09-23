@@ -68,38 +68,8 @@ func derive() *model.Bundle {
 		svc.Operations = unionOperations(gen.Operations, authored(unmodeledOps[id]...))
 		b.Services = append(b.Services, svc)
 	}
-	b.Services = append(b.Services, unmodeled()...)
 	sort.Slice(b.Services, func(i, j int) bool { return b.Services[i].ID < b.Services[j].ID })
 	return b
-}
-
-// unmodeled is what no specification carries and a pack still serves. Both
-// tables are the residue of the hand-authored catalog, kept because deleting
-// them would take a service away rather than correct it; every entry is a
-// pack's promise, not a vendor's.
-//
-// The services are the three aws/api-models-aws publishes no model for --
-// specs/aws-dirs.json records each, and TestEveryServedServiceIsDescribedByASpecification
-// keeps the list from growing -- described the way the catalog described
-// them: awsJson1_1, every operation a POST to "/".
-func unmodeled() []model.Service {
-	json11 := func(id, prefix, target string, ops ...string) model.Service {
-		return model.Service{
-			ID: id, Protocol: model.ProtoAWSJSON11, EndpointPrefix: prefix, TargetPrefix: target,
-			Operations: authored(ops...), Shapes: map[string]model.Shape{},
-		}
-	}
-	return []model.Service{
-		json11("aws.qldb", "qldb", "AmazonQLDB",
-			"CreateLedger", "DescribeLedger", "ListLedgers", "UpdateLedger", "DeleteLedger",
-			"GetDigest", "GetBlock", "SendCommand"),
-		json11("aws.elastictranscoder", "elastictranscoder", "ElasticTranscoder",
-			"CreatePipeline", "ReadPipeline", "ListPipelines", "DeletePipeline",
-			"CreateJob", "ReadJob", "ListJobsByPipeline"),
-		json11("aws.lookoutmetrics", "lookoutmetrics", "LookoutMetrics",
-			"CreateAnomalyDetector", "DescribeAnomalyDetector", "ListAnomalyDetectors", "DeleteAnomalyDetector",
-			"CreateAlert", "DescribeAlert", "ListAlerts"),
-	}
 }
 
 // unmodeledOps are operations a pack serves that its service's specification

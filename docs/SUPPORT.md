@@ -58,7 +58,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.elasticloadbalancing` | `awsQuery` | 51 | 0 |
 | `aws.elasticmapreduce` | `awsJson1_1` | 8 | 57 |
 | `aws.elasticsearch` | `restJson1` | 6 | 45 |
-| `aws.elastictranscoder` | `awsJson1_1` | 7 | 0 |
+| `aws.elastictranscoder` | `restJson1` | 7 | 10 |
 | `aws.es` | `restJson1` | 14 | 86 |
 | `aws.events` | `awsJson1_1` | 57 | 0 |
 | `aws.firehose` | `awsJson1_1` | 12 | 0 |
@@ -90,7 +90,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.lightsail` | `awsJson1_1` | 7 | 154 |
 | `aws.location` | `restJson1` | 8 | 56 |
 | `aws.logs` | `awsJson1_1` | 118 | 0 |
-| `aws.lookoutmetrics` | `awsJson1_1` | 7 | 0 |
+| `aws.lookoutmetrics` | `restJson1` | 7 | 23 |
 | `aws.macie2` | `restJson1` | 6 | 75 |
 | `aws.managedblockchain` | `restJson1` | 5 | 22 |
 | `aws.mediaconnect` | `restJson1` | 6 | 76 |
@@ -110,7 +110,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.pipes` | `restJson1` | 10 | 0 |
 | `aws.polly` | `restJson1` | 5 | 5 |
 | `aws.proton` | `awsJson1_0` | 6 | 81 |
-| `aws.qldb` | `awsJson1_1` | 8 | 0 |
+| `aws.qldb` | `restJson1` | 5 | 15 |
 | `aws.quicksight` | `restJson1` | 8 | 285 |
 | `aws.ram` | `restJson1` | 8 | 27 |
 | `aws.rds` | `awsQuery` | 164 | 0 |

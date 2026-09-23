@@ -16,10 +16,10 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -236,7 +236,7 @@ func TestPipesKinesisDeliveryAndCheckpoint(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	stream, queue := kinesis.New(deps), bundled.Handler("aws.sqs", deps)
+	stream, queue := bundled.Handler("aws.kinesis", deps), bundled.Handler("aws.sqs", deps)
 	invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "events"})
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "target"})
 	invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "events", "PartitionKey": "old", "Data": []byte("before")})
@@ -298,7 +298,7 @@ func TestPipesKinesisPartialBatchCheckpoint(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	stream, function := kinesis.New(deps), lambda.New(deps)
+	stream, function := bundled.Handler("aws.kinesis", deps), lambda.New(deps)
 	invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "partial"})
 	for _, data := range []string{"done", "retry"} {
 		invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "partial", "PartitionKey": data, "Data": []byte(data)})
@@ -332,7 +332,7 @@ func TestPipesKinesisPartialBatchCheckpoint(t *testing.T) {
 func TestPipesKinesisRetryAgeAndDeadLetterPolicy(t *testing.T) {
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	deps := spitest.Deps(t)
-	stream, queue := kinesis.New(deps), bundled.Handler("aws.sqs", deps)
+	stream, queue := bundled.Handler("aws.kinesis", deps), bundled.Handler("aws.sqs", deps)
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "stream-dlq"})
 	dlq := queueARN(id, "stream-dlq")
 
@@ -601,7 +601,7 @@ func TestPipesAPIGatewayEnrichment(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer p.Close()
-	queue, function, gateway := bundled.Handler("aws.sqs", deps), lambda.New(deps), apigateway.New(deps)
+	queue, function, gateway := bundled.Handler("aws.sqs", deps), lambda.New(deps), bundled.Handler("aws.apigateway", deps)
 	for _, name := range []string{"api-source", "api-target"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}

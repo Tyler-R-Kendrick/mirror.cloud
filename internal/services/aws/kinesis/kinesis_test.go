@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -84,15 +85,15 @@ func TestBootedServerKinesisPutGet(t *testing.T) {
 	if ps == "" {
 		t.Fatalf("policy %v", pol)
 	}
-	_, cons := call("RegisterStreamConsumer", `{"StreamName":"s","ConsumerName":"c"}`)
+	_, cons := call("RegisterStreamConsumer", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","ConsumerName":"c"}`)
 	cm, _ := cons["Consumer"].(map[string]any)
 	carn, _ := cm["ConsumerARN"].(string)
 	if carn == "" {
 		t.Fatalf("consumer %v", cons)
 	}
-	call("ListStreamConsumers", `{"StreamName":"s"}`)
+	call("ListStreamConsumers", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"}`)
 	call("DescribeStreamConsumer", `{"ConsumerARN":"`+carn+`"}`)
-	call("SubscribeToShard", `{"ConsumerARN":"`+carn+`","ShardId":"shardId-000000000000"}`)
+	call("SubscribeToShard", `{"ConsumerARN":"`+carn+`","ShardId":"shardId-000000000000","StartingPosition":{"Type":"LATEST"}}`)
 	call("EnableEnhancedMonitoring", `{"StreamName":"s","ShardLevelMetrics":["IncomingBytes"]}`)
 	call("UpdateShardCount", `{"StreamName":"s","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`)
 	call("StartStreamEncryption", `{"StreamName":"s","EncryptionType":"KMS","KeyId":"alias/aws/kinesis"}`)
@@ -108,16 +109,16 @@ func TestBootedServerKinesisPutGet(t *testing.T) {
 	call("MergeShards", `{"StreamName":"s","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`)
 	call("StopStreamEncryption", `{"StreamName":"s","EncryptionType":"KMS","KeyId":"alias/aws/kinesis"}`)
 	call("DescribeAccountSettings", `{}`)
-	call("UpdateAccountSettings", `{}`)
+	call("UpdateAccountSettings", `{"MinimumThroughputBillingCommitment":{"Status":"DISABLED"}}`)
 	call("UpdateMaxRecordSize", `{"StreamName":"s","MaxRecordSizeInKiB":1024}`)
-	call("UpdateStreamWarmThroughput", `{"StreamName":"s","WarmThroughputMiBPerSecond":1}`)
+	call("UpdateStreamWarmThroughput", `{"StreamName":"s","WarmThroughputMiBps":1}`)
 	call("DeregisterStreamConsumer", `{"ConsumerARN":"`+carn+`"}`)
 }
 
 func TestKinesisPublishesRecordsAndStartsAtTimestamp(t *testing.T) {
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.kinesis", deps)
 	request := func(operation string, input map[string]any) *spi.Response {
 		t.Helper()
 		response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
@@ -146,11 +147,13 @@ func TestKinesisPublishesRecordsAndStartsAtTimestamp(t *testing.T) {
 	if published != 2 || event["Account"] != id.Account || event["Region"] != id.Region || event["StreamName"] != "events" || len(records) != 1 || records[0].(map[string]any)["PartitionKey"] != "two" {
 		t.Fatalf("published=%d event=%#v records=%#v", published, event, records)
 	}
-}
 
-func TestKinesisHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 39 {
-		t.Fatalf("kinesis Operations() %d want 39", n)
+	// A recreated stream restarts at sequence 0; its predecessor's records
+	// must not answer from the horizon.
+	request("DeleteStream", map[string]any{"StreamName": "events"})
+	request("CreateStream", map[string]any{"StreamName": "events"})
+	iterator = request("GetShardIterator", map[string]any{"StreamName": "events", "ShardIteratorType": "TRIM_HORIZON"}).Output["ShardIterator"]
+	if stale, _ := request("GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"].([]any); len(stale) != 0 {
+		t.Fatalf("recreated stream answered %#v", stale)
 	}
 }

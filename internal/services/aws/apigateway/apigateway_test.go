@@ -12,7 +12,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 )
@@ -101,6 +100,25 @@ func TestBootedServerAPIGatewayLambdaProxy(t *testing.T) {
 	if res.StatusCode >= 300 || !strings.Contains(string(out), "echo") {
 		t.Fatalf("execute %d %s", res.StatusCode, out)
 	}
+
+	// A child path resolves to its own resource, and an ANY integration
+	// answers every method on it.
+	_, child := doGW(http.MethodPost, "/restapis/"+id+"/resources/"+root, `{"pathPart":"pets"}`)
+	var pets map[string]any
+	_ = json.Unmarshal(child, &pets)
+	pid, _ := pets["id"].(string)
+	doGW(http.MethodPut, "/restapis/"+id+"/resources/"+pid+"/methods/ANY/integration", `{"type":"AWS_PROXY","uri":"`+uri+`","httpMethod":"POST"}`)
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/restapis/"+id+"/prod/_user_request_/pets", strings.NewReader(`{"n":7}`))
+	req.Header.Set("Authorization", authGW)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode >= 300 || !strings.Contains(string(out), "7") {
+		t.Fatalf("execute /pets %d %s", res.StatusCode, out)
+	}
 }
 
 func TestBootedServerAPIGatewayRemainder(t *testing.T) {
@@ -158,10 +176,10 @@ func TestBootedServerAPIGatewayRemainder(t *testing.T) {
 	do(http.MethodGet, "/restapis/"+id+"/resources/"+rid+"/methods/GET", "", "NONE")
 	do(http.MethodPut, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integration", `{"type":"MOCK","httpMethod":"GET"}`)
 	do(http.MethodGet, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integration", "", "MOCK")
-	do(http.MethodPut, "/restapis/"+id+"/resources/"+rid+"/methods/GET/methodresponses/200", `{"statusCode":"200"}`, "200")
-	do(http.MethodGet, "/restapis/"+id+"/resources/"+rid+"/methods/GET/methodresponses/200", "", "200")
-	do(http.MethodPut, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integrationresponses/200", `{"statusCode":"200"}`, "200")
-	do(http.MethodGet, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integrationresponses/200", "", "200")
+	do(http.MethodPut, "/restapis/"+id+"/resources/"+rid+"/methods/GET/responses/200", `{"statusCode":"200"}`, "200")
+	do(http.MethodGet, "/restapis/"+id+"/resources/"+rid+"/methods/GET/responses/200", "", "200")
+	do(http.MethodPut, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integration/responses/200", `{"statusCode":"200"}`, "200")
+	do(http.MethodGet, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integration/responses/200", "", "200")
 	dep := do(http.MethodPost, "/restapis/"+id+"/deployments", `{"stageName":"prod"}`, "id")
 	var d map[string]any
 	_ = json.Unmarshal([]byte(dep), &d)
@@ -192,8 +210,8 @@ func TestBootedServerAPIGatewayRemainder(t *testing.T) {
 	do(http.MethodGet, "/usageplans/"+uid, "", "u1")
 	do(http.MethodGet, "/usageplans", "", "u1")
 	do(http.MethodDelete, "/usageplans/"+uid, "")
-	do(http.MethodDelete, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integrationresponses/200", "")
-	do(http.MethodDelete, "/restapis/"+id+"/resources/"+rid+"/methods/GET/methodresponses/200", "")
+	do(http.MethodDelete, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integration/responses/200", "")
+	do(http.MethodDelete, "/restapis/"+id+"/resources/"+rid+"/methods/GET/responses/200", "")
 	do(http.MethodDelete, "/restapis/"+id+"/resources/"+rid+"/methods/GET/integration", "")
 	do(http.MethodDelete, "/restapis/"+id+"/resources/"+rid+"/methods/GET", "")
 	do(http.MethodDelete, "/restapis/"+id+"/stages/prod", "")
@@ -231,26 +249,5 @@ func TestBootedServerAPIGatewayRemainder(t *testing.T) {
 	gRes.Body.Close()
 	if gRes.StatusCode < 300 && strings.Contains(string(miss), `"domainName":"ex.com"`) {
 		t.Fatalf("domain still present %s", miss)
-	}
-	for _, op := range extraOps() {
-		er, _ := http.NewRequest(http.MethodPost, ts.URL+"/?Action="+op, strings.NewReader(`{"domainName":"ex.com","name":"n","id":"i1","restApiId":"r"}`))
-		er.Header.Set("Content-Type", "application/json")
-		er.Header.Set("Authorization", auth)
-		eres, err := http.DefaultClient.Do(er)
-		if err != nil {
-			t.Fatal(err)
-		}
-		eb, _ := io.ReadAll(eres.Body)
-		eres.Body.Close()
-		if eres.Header.Get("x-mirror-fidelity") != "emulate" && eres.StatusCode >= 500 {
-			t.Fatalf("%s %d %s", op, eres.StatusCode, eb)
-		}
-	}
-}
-
-func TestAPIGatewayHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 42+len(extraOps()) {
-		t.Fatalf("apigateway Operations() %d want %d", n, 42+len(extraOps()))
 	}
 }

@@ -10,8 +10,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
 )
 
 func TestBootedServerIAMSection48(t *testing.T) {
@@ -58,7 +57,7 @@ func TestBootedServerIAMSection48(t *testing.T) {
 	if !strings.Contains(gr, doc) && !strings.Contains(gr, "s3:*") {
 		t.Fatalf("policy not verbatim %s", gr)
 	}
-	must(url.Values{"Action": {"UpdateRole"}, "RoleName": {"r"}, "AssumeRolePolicyDocument": {doc}}, "role/r")
+	must(url.Values{"Action": {"UpdateRole"}, "RoleName": {"r"}, "AssumeRolePolicyDocument": {doc}}, "UpdateRoleResult")
 	must(url.Values{"Action": {"ListRoles"}}, "role/r")
 
 	must(url.Values{"Action": {"PutRolePolicy"}, "RoleName": {"r"}, "PolicyName": {"inline"}, "PolicyDocument": {doc}})
@@ -76,7 +75,7 @@ func TestBootedServerIAMSection48(t *testing.T) {
 	must(url.Values{"Action": {"AttachRolePolicy"}, "RoleName": {"r"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p"}})
 	must(url.Values{"Action": {"ListAttachedRolePolicies"}, "RoleName": {"r"}}, "policy/p")
 	must(url.Values{"Action": {"DetachRolePolicy"}, "RoleName": {"r"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p"}})
-	must(url.Values{"Action": {"DeletePolicy"}, "PolicyName": {"p"}})
+	must(url.Values{"Action": {"DeletePolicy"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p"}})
 
 	must(url.Values{"Action": {"CreateUser"}, "UserName": {"u"}}, "user/u")
 	must(url.Values{"Action": {"GetUser"}, "UserName": {"u"}}, "user/u")
@@ -97,15 +96,15 @@ func TestBootedServerIAMSection48(t *testing.T) {
 
 	must(url.Values{"Action": {"UpdateAssumeRolePolicy"}, "RoleName": {"r"}, "PolicyDocument": {doc}})
 	must(url.Values{"Action": {"CreatePolicy"}, "PolicyName": {"p2"}, "PolicyDocument": {doc}}, "policy/p2")
-	must(url.Values{"Action": {"CreatePolicyVersion"}, "PolicyName": {"p2"}, "PolicyDocument": {`{"Version":"2012-10-17","Statement":[]}`}, "SetAsDefault": {"false"}}, "v2")
-	must(url.Values{"Action": {"GetPolicyVersion"}, "PolicyName": {"p2"}, "VersionId": {"v2"}}, "v2")
-	must(url.Values{"Action": {"ListPolicyVersions"}, "PolicyName": {"p2"}}, "v1")
-	must(url.Values{"Action": {"SetDefaultPolicyVersion"}, "PolicyName": {"p2"}, "VersionId": {"v1"}})
-	must(url.Values{"Action": {"DeletePolicyVersion"}, "PolicyName": {"p2"}, "VersionId": {"v2"}})
-	must(url.Values{"Action": {"DeletePolicy"}, "PolicyName": {"p2"}})
+	must(url.Values{"Action": {"CreatePolicyVersion"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p2"}, "PolicyDocument": {`{"Version":"2012-10-17","Statement":[]}`}, "SetAsDefault": {"false"}}, "v2")
+	must(url.Values{"Action": {"GetPolicyVersion"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p2"}, "VersionId": {"v2"}}, "v2")
+	must(url.Values{"Action": {"ListPolicyVersions"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p2"}}, "v1")
+	must(url.Values{"Action": {"SetDefaultPolicyVersion"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p2"}, "VersionId": {"v1"}})
+	must(url.Values{"Action": {"DeletePolicyVersion"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p2"}, "VersionId": {"v2"}})
+	must(url.Values{"Action": {"DeletePolicy"}, "PolicyArn": {"arn:aws:iam::000000000000:policy/p2"}})
 
 	must(url.Values{"Action": {"CreateUser"}, "UserName": {"u2"}}, "user/u2")
-	must(url.Values{"Action": {"UpdateUser"}, "UserName": {"u2"}, "NewUserName": {"u3"}}, "user/u3")
+	must(url.Values{"Action": {"UpdateUser"}, "UserName": {"u2"}, "NewUserName": {"u3"}}, "UpdateUserResult")
 	must(url.Values{"Action": {"PutUserPolicy"}, "UserName": {"u3"}, "PolicyName": {"up"}, "PolicyDocument": {doc}})
 	must(url.Values{"Action": {"GetUserPolicy"}, "UserName": {"u3"}, "PolicyName": {"up"}}, "s3:*")
 	must(url.Values{"Action": {"ListUserPolicies"}, "UserName": {"u3"}}, "up")
@@ -128,7 +127,7 @@ func TestBootedServerIAMSection48(t *testing.T) {
 	must(url.Values{"Action": {"CreateGroup"}, "GroupName": {"g"}}, "group/g")
 	must(url.Values{"Action": {"GetGroup"}, "GroupName": {"g"}}, "group/g")
 	must(url.Values{"Action": {"ListGroups"}}, "group/g")
-	must(url.Values{"Action": {"UpdateGroup"}, "GroupName": {"g"}, "NewGroupName": {"g2"}}, "group/g2")
+	must(url.Values{"Action": {"UpdateGroup"}, "GroupName": {"g"}, "NewGroupName": {"g2"}}, "UpdateGroupResult")
 	must(url.Values{"Action": {"AddUserToGroup"}, "GroupName": {"g2"}, "UserName": {"u3"}})
 	must(url.Values{"Action": {"ListGroupsForUser"}, "UserName": {"u3"}}, "g2")
 	must(url.Values{"Action": {"GetGroup"}, "GroupName": {"g2"}}, "u3")
@@ -166,7 +165,7 @@ func TestBootedServerIAMSection48(t *testing.T) {
 	_ = oidc
 
 	must(url.Values{"Action": {"CreateSAMLProvider"}, "Name": {"saml1"}, "SAMLMetadataDocument": {"<xml/>"}}, "saml-provider/saml1")
-	must(url.Values{"Action": {"GetSAMLProvider"}, "SAMLProviderArn": {"arn:aws:iam::000000000000:saml-provider/saml1"}}, "saml1")
+	must(url.Values{"Action": {"GetSAMLProvider"}, "SAMLProviderArn": {"arn:aws:iam::000000000000:saml-provider/saml1"}}, "SAMLMetadataDocument")
 	must(url.Values{"Action": {"ListSAMLProviders"}}, "saml1")
 	must(url.Values{"Action": {"UpdateSAMLProvider"}, "SAMLProviderArn": {"arn:aws:iam::000000000000:saml-provider/saml1"}, "SAMLMetadataDocument": {"<xml2/>"}})
 	must(url.Values{"Action": {"DeleteSAMLProvider"}, "SAMLProviderArn": {"arn:aws:iam::000000000000:saml-provider/saml1"}})
@@ -200,32 +199,4 @@ func TestBootedServerIAMSection48(t *testing.T) {
 	if code == 200 && strings.Contains(rmiss, "role/r") {
 		t.Fatalf("deleted role still there %s", rmiss)
 	}
-}
-
-func TestIAMHTTPProvenOps(t *testing.T) {
-	want := []string{
-		"CreateRole", "GetRole", "UpdateRole", "DeleteRole", "ListRoles", "UpdateAssumeRolePolicy",
-		"PutRolePolicy", "GetRolePolicy", "DeleteRolePolicy", "ListRolePolicies",
-		"AttachRolePolicy", "DetachRolePolicy", "ListAttachedRolePolicies",
-		"CreatePolicy", "GetPolicy", "DeletePolicy", "ListPolicies",
-		"CreatePolicyVersion", "GetPolicyVersion", "DeletePolicyVersion", "ListPolicyVersions", "SetDefaultPolicyVersion",
-		"CreateUser", "GetUser", "UpdateUser", "DeleteUser", "ListUsers",
-		"PutUserPolicy", "GetUserPolicy", "DeleteUserPolicy", "ListUserPolicies",
-		"AttachUserPolicy", "DetachUserPolicy", "ListAttachedUserPolicies",
-		"CreateAccessKey", "ListAccessKeys", "UpdateAccessKey", "DeleteAccessKey",
-		"CreateLoginProfile", "GetLoginProfile", "UpdateLoginProfile", "DeleteLoginProfile",
-		"CreateGroup", "GetGroup", "UpdateGroup", "DeleteGroup", "ListGroups",
-		"AddUserToGroup", "RemoveUserFromGroup", "ListGroupsForUser",
-		"PutGroupPolicy", "GetGroupPolicy", "DeleteGroupPolicy", "ListGroupPolicies",
-		"AttachGroupPolicy", "DetachGroupPolicy", "ListAttachedGroupPolicies",
-		"CreateInstanceProfile", "GetInstanceProfile", "DeleteInstanceProfile", "ListInstanceProfiles",
-		"AddRoleToInstanceProfile", "RemoveRoleFromInstanceProfile", "ListInstanceProfilesForRole",
-		"TagRole", "UntagRole", "ListRoleTags", "TagUser", "UntagUser", "ListUserTags",
-		"CreateAccountAlias", "ListAccountAliases", "DeleteAccountAlias",
-		"GetAccountSummary", "GetAccountPasswordPolicy", "UpdateAccountPasswordPolicy", "DeleteAccountPasswordPolicy",
-		"CreateOpenIDConnectProvider", "GetOpenIDConnectProvider", "DeleteOpenIDConnectProvider", "ListOpenIDConnectProviders", "UpdateOpenIDConnectProviderThumbprint",
-		"CreateSAMLProvider", "GetSAMLProvider", "DeleteSAMLProvider", "ListSAMLProviders", "UpdateSAMLProvider",
-		"SimulatePrincipalPolicy", "SimulateCustomPolicy",
-	}
-	assertSame(t, "iam", iam.New(spitest.Deps(t)).Operations(), append(want, iam.ExtraOps()...))
 }

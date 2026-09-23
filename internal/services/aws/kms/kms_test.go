@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ import (
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
-	p := New(spitest.Deps(t))
+	p := bundled.Handler("aws.kms", spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateKey", Input: map[string]any{}})
@@ -149,14 +150,7 @@ func TestBootedServerKMSEncryptDecrypt(t *testing.T) {
 	call("EnableKey", `{"KeyId":"`+kid+`"}`)
 	call("TagResource", `{"KeyId":"`+kid+`","Tags":[{"TagKey":"k","TagValue":"v"}]}`)
 	call("ListResourceTags", `{"KeyId":"`+kid+`"}`)
-	call("UntagResource", `{"KeyId":"`+kid+`"}`)
-}
-
-func TestKMSHTTPProvenOps(t *testing.T) {
-	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 54 {
-		t.Fatalf("kms Operations() %d want 54", n)
-	}
+	call("UntagResource", `{"KeyId":"`+kid+`","TagKeys":["k"]}`)
 }
 
 func TestBootedServerKMSExtraOps(t *testing.T) {
@@ -229,7 +223,9 @@ func TestBootedServerKMSExtraOps(t *testing.T) {
 		t.Fatalf("alias still present %s", gone)
 	}
 	payload := `{"KeyId":"` + kid + `","AliasName":"alias/bootx","TargetKeyId":"` + kid + `","CustomKeyStoreId":"cks1","GrantId":"g1","Message":"aGVsbG8=","Mac":"YQ==","Signature":"YQ==","Plaintext":"aGVsbG8=","CiphertextBlob":"YQ==","DestinationKeyId":"` + kid + `","ReplicaRegion":"us-west-2","Tags":[{"TagKey":"k","TagValue":"v"}],"Policy":"{}","NumberOfBytes":16,"PublicKey":"YQ=="}`
-	for _, op := range extraOps() {
+	for _, op := range []string{"Encrypt", "Decrypt", "GenerateDataKey", "GenerateDataKeyWithoutPlaintext",
+		"GenerateDataKeyPair", "GenerateDataKeyPairWithoutPlaintext", "ReEncrypt", "Sign", "Verify",
+		"GenerateMac", "VerifyMac", "DeriveSharedSecret", "GenerateRandom", "GetParametersForImport", "ImportKeyMaterial"} {
 		soft(op, payload)
 	}
 }

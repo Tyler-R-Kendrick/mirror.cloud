@@ -1257,3 +1257,23 @@ The residue: `GetBucketLocation` is the S3 customization that unwraps its one me
 **Those are the first mutation needles on bundle YAML.** `go test -overlay` reaches embedded files, so a needle can mutate `behavior/aws/kafka/service.yaml` as readily as Go -- and it has to, for exactly this class: behavior the recording cannot see because no served operation reads it back.
 
 **And the S3 Tables rename was a latent 500.** The bundle's RenameTable and GetTable read `metadataLocation`, which tables created by the row plane never had, so renaming a firehose-created table would have failed as an internal error. The row plane writes the field now, and athena -- which kept a second copy of the row engine over the same collection -- reads and writes the object-shaped rows too (marked `ponytail:` for going through the row plane instead).
+
+### One operation kept a whole pack alive; now it is one line of YAML and one Go function
+
+`aws.apigateway` and `aws.kinesis` had complete, gated bundles that could not serve because of a handful of operations the effect vocabulary cannot say: ExecuteApi calls a Lambda function and answers with its stream; PutRecord publishes to the bus pipes and firehose read, and a shard iterator is opaque base64 state over a timestamp scan. For that, 123 and 35 transcribed operations sat unserved behind hand-written packs.
+
+A bundle can now list those operations under `native:`. The bundle serves; the listed operations go to Go registered with `bundled.RegisterNative`, against the collections the bundle owns. The IR validation rejects a native operation the model lacks or the bundle also defines, and `allservices` fails if a native has no Go linked. A binary that links only part of the set still serves the rest of a hybrid: CloudFormation reaches API Gateway's control plane without linking ExecuteApi. Both packages are now just their native operations.
+
+**CloudFormation was writing other services' storage by hand.** It provisioned a Kinesis stream, a Kinesis resource policy and a REST API by putting records in the pack's layout: the single `apigw-res` collection, raw policy bytes, and a stream record with no record cascade. Once the bundles served, CloudFormation-created policies read back as missing and REST APIs had no root resource. It now provisions and tears down through the owning service's operations, so their layout and cascades stay theirs.
+
+**Kinesis had the same kind of hidden cascade as the three before it.** A recreated stream restarts at sequence 0, and the bundle's DeleteStream left the old records behind for GetRecords to answer. It now empties the stream's record collection, guarded by a YAML needle. The booted tests had also pinned invented paths (`/methodresponses/`) and pack-era members (`WarmThroughputMiBPerSecond`). They use the model's paths and members now.
+
+KMS followed the same pattern: fifteen cryptographic operations are native, and the other thirty-nine are the bundle's. It needed one reconciliation. The pack kept key material as base64, while the bundle draws it as hex. The native code reads hex, and a needle fails if it reads the old encoding.
+
+Athena needed less: the pack and the bundle already shared the execution record's layout. StartQueryExecution, the query engine, is native, and the bundle's `SELECT 1` approximation of it is deleted rather than kept as a second answer. Workgroups and the execution reads come from the bundle.
+
+IAM's shadow gave NewAuthorizer as a reason the pack had to stay. That was never true: the authorizer needs the records, not the pack. It read one `iam` collection by key prefix (`rolepolicy:`, `attached:`, `ug:`). Each prefix is one of the bundle's collections, with the same records. The authorizer now reads those, and the policy simulator and GetAccountSummary are the three native operations. Promoting it exposed three things:
+
+- The user-and-group test could not tell a group Deny from an implicit deny, because nothing allowed the action in the first place. It does now, and a needle guards the group read.
+- CreateVirtualMFADevice answered `MFADevice` and a bare `SerialNumber`, neither of them a member of the output, so the wire carried nothing. It now answers `VirtualMFADevice`, as AWS does.
+- Several tests pinned pack answers AWS does not give: names in UpdateRole, UpdateUser, UpdateGroup and GetSAMLProvider results, and `PolicyName` accepted where the model requires `PolicyArn`. They now expect AWS's answers.

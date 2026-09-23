@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -10,10 +11,10 @@ import (
 
 func TestAuthorizerExplicitDeny(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.iam", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateRole", Input: map[string]any{"RoleName": "denied"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateRole", Input: map[string]any{"RoleName": "denied", "AssumeRolePolicyDocument": "{}"}}); err != nil {
 		t.Fatal(err)
 	}
 	doc := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:DeleteBucket","Resource":"*"}]}`
@@ -35,10 +36,10 @@ func TestAuthorizerExplicitDeny(t *testing.T) {
 
 func TestAuthorizerAllowThenDeny(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.iam", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateRole", Input: map[string]any{"RoleName": "rw"}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateRole", Input: map[string]any{"RoleName": "rw", "AssumeRolePolicyDocument": "{}"}}); err != nil {
 		t.Fatal(err)
 	}
 	doc := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"},{"Effect":"Deny","Action":"s3:DeleteBucket","Resource":"*"}]}`
@@ -63,7 +64,7 @@ func TestAuthorizerAllowThenDeny(t *testing.T) {
 
 func TestAuthorizerUserAndGroupPolicies(t *testing.T) {
 	deps := spitest.Deps(t)
-	p := New(deps)
+	p := bundled.Handler("aws.iam", deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) *spi.Response {
@@ -76,7 +77,7 @@ func TestAuthorizerUserAndGroupPolicies(t *testing.T) {
 	}
 	invoke("CreateUser", map[string]any{"UserName": "alice"})
 	invoke("CreatePolicy", map[string]any{
-		"PolicyName": "read", "PolicyDocument": `{"Statement":{"Effect":"Allow","Action":"s3:*Object","Resource":"*"}}`,
+		"PolicyName": "read", "PolicyDocument": `{"Statement":{"Effect":"Allow","Action":["s3:*Object","s3:DeleteBucket"],"Resource":"*"}}`,
 	})
 	invoke("AttachUserPolicy", map[string]any{"UserName": "alice", "PolicyArn": "arn:aws:iam::000000000000:policy/read"})
 	invoke("CreateGroup", map[string]any{"GroupName": "guardrails"})

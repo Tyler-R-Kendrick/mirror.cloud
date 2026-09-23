@@ -204,6 +204,15 @@ func Validate(s *Service, svc *model.Service) error {
 		}
 	}
 
+	for _, name := range s.Native {
+		if _, known := ops[name]; !known {
+			problems = append(problems, fmt.Errorf("%s: native.%s: no such operation in the generated model", s.ServiceID, name))
+		}
+		if _, dup := s.Operations[name]; dup {
+			problems = append(problems, fmt.Errorf("%s: native.%s: also defined under operations", s.ServiceID, name))
+		}
+	}
+
 	// Operations.
 	for _, name := range sortedKeys(s.Operations) {
 		op := s.Operations[name]

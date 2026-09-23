@@ -28,8 +28,8 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
@@ -511,7 +511,7 @@ func TestFirehoseConsumesFutureKinesisRecords(t *testing.T) {
 	deps := spitest.Deps(t)
 	firehose := New(deps)
 	defer firehose.Close()
-	kinesis := kinesis.New(deps)
+	kinesis := bundled.Handler("aws.kinesis", deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	invoke := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
 		t.Helper()
@@ -3930,7 +3930,7 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidKMSResourceException" {
 		t.Fatalf("missing KMS key fault %#v", err)
 	}
-	keyService := kms.New(deps)
+	keyService := bundled.Handler("aws.kms", deps)
 	createdKey, err := keyService.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateKey", Input: map[string]any{}})
 	if err != nil {
 		t.Fatal(err)

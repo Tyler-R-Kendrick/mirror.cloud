@@ -15,23 +15,14 @@ provenance: authored
 # rejects those requests, which is a divergence the quirks name.
 missing_input_error: NotFound
 
-# Complete and gated, but not yet serving: ExecuteApi is a Lambda AWS_PROXY
-# invocation, not a CRUD write. It resolves the resource for a request path,
-# reads the integration, calls aws.lambda Invoke synchronously with a
-# synthesized proxy event, and answers with the flattened response as a stream
-# with the function's status code and headers. The effect vocabulary has no
-# synchronous cross-service call and no stream answer, and the engine's prim
-# dispatch reports no primitives registered, so a serving bundle would fault
-# every invocation NotImplemented where the pack runs the function. Pipes'
-# execute-api enrichment and the `_user_request_` edge route both depend on
-# it. The bundle takes over when an engine primitive can invoke a sibling
-# service and answer with a stream.
-shadow: >
-  ExecuteApi invokes aws.lambda synchronously and streams the flattened
-  AWS_PROXY response; the bundle vocabulary cannot call a sibling service or
-  answer with a stream, so the pack still serves. Everything else the pack
-  does -- all 123 remaining operations, including the leftover control-plane
-  KV family -- is transcribed and gated below.
+# ExecuteApi is a Lambda AWS_PROXY invocation, not a CRUD write: it resolves
+# the resource for a request path, reads the integration, calls aws.lambda
+# Invoke synchronously with a synthesized proxy event, and answers with the
+# function's status, headers and body as a stream. The effect vocabulary has
+# no synchronous cross-service call and no stream answer, so it is Go, in
+# internal/services/aws/apigateway, over the res and integration collections
+# below.
+native: [ExecuteApi]
 
 resources:
   api:

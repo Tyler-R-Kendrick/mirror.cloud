@@ -4274,10 +4274,10 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-reject-api-gateway-resource",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old: `		return arn, nil
+		old: `		return arn, err
 	case "AWS::ApiGateway::RestApi":
 		n := str(props["Name"])`,
-		new: `		return arn, nil
+		new: `		return arn, err
 	case "AWS::ApiGateway::RestApiMutated":
 		n := str(props["Name"])`,
 		pkg: "./internal/services/aws/cloudformation",
@@ -12494,6 +12494,38 @@ var mutants = []mutant{
 		run:  "TestAuthorizerExplicitDeny|TestAuthorizerAllowThenDeny",
 	},
 	{
+		name: "iam-inline-role-policies-outside-bundle",
+		file: filepath.Join("internal", "services", "aws", "iam", "authorizer.go"),
+		old:  `inline, attached := "iamrp", "iamatt"`,
+		new:  `inline, attached := "iam", "iamatt"`,
+		pkg:  "./internal/services/aws/iam",
+		run:  "TestAuthorizerExplicitDeny",
+	},
+	{
+		name: "iam-group-policies-ignored",
+		file: filepath.Join("internal", "services", "aws", "iam", "authorizer.go"),
+		old:  `scope.Collection("iamug:"+name)`,
+		new:  `scope.Collection("ug:"+name)`,
+		pkg:  "./internal/services/aws/iam",
+		run:  "TestAuthorizerUserAndGroupPolicies",
+	},
+	{
+		name: "iam-account-summary-counts-nothing",
+		file: filepath.Join("internal", "services", "aws", "iam", "iam.go"),
+		old:  `summary[member] = len(kvs)`,
+		new:  `summary[member] = len(kvs) * 0`,
+		pkg:  "./internal/services/aws/iam",
+		run:  "TestAccountSummaryCounts",
+	},
+	{
+		name: "iam-mfa-device-answers-nothing",
+		file: filepath.Join("behavior", "aws", "iam", "service.yaml"),
+		old:  `      VirtualMFADevice: "{'SerialNumber': rec.SerialNumber}"`,
+		new:  `      VirtualMFADevice: "{}"`,
+		pkg:  "./internal/services/aws/iam",
+		run:  "TestBootedServerIAMExtraMFA",
+	},
+	{
 		name: "iam-inactive-key-to-active",
 		file: filepath.Join("internal", "services", "aws", "iam", "authorizer.go"),
 		old:  `!strings.EqualFold(str(rec["Status"]), "Inactive")`,
@@ -13036,6 +13068,14 @@ var mutants = []mutant{
 		run:  "TestOpenSearchBufferRetryPersistence",
 	},
 	{
+		name: "kinesis-delete-stream-keeps-records",
+		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
+		old:  `      - delete: { resource: record, where: "true" }`,
+		new:  ``,
+		pkg:  "./internal/services/aws/kinesis",
+		run:  "TestKinesisPublishesRecordsAndStartsAtTimestamp",
+	},
+	{
 		name: "kinesis-reverse-at-timestamp-selection",
 		file: filepath.Join("internal", "services", "aws", "kinesis", "kinesis.go"),
 		old:  `asFloat(record["ApproximateArrivalTimestamp"]) >= timestamp`,
@@ -13254,6 +13294,38 @@ var mutants = []mutant{
 		new:  `if false {`,
 		pkg:  "./internal/services/aws/apigateway",
 		run:  "TestProxyEventSyntheticMetadata",
+	},
+	{
+		name: "bundled-native-falls-to-engine",
+		file: filepath.Join("internal", "bundled", "bundled.go"),
+		old:  `if !slices.Contains(h.Engine.IR().Native, req.Operation) {`,
+		new:  `if !slices.Contains(h.Engine.IR().Native, "") {`,
+		pkg:  "./internal/services/aws/apigateway",
+		run:  "TestBootedServerAPIGatewayLambdaProxy",
+	},
+	{
+		name: "apigateway-integration-outside-bundle-collection",
+		file: filepath.Join("internal", "services", "aws", "apigateway", "apigateway.go"),
+		old:  `"apigwi:"+api`,
+		new:  `"apigw-integ:"+api`,
+		pkg:  "./internal/services/aws/apigateway",
+		run:  "TestBootedServerAPIGatewayLambdaProxy",
+	},
+	{
+		name: "apigateway-no-any-integration",
+		file: filepath.Join("internal", "services", "aws", "apigateway", "apigateway.go"),
+		old:  `ib, ok, _ = integrations.Get(ctx, rid+"/ANY")`,
+		new:  `ib, ok, _ = integrations.Get(ctx, rid+"/"+meth)`,
+		pkg:  "./internal/services/aws/apigateway",
+		run:  "TestBootedServerAPIGatewayLambdaProxy",
+	},
+	{
+		name: "apigateway-every-path-is-root",
+		file: filepath.Join("internal", "services", "aws", "apigateway", "apigateway.go"),
+		old:  `if str(rec["path"]) == path {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/aws/apigateway",
+		run:  "TestBootedServerAPIGatewayLambdaProxy",
 	},
 	{
 		name: "pipes-skip-api-gateway-enrichment",
@@ -18332,10 +18404,18 @@ var mutants = []mutant{
 		run:  "TestDynamoDBDefaultSSECharacterization",
 	},
 	{
-		name: "kms-create-expose-key-material",
+		name: "kms-read-material-in-the-pack-encoding",
 		file: filepath.Join("internal", "services", "aws", "kms", "kms.go"),
-		old:  `delete(metadata, "KeyMaterial")`,
-		new:  `metadata["KeyMaterial"] = key["KeyMaterial"]`,
+		old:  `mat, err := hex.DecodeString(s)`,
+		new:  `mat, err := base64.StdEncoding.DecodeString(s)`,
+		pkg:  "./internal/services/aws/kms",
+		run:  "TestEncryptDecryptRoundTrip",
+	},
+	{
+		name: "kms-create-expose-key-material",
+		file: filepath.Join("behavior", "aws", "kms", "service.yaml"),
+		old:  `      KeyMetadata: without(rec, ['KeyMaterial'])`,
+		new:  `      KeyMetadata: rec`,
 		pkg:  "./internal/services/aws/kms",
 		run:  "TestEncryptDecryptRoundTrip",
 	},

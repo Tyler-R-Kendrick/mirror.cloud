@@ -37,7 +37,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/logging"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
@@ -3096,7 +3096,7 @@ func TestObjectServerSideEncryption(t *testing.T) {
 
 func TestExplicitKMSKeyValidation(t *testing.T) {
 	deps := spitest.Deps(t)
-	s3Pack, kmsPack := s3.New(deps), kms.New(deps)
+	s3Pack, kmsPack := s3.New(deps), bundled.Handler("aws.kms", deps)
 	ctx, owner := context.Background(), ident()
 	kmsCall := func(t *testing.T, id spi.Identity, operation string, input map[string]any) *spi.Response {
 		t.Helper()

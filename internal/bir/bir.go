@@ -81,6 +81,13 @@ type Service struct {
 	// with no stated gap is how a half-migration becomes permanent.
 	Shadow string `yaml:"shadow,omitempty"`
 
+	// Native lists operations the bundle serves by handing them to Go, which
+	// registers them with bundled.RegisterNative. It is for the operation the
+	// effect vocabulary cannot say -- API Gateway's ExecuteApi calls a
+	// function and answers with its stream -- so one such operation no longer
+	// keeps a whole hand-written pack alive beside a complete bundle.
+	Native []string `yaml:"native,omitempty"`
+
 	// MissingInput names the error table entry the engine answers with when a
 	// required input member is absent. The model says which members are
 	// required; it does not say what a service calls their absence, and

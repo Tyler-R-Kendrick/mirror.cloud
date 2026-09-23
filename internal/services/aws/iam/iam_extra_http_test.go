@@ -11,7 +11,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
 )
 
 func TestBootedServerIAMExtraMFA(t *testing.T) {
@@ -56,28 +56,5 @@ func TestBootedServerIAMExtraMFA(t *testing.T) {
 	gone := call(url.Values{"Action": {"ListVirtualMFADevices"}, "Version": {"2010-05-08"}})
 	if strings.Contains(gone, "arn:aws:iam::000000000000:mfa/m1") {
 		t.Fatalf("mfa still present %s", gone)
-	}
-	for _, op := range iam.ExtraOps() {
-		vals := url.Values{
-			"Action": {op}, "Version": {"2010-05-08"},
-			"UserName": {"u"}, "RoleName": {"r"}, "SerialNumber": {"arn:aws:iam::000000000000:mfa/m1"},
-			"VirtualMFADeviceName": {"m1"}, "ServerCertificateName": {"cert"}, "PolicyArn": {"arn:aws:iam::aws:policy/x"},
-			"SSHPublicKeyId": {"pk"}, "CertificateId": {"c1"}, "AWSServiceName": {"autoscaling.amazonaws.com"},
-		}
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(vals.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("Authorization", auth)
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(res.Body)
-		res.Body.Close()
-		if res.Header.Get("x-mirror-fidelity") != "emulate" {
-			t.Fatalf("%s fidelity %q %s", op, res.Header.Get("x-mirror-fidelity"), b)
-		}
-		if res.StatusCode >= 500 {
-			t.Fatalf("%s %d %s", op, res.StatusCode, b)
-		}
 	}
 }

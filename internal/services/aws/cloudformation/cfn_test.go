@@ -12,12 +12,12 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 func TestTemplateURLLoadsFromS3(t *testing.T) {
@@ -59,7 +59,7 @@ func TestKinesisResourcePolicyLifecycle(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "policy", "TemplateBody": template}}); err != nil {
 		t.Fatal(err)
 	}
-	kinesisPack := kinesis.New(deps)
+	kinesisPack := bundled.Handler("aws.kinesis", deps)
 	get := func() string {
 		resp, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetResourcePolicy", Input: map[string]any{"ResourceARN": arn}})
 		if err != nil {

@@ -42,7 +42,7 @@ func TestBootedServerIAMDenyDeleteBucket(t *testing.T) {
 			t.Fatalf("iam %d %s", res.StatusCode, b)
 		}
 	}
-	form("Action=CreateRole&RoleName=denied")
+	form("Action=CreateRole&RoleName=denied&AssumeRolePolicyDocument=%7B%7D")
 	form("Action=PutRolePolicy&RoleName=denied&PolicyName=d&PolicyDocument=" + url.QueryEscape(`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:DeleteBucket","Resource":"*"}]}`))
 
 	put, _ := http.NewRequest(http.MethodPut, ts.URL+"/deny-b", nil)
@@ -99,7 +99,7 @@ func TestBootedServerIAMAllowEngine(t *testing.T) {
 		}
 		return string(b)
 	}
-	form("Action=CreateRole&RoleName=reader")
+	form("Action=CreateRole&RoleName=reader&AssumeRolePolicyDocument=%7B%7D")
 	form("Action=PutRolePolicy&RoleName=reader&PolicyName=p&PolicyDocument=" + url.QueryEscape(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}`))
 	put, _ := http.NewRequest(http.MethodPut, ts.URL+"/allow-b", nil)
 	put.Header.Set("Authorization", s3Auth)

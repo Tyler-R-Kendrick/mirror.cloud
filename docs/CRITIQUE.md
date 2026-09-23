@@ -1319,4 +1319,4 @@ The claim was wrong. api-models-aws had published all three and then deleted the
 
 The models answer something the hand table could not: **all three are `restJson1`**. The emulator had been accepting a wire format no SDK sends to these services. Their packs are still the hand-written ones. Two of them name operations that match the models. The QLDB pack also serves `SendCommand`, which belongs to a separate service, QLDB Session, and no request to QLDB can reach it now. Moving the three to bundles against their real models is the next step.
 
-The lesson is the one C24 records for exemptions: a reason is a claim, and this one was never checked against the upstream history, where it was false.
+The lesson is the one "Reviewing the exemptions" records: an exemption must say why, and the why is a claim. This one was never checked against the upstream history, where it was false.

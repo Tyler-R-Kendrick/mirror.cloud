@@ -1584,3 +1584,7 @@ ABAC had no test, so it has one now.
 GetBucketEncryption now answers under the model's `ServerSideEncryptionConfiguration` member rather than flat. The wire is unchanged, because it is the payload member.
 
 A bundle operation can now declare `status:` for a service that departs from its model. S3 answers PutBucketPolicy with 204 where the model says 200.
+
+**Header and query binding.** The S3 codec bound the path, the raw query and a few headers into the input, and the natives read other headers from the request themselves. A bundle only reads the input. So an expected-owner header, or an `?id=` query, never reached the YAML over HTTP. The in-process tests had passed the members directly.
+
+The codec now binds every member the model places in a header or a query parameter under its member name.

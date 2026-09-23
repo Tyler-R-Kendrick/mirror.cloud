@@ -14952,6 +14952,14 @@ var mutants = []mutant{
 		run:  "TestBucketPolicyConfiguration",
 	},
 	{
+		name: "restxml-s3-skip-header-members",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  "case \"header\":\n\t\t\tif v := r.Header.Get(member.Binding.Name); v != \"\" {",
+		new:  "case \"header\":\n\t\t\tif v := r.Header.Get(member.Binding.Name); false && v != \"\" {",
+		pkg:  "./test/behavior/aws",
+		run:  "TestS3ObjectLifecycle",
+	},
+	{
 		name: "s3-wrap-skip-home-region",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  `if !slices.Contains(natives, req.Operation) {`,

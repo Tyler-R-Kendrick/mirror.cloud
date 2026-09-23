@@ -1,13 +1,12 @@
 {
-  "packs": 2,
-  "case_labels": 494,
+  "packs": 1,
+  "case_labels": 491,
   "services_files": 38,
-  "services_loc": 33964,
-  "fault_sites": 661,
-  "register_sites": 2,
+  "services_loc": 33971,
+  "fault_sites": 658,
+  "register_sites": 1,
   "pack_dirs": [
-    "aws/s3",
-    "aws/states"
+    "aws/s3"
   ],
   "routing_mismatches": 0,
   "routing_mismatch_services": null,

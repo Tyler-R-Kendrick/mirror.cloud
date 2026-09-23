@@ -24,7 +24,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states" // natives the Step Functions bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -417,7 +417,7 @@ func (p *worker) enrich(ctx context.Context, identity spi.Identity, pipe map[str
 		}
 		raw = response
 	case strings.Contains(arn, ":states:"):
-		response, err := states.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "StartSyncExecution", Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
+		response, err := bundled.Handler("aws.states", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "StartSyncExecution", Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
 		if err != nil || stringValue(response.Output["status"]) != "SUCCEEDED" {
 			return nil, true, false
 		}

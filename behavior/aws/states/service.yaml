@@ -1,0 +1,101 @@
+schema: bir/1
+service: aws.states
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Describing and deleting an alias and describing a map run are
+# records. The rest is Go, in internal/services/aws/states: a state machine
+# is an Amazon States Language program, and validating, versioning, routing
+# and walking it -- JSONPath and JSONata, intrinsic functions, service
+# integrations, activities and task tokens -- is an interpreter. A worker
+# resumes executions parked on a Wait state, a task token or a heartbeat.
+provenance: authored
+
+native:
+  - CreateStateMachine
+  - UpdateStateMachine
+  - DeleteStateMachine
+  - DescribeStateMachine
+  - ListStateMachines
+  - PublishStateMachineVersion
+  - ListStateMachineVersions
+  - DeleteStateMachineVersion
+  - CreateStateMachineAlias
+  - ListStateMachineAliases
+  - UpdateStateMachineAlias
+  - StartExecution
+  - StartSyncExecution
+  - StopExecution
+  - DescribeExecution
+  - ListExecutions
+  - GetExecutionHistory
+  - DescribeStateMachineForExecution
+  - RedriveExecution
+  - ListMapRuns
+  - UpdateMapRun
+  - CreateActivity
+  - DeleteActivity
+  - DescribeActivity
+  - ListActivities
+  - GetActivityTask
+  - SendTaskSuccess
+  - SendTaskFailure
+  - SendTaskHeartbeat
+  - TestState
+  - ValidateStateMachineDefinition
+  - TagResource
+  - UntagResource
+  - ListTagsForResource
+worker: resumes executions waiting on a Wait state, a task token or a heartbeat
+
+resources:
+  alias:
+    collection: alias
+    id: { input_members: [stateMachineAliasArn] }
+    record: {}
+  # Executions write these as they finish a distributed Map state.
+  maprun:
+    collection: maprun
+    id: { input_members: [mapRunArn] }
+    record: {}
+
+errors:
+  NotFound: { code: ResourceNotFound, http: 400, fault: client }
+
+operations:
+  DescribeStateMachineAlias:
+    reads: { a: { resource: alias } }
+    require:
+      - { cond: a_found, error: NotFound }
+    output:
+      stateMachineAliasArn: a.stateMachineAliasArn
+      name: a.name
+      description: a.description
+      routingConfiguration: a.routingConfiguration
+      creationDate: a.creationDate
+      updateDate: a.updateDate
+
+  DeleteStateMachineAlias:
+    reads: { d: { resource: alias } }
+    require:
+      - { cond: d_found, error: NotFound }
+    effects:
+      - delete: { resource: alias }
+    output: {}
+
+  DescribeMapRun:
+    reads: { m: { resource: maprun } }
+    require:
+      - { cond: m_found, error: NotFound }
+    output:
+      mapRunArn: m.mapRunArn
+      executionArn: m.executionArn
+      status: m.status
+      startDate: m.startDate
+      stopDate: "'stopDate' in m ? m.stopDate : null"
+      maxConcurrency: m.maxConcurrency
+      toleratedFailurePercentage: m.toleratedFailurePercentage
+      toleratedFailureCount: m.toleratedFailureCount
+      itemCounts: m.itemCounts
+      executionCounts: m.executionCounts
+      redriveCount: "'redriveCount' in m ? m.redriveCount : null"
+      redriveDate: "'redriveDate' in m ? m.redriveDate : null"

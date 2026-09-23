@@ -2733,6 +2733,8 @@ func TestStatesServiceIntegrations(t *testing.T) {
 
 func TestStatesCallbackServiceIntegration(t *testing.T) {
 	deps := spitest.Deps(t)
+	// Zero jitter, so a retried task is due at once.
+	deps.Rand = zeroIntRand{deps.Rand}
 	p := New(deps)
 	queue := bundled.Handler("aws.sqs", deps)
 	ctx := context.Background()
@@ -2785,7 +2787,6 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	retrying := must(p, "StartExecution", map[string]any{"stateMachineArn": arn, "name": "retry"})["executionArn"].(string)
 	firstToken, firstHandle := task()
 	must(queue, "DeleteMessage", map[string]any{"QueueUrl": queueURL, "ReceiptHandle": firstHandle})
-	p.deps.Rand = zeroIntRand{p.deps.Rand}
 	must(p, "SendTaskFailure", map[string]any{"taskToken": firstToken, "error": "Retryable"})
 	secondToken, secondHandle := task()
 	if secondToken == firstToken {
@@ -3414,7 +3415,10 @@ func TestStatesTestStateReaderDataFormats(t *testing.T) {
 }
 
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	// Zero jitter, so a retried task is due at once.
+	deps.Rand = zeroIntRand{deps.Rand}
+	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -3501,7 +3505,6 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	recoveryARN := must("StartExecution", map[string]any{"StateMachineArn": recoveryMachine, "Name": "recovery", "Input": `{"keep":true}`}).Output["executionArn"].(string)
 	firstToken := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
 	must("SendTaskHeartbeat", map[string]any{"TaskToken": firstToken})
-	p.deps.Rand = zeroIntRand{p.deps.Rand}
 	must("SendTaskFailure", map[string]any{"TaskToken": firstToken, "Error": "Retryable", "Cause": "try again"})
 	if retrying := must("DescribeExecution", map[string]any{"ExecutionArn": recoveryARN}).Output; retrying["status"] != "RUNNING" {
 		t.Fatalf("activity retry %#v", retrying)

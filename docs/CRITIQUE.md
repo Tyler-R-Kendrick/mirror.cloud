@@ -1529,3 +1529,13 @@ The replica auto-scaling pair echoed its request back as a description, so it dr
 TTL expiry is not an operation. The edge's `/_aws/dynamodb/expired` reached it as a pseudo-operation named ExpireItems, which a bundle cannot serve, so it is now an exported function the edge calls. The booted-server stream test moved to an external test package, because the edge now imports this package.
 
 One step of the recording is re-cut. DescribeBackup answered the backup's snapshot, meaning the table as a JSON string and its items, inside `BackupDetails`, which has no such members.
+
+### Step Functions: an interpreter with three record operations
+
+Step Functions is a hybrid bundle. DescribeStateMachineAlias, DeleteStateMachineAlias and DescribeMapRun are YAML. Everything else is natives, because a state machine is an Amazon States Language program, and creating, versioning, routing and running one is an interpreter. The durable Wait loop is the bundle's worker, and natives that park an execution wake it through the bus.
+
+**Workers per call.** Pipes and EventBridge started executions through `states.New`, which started a Wait worker on every call and never stopped it. They now call the served bundle, and `New` is reserved for tests that want the worker running.
+
+**Tests.** The tests that zeroed retry jitter did it by swapping the random source on a pack mid-test. Natives run on the bundle's dependencies, so those tests now set it before building the service.
+
+**Re-cut.** One step of the recording is re-cut. DescribeMapRun answered its stored record whole, including a `stateMachineArn` that `DescribeMapRunOutput` does not declare.

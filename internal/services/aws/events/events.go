@@ -19,7 +19,7 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states" // natives the Step Functions bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -897,7 +897,7 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 		} else if invocation != "" && invocation != "FIRE_AND_FORGET" {
 			return &spi.Fault{Code: "ValidationException", Message: "Invalid Step Functions invocation type.", HTTPStatus: 400, Fault: "client"}
 		}
-		response, err := states.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: operation, Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
+		response, err := bundled.Handler("aws.states", deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: operation, Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
 		if err != nil {
 			return err
 		}

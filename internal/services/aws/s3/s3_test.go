@@ -7280,10 +7280,16 @@ func TestMultipartZeroLimitsUseDefaults(t *testing.T) {
 	})
 	t.Run("ListPartsHTTP", func(t *testing.T) {
 		var response *spi.Response
-		for _, query := range []string{"&max-parts=0", "&max-parts=&part-number-marker="} {
+		// Each query arrives with the members the codec binds from it.
+		for query, bound := range map[string]map[string]any{
+			"&max-parts=0":                    {"MaxParts": "0"},
+			"&max-parts=&part-number-marker=": {"MaxParts": "", "PartNumberMarker": ""},
+		} {
 			request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/multipart-zero-limits/key?uploadId="+url.QueryEscape(fmt.Sprint(uploadID))+query, nil)
+			input := map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID}
+			maps.Copy(input, bound)
 			var err error
-			response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListParts", Input: map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID}, Identity: ident(), HTTP: request})
+			response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListParts", Input: input, Identity: ident(), HTTP: request})
 			if err != nil || response.Output["MaxParts"] != 1000 || response.Output["PartNumberMarker"] != 0 || len(asSliceForTest(response.Output["Parts"])) != 1 {
 				t.Fatalf("default list parts %q = %#v, %v", query, response, err)
 			}

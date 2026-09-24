@@ -21,8 +21,8 @@
   "preserved": {
     "Status": "Suspended"
   },
-  "putEnabled": null,
-  "putSuspended": null,
+  "putEnabled": {},
+  "putSuspended": {},
   "suspended": {
     "Status": "Suspended"
   }

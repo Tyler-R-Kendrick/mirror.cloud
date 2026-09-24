@@ -809,7 +809,7 @@ func FuzzBucketEncryption(f *testing.F) {
 		if !valid && asFault(t, err).Code != wantFault {
 			t.Fatalf("mode=%d algorithm=%q key=%v fault=%v", mode%4, algorithm, withKey, err)
 		}
-		stored := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]
+		stored := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]
 		if valid && !reflect.DeepEqual(stored, rules) || !valid && !reflect.DeepEqual(stored, baseline) {
 			t.Fatalf("stored encryption = %#v", stored)
 		}

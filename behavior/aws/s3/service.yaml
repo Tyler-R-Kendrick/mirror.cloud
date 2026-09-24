@@ -2,14 +2,17 @@ schema: bir/1
 service: aws.s3
 
 # Transcribed from the hand-written pack, not established against the real
-# service. Every operation is Go, in internal/services/aws/s3. S3 routes by
-# the request's shape -- host, path, method, query and headers -- rather
-# than by the operation the codec decoded; it answers a bucket's CORS rules
-# on every response and preflight; and objects are streamed blobs with
-# versions, multipart uploads, checksums, encryption, object lock and
-# notifications. None of that is records yet, so the bundle declares the
-# surface and the Go serves it.
+# service. Bucket configurations the rest of S3 does not consult are records
+# here. The rest is Go, in internal/services/aws/s3: objects are streamed
+# blobs with versions, multipart uploads, checksums, encryption, object lock
+# and notifications, and the configurations those read are still validated
+# and stored by the Go that reads them.
 provenance: authored
+
+wrap: >-
+  routes each request by its shape (host, path, method, query and headers),
+  sends a bucket's requests to the region that holds it, answers CORS
+  preflights, and puts the bucket's CORS rules on every response
 
 native:
   - CreateBucket
@@ -27,31 +30,13 @@ native:
   - PutBucketAcl
   - GetObjectAcl
   - PutObjectAcl
-  - GetBucketPolicy
-  - PutBucketPolicy
-  - DeleteBucketPolicy
-  - GetBucketCors
-  - PutBucketCors
-  - DeleteBucketCors
-  - GetBucketWebsite
-  - PutBucketWebsite
-  - DeleteBucketWebsite
-  - GetBucketLogging
-  - PutBucketLogging
   - GetBucketLifecycleConfiguration
   - PutBucketLifecycleConfiguration
   - DeleteBucketLifecycle
   - GetBucketReplication
   - PutBucketReplication
-  - GetBucketEncryption
-  - PutBucketEncryption
-  - DeleteBucketEncryption
   - GetBucketObjectLockConfiguration
   - PutBucketObjectLockConfiguration
-  - GetBucketRequestPayment
-  - PutBucketRequestPayment
-  - GetBucketAccelerateConfiguration
-  - PutBucketAccelerateConfiguration
   - PutObject
   - PostObject
   - GetObject
@@ -71,12 +56,6 @@ native:
   - ListMultipartUploads
   - GetObjectTagging
   - PutObjectTagging
-  - PutPublicAccessBlock
-  - GetPublicAccessBlock
-  - DeletePublicAccessBlock
-  - PutBucketOwnershipControls
-  - GetBucketOwnershipControls
-  - DeleteBucketOwnershipControls
   - GetBucketPolicyStatus
   - GetObjectAttributes
   - DeleteBucketTagging
@@ -86,22 +65,6 @@ native:
   - PutObjectRetention
   - GetObjectRetention
   - RestoreObject
-  - PutBucketAnalyticsConfiguration
-  - GetBucketAnalyticsConfiguration
-  - DeleteBucketAnalyticsConfiguration
-  - ListBucketAnalyticsConfigurations
-  - PutBucketInventoryConfiguration
-  - GetBucketInventoryConfiguration
-  - DeleteBucketInventoryConfiguration
-  - ListBucketInventoryConfigurations
-  - PutBucketMetricsConfiguration
-  - GetBucketMetricsConfiguration
-  - DeleteBucketMetricsConfiguration
-  - ListBucketMetricsConfigurations
-  - PutBucketIntelligentTieringConfiguration
-  - GetBucketIntelligentTieringConfiguration
-  - DeleteBucketIntelligentTieringConfiguration
-  - ListBucketIntelligentTieringConfigurations
   - CreateBucketMetadataConfiguration
   - CreateBucketMetadataTableConfiguration
   - CreateSession
@@ -109,7 +72,6 @@ native:
   - DeleteBucketMetadataTableConfiguration
   - DeleteBucketReplication
   - DeleteObjectAnnotation
-  - GetBucketAbac
   - GetBucketMetadataConfiguration
   - GetBucketMetadataTableConfiguration
   - GetObjectAnnotation
@@ -117,7 +79,6 @@ native:
   - GetObjectTorrent
   - ListDirectoryBuckets
   - ListObjectAnnotations
-  - PutBucketAbac
   - PutObjectAnnotation
   - PutObjectLockConfiguration
   - RenameObject
@@ -127,4 +88,704 @@ native:
   - UpdateBucketMetadataJournalTableConfiguration
   - UpdateObjectEncryption
   - WriteGetObjectResponse
-operations: {}
+
+resources:
+  bucket:
+    collection: buckets
+    id: { input_members: [Bucket] }
+    record: {}
+  # Bucket configurations are keyed bucket/kind, the layout CreateBucket
+  # writes the public access block and ownership defaults in.
+  requestpayment:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/requestpayment'" }
+    record: {}
+  accelerate:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/accelerate'" }
+    record: {}
+  publicaccessblock:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/publicaccessblock'" }
+    record: {}
+  ownershipcontrols:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/ownershipcontrols'" }
+    record: {}
+
+  cors:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/cors'" }
+    record: {}
+  website:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/website'" }
+    record: {}
+  logging:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/logging'" }
+    record: {}
+  abac:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/abac'" }
+    record: {}
+  policy:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/policy'" }
+    record: {}
+  encryption:
+    collection: bktcfg
+    id: { derive: "string(input.Bucket) + '/encryption'" }
+    record: {}
+  # Where every bucket lives, by name, across accounts and regions.
+  bucketlocation:
+    collection: s3buckets
+    global: true
+    id: { input_members: [Bucket] }
+    record: {}
+  # Named configurations are keyed bucket/kind/id; a listing reads a
+  # bucket's kind by that prefix, which is also Id order.
+  analyticsconfig:
+    collection: namedcfg
+    id: { derive: "string(input.Bucket) + '/analytics/' + string(input.Id)" }
+    record: {}
+  inventoryconfig:
+    collection: namedcfg
+    id: { derive: "string(input.Bucket) + '/inventory/' + string(input.Id)" }
+    record: {}
+  metricsconfig:
+    collection: namedcfg
+    id: { derive: "string(input.Bucket) + '/metrics/' + string(input.Id)" }
+    record: {}
+  intelligentconfig:
+    collection: namedcfg
+    id: { derive: "string(input.Bucket) + '/intelligent/' + string(input.Id)" }
+    record: {}
+
+errors:
+  NoSuchBucket: { code: NoSuchBucket, http: 404, fault: client, message: The specified bucket does not exist }
+  InvalidOwner: { code: InvalidBucketOwnerAWSAccountID, http: 400, fault: client, message: The value of the expected bucket owner parameter must be an AWS Account ID }
+  AccessDenied: { code: AccessDenied, http: 403, fault: client, message: Access Denied }
+  MalformedXML: { code: MalformedXML, http: 400, fault: client }
+  InvalidRequest: { code: InvalidRequest, http: 400, fault: client }
+  NoPublicAccessBlock: { code: NoSuchPublicAccessBlockConfiguration, http: 404, fault: client, message: The public access block configuration was not found }
+  NoConfiguration: { code: NoSuchConfiguration, http: 404, fault: client, message: The specified configuration does not exist. }
+  IdRequired: { code: InvalidArgument, http: 400, fault: client, message: The configuration ID is required }
+  IdMismatch: { code: IdMismatch, http: 400, fault: client, message: Document ID does not match the specified configuration ID. }
+  InvalidDestination: { code: InvalidS3DestinationBucket, http: 400, fault: client, message: Invalid bucket ARN. }
+  TooManyConfigurations: { code: TooManyConfigurations, http: 400, fault: client, message: Too many metrics configurations }
+  InvalidToken: { code: InvalidToken, http: 400, fault: client, message: The continuation token provided is incorrect }
+  NoCORS: { code: NoSuchCORSConfiguration, http: 404, fault: client, message: The CORS configuration does not exist }
+  NoWebsite: { code: NoSuchWebsiteConfiguration, http: 404, fault: client, message: The specified bucket does not have a website configuration }
+  NoAbac: { code: NoSuchAbacConfiguration, http: 404, fault: client, message: The ABAC configuration does not exist }
+  InvalidArgument: { code: InvalidArgument, http: 400, fault: client }
+  TooManyRoutingRules: { code: InternalError, http: 500, fault: server, message: Too many routing rules }
+  CrossLocationLogging: { code: CrossLocationLoggingProhibitted, http: 400, fault: client, message: "Cross S3 location logging not allowed. " }
+  InvalidLoggingTarget: { code: InvalidTargetBucketForLogging, http: 400, fault: client, message: The target bucket for logging does not exist }
+  NoPolicy: { code: NoSuchBucketPolicy, http: 404, fault: client, message: The bucket policy does not exist }
+  MalformedPolicy: { code: MalformedPolicy, http: 400, fault: client }
+  NoEncryption: { code: ServerSideEncryptionConfigurationNotFoundError, http: 404, fault: client, message: The server side encryption configuration was not found }
+  NoOwnershipControls: { code: OwnershipControlsNotFoundError, http: 404, fault: client, message: The bucket ownership controls were not found }
+
+operations:
+  # Every bucket operation checks the expected owner's form, then that the
+  # bucket exists, then that the owner matches, in that order.
+
+  PutBucketRequestPayment:
+    reads: { b: { resource: bucket } }
+    require:
+      - &ownerForm
+        cond: "!('ExpectedBucketOwner' in input) || string(input.ExpectedBucketOwner) == '' || string(input.ExpectedBucketOwner).matches('^[0-9]{12}$')"
+        error: InvalidOwner
+      - &bucketExists { cond: b_found, error: NoSuchBucket, fields: { BucketName: input.Bucket } }
+      - &ownerMatches
+        cond: "!('ExpectedBucketOwner' in input) || string(input.ExpectedBucketOwner) == '' || string(input.ExpectedBucketOwner) == identity.account"
+        error: AccessDenied
+      - cond: "'RequestPaymentConfiguration' in input && type(input.RequestPaymentConfiguration) == map && 'Payer' in input.RequestPaymentConfiguration && string(input.RequestPaymentConfiguration.Payer) in ['Requester', 'BucketOwner']"
+        error: MalformedXML
+    effects:
+      - put: { resource: requestpayment, record: { RequestPaymentConfiguration: "{'Payer': input.RequestPaymentConfiguration.Payer}" } }
+    output: {}
+
+  GetBucketRequestPayment:
+    reads: { b: { resource: bucket }, r: { resource: requestpayment } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    output:
+      Payer: "r_found ? r.RequestPaymentConfiguration.Payer : 'BucketOwner'"
+
+  PutBucketAccelerateConfiguration:
+    reads: { b: { resource: bucket } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: "!string(input.Bucket).contains('.')"
+        error: InvalidRequest
+        message: S3 Transfer Acceleration is not supported for buckets with periods (.) in their names
+      - cond: "'AccelerateConfiguration' in input && type(input.AccelerateConfiguration) == map && 'Status' in input.AccelerateConfiguration && string(input.AccelerateConfiguration.Status) in ['Enabled', 'Suspended']"
+        error: MalformedXML
+    effects:
+      - put: { resource: accelerate, record: { AccelerateConfiguration: "{'Status': input.AccelerateConfiguration.Status}" } }
+    output: {}
+
+  GetBucketAccelerateConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: accelerate } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    output:
+      Status: "r_found ? r.AccelerateConfiguration.Status : null"
+    omit_null: [Status]
+
+  PutPublicAccessBlock:
+    reads: { b: { resource: bucket } }
+    let:
+      pab: "'PublicAccessBlockConfiguration' in input ? input.PublicAccessBlockConfiguration : null"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: >-
+          type(pab) == map && pab.all(k, k in ['BlockPublicAcls', 'BlockPublicPolicy', 'IgnorePublicAcls', 'RestrictPublicBuckets']
+          && type(pab[k]) == bool)
+        error: MalformedXML
+    effects:
+      - put:
+          resource: publicaccessblock
+          record:
+            PublicAccessBlockConfiguration: >-
+              {'BlockPublicAcls': 'BlockPublicAcls' in pab ? pab.BlockPublicAcls : false,
+               'BlockPublicPolicy': 'BlockPublicPolicy' in pab ? pab.BlockPublicPolicy : false,
+               'IgnorePublicAcls': 'IgnorePublicAcls' in pab ? pab.IgnorePublicAcls : false,
+               'RestrictPublicBuckets': 'RestrictPublicBuckets' in pab ? pab.RestrictPublicBuckets : false}
+    output: {}
+
+  GetPublicAccessBlock:
+    reads: { b: { resource: bucket }, r: { resource: publicaccessblock } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: r_found, error: NoPublicAccessBlock, fields: { BucketName: input.Bucket } }
+    output:
+      PublicAccessBlockConfiguration: r.PublicAccessBlockConfiguration
+
+  DeletePublicAccessBlock:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: publicaccessblock, missing: ignore }
+    output: {}
+
+  PutBucketOwnershipControls:
+    reads: { b: { resource: bucket } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: >-
+          'OwnershipControls' in input && type(input.OwnershipControls) == map && 'Rules' in input.OwnershipControls
+          && type(input.OwnershipControls.Rules) == list && size(input.OwnershipControls.Rules) == 1
+          && type(input.OwnershipControls.Rules[0]) == map
+          && 'ObjectOwnership' in input.OwnershipControls.Rules[0]
+          && string(input.OwnershipControls.Rules[0].ObjectOwnership) in ['BucketOwnerPreferred', 'ObjectWriter', 'BucketOwnerEnforced']
+        error: MalformedXML
+    effects:
+      - put: { resource: ownershipcontrols, record: { OwnershipControls: input.OwnershipControls } }
+    output: {}
+
+  GetBucketOwnershipControls:
+    reads: { b: { resource: bucket }, r: { resource: ownershipcontrols } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: r_found, error: NoOwnershipControls, fields: { BucketName: input.Bucket } }
+    output:
+      OwnershipControls: r.OwnershipControls
+
+  DeleteBucketOwnershipControls:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: ownershipcontrols, missing: ignore }
+    output: {}
+
+  # --- named configurations --------------------------------------------------
+  # Analytics, inventory, metrics and Intelligent-Tiering configurations are
+  # each a document per id. Intelligent-Tiering does not check the expected
+  # owner, as the pack did not.
+
+  PutBucketAnalyticsConfiguration:
+    reads: { b: { resource: bucket } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - cond: "type(input.AnalyticsConfiguration) == map && 'Id' in input.AnalyticsConfiguration && string(input.AnalyticsConfiguration.Id) == string(input.Id)"
+        error: MalformedXML
+    effects:
+      - put: { resource: analyticsconfig, record: { Bucket: input.Bucket, Kind: "'analytics'", Configuration: input.AnalyticsConfiguration } }
+    output: {}
+
+  GetBucketAnalyticsConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: analyticsconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: r_found, error: NoConfiguration }
+    output:
+      AnalyticsConfiguration: r.Configuration
+
+  DeleteBucketAnalyticsConfiguration:
+    reads: { b: { resource: bucket }, delA: { resource: analyticsconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: delA_found, error: NoConfiguration }
+    effects:
+      - delete: { resource: analyticsconfig }
+    output: {}
+
+  ListBucketAnalyticsConfigurations:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    list: { resource: analyticsconfig, member: AnalyticsConfigurationList, prefix: "string(input.Bucket) + '/analytics/'" }
+    output:
+      IsTruncated: "false"
+      AnalyticsConfigurationList: "items.map(i, i.Configuration)"
+
+  PutBucketInventoryConfiguration:
+    reads: { b: { resource: bucket } }
+    let:
+      c: "'InventoryConfiguration' in input ? input.InventoryConfiguration : null"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - cond: >-
+          type(c) == map
+          && ['Destination', 'Id', 'IncludedObjectVersions', 'IsEnabled', 'Schedule'].all(f, f in c)
+          && c.all(f, f in ['Destination', 'Id', 'IncludedObjectVersions', 'IsEnabled', 'Schedule', 'Filter', 'OptionalFields'])
+          && type(c.Destination) == map && 'S3BucketDestination' in c.Destination && type(c.Destination.S3BucketDestination) == map
+          && ['Bucket', 'Format'].all(f, f in c.Destination.S3BucketDestination)
+          && c.Destination.S3BucketDestination.all(f, f in ['Bucket', 'Format', 'AccountId', 'Encryption', 'Prefix'])
+          && string(c.Destination.S3BucketDestination.Format) in ['CSV', 'ORC', 'Parquet']
+          && type(c.Schedule) == map && 'Frequency' in c.Schedule && string(c.Schedule.Frequency) in ['Daily', 'Weekly']
+          && string(c.IncludedObjectVersions) in ['All', 'Current']
+          && (!('OptionalFields' in c) || c.OptionalFields.all(f, string(f) in ['Size', 'LastModifiedDate', 'StorageClass', 'ETag',
+             'IsMultipartUploaded', 'ReplicationStatus', 'EncryptionStatus', 'ObjectLockRetainUntilDate', 'ObjectLockMode',
+             'ObjectLockLegalHoldStatus', 'IntelligentTieringAccessTier', 'BucketKeyStatus', 'ChecksumAlgorithm']))
+        error: MalformedXML
+      - cond: "string(c.Id) == string(input.Id)"
+        error: IdMismatch
+      - cond: "string(c.Destination.S3BucketDestination.Bucket).matches('^arn:[^:]*:s3:[^:]*:[^:]*:.+$')"
+        error: InvalidDestination
+    effects:
+      - put: { resource: inventoryconfig, record: { Bucket: input.Bucket, Kind: "'inventory'", Configuration: input.InventoryConfiguration } }
+    output: {}
+
+  GetBucketInventoryConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: inventoryconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: r_found, error: NoConfiguration }
+    output:
+      InventoryConfiguration: r.Configuration
+
+  DeleteBucketInventoryConfiguration:
+    reads: { b: { resource: bucket }, delI: { resource: inventoryconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: delI_found, error: NoConfiguration }
+    effects:
+      - delete: { resource: inventoryconfig }
+    output: {}
+
+  ListBucketInventoryConfigurations:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    list: { resource: inventoryconfig, member: InventoryConfigurationList, prefix: "string(input.Bucket) + '/inventory/'" }
+    output:
+      IsTruncated: "false"
+      InventoryConfigurationList: "items.map(i, i.Configuration)"
+
+  PutBucketMetricsConfiguration:
+    reads: { b: { resource: bucket }, e: { resource: metricsconfig } }
+    select:
+      binding: same
+      resource: metricsconfig
+      filter: "item.Bucket == input.Bucket && item.Kind == 'metrics'"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - cond: "type(input.MetricsConfiguration) == map"
+        error: MalformedXML
+      - cond: "e_found || size(same) < 1000"
+        error: TooManyConfigurations
+    effects:
+      - put: { resource: metricsconfig, record: { Bucket: input.Bucket, Kind: "'metrics'", Configuration: input.MetricsConfiguration } }
+    output: {}
+
+  GetBucketMetricsConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: metricsconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: r_found, error: NoConfiguration }
+    output:
+      MetricsConfiguration: r.Configuration
+
+  DeleteBucketMetricsConfiguration:
+    reads: { b: { resource: bucket }, delM: { resource: metricsconfig } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: delM_found, error: NoConfiguration }
+    effects:
+      - delete: { resource: metricsconfig }
+    output: {}
+
+  # Metrics listings page by 100; the token is the next page's first id.
+  ListBucketMetricsConfigurations:
+    reads: { b: { resource: bucket } }
+    let:
+      token: "'ContinuationToken' in input ? string(input.ContinuationToken) : ''"
+      marker: "token == '' ? '' : b64decode(token)"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: "token == '' || marker != ''", error: InvalidToken }
+    list: { resource: metricsconfig, member: MetricsConfigurationList, prefix: "string(input.Bucket) + '/metrics/'" }
+    output:
+      IsTruncated: "size(items.filter(i, string(i.Configuration.Id) >= marker)) > 100"
+      ContinuationToken: "token == '' ? dyn(null) : token"
+      NextContinuationToken: >-
+        size(items.filter(i, string(i.Configuration.Id) >= marker)) > 100
+        ? dyn(b64(string(items.filter(i, string(i.Configuration.Id) >= marker)[100].Configuration.Id))) : null
+      MetricsConfigurationList: "slice(items.filter(i, string(i.Configuration.Id) >= marker).map(i, i.Configuration), 0, 100)"
+    omit_null: [ContinuationToken, NextContinuationToken]
+
+  PutBucketIntelligentTieringConfiguration:
+    reads: { b: { resource: bucket } }
+    require:
+      - *bucketExists
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - cond: "type(input.IntelligentTieringConfiguration) == map && 'Id' in input.IntelligentTieringConfiguration && string(input.IntelligentTieringConfiguration.Id) == string(input.Id)"
+        error: MalformedXML
+    effects:
+      - put: { resource: intelligentconfig, record: { Bucket: input.Bucket, Kind: "'intelligent'", Configuration: input.IntelligentTieringConfiguration } }
+    output: {}
+
+  GetBucketIntelligentTieringConfiguration:
+    reads: { b: { resource: bucket }, r: { resource: intelligentconfig } }
+    require:
+      - *bucketExists
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: r_found, error: NoConfiguration }
+    output:
+      IntelligentTieringConfiguration: r.Configuration
+
+  DeleteBucketIntelligentTieringConfiguration:
+    reads: { b: { resource: bucket }, delT: { resource: intelligentconfig } }
+    require:
+      - *bucketExists
+      - { cond: "'Id' in input && string(input.Id) != ''", error: IdRequired }
+      - { cond: delT_found, error: NoConfiguration }
+    effects:
+      - delete: { resource: intelligentconfig }
+    output: {}
+
+  ListBucketIntelligentTieringConfigurations:
+    reads: { b: { resource: bucket } }
+    require: [*bucketExists]
+    list: { resource: intelligentconfig, member: IntelligentTieringConfigurationList, prefix: "string(input.Bucket) + '/intelligent/'" }
+    output:
+      IsTruncated: "false"
+      IntelligentTieringConfigurationList: "items.map(i, i.Configuration)"
+
+  # --- configurations the Go reads -------------------------------------------
+  # The wrap answers a bucket's CORS rules from bktcfg/cors, and the website
+  # endpoint serves from bktcfg/website; both read the layout written here.
+  # A body the codec could not bind arrives as _body and is malformed.
+
+  PutBucketCors:
+    reads: { b: { resource: bucket } }
+    let:
+      rules: >-
+        'CORSConfiguration' in input && type(input.CORSConfiguration) == map && 'CORSRules' in input.CORSConfiguration
+        ? input.CORSConfiguration.CORSRules : ('CORSRules' in input ? input.CORSRules : [])
+      methods: "['GET', 'PUT', 'HEAD', 'POST', 'DELETE']"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - &unboundBody { cond: "!('_body' in input) || string(input._body) == ''", error: MalformedXML }
+      - cond: "type(rules) == list && size(rules) >= 1 && size(rules) <= 100"
+        error: MalformedXML
+      - cond: >-
+          rules.all(r, type(r) == map && 'AllowedMethods' in r && 'AllowedOrigins' in r
+          && r.all(f, f in ['AllowedMethods', 'AllowedOrigins', 'AllowedHeaders', 'ExposeHeaders', 'MaxAgeSeconds', 'ID']))
+        error: MalformedXML
+      - cond: "rules.all(r, r.AllowedMethods.all(m, string(m) in methods))"
+        error: InvalidRequest
+        message_expr: >-
+          'Found unsupported HTTP method in CORS config. Unsupported method is '
+          + string(rules.filter(r, r.AllowedMethods.exists(m, !(string(m) in methods)))[0].AllowedMethods.filter(m, !(string(m) in methods))[0])
+    effects:
+      - put: { resource: cors, record: { CORSConfiguration: "{'CORSRules': rules}" } }
+    output: {}
+
+  GetBucketCors:
+    reads: { b: { resource: bucket }, cors: { resource: cors } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: cors_found, error: NoCORS, fields: { BucketName: input.Bucket } }
+    output:
+      CORSRules: cors.CORSConfiguration.CORSRules
+
+  DeleteBucketCors:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: cors, missing: ignore }
+    output: {}
+
+  # A website either redirects every request or serves an index document;
+  # the checks for the second apply only when it does not redirect.
+  PutBucketWebsite:
+    reads: { b: { resource: bucket } }
+    let:
+      c: "'WebsiteConfiguration' in input ? input.WebsiteConfiguration : null"
+      redirect: "type(c) == map && 'RedirectAllRequestsTo' in c && type(c.RedirectAllRequestsTo) == map && size(c.RedirectAllRequestsTo) != 0"
+      suffix: >-
+        type(c) == map && 'IndexDocument' in c && type(c.IndexDocument) == map && 'Suffix' in c.IndexDocument
+        ? string(c.IndexDocument.Suffix) : ''
+      routing: "type(c) == map && 'RoutingRules' in c && type(c.RoutingRules) == list ? c.RoutingRules : []"
+      protocols: "['', 'http', 'https']"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - *unboundBody
+      - { cond: "type(c) == map", error: MalformedXML }
+      - cond: "!redirect || size(c) == 1"
+        error: InvalidArgument
+        message: RedirectAllRequestsTo cannot be provided in conjunction with other Routing Rules.
+        fields: { ArgumentName: "'RedirectAllRequestsTo'", ArgumentValue: "'not null'" }
+      - { cond: "!redirect || 'HostName' in c.RedirectAllRequestsTo", error: MalformedXML }
+      - cond: "!redirect || !('Protocol' in c.RedirectAllRequestsTo) || string(c.RedirectAllRequestsTo.Protocol) in protocols"
+        error: InvalidRequest
+        message: &badProtocol Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.
+      - cond: "redirect || ('IndexDocument' in c && type(c.IndexDocument) == map && size(c.IndexDocument) != 0)"
+        error: InvalidArgument
+        message: A value for IndexDocument Suffix must be provided if RedirectAllRequestsTo is empty
+        fields: { ArgumentName: "'IndexDocument'", ArgumentValue: "null" }
+      - cond: "redirect || (suffix != '' && !suffix.contains('/'))"
+        error: InvalidArgument
+        message: The IndexDocument Suffix is not well formed
+        fields: { ArgumentName: "'IndexDocument'", ArgumentValue: "suffix == '' ? dyn(null) : suffix" }
+      - cond: "redirect || !('ErrorDocument' in c) || (type(c.ErrorDocument) == map && 'Key' in c.ErrorDocument && string(c.ErrorDocument.Key) != '')"
+        error: MalformedXML
+      - { cond: "redirect || !('RoutingRules' in c) || size(routing) != 0", error: MalformedXML }
+      - { cond: "redirect || size(routing) <= 50", error: TooManyRoutingRules }
+      - cond: >-
+          redirect || routing.all(r, !(type(r) == map && 'Redirect' in r && type(r.Redirect) == map
+          && 'ReplaceKeyPrefixWith' in r.Redirect && 'ReplaceKeyWith' in r.Redirect))
+        error: InvalidRequest
+        message: You can only define ReplaceKeyPrefix or ReplaceKey but not both.
+      - cond: "redirect || routing.all(r, !(type(r) == map && 'Condition' in r) || (type(r.Condition) == map && size(r.Condition) != 0))"
+        error: InvalidRequest
+        message: Condition cannot be empty. To redirect all requests without a condition, the condition element shouldn't be present.
+      - cond: >-
+          redirect || routing.all(r, !(type(r) == map && 'Redirect' in r && type(r.Redirect) == map && 'Protocol' in r.Redirect)
+          || string(r.Redirect.Protocol) in protocols)
+        error: InvalidRequest
+        message: *badProtocol
+    effects:
+      - put: { resource: website, record: { WebsiteConfiguration: c } }
+    output: {}
+
+  GetBucketWebsite:
+    reads: { b: { resource: bucket }, site: { resource: website } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: site_found, error: NoWebsite, fields: { BucketName: input.Bucket } }
+    output:
+      RedirectAllRequestsTo: "'RedirectAllRequestsTo' in site.WebsiteConfiguration ? site.WebsiteConfiguration.RedirectAllRequestsTo : null"
+      IndexDocument: "'IndexDocument' in site.WebsiteConfiguration ? site.WebsiteConfiguration.IndexDocument : null"
+      ErrorDocument: "'ErrorDocument' in site.WebsiteConfiguration ? site.WebsiteConfiguration.ErrorDocument : null"
+      RoutingRules: "'RoutingRules' in site.WebsiteConfiguration ? site.WebsiteConfiguration.RoutingRules : null"
+    omit_null: [RedirectAllRequestsTo, IndexDocument, ErrorDocument, RoutingRules]
+
+  DeleteBucketWebsite:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: website, missing: ignore }
+    output: {}
+
+  # Logging with no LoggingEnabled turns logging off. A target bucket must
+  # exist in the caller's region; one the caller owns elsewhere is a
+  # cross-location target, anything else does not exist.
+  PutBucketLogging:
+    reads:
+      b: { resource: bucket }
+      target:
+        resource: bucket
+        key: &target >-
+          'BucketLoggingStatus' in input && type(input.BucketLoggingStatus) == map && 'LoggingEnabled' in input.BucketLoggingStatus
+          && type(input.BucketLoggingStatus.LoggingEnabled) == map && 'TargetBucket' in input.BucketLoggingStatus.LoggingEnabled
+          ? string(input.BucketLoggingStatus.LoggingEnabled.TargetBucket) : ''
+
+      where: { resource: bucketlocation, key: *target }
+    let:
+      logging: >-
+        'BucketLoggingStatus' in input && type(input.BucketLoggingStatus) == map && 'LoggingEnabled' in input.BucketLoggingStatus
+        && type(input.BucketLoggingStatus.LoggingEnabled) == map ? input.BucketLoggingStatus.LoggingEnabled : {}
+      enabled: "size(logging) != 0"
+      elsewhere: "where_found && where.account == identity.account && string(where.region) != '' && where.region != identity.region"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - *unboundBody
+      - { cond: "!enabled || ('TargetBucket' in logging && string(logging.TargetBucket) != '')", error: MalformedXML }
+      - cond: "!enabled || target_found || !elsewhere"
+        error: CrossLocationLogging
+        fields:
+          TargetBucketLocation: where.region
+          SourceBucketLocation: "identity.region == 'us-east-1' ? dyn(null) : identity.region"
+      - cond: "!enabled || target_found"
+        error: InvalidLoggingTarget
+        fields: { TargetBucket: logging.TargetBucket }
+    effects:
+      - delete: { resource: logging, missing: ignore, when: "!enabled" }
+      - put:
+          resource: logging
+          when: enabled
+          record: { BucketLoggingStatus: "{'LoggingEnabled': merge(logging, {'TargetPrefix': 'TargetPrefix' in logging ? string(logging.TargetPrefix) : ''})}" }
+    output: {}
+
+  GetBucketLogging:
+    reads: { b: { resource: bucket }, log: { resource: logging } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    output:
+      LoggingEnabled: "log_found ? log.BucketLoggingStatus.LoggingEnabled : null"
+    omit_null: [LoggingEnabled]
+
+  PutBucketAbac:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - put: { resource: abac, record: { AbacStatus: "'AbacStatus' in input ? input.AbacStatus : null" } }
+    output: {}
+
+  GetBucketAbac:
+    reads: { b: { resource: bucket }, abac: { resource: abac } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: abac_found, error: NoAbac }
+    output:
+      AbacStatus: abac.AbacStatus
+
+  # A policy is kept as the caller sent it; it must be a JSON object with at
+  # least one member. S3 answers a put with 204 where the model says 200.
+  PutBucketPolicy:
+    reads: { b: { resource: bucket } }
+    let:
+      text: "'Policy' in input ? string(input.Policy) : ''"
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: "text.startsWith('{') && parseJSON(text) != null"
+        error: MalformedPolicy
+        message: Policies must be valid JSON and the first byte must be '{'
+      - cond: "size(parseJSON(text)) != 0"
+        error: MalformedPolicy
+        message: Missing required field Statement
+    effects:
+      - put: { resource: policy, record: { Policy: text } }
+    output: {}
+    status: 204
+
+  GetBucketPolicy:
+    reads: { b: { resource: bucket }, pol: { resource: policy } }
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - { cond: pol_found, error: NoPolicy, fields: { BucketName: input.Bucket } }
+    output:
+      Policy: pol.Policy
+
+  DeleteBucketPolicy:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: policy, missing: ignore }
+    output: {}
+
+  # Default encryption is one rule. PutObject reads it from this layout to
+  # encrypt objects written without an algorithm of their own.
+  PutBucketEncryption:
+    reads: { b: { resource: bucket } }
+    let:
+      sse: "'ServerSideEncryptionConfiguration' in input ? input.ServerSideEncryptionConfiguration : null"
+      defaults: >-
+        type(sse) == map && 'Rules' in sse && type(sse.Rules) == list && size(sse.Rules) == 1
+        && type(sse.Rules[0]) == map && 'ApplyServerSideEncryptionByDefault' in sse.Rules[0]
+        && type(sse.Rules[0].ApplyServerSideEncryptionByDefault) == map
+        ? sse.Rules[0].ApplyServerSideEncryptionByDefault : null
+    require:
+      - *ownerForm
+      - *bucketExists
+      - *ownerMatches
+      - cond: "defaults != null && 'SSEAlgorithm' in defaults && string(defaults.SSEAlgorithm) in ['AES256', 'aws:fsx', 'aws:backup', 'aws:kms', 'aws:kms:dsse']"
+        error: MalformedXML
+      - cond: "!('KMSMasterKeyID' in defaults) || string(defaults.SSEAlgorithm) == 'aws:kms'"
+        error: InvalidArgument
+        message: a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse
+        fields: { ArgumentName: "'ApplyServerSideEncryptionByDefault'" }
+    effects:
+      - put: { resource: encryption, record: { ServerSideEncryptionConfiguration: "{'Rules': sse.Rules}" } }
+    output: {}
+
+  GetBucketEncryption:
+    reads: { b: { resource: bucket }, enc: { resource: encryption } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    output:
+      ServerSideEncryptionConfiguration: >-
+        enc_found ? enc.ServerSideEncryptionConfiguration
+        : {'Rules': [{'ApplyServerSideEncryptionByDefault': {'SSEAlgorithm': 'AES256'}, 'BucketKeyEnabled': false}]}
+
+  DeleteBucketEncryption:
+    reads: { b: { resource: bucket } }
+    require: [*ownerForm, *bucketExists, *ownerMatches]
+    effects:
+      - delete: { resource: encryption, missing: ignore }
+    output: {}

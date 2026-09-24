@@ -2285,6 +2285,18 @@ func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
 	})
 }
 
+func TestBucketAbac(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "abac-bucket"}, nil)
+	if _, err := invoke(t, p, "GetBucketAbac", map[string]any{"Bucket": "abac-bucket"}, nil); asFault(t, err).Code != "NoSuchAbacConfiguration" {
+		t.Fatalf("unset abac = %v", err)
+	}
+	mustInvoke(t, p, "PutBucketAbac", map[string]any{"Bucket": "abac-bucket", "AbacStatus": map[string]any{"Status": "Enabled"}}, nil)
+	if got := asMapForTest(mustInvoke(t, p, "GetBucketAbac", map[string]any{"Bucket": "abac-bucket"}, nil).Output["AbacStatus"]); got["Status"] != "Enabled" {
+		t.Fatalf("abac = %#v", got)
+	}
+}
+
 func TestBucketLoggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	for _, bucket := range []string{"logging-characterization-source", "logging-characterization-target"} {
@@ -2651,6 +2663,15 @@ func TestCrossRegionBucketResolutionAndHeadMetadata(t *testing.T) {
 	listed := mustInvokeAs(t, p, east, "ListObjectsV2", map[string]any{"Bucket": "cross-region"}, nil)
 	if listed.Headers.Get("x-amz-bucket-region") != "us-west-2" || len(asSliceForTest(listed.Output["Contents"])) != 1 {
 		t.Fatalf("list = %#v headers=%#v", listed.Output, listed.Headers)
+	}
+
+	// The bundle's operations find the bucket's region through the wrap, as
+	// the Go ones do through requireBucket.
+	mustInvokeAs(t, p, east, "PutBucketRequestPayment", map[string]any{"Bucket": "cross-region", "RequestPaymentConfiguration": map[string]any{"Payer": "Requester"}}, nil)
+	west := east
+	west.Region = "us-west-2"
+	if payer := mustInvokeAs(t, p, west, "GetBucketRequestPayment", map[string]any{"Bucket": "cross-region"}, nil).Output["Payer"]; payer != "Requester" {
+		t.Fatalf("payer in the home region = %v", payer)
 	}
 
 	global := east
@@ -3184,7 +3205,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	bucket := map[string]any{"Bucket": "bucket-encryption"}
 	mustInvoke(t, p, "CreateBucket", bucket, nil)
 	defaultRules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}
-	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, defaultRules) {
+	if got := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]; !reflect.DeepEqual(got, defaultRules) {
 		t.Fatalf("default encryption = %#v", got)
 	}
 	rule := func(algorithm string, keyID any, bucketKey bool) map[string]any {
@@ -3202,7 +3223,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 		if _, err := put(configuration); err != nil {
 			t.Fatalf("put %s: %v", algorithm, err)
 		}
-		if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, configuration["Rules"]) {
+		if got := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]; !reflect.DeepEqual(got, configuration["Rules"]) {
 			t.Fatalf("get %s = %#v", algorithm, got)
 		}
 		object := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "object-" + strings.ReplaceAll(algorithm, ":", "-")}, []byte("body"))
@@ -3258,7 +3279,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 			if test.code == "InvalidArgument" && (fault.Message != "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse" || fault.Fields["ArgumentName"] != "ApplyServerSideEncryptionByDefault") {
 				t.Fatalf("invalid key fault = %#v", fault)
 			}
-			if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, baseline["Rules"]) {
+			if got := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]; !reflect.DeepEqual(got, baseline["Rules"]) {
 				t.Fatalf("invalid put replaced baseline = %#v", got)
 			}
 		})
@@ -3266,7 +3287,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	for range 2 {
 		mustInvoke(t, p, "DeleteBucketEncryption", bucket, nil)
 	}
-	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, defaultRules) {
+	if got := asMapForTest(mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["ServerSideEncryptionConfiguration"])["Rules"]; !reflect.DeepEqual(got, defaultRules) {
 		t.Fatalf("deleted encryption = %#v", got)
 	}
 }
@@ -7259,10 +7280,16 @@ func TestMultipartZeroLimitsUseDefaults(t *testing.T) {
 	})
 	t.Run("ListPartsHTTP", func(t *testing.T) {
 		var response *spi.Response
-		for _, query := range []string{"&max-parts=0", "&max-parts=&part-number-marker="} {
+		// Each query arrives with the members the codec binds from it.
+		for query, bound := range map[string]map[string]any{
+			"&max-parts=0":                    {"MaxParts": "0"},
+			"&max-parts=&part-number-marker=": {"MaxParts": "", "PartNumberMarker": ""},
+		} {
 			request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/multipart-zero-limits/key?uploadId="+url.QueryEscape(fmt.Sprint(uploadID))+query, nil)
+			input := map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID}
+			maps.Copy(input, bound)
 			var err error
-			response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListParts", Input: map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID}, Identity: ident(), HTTP: request})
+			response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListParts", Input: input, Identity: ident(), HTTP: request})
 			if err != nil || response.Output["MaxParts"] != 1000 || response.Output["PartNumberMarker"] != 0 || len(asSliceForTest(response.Output["Parts"])) != 1 {
 				t.Fatalf("default list parts %q = %#v, %v", query, response, err)
 			}

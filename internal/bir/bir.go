@@ -95,6 +95,12 @@ type Service struct {
 	// does not.
 	Worker string `yaml:"worker,omitempty"`
 
+	// Wrap, when set, says every request passes through Go before and after
+	// the operation -- S3 re-derives the operation from the request's shape
+	// and answers a bucket's CORS rules on every response -- registered with
+	// bundled.RegisterWrap. The value says what it does.
+	Wrap string `yaml:"wrap,omitempty"`
+
 	// MissingInput names the error table entry the engine answers with when a
 	// required input member is absent. The model says which members are
 	// required; it does not say what a service calls their absence, and
@@ -318,6 +324,11 @@ type Operation struct {
 	Delete *CrudSpec         `yaml:"delete,omitempty"`
 	Batch  *BatchSpec        `yaml:"batch,omitempty"`
 	Output map[string]string `yaml:"output,omitempty"`
+
+	// Status is the HTTP status the operation answers with when the service
+	// departs from its model: S3 answers PutBucketPolicy with 204 where the
+	// model says 200. Unset, the model's code stands.
+	Status int `yaml:"status,omitempty"`
 
 	// OmitNull names output members the answer drops when they project null.
 	// A record that lacks a member answers without it -- OpenSearch answers

@@ -4,7 +4,7 @@
     "code": "NoSuchCORSConfiguration",
     "status": 404
   },
-  "delete": null,
+  "delete": {},
   "deleted": {
     "bucket": "cors-characterization",
     "code": "NoSuchCORSConfiguration",
@@ -106,7 +106,7 @@
       }
     ]
   },
-  "put": null,
+  "put": {},
   "rejected": {
     "code": "AccessForbidden",
     "message": "CORSResponse: This CORS request is not allowed. This is usually because the evalution of Origin, request method / Access-Control-Request-Method or Access-Control-Request-Headers are not whitelisted by the resource's CORS spec.",

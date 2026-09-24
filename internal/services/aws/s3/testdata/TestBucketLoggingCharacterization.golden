@@ -1,6 +1,6 @@
 {
   "default": {},
-  "disable": null,
+  "disable": {},
   "disabled": {},
   "get": {
     "LoggingEnabled": {
@@ -20,5 +20,5 @@
       "TargetPrefix": "logs/"
     }
   },
-  "put": null
+  "put": {}
 }

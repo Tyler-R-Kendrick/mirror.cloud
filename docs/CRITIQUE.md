@@ -1552,3 +1552,46 @@ Moving S3's configuration surface into YAML first needs a response hook in the e
 **Multipart state.** Multipart uploads in flight live in memory. Natives build a pack per call, so that state and its locks are kept per store in a package-level map. The map is marked `ponytail:`, because an entry is never freed.
 
 **Recording.** The recording covers the bucket surface. It exists so that when an operation does move to YAML, it has a pack answer to meet.
+
+### S3: a wrap for the request shape, and the first configurations as records
+
+S3's bundle could not serve any operation as records until the engine could run Go around a request. A bundle can now declare `wrap:`, with the Go supplied by `bundled.RegisterWrap`. For S3, the wrap does four things before or after every operation:
+- **Routing.** It re-derives the operation from the request's shape.
+- **Home region.** It points a bucket's records at the region that holds the bucket. This is the lookup `requireBucket` does for the natives.
+- **Preflight.** It answers CORS preflights.
+- **CORS headers.** It puts the bucket's CORS rules on every response.
+
+Ten configuration operations are now YAML: request payment, transfer acceleration, public access block and ownership controls. They keep the `bktcfg` layout, keyed `bucket/kind`, that CreateBucket writes the defaults in. Their validation is `require` rules: owner form, then bucket existence, then owner match, the order `requireBucketOwner` checks in.
+
+Two engine defects surfaced along the way:
+- **Shared collections.** A resource was found by its collection name alone. Four S3 resources share `bktcfg`, so a read could evaluate another resource's key. The lookup now matches the key derivation too.
+- **Status codes.** An engine answer carried status 0, and only the codec filled in the model's code. A delete answered 204 on the wire but 0 to a caller in Go. The engine now sets the model's code itself.
+
+**Named configurations.** Analytics, inventory, metrics and Intelligent-Tiering configurations moved to YAML: sixteen operations. Each is a document keyed `bucket/kind/id`. A listing reads its kind by prefix, and the key order is the Id order the pack sorted into. The inventory validation is one `require` rule. Metrics listings page by 100, with the next page's first Id as the token.
+
+The token is now standard base64 rather than URL-safe. It only has to survive a round trip, and callers already escape it in the query string. As the pack did, Intelligent-Tiering does not check the expected owner.
+
+**CORS, website, logging and ABAC.** These configurations moved to YAML: ten operations, including the two the Go reads back. The wrap reads the CORS rules from `bktcfg/cors`, and the website endpoint reads its configuration from `bktcfg/website`. Both read the layout the YAML writes.
+
+Website validation is one `require` rule per check. The index-document checks apply only when the site does not redirect everything.
+
+The logging target check reads the target bucket twice: once in the caller's region, and once in the global `s3buckets` registry to tell a cross-location target from a missing one.
+
+ABAC had no test, so it has one now.
+
+**Policy and encryption.** These moved to YAML, six operations. PutObject still reads default encryption from `bktcfg/encryption`, in the layout the YAML writes.
+
+GetBucketEncryption now answers under the model's `ServerSideEncryptionConfiguration` member rather than flat. The wire is unchanged, because it is the payload member.
+
+A bundle operation can now declare `status:` for a service that departs from its model. S3 answers PutBucketPolicy with 204 where the model says 200.
+
+**Header and query binding.** The S3 codec bound the path, the raw query and a few headers into the input, and the natives read other headers from the request themselves. A bundle only reads the input. So an expected-owner header, or an `?id=` query, never reached the YAML over HTTP. The in-process tests had passed the members directly.
+
+The codec now binds every member the model places in a header or a query parameter under its member name.
+
+**Duplicate reads removed.** Once the codec binds header and query members, several natives' own reads of the same header or query parameter became a second path to one value. With two paths, a mutant on either path cannot be killed. The duplicates are gone:
+- the bucket-key-enabled header fallback;
+- the bucket-namespace header read;
+- `route`'s hydration of `continuation-token` and `max-buckets`.
+
+ListParts reads its marker and limit from the bound input, so it still rejects a non-integer. The mutants that defended those reads now defend the codec's binding.

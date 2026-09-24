@@ -20,6 +20,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,48 +41,38 @@ import (
 func init() {
 	for _, op := range natives {
 		bundled.RegisterNative("aws.s3", op, func(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
-			return packFor(deps).Invoke(ctx, req)
+			return packFor(deps).invoke(ctx, req)
 		})
 	}
+	bundled.RegisterWrap("aws.s3", func(ctx context.Context, deps spi.Deps, req *spi.Request, next func(context.Context, *spi.Request) (*spi.Response, error)) (*spi.Response, error) {
+		return packFor(deps).serve(ctx, req, next)
+	})
 }
 
-// natives are the operations behavior/aws/s3 declares native: all of them.
+// natives are the operations behavior/aws/s3 declares native.
 var natives = []string{
 	"CreateBucket", "DeleteBucket", "HeadBucket", "ListBuckets", "GetBucketLocation",
 	"GetBucketVersioning", "PutBucketVersioning", "GetBucketTagging", "PutBucketTagging",
 	"GetBucketNotificationConfiguration", "PutBucketNotificationConfiguration",
 	"GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
-	"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
-	"GetBucketCors", "PutBucketCors", "DeleteBucketCors",
-	"GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
-	"GetBucketLogging", "PutBucketLogging",
 	"GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
 	"GetBucketReplication", "PutBucketReplication",
-	"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 	"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
-	"GetBucketRequestPayment", "PutBucketRequestPayment",
-	"GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
 	"PutObject", "PostObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
 	"ListObjects", "ListObjectsV2", "ListObjectVersions",
 	"CreateMultipartUpload", "UploadPart", "UploadPartCopy", "CompleteMultipartUpload",
 	"AbortMultipartUpload", "ListParts", "ListMultipartUploads",
 	"GetObjectTagging", "PutObjectTagging",
-	"PutPublicAccessBlock", "GetPublicAccessBlock", "DeletePublicAccessBlock",
-	"PutBucketOwnershipControls", "GetBucketOwnershipControls", "DeleteBucketOwnershipControls",
 	"GetBucketPolicyStatus", "GetObjectAttributes",
 	"DeleteBucketTagging", "DeleteObjectTagging",
 	"PutObjectLegalHold", "GetObjectLegalHold", "PutObjectRetention", "GetObjectRetention",
 	"RestoreObject",
-	"PutBucketAnalyticsConfiguration", "GetBucketAnalyticsConfiguration", "DeleteBucketAnalyticsConfiguration", "ListBucketAnalyticsConfigurations",
-	"PutBucketInventoryConfiguration", "GetBucketInventoryConfiguration", "DeleteBucketInventoryConfiguration", "ListBucketInventoryConfigurations",
-	"PutBucketMetricsConfiguration", "GetBucketMetricsConfiguration", "DeleteBucketMetricsConfiguration", "ListBucketMetricsConfigurations",
-	"PutBucketIntelligentTieringConfiguration", "GetBucketIntelligentTieringConfiguration", "DeleteBucketIntelligentTieringConfiguration", "ListBucketIntelligentTieringConfigurations",
 	"CreateBucketMetadataConfiguration", "CreateBucketMetadataTableConfiguration", "CreateSession",
 	"DeleteBucketMetadataConfiguration", "DeleteBucketMetadataTableConfiguration", "DeleteBucketReplication",
-	"DeleteObjectAnnotation", "GetBucketAbac", "GetBucketMetadataConfiguration",
+	"DeleteObjectAnnotation", "GetBucketMetadataConfiguration",
 	"GetBucketMetadataTableConfiguration", "GetObjectAnnotation", "GetObjectLockConfiguration",
 	"GetObjectTorrent", "ListDirectoryBuckets", "ListObjectAnnotations",
-	"PutBucketAbac", "PutObjectAnnotation", "PutObjectLockConfiguration",
+	"PutObjectAnnotation", "PutObjectLockConfiguration",
 	"RenameObject", "SelectObjectContent", "UpdateBucketMetadataAnnotationTableConfiguration",
 	"UpdateBucketMetadataInventoryTableConfiguration", "UpdateBucketMetadataJournalTableConfiguration",
 	"UpdateObjectEncryption", "WriteGetObjectResponse",
@@ -235,14 +226,23 @@ func looksLikeIPv4(name string) bool {
 // New answers with the S3 service, served through its bundle.
 func New(d spi.Deps) spi.BehaviorPack { return bundled.Handler("aws.s3", d) }
 
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+// serve is the bundle's wrap: every request is routed by its shape, a
+// bucket's records are read in its home region, and every response carries
+// the bucket's CORS rules.
+func (p *Pack) serve(ctx context.Context, req *spi.Request, next func(context.Context, *spi.Request) (*spi.Response, error)) (*spi.Response, error) {
 	if req.HTTP != nil && req.Operation != "" {
 		req.Operation = p.route(req)
 	}
 	if req.HTTP != nil && req.HTTP.Method == http.MethodOptions {
 		return p.corsPreflight(ctx, req)
 	}
-	resp, err := p.invoke(ctx, req)
+	if !slices.Contains(natives, req.Operation) {
+		// The natives find the home region themselves, in requireBucket.
+		if err := p.toHomeRegion(ctx, req, str(req.Input["Bucket"])); err != nil {
+			return nil, err
+		}
+	}
+	resp, err := next(ctx, req)
 	if err == nil && resp != nil {
 		if resp.Headers == nil {
 			resp.Headers = http.Header{}
@@ -293,19 +293,9 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle":
 		return p.bucketLifecycle(ctx, req)
 	case "GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
-		"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
-		"GetBucketCors", "PutBucketCors", "DeleteBucketCors",
-		"GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
-		"GetBucketLogging", "PutBucketLogging",
 		"GetBucketReplication", "PutBucketReplication", "DeleteBucketReplication",
-		"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
-		"GetObjectLockConfiguration", "PutObjectLockConfiguration",
-		"GetBucketAbac", "PutBucketAbac",
-		"GetBucketRequestPayment", "PutBucketRequestPayment",
-		"GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
-		"PutPublicAccessBlock", "GetPublicAccessBlock", "DeletePublicAccessBlock",
-		"PutBucketOwnershipControls", "GetBucketOwnershipControls", "DeleteBucketOwnershipControls":
+		"GetObjectLockConfiguration", "PutObjectLockConfiguration":
 		return p.bucketCfg(ctx, req)
 	case "GetObjectAttributes":
 		return p.objectAttributes(ctx, req)
@@ -318,11 +308,6 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.objectLockExtras(ctx, req)
 	case "RestoreObject":
 		return p.restoreObject(ctx, req)
-	case "PutBucketAnalyticsConfiguration", "GetBucketAnalyticsConfiguration", "DeleteBucketAnalyticsConfiguration", "ListBucketAnalyticsConfigurations",
-		"PutBucketInventoryConfiguration", "GetBucketInventoryConfiguration", "DeleteBucketInventoryConfiguration", "ListBucketInventoryConfigurations",
-		"PutBucketMetricsConfiguration", "GetBucketMetricsConfiguration", "DeleteBucketMetricsConfiguration", "ListBucketMetricsConfigurations",
-		"PutBucketIntelligentTieringConfiguration", "GetBucketIntelligentTieringConfiguration", "DeleteBucketIntelligentTieringConfiguration", "ListBucketIntelligentTieringConfigurations":
-		return p.namedCfg(ctx, req)
 	case "ListParts":
 		return p.listParts(ctx, req)
 	case "ListMultipartUploads":
@@ -590,9 +575,6 @@ func (p *Pack) route(req *spi.Request) string {
 		return a
 	}
 	has := func(k string) bool { _, ok := q[k]; return ok }
-	if has("max-buckets") {
-		req.Input["MaxBuckets"] = q.Get("max-buckets")
-	}
 	if has("bucket-region") {
 		req.Input["BucketRegion"] = q.Get("bucket-region")
 	}
@@ -629,9 +611,6 @@ func (p *Pack) route(req *spi.Request) string {
 	}
 	if v := q.Get("max-keys"); v != "" {
 		req.Input["MaxKeys"] = v
-	}
-	if has("continuation-token") {
-		req.Input["ContinuationToken"] = q.Get("continuation-token")
 	}
 	if v := q.Get("start-after"); v != "" {
 		req.Input["StartAfter"] = v
@@ -856,7 +835,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if req.HTTP != nil {
 		objectLock = objectLock || strings.EqualFold(req.HTTP.Header.Get("x-amz-bucket-object-lock-enabled"), "true")
 	}
-	namespace := requestCondition(req, "BucketNamespace", "x-amz-bucket-namespace")
+	namespace := str(req.Input["BucketNamespace"])
 	if namespace != "" && namespace != "global" && namespace != "account-regional" {
 		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid bucket namespace", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bucket-namespace", "ArgumentValue": namespace}}
 	}
@@ -2724,14 +2703,14 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 		maxParts = value
 	}
 	if req.HTTP != nil {
-		if raw := req.HTTP.URL.Query().Get("part-number-marker"); raw != "" {
+		if raw := str(req.Input["PartNumberMarker"]); raw != "" {
 			var err error
 			marker, err = strconv.Atoi(raw)
 			if err != nil {
 				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
 		}
-		if raw := req.HTTP.URL.Query().Get("max-parts"); raw != "" {
+		if raw := str(req.Input["MaxParts"]); raw != "" {
 			var err error
 			maxParts, err = strconv.Atoi(raw)
 			if err != nil {
@@ -3551,19 +3530,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
-		if req.Operation == "PutBucketEncryption" {
-			configuration, err := validateBucketEncryption(req.Input["ServerSideEncryptionConfiguration"])
-			if err != nil {
-				return nil, err
-			}
-			delete(req.Input, "_body")
-			req.Input["ServerSideEncryptionConfiguration"] = configuration
-		}
-		if req.Operation == "PutBucketPolicy" {
-			if err := validateBucketPolicy(str(req.Input["Policy"])); err != nil {
-				return nil, err
-			}
-		}
 		if req.Operation == "PutBucketAcl" || req.Operation == "PutObjectAcl" {
 			acl, _, err := requestACL(req, true)
 			if err != nil {
@@ -3575,117 +3541,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 				p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
 			}
 			return &spi.Response{Status: http.StatusOK}, nil
-		}
-		if req.Operation == "PutBucketWebsite" {
-			if str(req.Input["_body"]) != "" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			if err := validateWebsiteConfiguration(req.Input["WebsiteConfiguration"]); err != nil {
-				return nil, err
-			}
-		}
-		if req.Operation == "PutBucketCors" {
-			if str(req.Input["_body"]) != "" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			configuration := asMap(req.Input["CORSConfiguration"])
-			rules := asSlice(configuration["CORSRules"])
-			if len(rules) == 0 {
-				rules = asSlice(req.Input["CORSRules"])
-			}
-			if len(rules) == 0 || len(rules) > 100 {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			for _, value := range rules {
-				rule, ok := value.(map[string]any)
-				if !ok {
-					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-				}
-				if _, ok := rule["AllowedMethods"]; !ok {
-					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-				}
-				if _, ok := rule["AllowedOrigins"]; !ok {
-					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-				}
-				for field := range rule {
-					switch field {
-					case "AllowedMethods", "AllowedOrigins", "AllowedHeaders", "ExposeHeaders", "MaxAgeSeconds", "ID":
-					default:
-						return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-					}
-				}
-				for _, value := range asSlice(rule["AllowedMethods"]) {
-					method := str(value)
-					if method != "GET" && method != "PUT" && method != "HEAD" && method != "POST" && method != "DELETE" {
-						return nil, &spi.Fault{Code: "InvalidRequest", Message: "Found unsupported HTTP method in CORS config. Unsupported method is " + method, HTTPStatus: http.StatusBadRequest, Fault: "client"}
-					}
-				}
-			}
-			delete(req.Input, "CORSRules")
-			req.Input["CORSConfiguration"] = map[string]any{"CORSRules": rules}
-		}
-		if req.Operation == "PutBucketLogging" {
-			if str(req.Input["_body"]) != "" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			logging := asMap(asMap(req.Input["BucketLoggingStatus"])["LoggingEnabled"])
-			if len(logging) == 0 {
-				_ = col.Delete(ctx, key)
-				return &spi.Response{Status: 200}, nil
-			}
-			target := str(logging["TargetBucket"])
-			if target == "" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			if _, exists, _ := p.col(req, "buckets").Get(ctx, target); !exists {
-				raw, found, _ := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, target)
-				var location struct {
-					Account string `json:"account"`
-					Region  string `json:"region"`
-				}
-				if found {
-					_ = json.Unmarshal(raw, &location)
-				}
-				if location.Account == req.Identity.Account && location.Region != "" && location.Region != req.Identity.Region {
-					fields := map[string]any{"TargetBucketLocation": location.Region}
-					if req.Identity.Region != "us-east-1" {
-						fields["SourceBucketLocation"] = req.Identity.Region
-					}
-					return nil, &spi.Fault{Code: "CrossLocationLoggingProhibitted", Message: "Cross S3 location logging not allowed. ", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: fields}
-				}
-				return nil, &spi.Fault{Code: "InvalidTargetBucketForLogging", Message: "The target bucket for logging does not exist", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TargetBucket": target}}
-			}
-			logging["TargetPrefix"] = str(logging["TargetPrefix"])
-			req.Input["BucketLoggingStatus"] = map[string]any{"LoggingEnabled": logging}
-		}
-		if req.Operation == "PutBucketAccelerateConfiguration" {
-			if strings.Contains(b, ".") {
-				return nil, &spi.Fault{Code: "InvalidRequest", Message: "S3 Transfer Acceleration is not supported for buckets with periods (.) in their names", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			status := str(asMap(req.Input["AccelerateConfiguration"])["Status"])
-			if status != "Enabled" && status != "Suspended" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			req.Input["AccelerateConfiguration"] = map[string]any{"Status": status}
-		}
-		if req.Operation == "PutBucketRequestPayment" {
-			payer := str(asMap(req.Input["RequestPaymentConfiguration"])["Payer"])
-			if payer != "Requester" && payer != "BucketOwner" {
-				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			req.Input["RequestPaymentConfiguration"] = map[string]any{"Payer": payer}
-		}
-		if req.Operation == "PutPublicAccessBlock" {
-			configuration, err := normalizePublicAccessBlock(req.Input["PublicAccessBlockConfiguration"])
-			if err != nil {
-				return nil, err
-			}
-			req.Input["PublicAccessBlockConfiguration"] = configuration
-		}
-		if req.Operation == "PutBucketOwnershipControls" {
-			if err := validateOwnershipControls(req.Input["OwnershipControls"]); err != nil {
-				return nil, err
-			}
 		}
 		if req.Operation == "PutBucketReplication" {
 			if !p.versioningEnabled(ctx, req, b) {
@@ -3716,9 +3571,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		if req.Operation == "PutObjectAcl" {
 			p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
 		}
-		if req.Operation == "PutBucketPolicy" {
-			return &spi.Response{Status: http.StatusNoContent}, nil
-		}
 		return &spi.Response{Status: 200}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {
@@ -3736,35 +3588,8 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 				"Grants": []any{map[string]any{"Grantee": map[string]any{"ID": req.Identity.Account, "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}},
 			}}, nil
 		}
-		if req.Operation == "GetBucketLogging" {
-			return &spi.Response{Output: map[string]any{}}, nil
-		}
-		if req.Operation == "GetBucketRequestPayment" {
-			return &spi.Response{Output: map[string]any{"Payer": "BucketOwner"}}, nil
-		}
-		if req.Operation == "GetBucketAccelerateConfiguration" {
-			return &spi.Response{Output: map[string]any{}}, nil
-		}
-		if req.Operation == "GetBucketEncryption" {
-			return &spi.Response{Output: map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}}}, nil
-		}
-		if req.Operation == "GetBucketCors" {
-			return nil, &spi.Fault{Code: "NoSuchCORSConfiguration", Message: "The CORS configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
-		}
-		if req.Operation == "GetBucketWebsite" {
-			return nil, &spi.Fault{Code: "NoSuchWebsiteConfiguration", Message: "The specified bucket does not have a website configuration", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
-		}
 		if miss != nil {
-			if req.Operation == "GetBucketPolicy" {
-				miss.Fields = map[string]any{"BucketName": b}
-			}
 			if req.Operation == "GetBucketObjectLockConfiguration" || req.Operation == "GetObjectLockConfiguration" {
-				miss.Fields = map[string]any{"BucketName": b}
-			}
-			if req.Operation == "GetBucketOwnershipControls" {
-				miss.Fields = map[string]any{"BucketName": b}
-			}
-			if req.Operation == "GetPublicAccessBlock" {
 				miss.Fields = map[string]any{"BucketName": b}
 			}
 			return nil, miss
@@ -3776,75 +3601,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
 		return &spi.Response{Status: http.StatusOK, Output: doc}, nil
 	}
-	if req.Operation == "GetBucketRequestPayment" {
-		return &spi.Response{Status: 200, Output: map[string]any{"Payer": asMap(doc["RequestPaymentConfiguration"])["Payer"]}}, nil
-	}
-	if req.Operation == "GetBucketAccelerateConfiguration" {
-		return &spi.Response{Status: 200, Output: map[string]any{"Status": asMap(doc["AccelerateConfiguration"])["Status"]}}, nil
-	}
-	if req.Operation == "GetBucketLogging" {
-		return &spi.Response{Status: 200, Output: map[string]any{"LoggingEnabled": asMap(doc["BucketLoggingStatus"])["LoggingEnabled"]}}, nil
-	}
-	if req.Operation == "GetBucketCors" {
-		return &spi.Response{Status: 200, Output: map[string]any{"CORSRules": asMap(doc["CORSConfiguration"])["CORSRules"]}}, nil
-	}
-	if req.Operation == "GetBucketWebsite" {
-		return &spi.Response{Status: 200, Output: asMap(doc["WebsiteConfiguration"])}, nil
-	}
-	if req.Operation == "GetBucketEncryption" {
-		return &spi.Response{Status: 200, Output: map[string]any{"Rules": asMap(doc["ServerSideEncryptionConfiguration"])["Rules"]}}, nil
-	}
 	return &spi.Response{Status: 200, Output: doc}, nil
-}
-
-func validateBucketEncryption(value any) (map[string]any, error) {
-	malformed := func() error {
-		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	configuration, ok := value.(map[string]any)
-	if !ok {
-		return nil, malformed()
-	}
-	rules, ok := configuration["Rules"].([]any)
-	if !ok || len(rules) != 1 {
-		return nil, malformed()
-	}
-	rule, ok := rules[0].(map[string]any)
-	if !ok {
-		return nil, malformed()
-	}
-	defaults, ok := rule["ApplyServerSideEncryptionByDefault"].(map[string]any)
-	if !ok {
-		return nil, malformed()
-	}
-	algorithm := str(defaults["SSEAlgorithm"])
-	if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
-		return nil, malformed()
-	}
-	if _, exists := defaults["KMSMasterKeyID"]; algorithm != "aws:kms" && exists {
-		return nil, &spi.Fault{
-			Code: "InvalidArgument", Message: "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse",
-			HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "ApplyServerSideEncryptionByDefault"},
-		}
-	}
-	return map[string]any{"Rules": rules}, nil
-}
-
-func validateBucketPolicy(policy string) error {
-	malformed := func(message string) error {
-		return &spi.Fault{Code: "MalformedPolicy", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	if policy == "" || policy[0] != '{' {
-		return malformed("Policies must be valid JSON and the first byte must be '{'")
-	}
-	var document map[string]any
-	if json.Unmarshal([]byte(policy), &document) != nil {
-		return malformed("Policies must be valid JSON and the first byte must be '{'")
-	}
-	if len(document) == 0 {
-		return malformed("Missing required field Statement")
-	}
-	return nil
 }
 
 func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
@@ -4013,95 +3770,6 @@ func invalidACLArgument(name, value, message string) *spi.Fault {
 	return &spi.Fault{Code: "InvalidArgument", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": name, "ArgumentValue": value}}
 }
 
-func validateWebsiteConfiguration(value any) error {
-	configuration, ok := value.(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	if redirect := asMap(configuration["RedirectAllRequestsTo"]); len(redirect) != 0 {
-		if len(configuration) > 1 {
-			return &spi.Fault{Code: "InvalidArgument", Message: "RedirectAllRequestsTo cannot be provided in conjunction with other Routing Rules.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "RedirectAllRequestsTo", "ArgumentValue": "not null"}}
-		}
-		if _, ok := redirect["HostName"]; !ok {
-			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
-			return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		return nil
-	}
-	index := asMap(configuration["IndexDocument"])
-	if len(index) == 0 {
-		return &spi.Fault{Code: "InvalidArgument", Message: "A value for IndexDocument Suffix must be provided if RedirectAllRequestsTo is empty", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "IndexDocument", "ArgumentValue": nil}}
-	}
-	suffix := str(index["Suffix"])
-	if suffix == "" || strings.Contains(suffix, "/") {
-		argumentValue := any(suffix)
-		if suffix == "" {
-			argumentValue = nil
-		}
-		return &spi.Fault{Code: "InvalidArgument", Message: "The IndexDocument Suffix is not well formed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "IndexDocument", "ArgumentValue": argumentValue}}
-	}
-	if _, exists := configuration["ErrorDocument"]; exists && str(asMap(configuration["ErrorDocument"])["Key"]) == "" {
-		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	if _, exists := configuration["RoutingRules"]; exists {
-		rules := asSlice(configuration["RoutingRules"])
-		if len(rules) == 0 {
-			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		if len(rules) > 50 {
-			return &spi.Fault{Code: "InternalError", Message: "Too many routing rules", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
-		}
-		for _, value := range rules {
-			rule := asMap(value)
-			redirect := asMap(rule["Redirect"])
-			_, prefix := redirect["ReplaceKeyPrefixWith"]
-			_, key := redirect["ReplaceKeyWith"]
-			if prefix && key {
-				return &spi.Fault{Code: "InvalidRequest", Message: "You can only define ReplaceKeyPrefix or ReplaceKey but not both.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			if _, exists := rule["Condition"]; exists && len(asMap(rule["Condition"])) == 0 {
-				return &spi.Fault{Code: "InvalidRequest", Message: "Condition cannot be empty. To redirect all requests without a condition, the condition element shouldn't be present.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-			if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
-				return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
-		}
-	}
-	return nil
-}
-
-func normalizePublicAccessBlock(value any) (map[string]any, error) {
-	configuration, ok := value.(map[string]any)
-	if !ok {
-		return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	normalized := map[string]any{"BlockPublicAcls": false, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
-	for field, value := range configuration {
-		if _, ok := normalized[field]; !ok {
-			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		flag, ok := value.(bool)
-		if !ok {
-			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		normalized[field] = flag
-	}
-	return normalized, nil
-}
-
-func validateOwnershipControls(value any) error {
-	rules := asSlice(asMap(value)["Rules"])
-	if len(rules) == 1 {
-		switch str(asMap(rules[0])["ObjectOwnership"]) {
-		case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
-			return nil
-		}
-	}
-	return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-}
-
 func validateObjectLockConfiguration(value any) error {
 	configuration := asMap(value)
 	malformed := func() error {
@@ -4129,36 +3797,16 @@ func cfgKind(op string) (string, *spi.Fault) {
 		return &spi.Fault{Code: code, Message: msg, HTTPStatus: 404, Fault: "client"}
 	}
 	switch {
-	case strings.Contains(op, "Policy"):
-		return "policy", n("NoSuchBucketPolicy", "The bucket policy does not exist")
-	case strings.Contains(op, "Cors"):
-		return "cors", n("NoSuchCORSConfiguration", "The CORS configuration does not exist")
-	case strings.Contains(op, "Website"):
-		return "website", n("NoSuchWebsiteConfiguration", "The specified bucket does not have a website configuration")
 	case strings.Contains(op, "Notification"):
 		return "notification", nil
 	case strings.Contains(op, "Lifecycle"):
 		return "lifecycle", n("NoSuchLifecycleConfiguration", "The lifecycle configuration does not exist")
-	case strings.Contains(op, "Encryption"):
-		return "encryption", n("ServerSideEncryptionConfigurationNotFoundError", "The server side encryption configuration was not found")
 	case strings.Contains(op, "Replication"):
 		return "replication", n("ReplicationConfigurationNotFoundError", "The replication configuration was not found")
 	case strings.Contains(op, "ObjectLock"):
 		return "objectlock", n("ObjectLockConfigurationNotFoundError", "Object Lock configuration does not exist for this bucket")
-	case strings.Contains(op, "Abac"):
-		return "abac", n("NoSuchAbacConfiguration", "The ABAC configuration does not exist")
-	case strings.Contains(op, "Logging"):
-		return "logging", nil
-	case strings.Contains(op, "RequestPayment"):
-		return "requestpayment", nil
-	case strings.Contains(op, "Accelerate"):
-		return "accelerate", nil
 	case strings.Contains(op, "Acl"):
 		return "acl", nil
-	case strings.Contains(op, "PublicAccessBlock"):
-		return "publicaccessblock", n("NoSuchPublicAccessBlockConfiguration", "The public access block configuration was not found")
-	case strings.Contains(op, "OwnershipControls"):
-		return "ownershipcontrols", n("OwnershipControlsNotFoundError", "The bucket ownership controls were not found")
 	}
 	return strings.ToLower(op), nil
 }
@@ -4691,9 +4339,6 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
 	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
 	bucketKey := truthy(req.Input["BucketKeyEnabled"])
-	if !bucketKey && req.HTTP != nil {
-		bucketKey = truthy(req.HTTP.Header.Get("x-amz-server-side-encryption-bucket-key-enabled"))
-	}
 	defaultAlgorithm, defaultKeyID := "", ""
 	defaultBucketKey := false
 	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/encryption")
@@ -5221,188 +4866,6 @@ func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Respon
 	return &spi.Response{Status: status, Output: map[string]any{}}, nil
 }
 
-func (p *Pack) namedCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
-	spec := namedConfigurationSpecFor(req.Operation)
-	var err error
-	if spec.kind == "intelligent" {
-		err = p.requireBucketOwner(ctx, req, b, "")
-	} else {
-		err = p.requireBucket(ctx, req, b)
-	}
-	if err != nil {
-		return nil, err
-	}
-	id := str(req.Input["Id"])
-	if id == "" {
-		id = str(req.Input["id"])
-	}
-	collection := p.col(req, "namedcfg")
-	prefix := b + "/" + spec.kind + "/"
-	if strings.HasPrefix(req.Operation, "List") {
-		kvs, _, _ := collection.List(ctx, prefix, "", 0)
-		items := make([]any, 0, len(kvs))
-		for _, kv := range kvs {
-			var doc map[string]any
-			_ = json.Unmarshal(kv.Value, &doc)
-			items = append(items, doc)
-		}
-		sort.Slice(items, func(i, j int) bool { return str(asMap(items[i])["Id"]) < str(asMap(items[j])["Id"]) })
-		output := map[string]any{"IsTruncated": false, spec.list: items}
-		if spec.kind == "metrics" {
-			token := str(req.Input["ContinuationToken"])
-			if token == "" {
-				token = str(req.Input["continuation-token"])
-			}
-			start := 0
-			if token != "" {
-				decoded, err := base64.URLEncoding.DecodeString(token)
-				if err != nil {
-					return nil, &spi.Fault{Code: "InvalidToken", Message: "The continuation token provided is incorrect", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-				}
-				marker := string(decoded)
-				for start < len(items) && str(asMap(items[start])["Id"]) < marker {
-					start++
-				}
-				output["ContinuationToken"] = token
-			}
-			end := min(start+100, len(items))
-			if end < len(items) {
-				output["IsTruncated"] = true
-				output["NextContinuationToken"] = base64.URLEncoding.EncodeToString([]byte(str(asMap(items[end])["Id"])))
-			}
-			output[spec.list] = items[start:end]
-		}
-		return &spi.Response{Status: http.StatusOK, Output: output}, nil
-	}
-	if id == "" {
-		return nil, &spi.Fault{Code: "InvalidArgument", Message: "The configuration ID is required", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	ck := prefix + id
-	if strings.HasPrefix(req.Operation, "Put") {
-		configuration, ok := req.Input[spec.configuration].(map[string]any)
-		if !ok {
-			return nil, malformedXML()
-		}
-		if err := validateNamedConfiguration(spec.kind, id, configuration); err != nil {
-			return nil, err
-		}
-		if spec.kind == "metrics" {
-			if _, exists, _ := collection.Get(ctx, ck); !exists {
-				kvs, _, _ := collection.List(ctx, prefix, "", 1001)
-				if len(kvs) >= 1000 {
-					return nil, &spi.Fault{Code: "TooManyConfigurations", Message: "Too many metrics configurations", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-				}
-			}
-		}
-		raw, _ := json.Marshal(configuration)
-		_ = collection.Put(ctx, ck, raw)
-		return &spi.Response{Status: 200}, nil
-	}
-	if strings.HasPrefix(req.Operation, "Delete") {
-		if _, exists, _ := collection.Get(ctx, ck); !exists {
-			return nil, &spi.Fault{Code: "NoSuchConfiguration", Message: "The specified configuration does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
-		}
-		_ = collection.Delete(ctx, ck)
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
-	}
-	raw, ok, _ := collection.Get(ctx, ck)
-	if !ok {
-		return nil, &spi.Fault{Code: "NoSuchConfiguration", Message: "The specified configuration does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
-	}
-	var doc map[string]any
-	_ = json.Unmarshal(raw, &doc)
-	return &spi.Response{Status: 200, Output: map[string]any{spec.configuration: doc}}, nil
-}
-
-type namedConfigurationSpec struct{ kind, configuration, list string }
-
-func namedConfigurationSpecFor(operation string) namedConfigurationSpec {
-	switch {
-	case strings.Contains(operation, "Inventory"):
-		return namedConfigurationSpec{"inventory", "InventoryConfiguration", "InventoryConfigurationList"}
-	case strings.Contains(operation, "Intelligent"):
-		return namedConfigurationSpec{"intelligent", "IntelligentTieringConfiguration", "IntelligentTieringConfigurationList"}
-	case strings.Contains(operation, "Metrics"):
-		return namedConfigurationSpec{"metrics", "MetricsConfiguration", "MetricsConfigurationList"}
-	default:
-		return namedConfigurationSpec{"analytics", "AnalyticsConfiguration", "AnalyticsConfigurationList"}
-	}
-}
-
-func validateNamedConfiguration(kind, id string, configuration map[string]any) error {
-	if kind == "inventory" {
-		return validateInventoryConfiguration(id, configuration)
-	}
-	if (kind == "analytics" || kind == "intelligent") && str(configuration["Id"]) != id {
-		return malformedXML()
-	}
-	return nil
-}
-
-func validateInventoryConfiguration(id string, configuration map[string]any) error {
-	if !hasOnlyFields(configuration,
-		[]string{"Destination", "Id", "IncludedObjectVersions", "IsEnabled", "Schedule"},
-		[]string{"Filter", "OptionalFields"}) {
-		return malformedXML()
-	}
-	destination := asMap(asMap(configuration["Destination"])["S3BucketDestination"])
-	if !hasOnlyFields(destination, []string{"Bucket", "Format"}, []string{"AccountId", "Encryption", "Prefix"}) {
-		return malformedXML()
-	}
-	if format := str(destination["Format"]); format != "CSV" && format != "ORC" && format != "Parquet" {
-		return malformedXML()
-	}
-	frequency := str(asMap(configuration["Schedule"])["Frequency"])
-	if frequency != "Daily" && frequency != "Weekly" {
-		return malformedXML()
-	}
-	versions := str(configuration["IncludedObjectVersions"])
-	if versions != "All" && versions != "Current" {
-		return malformedXML()
-	}
-	allowed := map[string]bool{
-		"Size": true, "LastModifiedDate": true, "StorageClass": true, "ETag": true,
-		"IsMultipartUploaded": true, "ReplicationStatus": true, "EncryptionStatus": true,
-		"ObjectLockRetainUntilDate": true, "ObjectLockMode": true, "ObjectLockLegalHoldStatus": true,
-		"IntelligentTieringAccessTier": true, "BucketKeyStatus": true, "ChecksumAlgorithm": true,
-	}
-	for _, value := range asSlice(configuration["OptionalFields"]) {
-		if !allowed[str(value)] {
-			return malformedXML()
-		}
-	}
-	if str(configuration["Id"]) != id {
-		return &spi.Fault{Code: "IdMismatch", Message: "Document ID does not match the specified configuration ID.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	parts := strings.SplitN(str(destination["Bucket"]), ":", 6)
-	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "s3" || parts[5] == "" {
-		return &spi.Fault{Code: "InvalidS3DestinationBucket", Message: "Invalid bucket ARN.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	return nil
-}
-
-func hasOnlyFields(value map[string]any, required, optional []string) bool {
-	allowed := make(map[string]bool, len(required)+len(optional))
-	for _, field := range required {
-		allowed[field] = true
-	}
-	for _, field := range optional {
-		allowed[field] = true
-	}
-	for _, field := range required {
-		if _, exists := value[field]; !exists {
-			return false
-		}
-	}
-	for field := range value {
-		if !allowed[field] {
-			return false
-		}
-	}
-	return true
-}
-
 func (p *Pack) requireBucket(ctx context.Context, req *spi.Request, b string) error {
 	expected := requestCondition(req, "ExpectedBucketOwner", "x-amz-expected-bucket-owner")
 	return p.requireBucketOwner(ctx, req, b, expected)
@@ -5411,6 +4874,31 @@ func (p *Pack) requireBucket(ctx context.Context, req *spi.Request, b string) er
 func (p *Pack) requireMultipartBucket(ctx context.Context, req *spi.Request) error {
 	if bucket := str(req.Input["Bucket"]); bucket != "" {
 		return p.requireBucket(ctx, req, bucket)
+	}
+	return nil
+}
+
+// toHomeRegion points req at the region that holds bucket b, when the caller
+// addressed it from another: a bucket name is global, its records are not.
+func (p *Pack) toHomeRegion(ctx context.Context, req *spi.Request, b string) error {
+	if b == "" {
+		return nil
+	}
+	if _, ok, err := p.col(req, "buckets").Get(ctx, b); err != nil || ok {
+		return err
+	}
+	raw, exists, err := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, b)
+	if err != nil || !exists {
+		return err
+	}
+	var location struct {
+		Region string `json:"region"`
+	}
+	if err := json.Unmarshal(raw, &location); err != nil {
+		return err
+	}
+	if location.Region != "" {
+		req.Identity.Region = location.Region
 	}
 	return nil
 }
@@ -5426,30 +4914,12 @@ func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expe
 			}
 		}
 	}
+	if err := p.toHomeRegion(ctx, req, b); err != nil {
+		return err
+	}
 	_, ok, err := p.col(req, "buckets").Get(ctx, b)
 	if err != nil {
 		return err
-	}
-	if !ok {
-		raw, exists, err := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, b)
-		if err != nil {
-			return err
-		}
-		if exists {
-			var location struct {
-				Region string `json:"region"`
-			}
-			if err := json.Unmarshal(raw, &location); err != nil {
-				return err
-			}
-			if location.Region != "" {
-				req.Identity.Region = location.Region
-				_, ok, err = p.col(req, "buckets").Get(ctx, b)
-				if err != nil {
-					return err
-				}
-			}
-		}
 	}
 	if !ok {
 		return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client", Fields: map[string]any{"BucketName": b}}

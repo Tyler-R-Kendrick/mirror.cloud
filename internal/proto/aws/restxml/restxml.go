@@ -1102,6 +1102,24 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
 		in["VersionId"] = versionID
 	}
+	// Members the model binds to a header or a query parameter answer under
+	// their member names, which is what a bundle reads: ExpectedBucketOwner
+	// arrives as x-amz-expected-bucket-owner, a configuration's Id as ?id=.
+	for name, member := range svc.Shapes[op.Input].Members {
+		if _, set := in[name]; set || member.Binding.Name == "" {
+			continue
+		}
+		switch member.Binding.Location {
+		case "header":
+			if v := r.Header.Get(member.Binding.Name); v != "" {
+				in[name] = v
+			}
+		case "query":
+			if v, ok := r.URL.Query()[member.Binding.Name]; ok {
+				in[name] = v[0]
+			}
+		}
+	}
 	if src := r.Header.Get("x-amz-copy-source"); src != "" {
 		in["CopySource"] = strings.TrimPrefix(src, "/")
 	}
@@ -1236,7 +1254,9 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
-	if resp.Output == nil {
+	// An operation whose output is Unit has no body, whatever the answer
+	// carries: an engine answers {} where a pack answered nil.
+	if resp.Output == nil || op.Output == "smithy.api#Unit" {
 		return nil
 	}
 	var b strings.Builder

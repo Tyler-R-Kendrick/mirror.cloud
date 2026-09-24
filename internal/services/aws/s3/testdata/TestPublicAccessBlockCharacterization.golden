@@ -26,5 +26,5 @@
     "message": "The public access block configuration was not found",
     "status": 404
   },
-  "put": null
+  "put": {}
 }

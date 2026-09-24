@@ -139,10 +139,34 @@ func New(id string, deps spi.Deps) (spi.BehaviorPack, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(e.IR().Native) == 0 {
-		return e, nil
+	var p spi.BehaviorPack = e
+	if len(e.IR().Native) != 0 {
+		p = hybrid{Engine: e, deps: deps}
 	}
-	return hybrid{Engine: e, deps: deps}, nil
+	if w := wraps[id]; w != nil && e.IR().Wrap != "" {
+		p = wrapped{p, deps, w}
+	}
+	return p, nil
+}
+
+// Wrap runs around every request a bundle serves: it may rewrite the request
+// before next and the response after it.
+type Wrap func(ctx context.Context, deps spi.Deps, req *spi.Request, next func(context.Context, *spi.Request) (*spi.Response, error)) (*spi.Response, error)
+
+// wraps is written only from package init, before any New runs.
+var wraps = map[string]Wrap{}
+
+// RegisterWrap supplies the Go a bundle declares under wrap:.
+func RegisterWrap(id string, w Wrap) { wraps[id] = w }
+
+type wrapped struct {
+	spi.BehaviorPack
+	deps spi.Deps
+	wrap Wrap
+}
+
+func (w wrapped) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	return w.wrap(ctx, w.deps, req, w.BehaviorPack.Invoke)
 }
 
 // NativeFunc serves one operation a bundle lists under native:.
@@ -175,7 +199,7 @@ type withWorker struct {
 func (w withWorker) Close() error { return w.stop() }
 
 // Unregistered lists every id/op a bundle declares native that no linked
-// package registered, and every id/worker likewise. A binary missing one still serves the rest of that
+// package registered, and every id/worker and id/wrap likewise. A binary missing one still serves the rest of that
 // bundle -- CloudFormation reaches API Gateway's control plane without
 // linking ExecuteApi -- so this is checked where every service is linked.
 func Unregistered() []string {
@@ -193,6 +217,9 @@ func Unregistered() []string {
 			}
 			if ir.Worker != "" && workers[id] == nil {
 				missing = append(missing, id+"/worker")
+			}
+			if ir.Wrap != "" && wraps[id] == nil {
+				missing = append(missing, id+"/wrap")
 			}
 		}
 	}

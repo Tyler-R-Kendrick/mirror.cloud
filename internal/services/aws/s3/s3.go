@@ -575,9 +575,6 @@ func (p *Pack) route(req *spi.Request) string {
 		return a
 	}
 	has := func(k string) bool { _, ok := q[k]; return ok }
-	if has("max-buckets") {
-		req.Input["MaxBuckets"] = q.Get("max-buckets")
-	}
 	if has("bucket-region") {
 		req.Input["BucketRegion"] = q.Get("bucket-region")
 	}
@@ -614,9 +611,6 @@ func (p *Pack) route(req *spi.Request) string {
 	}
 	if v := q.Get("max-keys"); v != "" {
 		req.Input["MaxKeys"] = v
-	}
-	if has("continuation-token") {
-		req.Input["ContinuationToken"] = q.Get("continuation-token")
 	}
 	if v := q.Get("start-after"); v != "" {
 		req.Input["StartAfter"] = v
@@ -841,7 +835,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if req.HTTP != nil {
 		objectLock = objectLock || strings.EqualFold(req.HTTP.Header.Get("x-amz-bucket-object-lock-enabled"), "true")
 	}
-	namespace := requestCondition(req, "BucketNamespace", "x-amz-bucket-namespace")
+	namespace := str(req.Input["BucketNamespace"])
 	if namespace != "" && namespace != "global" && namespace != "account-regional" {
 		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid bucket namespace", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bucket-namespace", "ArgumentValue": namespace}}
 	}
@@ -2709,14 +2703,14 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 		maxParts = value
 	}
 	if req.HTTP != nil {
-		if raw := req.HTTP.URL.Query().Get("part-number-marker"); raw != "" {
+		if raw := str(req.Input["PartNumberMarker"]); raw != "" {
 			var err error
 			marker, err = strconv.Atoi(raw)
 			if err != nil {
 				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
 		}
-		if raw := req.HTTP.URL.Query().Get("max-parts"); raw != "" {
+		if raw := str(req.Input["MaxParts"]); raw != "" {
 			var err error
 			maxParts, err = strconv.Atoi(raw)
 			if err != nil {
@@ -4345,9 +4339,6 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
 	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
 	bucketKey := truthy(req.Input["BucketKeyEnabled"])
-	if !bucketKey && req.HTTP != nil {
-		bucketKey = truthy(req.HTTP.Header.Get("x-amz-server-side-encryption-bucket-key-enabled"))
-	}
 	defaultAlgorithm, defaultKeyID := "", ""
 	defaultBucketKey := false
 	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/encryption")

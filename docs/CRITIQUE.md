@@ -1588,3 +1588,10 @@ A bundle operation can now declare `status:` for a service that departs from its
 **Header and query binding.** The S3 codec bound the path, the raw query and a few headers into the input, and the natives read other headers from the request themselves. A bundle only reads the input. So an expected-owner header, or an `?id=` query, never reached the YAML over HTTP. The in-process tests had passed the members directly.
 
 The codec now binds every member the model places in a header or a query parameter under its member name.
+
+**Duplicate reads removed.** Once the codec binds header and query members, several natives' own reads of the same header or query parameter became a second path to one value. With two paths, a mutant on either path cannot be killed. The duplicates are gone:
+- the bucket-key-enabled header fallback;
+- the bucket-namespace header read;
+- `route`'s hydration of `continuation-token` and `max-buckets`.
+
+ListParts reads its marker and limit from the bound input, so it still rejects a non-integer. The mutants that defended those reads now defend the codec's binding.

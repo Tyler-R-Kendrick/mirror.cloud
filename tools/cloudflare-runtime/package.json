@@ -6,7 +6,7 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "dependencies": {
-    "miniflare": "5.20260921.0-alpha"
+    "miniflare": "5.20261001.0-alpha"
   },
   "scripts": {
     "session": "node session.mjs"

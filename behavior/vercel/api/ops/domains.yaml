@@ -43,7 +43,10 @@ resources:
   # Which project holds a hostname, account-wide: a hostname can be on one
   # project at a time, and the per-project collections cannot say so. The
   # `verified` flag rides along so the account-level routes can answer without
-  # knowing the project.
+  # knowing the project, and so does the rest of the project domain (its apex,
+  # redirect, branch, instants and order) because GET /v1/domains/{domain}/project-domains
+  # lists the project domains of every project under one apex, which no
+  # per-project collection can be asked.
   domain_owner:
     collection: vdomowner
     id:
@@ -96,7 +99,7 @@ operations:
          'prev': null}
 
   AddProjectDomain:
-    reads:
+    reads: &add_reads
       by_name: { resource: project_name }
       proj:
         resource: project
@@ -104,12 +107,18 @@ operations:
           by_name_found ? string(by_name.project)
             : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
       owner: { resource: domain_owner }
-      # The account may already hold this hostname's apex, verified.
+      # The account may already hold this hostname's apex, verified. The host is
+      # `name` in the document's body and `domain` in the older address's
+      # (AddProjectAlias), which share all of this.
       held:
         resource: account_domain
-        key: "('name' in input && input.name != null) ? apexOf(lower(string(input.name))) : ''"
-    let:
-      host: "('name' in input && input.name != null) ? lower(string(input.name)) : ''"
+        key: >
+          ('name' in input && input.name != null) ? apexOf(lower(string(input.name)))
+            : (('domain' in input && input.domain != null) ? apexOf(lower(string(input.domain))) : '')
+    let: &add_let
+      host: >
+        ('name' in input && input.name != null) ? lower(string(input.name))
+          : (('domain' in input && input.domain != null) ? lower(string(input.domain)) : '')
       apex: "apexOf(host)"
       verified: "host.endsWith('.vercel.app') || (held_found && held.verified)"
       redirect: "('redirect' in input) ? input.redirect : null"
@@ -126,12 +135,21 @@ operations:
       - cond: "!owner_found"
         error: DomainAlreadyInUse
         message: "Cannot add a domain that is already assigned to a project"
-    effects:
+    effects: &add_effects
       - put:
           resource: domain_owner
           record:
+            name: "host"
+            apexName: "apex"
             projectId: "string(proj.id)"
+            redirect: "redirect"
+            redirectStatusCode: "('redirectStatusCode' in input) ? input.redirectStatusCode : null"
+            gitBranch: "branch"
+            customEnvironmentId: "('customEnvironmentId' in input) ? input.customEnvironmentId : null"
             verified: "verified"
+            createdAt: "now_ms"
+            updatedAt: "now_ms"
+            seq: { counter: "vdomowner" }
       # Last, because the answer is the record the last write left.
       - put:
           resource: domain
@@ -197,6 +215,38 @@ operations:
       - { cond: "redirect == null || string(redirect) != string(dom.name)", error: BadRequest, message: "A domain cannot redirect to itself" }
       - { cond: "redirect == null || string(redirect).matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')", error: BadRequest, message: "The domain redirect is not valid" }
     effects:
+      # The account-wide index keeps what GET /v1/domains/{domain}/project-domains
+      # lists, so an edit lands there too. Before the domain's own patches, because
+      # the answer is the record the last write left.
+      - patch:
+          resource: domain_owner
+          key: "string(dom.name)"
+          record:
+            updatedAt: "now_ms"
+      - patch:
+          resource: domain_owner
+          key: "string(dom.name)"
+          when: "'gitBranch' in input"
+          record:
+            gitBranch: "input.gitBranch"
+      - patch:
+          resource: domain_owner
+          key: "string(dom.name)"
+          when: "'redirect' in input"
+          record:
+            redirect: "input.redirect"
+      - patch:
+          resource: domain_owner
+          key: "string(dom.name)"
+          when: "'redirectStatusCode' in input"
+          record:
+            redirectStatusCode: "input.redirectStatusCode"
+      - patch:
+          resource: domain_owner
+          key: "string(dom.name)"
+          when: "'customEnvironmentId' in input"
+          record:
+            customEnvironmentId: "input.customEnvironmentId"
       # Each member is stored only when the request carried it, so what it did
       # not mention keeps its value -- and a null in the request clears it.
       - patch:
@@ -269,6 +319,7 @@ operations:
           key: "string(dom.name)"
           record:
             verified: "true"
+            updatedAt: "now_ms"
       - patch:
           resource: account_domain
           key: "string(dom.apexName)"
@@ -293,6 +344,85 @@ operations:
       createdAt: rec.createdAt
       updatedAt: rec.updatedAt
       verified: rec.verified
+
+  # --- The older address `vercel domains add <domain> <project>` uses --------
+  #
+  # vercel 63.1.2 posts {"target": "PRODUCTION", "domain": host} to
+  # /projects/{project}/alias, reads the target for that host out of the array it
+  # gets back, and on ALIAS_DOMAIN_EXIST reads the holding project out of the
+  # envelope: if it is the project asked for, the domain is already there; with
+  # --force it removes the host from the holder (DELETE /projects/{id}/alias?domain=)
+  # and posts again. The effects are AddProjectDomain's (they share a store), so a
+  # host added here is one the document's routes list, edit and verify.
+  AddProjectAlias:
+    reads: *add_reads
+    let: *add_let
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "host != ''", error: BadRequest, message: "Domain name is required" }
+      - cond: "host.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')"
+        error: InvalidDomain
+        message: "The domain is not valid"
+      # The holder is named by id only: a name kept here would go stale on a rename.
+      - cond: "!owner_found"
+        error: AliasDomainExist
+        message_expr: "'The domain ' + host + ' is already assigned to project ' + string(owner.projectId)"
+        fields:
+          project: "{'id': string(owner.projectId)}"
+    effects: *add_effects
+    output:
+      _list: >
+        [{'domain': rec.name, 'target': 'PRODUCTION', 'projectId': rec.projectId, 'redirect': rec.redirect,
+          'verified': rec.verified, 'createdAt': rec.createdAt}]
+
+  # The inverse: the project stops holding the host, and the host is free.
+  RemoveProjectAlias:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - delete: { resource: domain }
+      - delete: { resource: domain_owner, missing: ignore }
+    output: {}
+
+  # The project domains of every project that sit under one apex domain of the
+  # account: what `vercel domains inspect` shows and `vercel domains rm` counts.
+  GetDomainProjectDomains:
+    reads:
+      held: { resource: account_domain }
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      apex: "('domain' in input && input.domain != null) ? lower(string(input.domain)) : ''"
+    require:
+      - { cond: held_found, error: NotFound, message: "Domain not found" }
+    list:
+      resource: domain_owner
+      member: projectDomains
+      filter: >
+        item.apexName == apex
+          && (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
+          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+    output:
+      projectDomains: >
+        slice(sortBy(items, 'seq', true), 0, limit).map(i, {
+          'name': i.name, 'apexName': i.apexName, 'projectId': i.projectId, 'redirect': i.redirect,
+          'redirectStatusCode': i.redirectStatusCode, 'gitBranch': i.gitBranch, 'customEnvironmentId': i.customEnvironmentId,
+          'updatedAt': i.updatedAt, 'createdAt': i.createdAt, 'verified': i.verified,
+          'verification': i.verified ? [] : [{'type': 'TXT', 'domain': '_vercel.' + i.apexName,
+            'value': 'vc-domain-verify=' + i.name + ',' + substr(sha256hex(identity.account + ':' + i.name), 0, 16),
+            'reason': 'Add the TXT record above to verify domain ownership'}]})
+      pagination: >
+        {'count': size(slice(items, 0, limit)),
+         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].createdAt : null,
+         'prev': null}
 
   # --- The account's domains ------------------------------------------------
 

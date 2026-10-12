@@ -1414,7 +1414,7 @@ The counting contract, frozen by `TestVercelCensusDenominators`: the vendored do
 |---|---:|
 | Vercel REST document operations (vendored) | 417 |
 | Vercel REST document paths (vendored) | 297 |
-| Narrowed `vercel.api` model operations | 120 |
+| Narrowed `vercel.api` model operations | 123 |
 | CI/CD operations served by mirror | 49 / 49 |
 | `vercel.kv` authored-document operations | 1 (`Command`) |
 
@@ -1431,7 +1431,7 @@ Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the emulated Vercel slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the two fault envelopes and the three generic rules this extraction needed) |
-| Vercel REST operations served by the bundle | 120 / 120 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model; three of the 120 are mirror's own test-control routes, not Vercel's) |
+| Vercel REST operations served by the bundle | 123 / 123 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model; three of the 123 are mirror's own test-control routes, not Vercel's) |
 | CI/CD operations served by mirror | 49 / 49 |
 | Vercel KV commands served | 14 string commands (SET, GET, DEL, EXISTS, PING, INCR, DECR, INCRBY, DECRBY, APPEND, STRLEN, EXPIRE, TTL, SETEX; hashes/lists/sets/pipelines answer 501 `MirrorNotImplemented`) |
 | Live Vercel probe | none (not required) |

@@ -749,6 +749,101 @@
           }
         }
       }
+    },
+    "/projects/{idOrName}/alias": {
+      "post": {
+        "operationId": "AddProjectAlias",
+        "description": "Adds a domain to a project at the address the CLI still uses. Client-observed: vercel CLI 63.1.2 `domains add <domain> <project>` posts {\"target\": \"PRODUCTION\", \"domain\": host} here and reads the target for that host (`domain`) out of the array it gets back; on 409 ALIAS_DOMAIN_EXIST it reads `project` (id) out of the error to tell \"already on this project\" from \"on another\", and with --force removes it there and posts again. The document's AddProjectDomain (POST /v10/projects/{idOrName}/domains) is the same act at a newer address with a different body and answer; the two share a store here. The array's members beyond `domain` are authored, not observed, and nothing was compared with api.vercel.com.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  },
+                  "domain": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the project's alias targets for the host added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SupplementProjectAlias"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "RemoveProjectAlias",
+        "description": "Removes a domain from a project at the address the CLI still uses. Client-observed: vercel CLI 63.1.2 `domains add <domain> <project> --force` sends DELETE /projects/{id}/alias?domain=host to take a host off the project that holds it, and reads nothing from the answer but whether it is an error. The empty object is authored.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1151,6 +1246,37 @@
             "additionalProperties": {
               "type": "string"
             }
+          }
+        }
+      },
+      "SupplementProjectAlias": {
+        "type": "object",
+        "required": [
+          "domain",
+          "target",
+          "projectId",
+          "verified",
+          "createdAt"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "redirect": {
+            "type": "string",
+            "nullable": true
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "number"
           }
         }
       }

@@ -116,6 +116,13 @@ errors:
     code: domain_already_exists
     http: 409
     fault: client
+  # `vercel domains add <domain> <project>` posts the older
+  # POST /projects/{project}/alias and keys on this code, with the project that
+  # holds the host in the envelope (client-observed, vercel 63.1.2).
+  AliasDomainExist:
+    code: ALIAS_DOMAIN_EXIST
+    http: 409
+    fault: client
   # The oracle's invite route answers a second 409 under its own code; the
   # generic Conflict stays for project names.
   MemberAlreadyExists:

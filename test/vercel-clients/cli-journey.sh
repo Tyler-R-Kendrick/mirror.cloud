@@ -70,6 +70,31 @@ vc pull --yes --environment production
 expect_line .vercel/.env.production.local 'LOG_LEVEL="info"'
 reject_text .vercel/.env.production.local vtok_dummy_marker
 grep -q '"projectId"' .vercel/project.json || { echo ".vercel/project.json has no projectId:" >&2; cat .vercel/project.json >&2; exit 1; }
+# Domains. `domains add <domain>` adds one to the account (POST /v7/domains), and
+# `domains add <domain> <project>` posts the older POST /projects/{project}/alias,
+# which answers 409 ALIAS_DOMAIN_EXIST naming the holder when another project has
+# the host, and which --force answers by taking it off the holder first. `inspect`
+# and `rm` list the projects under a domain (GET /v1/domains/{domain}/project-domains)
+# and `rm` deletes at DELETE /v3/domains/{domain}. (The CLI is not piped into grep:
+# it aborts on the closed pipe.)
+vcn() { vc "$@" < /dev/null; }
+fail() { echo "$*" >&2; exit 1; }
+vcn domains add example.dev
+dup="$(vcn domains add example.dev 2>&1)" && fail "adding example.dev twice succeeded: $dup"
+case "$dup" in *"already exists"*) ;; *) fail "no 'already exists' for a second add: $dup" ;; esac
+vcn domains add "www.example.dev" "$NAME"
+vcn project add "$NAME-other"
+taken="$(vcn domains add www.example.dev "$NAME-other" 2>&1)" && fail "another project took a host $NAME holds: $taken"
+case "$taken" in *"already assigned"*) ;; *) fail "no 'already assigned' for a host another project holds: $taken" ;; esac
+vcn domains add www.example.dev "$NAME-other" --force
+listed="$(vcn domains ls 2>&1)"
+case "$listed" in *example.dev*) ;; *) fail "domains ls does not list example.dev: $listed" ;; esac
+inspected="$(vcn domains inspect example.dev 2>&1)"
+case "$inspected" in *"$NAME-other"*"www.example.dev"*) ;; *) fail "domains inspect does not show $NAME-other holding www.example.dev: $inspected" ;; esac
+vcn domains rm example.dev --yes
+listed="$(vcn domains ls 2>&1)"
+case "$listed" in *example.dev*) fail "example.dev is still listed after domains rm: $listed" ;; esac
+
 out="$(vc deploy --prod --yes)"
 # A person's terminal gets the URL; a JSON document comes back when the CLI took the run for an agent's.
 url="$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{s=s.trim();try{console.log(JSON.parse(s).deployment.url)}catch{console.log(s.split("\n")[0])}})')"
@@ -87,6 +112,7 @@ vc ls
 vc project ls
 vc alias rm "$NAME-alias.vercel.app" --yes
 vc remove "$NAME" --yes
+vc remove "$NAME-other" --yes
 # `vercel remove` calls a 404 on its DELETE "already removed", so ask the API whether the project is really gone.
 status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $VERCEL_TOKEN" "$API/v9/projects/$NAME")"
 [ "$status" = 404 ] || { echo "project $NAME is still there after 'vercel remove' (GET answered $status)" >&2; exit 1; }

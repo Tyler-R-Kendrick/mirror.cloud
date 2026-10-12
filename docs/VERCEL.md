@@ -126,6 +126,24 @@ environments; anything else is a 400 rather than an empty file. A git branch add
 for it over the ones set for none, and without one they are left out. Nothing here was compared with
 api.vercel.com: which variables a real target includes (system variables, for one) is not known.
 
+## Domains the CLI adds to a project
+
+`vercel domains add <domain>` adds a domain to the account (`POST /v7/domains`, the document's).
+`vercel domains add <domain> <project>` does not use the document's `AddProjectDomain`: vercel
+63.1.2 posts the older `POST /projects/{project}/alias` with `{"target": "PRODUCTION", "domain": host}`
+and reads the entry for its host out of the array it gets back, so that is what the authored
+`AddProjectAlias` answers (the entry's members beyond `domain` are not observed). The host lands in
+the same store the document's routes use, so `GET /v9/projects/{id}/domains/{host}` finds it and
+`AddProjectDomain` refuses it. When another project holds the host the answer is `409` with the code
+`ALIAS_DOMAIN_EXIST` and `project: {id}` in the envelope, which is what the CLI reads to tell "already
+on this project" from "on another", and what `--force` answers by taking the host off the holder
+(`DELETE /projects/{id}/alias?domain=host`, `RemoveProjectAlias`) and posting again. The holder is named
+by id only: a name kept beside it would go stale on a rename. `vercel domains inspect` and `rm` list the
+projects under a domain with the document's `GET /v1/domains/{domain}/project-domains` (a 404 for a
+domain the account does not hold), and `rm` deletes at `DELETE /v3/domains/{domain}`, an older address
+of `DeleteDomain`. A domain still on a project is deleted all the same: the CLI knows a
+`domain_removal_conflict`, and nothing here raises it.
+
 ## Errors
 
 Every error is Vercel's envelope, `{"error": {"code": "...", "message": "..."}}`
@@ -206,7 +224,8 @@ What each journey walks, and how it ends now:
 | SDK projects, variables, deployments, aliases, domains, Edge Config, and the listings that carry a pagination object | pass |
 | CLI `env pull` (all three targets, a git branch), `pull` | pass; `GET /v3/env/pull/{project}[/{target}[/{branch}]]` is authored, the document does not list it (below) |
 | CLI `build` | **not run**: it loads the framework builders, which the toolchain does not carry |
-| CLI `domains add`, `alias set` to a hostname the account does not hold | **fail**: `domains add` posts to `POST /projects/{project}/alias` with `{domain}` (an older address and body than the document's `AddProjectDomain`); `alias set` asks the registrar (`GET /v1/registrar/domains/{host}/availability`) whether the name is for sale, and the registrar is not served |
+| CLI `domains add`, `domains add <domain> <project>` (also against a host another project holds, and `--force`), `domains ls`, `domains inspect`, `domains rm` | pass; the project form posts the older `POST /projects/{project}/alias`, authored (below) |
+| CLI `alias set` to a hostname the account does not hold | **fail**: the CLI asks the registrar (`GET /v1/registrar/domains/{host}/availability`) whether the name is for sale, and the registrar is not served |
 
 What running them changed, one entry per finding (the commit that made each change
 carries the request and the failure it fixed):
@@ -288,6 +307,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 
 | Operation | Method and address | Also answers at | Status |
 |---|---|---|---|
+| `AddProjectAlias` | POST `/projects/{idOrName}/alias` | - | authored (held to the supplement's schema) |
 | `AddProjectDomain` | POST `/v10/projects/{idOrName}/domains` | `/v8/projects/{idOrName}/domains`, `/v9/projects/{idOrName}/domains` | spec-validated |
 | `ApproveRollingReleaseStage` | POST `/v1/projects/{idOrName}/rolling-release/approve-stage` | - | spec-validated |
 | `ArtifactExists` | HEAD `/v8/artifacts/{hash}` | - | spec-validated |
@@ -312,7 +332,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `DeleteAllArtifacts` | DELETE `/v8/artifacts` | - | spec-validated |
 | `DeleteApiKey` | DELETE `/v1/api-keys/{keyId}` | - | authored (held to the supplement's schema) |
 | `DeleteDeployment` | DELETE `/v13/deployments/{id}` | - | spec-validated |
-| `DeleteDomain` | DELETE `/v6/domains/{domain}` | `/v4/domains/{domain}`, `/v5/domains/{domain}` | spec-validated |
+| `DeleteDomain` | DELETE `/v6/domains/{domain}` | `/v3/domains/{domain}`, `/v4/domains/{domain}`, `/v5/domains/{domain}` | spec-validated |
 | `DeleteEdgeConfig` | DELETE `/v1/global-config/{edgeConfigId}` | `/v1/edge-config/{edgeConfigId}` | spec-validated |
 | `DeleteEdgeConfigSchema` | DELETE `/v1/global-config/{edgeConfigId}/schema` | `/v1/edge-config/{edgeConfigId}/schema` | spec-validated |
 | `DeleteEdgeConfigTokens` | DELETE `/v1/global-config/{edgeConfigId}/tokens` | `/v1/edge-config/{edgeConfigId}/tokens` | spec-validated |
@@ -336,6 +356,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `GetDeploymentsV6` | GET `/v6/deployments` | - | authored (held to the supplement's schema) |
 | `GetDomain` | GET `/v5/domains/{domain}` | `/v4/domains/{domain}`, `/v6/domains/{domain}` | spec-validated |
 | `GetDomainConfig` | GET `/v6/domains/{domain}/config` | - | spec-validated |
+| `GetDomainProjectDomains` | GET `/v1/domains/{domain}/project-domains` | - | spec-validated |
 | `GetDomainVerificationRecord` | GET `/v9/domains/{domain}/verification` | - | spec-validated |
 | `GetDomains` | GET `/v5/domains` | `/v4/domains`, `/v6/domains` | spec-validated |
 | `GetEdgeConfig` | GET `/v1/global-config/{edgeConfigId}` | `/v1/edge-config/{edgeConfigId}` | spec-validated |
@@ -387,6 +408,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `PatchUrlProtectionBypass` | PATCH `/aliases/{id}/protection-bypass` | - | spec-validated |
 | `RecordEvents` | POST `/v8/artifacts/events` | - | spec-validated |
 | `RemoveCustomEnvironment` | DELETE `/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` | - | spec-validated |
+| `RemoveProjectAlias` | DELETE `/projects/{idOrName}/alias` | - | authored (held to the supplement's schema) |
 | `RemoveProjectDomain` | DELETE `/v9/projects/{idOrName}/domains/{domain}` | `/v10/projects/{idOrName}/domains/{domain}`, `/v8/projects/{idOrName}/domains/{domain}` | spec-validated |
 | `RemoveProjectEnv` | DELETE `/v9/projects/{idOrName}/env/{id}` | `/v10/projects/{idOrName}/env/{id}`, `/v8/projects/{idOrName}/env/{id}` | spec-validated |
 | `RequestPromote` | POST `/v10/projects/{projectId}/promote/{deploymentId}` | - | spec-validated |
@@ -434,11 +456,12 @@ What a person deploying through this will run into, roughly in the order they wi
   `vercel env pull`, `vercel pull` and `vercel link`'s token refresh work (see
   [Pulling variables](#pulling-variables)); a pull of a deployment id (`env pull --id dpl_...`,
   which reads `buildEnv`) is not served, and no `VERCEL_OIDC_TOKEN` is ever issued.
-- **`vercel domains add`** posts the older `POST /projects/{project}/alias` with `{domain}`;
-  `vercel alias set` to a hostname the account does not hold asks the registrar
-  whether it is for sale. Neither is served. A custom domain is added with the SDK's
-  `addProjectDomain` (or `POST /v10/projects/{id}/domains`); an alias to a `*.vercel.app` name
-  needs none.
+- **`vercel alias set` to a hostname the account does not hold** asks the registrar
+  whether it is for sale before it reaches the alias route, and the registrar is not
+  served. An alias to a `*.vercel.app` name needs no domain, and one under a domain the
+  account holds goes straight to the alias route.
+- **`vercel domains inspect`** asks `GET /v1/registrar/domains/{domain}/price` for a renewal
+  price and gets a 404; it takes that for "no price" and prints `-`.
 - **A domain is never resolved.** Verifying a project domain takes the TXT challenge
   as met; there is no DNS to ask. An alias to a hostname the account does not hold is
   accepted, where Vercel answers 404.

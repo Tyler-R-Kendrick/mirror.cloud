@@ -169,7 +169,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `hostinger.api` | `restJson1` | 6 | 371 |
 | `railway.graphql` | `graphql` | 7 | 0 |
 | `stripe.api` | `restJson1` | 27 | 0 |
-| `vercel.api` | `restJson1` | 120 | 0 |
+| `vercel.api` | `restJson1` | 123 | 0 |
 | `vercel.blob` | `restJson1` | 7 | 0 |
 | `vercel.kv` | `restJson1` | 1 | 0 |
 

@@ -147,7 +147,10 @@ api.vercel.com: which variables a real target includes (system variables, for on
 `vercel domains add <domain> <project>` does not use the document's `AddProjectDomain`: vercel
 63.1.2 posts the older `POST /projects/{project}/alias` with `{"target": "PRODUCTION", "domain": host}`
 and reads the entry for its host out of the array it gets back, so that is what the authored
-`AddProjectAlias` answers (the entry's members beyond `domain` are not observed). The host lands in
+`AddProjectAlias` answers (the entry's members beyond `domain` are not observed). A host is held and
+listed in lower case, and the entry the add answers keeps the spelling that was posted, because the
+CLI compares it with `===` (`domains add WWW2.Example.Dev app` failed with "did not return a matching
+alias" when it was lower-cased); what api.vercel.com echoes is not known. The host lands in
 the same store the document's routes use, so `GET /v9/projects/{id}/domains/{host}` finds it and
 `AddProjectDomain` refuses it. When another project holds the host the answer is `409` with the code
 `ALIAS_DOMAIN_EXIST` and `project: {id}` in the envelope, which is what the CLI reads to tell "already

@@ -1,6 +1,7 @@
 package vercel
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -217,6 +218,70 @@ func TestVercelDeletesAnAccountDomainAtTheOlderAddress(t *testing.T) {
 		r := v.do(http.MethodDelete, "/v3/domains/old.example.dev", nil)
 		if r.status != 404 || !strings.EqualFold(str(errorOf(r), "code"), "not_found") {
 			t.Fatalf("second delete = %d %s", r.status, r.raw)
+		}
+	})
+}
+
+// TestVercelProjectAliasEchoesTheSpellingTheCLIPosted holds the request the real
+// CLI sent (the recorded `domains add <domain> <project>`) with the host spelled as
+// a person may type it. The CLI finds its host in the answer by comparing
+// `alias.domain === the domain it posted`, strictly, so an answer that lower-cased
+// the host made `vercel domains add WWW2.Example.Dev app` fail with "did not return
+// a matching alias" after the host had been recorded. Hosts are case-insensitive:
+// the emulator stores and lists the lower-case name, a second add in another case
+// finds the first, and only the entry the add answers keeps the spelling posted.
+// What Vercel itself echoes is not known.
+func TestVercelProjectAliasEchoesTheSpellingTheCLIPosted(t *testing.T) {
+	v := newVX(t, "vercel-projectalias-case")
+	recorded := recordedStep(t, "vercel-cli-63.1.2", "domains", "domains add <domain> <project>")
+	var posted map[string]any
+	if err := json.Unmarshal([]byte(recorded.Request.Body), &posted); err != nil || posted["domain"] == nil {
+		t.Fatalf("the recorded body %q is not the CLI's alias request: %v", recorded.Request.Body, err)
+	}
+	pid := newProjectNamed(t, v, "cli-domains")
+	other := newProjectNamed(t, v, "cli-domains-other")
+	add := func(project, host string) reply {
+		body := map[string]any{}
+		for k, val := range posted {
+			body[k] = val
+		}
+		body["domain"] = host
+		return v.do(recorded.Request.Method, strings.Replace(recorded.Request.Path, "cli-domains", project, 1), body)
+	}
+
+	r := add(pid, "WWW2.Example.Dev")
+	var targets []map[string]any
+	if err := unmarshalJSON(r.raw, &targets); err != nil || r.status != 200 {
+		t.Fatalf("add = %d %s", r.status, r.raw)
+	}
+	matching := 0
+	for _, a := range targets {
+		if str(a, "domain") == "WWW2.Example.Dev" {
+			matching++
+		}
+	}
+	if matching != 1 {
+		t.Fatalf("no entry whose domain is exactly the spelling posted, which the CLI compares with ===: %s", r.raw)
+	}
+
+	t.Run("Given the host was added in mixed case Then the project lists it in lower case", func(t *testing.T) {
+		got := v.do(http.MethodGet, "/v9/projects/"+pid+"/domains/WWW2.Example.Dev", nil)
+		if got.status != 200 || got.body["name"] != "www2.example.dev" {
+			t.Fatalf("the CLI's follow-up for the host = %d %s", got.status, got.raw)
+		}
+	})
+	t.Run("Given the host is added again in another case Then it is the same host, held by that project", func(t *testing.T) {
+		again := add(other, "www2.EXAMPLE.dev")
+		holder, _ := errorOf(again)["project"].(map[string]any)
+		if again.status != 409 || str(errorOf(again), "code") != "ALIAS_DOMAIN_EXIST" || str(holder, "id") != pid {
+			t.Fatalf("add again in another case = %d %s", again.status, again.raw)
+		}
+	})
+	t.Run("Given the spelling already lower case Then it is echoed as it is", func(t *testing.T) {
+		r := add(pid, "plain.example.dev")
+		var plain []map[string]any
+		if err := unmarshalJSON(r.raw, &plain); err != nil || len(plain) != 1 || str(plain[0], "domain") != "plain.example.dev" {
+			t.Fatalf("add = %d %s", r.status, r.raw)
 		}
 	})
 }

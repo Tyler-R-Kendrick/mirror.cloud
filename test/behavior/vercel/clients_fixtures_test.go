@@ -68,6 +68,27 @@ type fxFile struct {
 	Steps    []fxStep `json:"steps"`
 }
 
+// recordedStep is the step of a recorded journey whose name begins with prefix:
+// the request the real client sent, to be sent again with some of it changed.
+func recordedStep(t *testing.T, client, journey, prefix string) fxStep {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "clients", client, journey+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fx fxFile
+	if err := json.Unmarshal(raw, &fx); err != nil {
+		t.Fatalf("%s/%s: %v", client, journey, err)
+	}
+	for _, step := range fx.Steps {
+		if strings.HasPrefix(step.Name, prefix) {
+			return step
+		}
+	}
+	t.Fatalf("%s/%s has no step named %q", client, journey, prefix)
+	return fxStep{}
+}
+
 var fxVar = regexp.MustCompile(`\{\{([A-Za-z0-9_]+)\}\}`)
 
 // fxGet reads a dotted path out of decoded JSON; numbers index arrays.

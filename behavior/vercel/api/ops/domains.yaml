@@ -369,8 +369,12 @@ operations:
           project: "{'id': string(owner.projectId)}"
     effects: *add_effects
     output:
+      # The host is held and listed in lower case, and answered in the spelling it
+      # was posted in: the CLI finds its host in this array with `domain ===` what
+      # it posted, so a lower-cased echo of `WWW.Example.Dev` was "did not return a
+      # matching alias".
       _list: >
-        [{'domain': rec.name, 'target': 'PRODUCTION', 'projectId': rec.projectId, 'redirect': rec.redirect,
+        [{'domain': string(input.domain), 'target': 'PRODUCTION', 'projectId': rec.projectId, 'redirect': rec.redirect,
           'verified': rec.verified, 'createdAt': rec.createdAt}]
 
   # The inverse: the project stops holding the host, and the host is free.

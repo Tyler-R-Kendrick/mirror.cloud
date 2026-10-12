@@ -1,10 +1,7 @@
 package vercel
 
 import (
-	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -17,25 +14,11 @@ import (
 // CLI would tell the person the development value was unavailable.
 
 // recordedSensitiveLookup is the request the real CLI sent, read from the
-// recorded journey (testdata/clients/vercel-cli-63.1.2/env-pull.json), with the
-// project it was recorded against replaced by pid.
+// recorded journey, with the project it was recorded against replaced by pid.
 func recordedSensitiveLookup(t *testing.T, pid string) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", "clients", "vercel-cli-63.1.2", "env-pull.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fx fxFile
-	if err := json.Unmarshal(raw, &fx); err != nil {
-		t.Fatal(err)
-	}
-	for _, step := range fx.Steps {
-		if strings.HasPrefix(step.Name, "env pull asks which empty values are sensitive") {
-			return strings.ReplaceAll(step.Request.Path, "{{projectId}}", pid)
-		}
-	}
-	t.Fatal("the recorded journey has no sensitive-value lookup")
-	return ""
+	step := recordedStep(t, "vercel-cli-63.1.2", "env-pull", "env pull asks which empty values are sensitive")
+	return strings.ReplaceAll(step.Request.Path, "{{projectId}}", pid)
 }
 
 func envKeys(t *testing.T, r reply) map[string]string {

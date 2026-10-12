@@ -189,6 +189,12 @@ With `MIRROR_VERCEL_STRICT_AUTH=1`, a request with no `Authorization: Bearer` he
 is a 403 `forbidden` ("Not authenticated"); a token that starts with `invalid` is a
 403 `forbidden` carrying `invalidToken: true`, which is what the CLI keys on to ask
 you to log in again.
+No route is exempt in either mode: `CreateTeam`, `ListTeamMembers`, `UpdateAuthUser` and the
+API-key routes, which the vendor's own emulator guards with a 401 of its own, are served to a
+request with no credential like every other (`vercel_covenant_test.go` calls each with no
+header, an arbitrary bearer, one that starts with `invalid` and basic credentials, in both
+modes). The one 401 left is the OAuth `userinfo` route's, which is the protocol's and not a
+credential check on the API.
 
 ## Persistence and determinism
 

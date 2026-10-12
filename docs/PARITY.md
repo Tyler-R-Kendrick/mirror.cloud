@@ -1499,8 +1499,8 @@ Serve state per emulate route group (method+path from `src/routes/*.ts`):
 | `deployments.ts` | 10 | 10 | `GET /v6/deployments` is served from the authored supplement (the oracle runs one handler for both versions) |
 | `domains.ts` (project domains) | 6 | 6 | — |
 | `env.ts` | 5 | 5 | get-one included via the authored supplement |
-| `user.ts` | 9 | 9 | teams create + members, user patch and the registration probe all ride the authored supplement |
-| `api-keys.ts` | 3 | 3 | create/list/delete with the oracle's 401/404 envelope |
+| `user.ts` | 9 | 9 | teams create + members, user patch and the registration probe all ride the authored supplement; the oracle's 401 for a request with no Bearer is not served (any credentials work) |
+| `api-keys.ts` | 3 | 3 | create/list/delete with the oracle's 404 envelope; its 401 for a request with no Bearer is not served, because any credentials work here (`MIRROR_VERCEL_STRICT_AUTH` refuses with Vercel's 403, for every route alike) |
 | `oauth.ts` | 4 | 4 | the local flow end to end: authorize page (mirror's own minimal form markup, recorded as a quirk), callback issues one-shot codes, token exchange with PKCE S256, userinfo |
 | `blob.ts` | 8 | 8 | `vercel.blob` serves the whole data plane: upload (overwrite/ETag/suffix rules), list (folded/cursor/prefix), head, delete, content serving with 304 and `?download=1`; mpu answers the oracle's own 400 refusal |
 

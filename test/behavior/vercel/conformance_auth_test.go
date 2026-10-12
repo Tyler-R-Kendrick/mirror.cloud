@@ -22,6 +22,14 @@ func (c *conf) apiKeysAndOAuth(t *testing.T) {
 	c.call(t, http.MethodGet, "/v1/api-keys", nil, 200)
 	c.call(t, http.MethodDelete, "/v1/api-keys/"+kid, nil, 200)
 	c.call(t, http.MethodDelete, "/v1/api-keys/key_nope", nil, 404)
+	// No credential at all is served: the covenant is that any credentials work.
+	c.call(t, http.MethodGet, "/v1/api-keys", nil, 200, "Authorization", "")
+	anon := c.call(t, http.MethodPost, "/v1/api-keys", map[string]any{"name": "anon"}, 200, "Authorization", "")
+	c.call(t, http.MethodDelete, "/v1/api-keys/"+str(anon.body["apiKey"].(map[string]any), "id"), nil, 200, "Authorization", "")
+	c.call(t, http.MethodDelete, "/v1/api-keys/key_nope", nil, 404, "Authorization", "")
+	c.call(t, http.MethodPost, "/v2/teams", map[string]any{"slug": "conform-anon"}, 200, "Authorization", "")
+	c.call(t, http.MethodGet, "/v2/teams/conform-anon/members", nil, 200, "Authorization", "")
+	c.call(t, http.MethodPatch, "/v2/user", map[string]any{"name": "Anon"}, 200, "Authorization", "")
 
 	// The OAuth leg that needs a browser is driven outside call(): its answers
 	// are an HTML page and a 302, which no JSON schema describes.

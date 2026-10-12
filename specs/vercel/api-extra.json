@@ -22,13 +22,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -67,13 +60,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -101,13 +87,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -127,15 +106,6 @@
     "/v2/teams": {
       "post": {
         "operationId": "CreateTeam",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -178,13 +148,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -204,15 +167,6 @@
     "/v2/user": {
       "patch": {
         "operationId": "UpdateAuthUser",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {

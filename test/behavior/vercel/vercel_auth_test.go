@@ -77,7 +77,9 @@ func TestVercelAuthSupplementBehavior(t *testing.T) {
 		}
 	})
 
-	t.Run("Given no token When a supplemented route is called Then 401", func(t *testing.T) {
+	t.Run("Given no token When a supplemented route is called Then it is served, as any credentials are", func(t *testing.T) {
+		// The oracle answers its own 401 here; the covenant is that any credentials
+		// work, none included (vercel_covenant_test.go holds every such route to it).
 		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/api-keys", nil)
 		req.Host = "api.vercel.com"
 		res, err := http.DefaultClient.Do(req)
@@ -86,8 +88,8 @@ func TestVercelAuthSupplementBehavior(t *testing.T) {
 		}
 		raw, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != 401 || !strings.Contains(string(raw), "not_authenticated") {
-			t.Fatalf("unauthenticated %d %s", res.StatusCode, raw)
+		if res.StatusCode != 200 || !strings.Contains(string(raw), `"keys"`) {
+			t.Fatalf("no credential = %d %s, want the listing", res.StatusCode, raw)
 		}
 	})
 

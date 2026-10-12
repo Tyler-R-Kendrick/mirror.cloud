@@ -11,6 +11,12 @@ What that claim rests on, stated once so the rest does not have to:
   differential. The behaviour is the vendored OpenAPI document's, plus what
   Vercel's own clients and its open-source emulator (vercel-labs/emulate, the
   "oracle") are known to do where the document is silent.
+- **Client-observed** is what a Vercel client was seen to send, or to need back, when
+  it was run against this emulator: an address, a header, a member of an answer.
+  It is recorded in `specs/vercel/clients.json` and `specs/vercel/api-extra.json`
+  with the client and version that showed it, and kept as the request exactly as the
+  client sent it (`test/behavior/vercel/testdata/clients`). It establishes that the
+  client works here. It does not establish that api.vercel.com answers the same.
 - **`spec-validated`** (the Status column below) means the conformance run drives
   the operation and holds every answer to the schema the vendored document
   declares for it. A client generated from the document, the SDK among them,
@@ -51,6 +57,10 @@ curl -s $MIRROR_URL/v2/user -H 'Authorization: Bearer anything'
 
 vercel --api $MIRROR_URL whoami            # the CLI; the token goes in VERCEL_TOKEN
 ```
+
+The CLI takes a token of letters, digits and underscores only (`--token` and
+`VERCEL_TOKEN` alike are refused with "Must not contain: \"-\"" for anything else),
+so `mirror_dev_token`, not `mirror-dev-token`.
 
 ```js
 import { Vercel } from "@vercel/sdk";
@@ -149,19 +159,73 @@ variables, the deployments and the Edge Configs while later requests draw new id
 
 ## Real clients
 
-`TestVercelsOwnClientsDeploy` runs Vercel's CLI and SDK against a booted emulator.
-It needs a directory with their packages installed:
+Vercel's CLI and its SDK have been run against the emulator, and what they sent is
+kept. The versions, because the SDK validates every answer against a schema generated
+from one revision of Vercel's document and the CLI's addresses move between releases:
+
+| Client | Version | Run on |
+|---|---|---|
+| `vercel` (the CLI) | 63.1.2 | Linux x64, Node 22.22.0, from its JavaScript |
+| `@vercel/sdk` | 1.28.43 | the same |
+
+Both are client-observed (see the top of this page). Install them into a directory with
+your package manager and name it:
 
 ```sh
-mkdir ~/vercel-clients && cd ~/vercel-clients
-# install `vercel` and `@vercel/sdk` here with your package manager
 MIRROR_VERCEL_CLIENT_DIR=~/vercel-clients go test ./test/behavior/vercel -run TestVercelsOwnClientsDeploy -v
 ```
 
-Without the variable it skips and says so. The journeys (`test/vercel-clients/`)
-were written from the clients' documented interfaces and **have not been run**:
-no toolchain was installed where they were written. Expect the first run to find
-something; a failure there is a finding about the emulator or about the script.
+Without the variable the test skips and says so. With it, both journeys
+(`test/vercel-clients/`) pass: the SDK one in about 7 s, the CLI one in about 26 s.
+The CLI's native binary (its default on macOS, opt-in on Linux) was not run. A newer
+SDK is generated from a newer document than the one pinned here and may ask for more.
+
+What each journey walks, and how it ends now:
+
+| Step | Result |
+|---|---|
+| CLI `whoami`, `project add`, `link` | pass; `link` warns that it could not refresh `VERCEL_OIDC_TOKEN` (below) |
+| CLI `env add`, `env ls`, `env rm` | pass |
+| CLI `deploy --prod`, `deploy` (preview) | pass; files go inline or by the upload protocol (`missing_files`, then `POST /v2/files`, the digest in `x-now-digest`) |
+| CLI `inspect`, `ls`, `project ls`, `alias set\|ls\|rm`, `remove` | pass |
+| CLI `redeploy`, `promote` | pass when run by hand; not in the journey script |
+| SDK projects, variables, deployments, aliases, domains, Edge Config, and the listings that carry a pagination object | pass |
+| CLI `env pull`, `pull` | **fail**: `GET /v3/env/pull/{id}/{target}` is not in the document, and the CLI exits "Response Error" |
+| CLI `build` | **not run**: it needs `pull` first and the builders it loads |
+| CLI `domains add`, `alias set` to a hostname the account does not hold | **fail**: `domains add` posts to `POST /projects/{project}/alias` with `{domain}` (an older address and body than the document's `AddProjectDomain`); `alias set` asks the registrar (`GET /v1/registrar/domains/{host}/availability`) whether the name is for sale, and the registrar is not served |
+
+What running them changed, one entry per finding (the commit that made each change
+carries the request and the failure it fixed):
+
+- The CLI creates a project at `POST /v1/projects`, not `/v11`.
+- Several of the CLI's addresses carry **no version**, or the old `/now/` segment:
+  `GET /projects/{id}/custom-environments`, `DELETE /projects/{id}`, `GET /teams/{id}`,
+  `POST /now/deployments/{url}/aliases`, `GET /now/aliases/{alias}`,
+  `DELETE /now/aliases/{id}`, `GET /v3/now/deployments/{id}/events`, `GET /v3/now/aliases`;
+  and `project ls` reads `GET /v9/projects`. All are in `specs/vercel/clients.json`
+  with the command that sends each. `vercel remove` treats a 404 on its DELETE as "already
+  removed" and prints success, so an unserved address left the project in place.
+- `vercel alias set` names the deployment by its **URL** in the path, not its id.
+- The SDK requires a **`duration`** object on every deployment it reads; the pinned
+  document does not list it (the SDK was published on 2026-10-09, the document pinned
+  on 2026-09-11). Added with
+  `x-mirror-members`, which lets the authored supplement add a member to a structure the
+  pinned document declared, with its source on record.
+- A personal account is addressed by the **user's own id**: `vercel link` writes it as the
+  project's org and `vercel ls` sends it back as `?teamId=`.
+- A **preview** deployment is `aliasAssigned` once it is READY. The CLI waits for it
+  after READY and polled forever while it stayed false.
+- `vercel inspect` reads `GET /v11/deployments/{id}/builds`, an operation the document
+  does not list; it is authored (`GetDeploymentBuilds`) and answers an empty list, since
+  nothing builds.
+
+The recorded journeys are replayed without node or the clients by
+`TestRealClientFixturesReplay`: every request exactly as it was sent, against a fresh
+emulator on the client's own `Host` (so an address no model claims falls through to S3
+and shows as `NoSuchBucket` instead of passing on a header the client does not send),
+with the members of each answer the client went on to read. To record another journey,
+point the client at a proxy in front of a running emulator that writes down each request
+and answer, and add the steps to a file in `test/behavior/vercel/testdata/clients/<client>/`.
 
 ## Conformance
 
@@ -344,8 +408,21 @@ What a person deploying through this will run into, roughly in the order they wi
 - **About 300 of the document's 417 operations are not served**: the marketplace and
   integrations, log drains and webhooks, sandboxes, storage, firewall, feature
   flags, certificates, DNS records, domain purchase and transfer (the registrar),
-  access groups, shared variables, and the rest. They answer 501. `vercel env pull`
-  uses an address the document does not list and is not served.
+  access groups, shared variables, and the rest. They answer 501 when sent with
+  `Host: api.vercel.com`; a client pointed at `http://127.0.0.1:PORT` sends its own
+  host, and an address no model claims then falls through to S3 and answers its
+  `NoSuchBucket`.
+- **`vercel env pull`, `vercel pull` and so `vercel build`** do not work: the CLI asks
+  `GET /v3/env/pull/{projectId}/{target}` (and `/{gitBranch}`), which the document does not
+  list, so nothing here knows what to answer, and the first failure ends the command. `vercel
+  link` makes the same request to refresh `VERCEL_OIDC_TOKEN` and only warns. `vercel build`
+  also loads the framework builders and was not run. A deployment is made from source
+  (`vercel deploy`), not from prebuilt output.
+- **`vercel domains add`** posts the older `POST /projects/{project}/alias` with `{domain}`;
+  `vercel alias set` to a hostname the account does not hold asks the registrar
+  whether it is for sale. Neither is served. A custom domain is added with the SDK's
+  `addProjectDomain` (or `POST /v10/projects/{id}/domains`); an alias to a `*.vercel.app` name
+  needs none.
 - **A domain is never resolved.** Verifying a project domain takes the TXT challenge
   as met; there is no DNS to ask. An alias to a hostname the account does not hold is
   accepted, where Vercel answers 404.

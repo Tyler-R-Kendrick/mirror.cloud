@@ -430,6 +430,57 @@
       }
     },
     {
+      "name": "alias rm: look the alias up",
+      "note": "an unversioned /now/ address",
+      "request": {
+        "method": "GET",
+        "path": "/now/aliases/cli-journey-alias.vercel.app",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "uid",
+          "alias"
+        ],
+        "equals": {
+          "alias": "cli-journey-alias.vercel.app"
+        }
+      },
+      "capture": {
+        "aliasId": "uid"
+      }
+    },
+    {
+      "name": "alias rm",
+      "note": "the alias id is captured from the lookup",
+      "request": {
+        "method": "DELETE",
+        "path": "/now/aliases/{{aliasId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "status": "SUCCESS"
+        }
+      }
+    },
+    {
       "name": "inspect: deployment by URL",
       "note": "a deployment is read by its host as well as its id",
       "request": {

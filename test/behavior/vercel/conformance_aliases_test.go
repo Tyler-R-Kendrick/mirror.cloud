@@ -45,6 +45,8 @@ func (c *conf) aliases(t *testing.T) {
 	c.call(t, http.MethodGet, "/v3/aliases/www.conform.dev", nil, 200)
 	c.call(t, http.MethodGet, "/v2/aliases/app.conform.dev", nil, 200)
 	c.call(t, http.MethodGet, "/v4/aliases/nope.conform.dev", nil, 404)
+	c.call(t, http.MethodGet, "/now/aliases/cli.conform.dev", nil, 200) // `vercel alias rm` looks the alias up first
+	c.call(t, http.MethodGet, "/now/aliases/nope.conform.dev", nil, 404)
 	c.call(t, http.MethodGet, "/v2/deployments/"+second+"/aliases", nil, 200)
 	c.call(t, http.MethodGet, "/v3/deployments/"+second+"/aliases", nil, 200)
 	c.call(t, http.MethodGet, "/v2/deployments/dpl_nope/aliases", nil, 404)
@@ -53,6 +55,9 @@ func (c *conf) aliases(t *testing.T) {
 	// Removed at each version.
 	c.call(t, http.MethodDelete, "/v2/aliases/"+uid, nil, 200)
 	c.call(t, http.MethodDelete, "/v2/aliases/"+uid, nil, 404)
+	cli := str(c.call(t, http.MethodGet, "/now/aliases/cli.conform.dev", nil, 200).body, "uid")
+	c.call(t, http.MethodDelete, "/now/aliases/"+cli, nil, 200) // `vercel alias rm`, no version
+	c.call(t, http.MethodDelete, "/now/aliases/"+cli, nil, 404)
 	other := str(c.call(t, http.MethodGet, "/v4/aliases/app.conform.dev", nil, 200).body, "uid")
 	c.call(t, http.MethodDelete, "/v4/aliases/"+other, nil, 200)
 }

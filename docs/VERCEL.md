@@ -230,7 +230,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `CreateProjectCheck` | POST `/v2/projects/{projectIdOrName}/checks` | - | spec-validated |
 | `CreateProjectEnv` | POST `/v10/projects/{idOrName}/env` | `/v8/projects/{idOrName}/env`, `/v9/projects/{idOrName}/env` | spec-validated |
 | `CreateTeam` | POST `/v2/teams` | `/v1/teams` | authored (held to the supplement's schema) |
-| `DeleteAlias` | DELETE `/v2/aliases/{aliasId}` | `/v4/aliases/{aliasId}` | spec-validated |
+| `DeleteAlias` | DELETE `/v2/aliases/{aliasId}` | `/now/aliases/{aliasId}`, `/v4/aliases/{aliasId}` | spec-validated |
 | `DeleteAllArtifacts` | DELETE `/v8/artifacts` | - | spec-validated |
 | `DeleteApiKey` | DELETE `/v1/api-keys/{keyId}` | - | authored (held to the supplement's schema) |
 | `DeleteDeployment` | DELETE `/v13/deployments/{id}` | - | spec-validated |
@@ -244,7 +244,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `DownloadArtifact` | GET `/v8/artifacts/{hash}` | - | spec-validated; the body is bytes, so only the status is held |
 | `EditProjectEnv` | PATCH `/v9/projects/{idOrName}/env/{id}` | `/v10/projects/{idOrName}/env/{id}`, `/v8/projects/{idOrName}/env/{id}` | spec-validated |
 | `FilterProjectEnvs` | GET `/v10/projects/{idOrName}/env` | `/v8/projects/{idOrName}/env`, `/v9/projects/{idOrName}/env` | spec-validated |
-| `GetAlias` | GET `/v4/aliases/{idOrAlias}` | `/v2/aliases/{idOrAlias}`, `/v3/aliases/{idOrAlias}` | spec-validated |
+| `GetAlias` | GET `/v4/aliases/{idOrAlias}` | `/now/aliases/{idOrAlias}`, `/v2/aliases/{idOrAlias}`, `/v3/aliases/{idOrAlias}` | spec-validated |
 | `GetAllChecks` | GET `/v1/deployments/{deploymentId}/checks` | - | spec-validated |
 | `GetAuthUser` | GET `/v2/user` | - | spec-validated |
 | `GetCheck` | GET `/v1/deployments/{deploymentId}/checks/{checkId}` | - | spec-validated |

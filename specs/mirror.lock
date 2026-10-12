@@ -1443,10 +1443,10 @@
     {
       "serviceId": "vercel.api",
       "source": "authored",
-      "ref": "2026-10-12T01:58:43Z",
+      "ref": "2026-10-12T02:29:40Z",
       "path": "vercel/clients.json",
-      "sha256": "35835b39c88943d682357b4797ad5691dc0f29713f5101db1bf31a787ef0ff2e",
-      "ingested": "2026-10-12T01:58:43Z"
+      "sha256": "ff09b4f3af24e483e73105e6429b259e67ef993f3c0360323d7bc1cb537a3dbd",
+      "ingested": "2026-10-12T02:29:40Z"
     },
     {
       "serviceId": "vercel.api",

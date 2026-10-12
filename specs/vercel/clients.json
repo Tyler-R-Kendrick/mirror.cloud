@@ -233,6 +233,16 @@
       "operation": "ListAliases",
       "uris": ["/v3/now/aliases"],
       "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias ls` sends GET /v3/now/aliases?limit=20."
+    },
+    {
+      "operation": "GetAlias",
+      "uris": ["/now/aliases/{idOrAlias}"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias rm` looks the alias up first with GET /now/aliases/{alias}, no version segment."
+    },
+    {
+      "operation": "DeleteAlias",
+      "uris": ["/now/aliases/{aliasId}"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias rm` then removes it with DELETE /now/aliases/{id}, no version segment."
     }
   ]
 }

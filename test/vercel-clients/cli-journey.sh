@@ -91,6 +91,9 @@ listed="$(vcn domains ls 2>&1)"
 case "$listed" in *example.dev*) ;; *) fail "domains ls does not list example.dev: $listed" ;; esac
 inspected="$(vcn domains inspect example.dev 2>&1)"
 case "$inspected" in *"$NAME-other"*"www.example.dev"*) ;; *) fail "domains inspect does not show $NAME-other holding www.example.dev: $inspected" ;; esac
+# A host typed in mixed case. The CLI finds its host in the answer with ===, so the answer
+# has to keep the spelling that was posted ("did not return a matching alias" otherwise).
+vcn domains add "WWW2.Example.Dev" "$NAME"
 
 out="$(vc deploy --prod --yes)"
 # A person's terminal gets the URL; a JSON document comes back when the CLI took the run for an agent's.

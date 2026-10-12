@@ -12025,8 +12025,8 @@ var mutants = []mutant{
 	{
 		name: "restjson-drop-the-path-members-from-the-input",
 		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
-		old:  `	if op.HTTP.URI != "" {`,
-		new:  `	if false {`,
+		old:  `	if bound, ok := httpuri.Bind(op, r.URL.EscapedPath(), r.URL.Query()); ok {`,
+		new:  `	if bound, ok := httpuri.Bind(op, r.URL.EscapedPath(), r.URL.Query()); !ok {`,
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSONDecodeEncodeAndFault",
 	},

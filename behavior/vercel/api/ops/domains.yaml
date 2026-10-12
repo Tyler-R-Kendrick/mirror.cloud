@@ -78,8 +78,11 @@ operations:
             : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
       asc: "'order' in input && input.order != null && upper(string(input.order)) == 'ASC'"
     require:
+      - { cond: "validCursors([since, until])", error: BadRequest, message: "since and until must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
     list:
       resource: domain
@@ -87,15 +90,15 @@ operations:
       filter: >
         (!('verified' in input && input.verified != null && string(input.verified) != '') || item.verified == (string(input.verified) == 'true'))
           && (!('gitBranch' in input && input.gitBranch != null && string(input.gitBranch) != '') || (item.gitBranch != null && item.gitBranch == string(input.gitBranch)))
-          && (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
-          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+          && newerThanCursor(item.createdAt, item.seq, since)
+          && olderThanCursor(item.createdAt, item.seq, until)
     output:
       # Newest first, which the document calls DESC; the stored record carries the
       # sequence it is ordered by, which a client never sees.
       domains: "slice(sortBy(items, 'seq', !asc), 0, limit).map(i, without(i, ['seq']))"
       pagination: >
         {'count': size(slice(items, 0, limit)),
-         'next': size(items) > limit ? slice(sortBy(items, 'seq', !asc), 0, limit)[limit - 1].createdAt : null,
+         'next': size(items) > limit ? cursorAt(sortBy(items, 'seq', !asc), 'createdAt', limit - 1) : null,
          'prev': null}
 
   AddProjectDomain:
@@ -400,16 +403,19 @@ operations:
       held: { resource: account_domain }
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
       apex: "('domain' in input && input.domain != null) ? lower(string(input.domain)) : ''"
     require:
+      - { cond: "validCursors([since, until])", error: BadRequest, message: "since and until must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
       - { cond: held_found, error: NotFound, message: "Domain not found" }
     list:
       resource: domain_owner
       member: projectDomains
       filter: >
         item.apexName == apex
-          && (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
-          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+          && newerThanCursor(item.createdAt, item.seq, since)
+          && olderThanCursor(item.createdAt, item.seq, until)
     output:
       projectDomains: >
         slice(sortBy(items, 'seq', true), 0, limit).map(i, {
@@ -421,7 +427,7 @@ operations:
             'reason': 'Add the TXT record above to verify domain ownership'}]})
       pagination: >
         {'count': size(slice(items, 0, limit)),
-         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].createdAt : null,
+         'next': size(items) > limit ? cursorAt(sortBy(items, 'seq', true), 'createdAt', limit - 1) : null,
          'prev': null}
 
   # --- The account's domains ------------------------------------------------
@@ -429,17 +435,21 @@ operations:
   GetDomains:
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
+    require:
+      - { cond: "validCursors([since, until])", error: BadRequest, message: "since and until must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
     list:
       resource: account_domain
       member: domains
       filter: >
-        (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
-          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+        newerThanCursor(item.createdAt, item.seq, since)
+          && olderThanCursor(item.createdAt, item.seq, until)
     output:
       domains: "slice(sortBy(items, 'seq', true), 0, limit).map(i, without(i, ['seq']))"
       pagination: >
         {'count': size(slice(items, 0, limit)),
-         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].createdAt : null,
+         'next': size(items) > limit ? cursorAt(sortBy(items, 'seq', true), 'createdAt', limit - 1) : null,
          'prev': null}
 
   GetDomain:

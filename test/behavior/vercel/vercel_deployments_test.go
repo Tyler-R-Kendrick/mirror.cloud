@@ -5,9 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -259,15 +261,24 @@ func TestVercelDeploymentsListNewestFirstAndPage(t *testing.T) {
 		t.Fatalf("unfiltered = %v pagination %v, want newest first %v", all, p, rev(ids))
 	}
 
+	// The cursor is a number that still reads as the creation instant of the last
+	// item on the page (its integer part), with the item's place among those made
+	// in the same millisecond in its fraction. It goes back as it came.
+	cursor := func(p map[string]any) string { return strconv.FormatFloat(p["next"].(float64), 'f', -1, 64) }
 	first, p := list("?limit=2")
-	if !reflect.DeepEqual(first, rev(ids)[:2]) || p["count"] != float64(2) || p["next"] != created[3] {
+	if !reflect.DeepEqual(first, rev(ids)[:2]) || p["count"] != float64(2) || math.Floor(p["next"].(float64)) != created[3] {
 		t.Fatalf("page one = %v %v", first, p)
 	}
-	second, p := list(fmt.Sprintf("?limit=2&until=%d", int64(p["next"].(float64))))
+	// A client that keeps only the integer part sends the old bare timestamp, and
+	// gets what it always did: the items made before that millisecond.
+	if bare, _ := list(fmt.Sprintf("?limit=2&until=%d", int64(p["next"].(float64)))); !reflect.DeepEqual(bare, rev(ids)[2:4]) {
+		t.Fatalf("page two from the bare timestamp = %v", bare)
+	}
+	second, p := list("?limit=2&until=" + cursor(p))
 	if !reflect.DeepEqual(second, rev(ids)[2:4]) || p["prev"] == nil {
 		t.Fatalf("page two = %v %v", second, p)
 	}
-	last, p := list(fmt.Sprintf("?limit=2&until=%d", int64(p["next"].(float64))))
+	last, p := list("?limit=2&until=" + cursor(p))
 	if !reflect.DeepEqual(last, rev(ids)[4:]) || p["next"] != nil {
 		t.Fatalf("last page = %v %v", last, p)
 	}

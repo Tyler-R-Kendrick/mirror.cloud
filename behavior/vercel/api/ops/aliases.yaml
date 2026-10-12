@@ -155,6 +155,11 @@ operations:
   ListAliases:
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
+      from: "('from' in input && input.from != null) ? string(input.from) : ''"
+    require:
+      - { cond: "validCursors([since, until, from])", error: BadRequest, message: "since, until and from must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
     list:
       resource: deployment_alias
       member: aliases
@@ -162,12 +167,12 @@ operations:
         (!('domain' in input && input.domain != null && string(input.domain) != '')
             || item.alias == string(input.domain) || item.alias.endsWith('.' + string(input.domain)))
           && (!('projectId' in input && input.projectId != null && string(input.projectId) != '') || item.projectId == string(input.projectId))
-          && (!('from' in input && input.from != null && string(input.from) != '') || item.createdAt > int(string(input.from)))
-          && (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
-          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+          && newerThanCursor(item.createdAt, item.seq, from)
+          && newerThanCursor(item.createdAt, item.seq, since)
+          && olderThanCursor(item.createdAt, item.seq, until)
     output:
-      # Newest first, as a client pages; `next` is the instant to ask for as
-      # `until`.
+      # Newest first, as a client pages; `next` is the cursor to ask for as
+      # `until` (cursor.go says what it carries).
       aliases: >
         slice(sortBy(items, 'seq', true), 0, limit).map(a, {
           'uid': a.uid, 'alias': a.alias, 'created': a.created, 'createdAt': a.createdAt,
@@ -178,7 +183,7 @@ operations:
           'protectionBypass': a.protectionBypass})
       pagination: >
         {'count': size(slice(items, 0, limit)),
-         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].createdAt : null,
+         'next': size(items) > limit ? cursorAt(sortBy(items, 'seq', true), 'createdAt', limit - 1) : null,
          'prev': null}
 
   GetAlias:

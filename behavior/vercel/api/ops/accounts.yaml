@@ -98,17 +98,22 @@ operations:
   GetTeams:
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
+    require:
+      - { cond: "validCursors([since, until])", error: BadRequest, message: "since and until must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
     list:
       resource: team
       member: teams
       filter: >
-        (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
-          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+        newerThanCursor(item.createdAt, (('seq' in item) ? item.seq : 0), since)
+          && olderThanCursor(item.createdAt, (('seq' in item) ? item.seq : 0), until)
     output:
-      teams: "slice(sortBy(items, 'createdAt', true), 0, limit)"
+      # The sequence is the order and the tie-break, not a member of a team.
+      teams: "slice(sortBy(items, 'seq', true), 0, limit).map(t, without(t, ['seq']))"
       pagination: >
-        {'count': size(slice(sortBy(items, 'createdAt', true), 0, limit)),
-         'next': size(items) > limit ? slice(sortBy(items, 'createdAt', true), 0, limit)[limit - 1].createdAt : null,
+        {'count': size(slice(sortBy(items, 'seq', true), 0, limit)),
+         'next': size(items) > limit ? cursorAt(sortBy(items, 'seq', true), 'createdAt', limit - 1) : null,
          'prev': null}
 
   GetTeam:
@@ -231,6 +236,9 @@ operations:
             stagingPrefix: "trim(string(input.slug))"
             billing: "{'plan': 'hobby'}"
             membership: "{'confirmed': true, 'role': 'OWNER', 'createdAt': now_ms, 'created': now_ms}"
+            # The order teams are listed in (newest first), and what breaks a tie
+            # between teams made in one millisecond when a page ends between them.
+            seq: { counter: "vteam" }
     output:
       id: rec.id
       slug: rec.slug

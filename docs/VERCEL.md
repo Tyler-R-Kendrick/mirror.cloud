@@ -493,9 +493,19 @@ What a person deploying through this will run into, roughly in the order they wi
   split. Billing is "unlimited".
 - **Teams** are created, read, renamed and given members by email; there is no
   invitation to accept, no roles beyond the stored string, no billing.
-- **Pagination** cursors are millisecond timestamps, as Vercel's are. Items created
-  within one millisecond of each other can be missed between pages; on a
-  controllable clock that is every item until the clock moves.
+- **Pagination cursors** are numbers, as the document types them, and carry more than
+  the timestamp: `pagination.next` is the creation instant of the last item on the page
+  with that item's place among those made in the same millisecond as the fraction (a
+  1/1024 step, so up to 1023 items of one millisecond are told apart). Sent back as
+  `until` (`from` for projects) it continues without a skip or a repeat, which a bare
+  timestamp cannot do for items that share one, and every item does on a controllable
+  clock that is not moving. A bare integer timestamp still means what it did (the
+  items strictly before it for `until`, after it for `since`), and anything that is not a
+  number is a 400. The ceiling is the 1023: more items than that in one millisecond are
+  ambiguous at a page boundary again. Projects page by creation, since that is the
+  order of the listing (an update moves nothing in it); the document words `from` as
+  "updated after". The listings are teams, projects, deployments (`/v6` and `/v7`),
+  aliases, the account's domains, a project's domains and the project domains of an apex.
 - **The OAuth flow** is the oracle's local login (a page, a callback, a token
   exchange, userinfo), not Vercel's.
 - **Rate limiting** is the armed 429s and nothing else; there is no accounting.

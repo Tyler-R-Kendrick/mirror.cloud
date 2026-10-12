@@ -79,3 +79,29 @@ func walkLimited(t *testing.T, v *vx, l pagedListing, path string, limit, n int)
 	}
 	return got
 }
+
+// TestVercelListingsPageOnAClockBeyondTheYear2248 winds the controllable clock past
+// 2^43 milliseconds, where a cursor with a ten-bit fraction stopped being exact in a
+// float64 (about half of the places it handed out read back as another) and where
+// the places a cursor has begin to shrink: 511 now, halving with each bit. The
+// teams of one instant, as many as there are places, page without a skip or a
+// repeat there, and so do those of a moving clock.
+func TestVercelListingsPageOnAClockBeyondTheYear2248(t *testing.T) {
+	v := newVX(t, "vercel-paging-far-future")
+	for i := 0; i < 2; i++ { // two advances: a duration holds 292 years
+		v.advance(145 * 365 * 24 * time.Hour)
+	}
+	if ms := v.rt.Deps.Clock.Now().UnixMilli(); ms < 1<<43 || ms >= 1<<44 {
+		t.Fatalf("the clock reads %d, want it between 2^43 and 2^44", ms)
+	}
+	teams := pagedListing{name: "teams", older: "until", items: "teams", id: "id"}
+	made := makeTeams(t, v, 0, 511) // every place a cursor has at this magnitude
+	for _, limit := range []int{1, 7, 100, 510} {
+		holdsExactly(t, "511 teams of one instant on a far clock", walkLimited(t, v, teams, "/v2/teams", limit, 600), newestFirst(made))
+	}
+	for i := 0; i < 40; i++ { // and a clock that moves
+		v.advance(time.Duration(i%3) * time.Millisecond)
+		made = append(made, makeTeams(t, v, 1000+i, 1001+i)...)
+	}
+	holdsExactly(t, "teams on a far clock that moves", walkLimited(t, v, teams, "/v2/teams", 3, 600), newestFirst(made))
+}

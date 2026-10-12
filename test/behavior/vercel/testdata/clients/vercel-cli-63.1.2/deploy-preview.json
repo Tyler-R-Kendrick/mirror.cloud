@@ -1,0 +1,109 @@
+{
+  "client": "vercel CLI 63.1.2 (node v22.22.0, linux x64)",
+  "observed": "client-observed: recorded by a proxy between the real CLI and a running emulator, `vercel deploy --yes` (no --prod: a preview deployment) from a linked directory, the CLI's agent detection off. After READY the CLI says \"Completing...\" and polls GET /v13/deployments/{id} until `aliasAssigned` is true; it polled a preview deployment forever while the emulator never set it. Never compared with api.vercel.com.",
+  "steps": [
+    {
+      "name": "project add",
+      "request": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"more-journey\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id"
+        ]
+      },
+      "capture": {
+        "projectId": "id"
+      }
+    },
+    {
+      "name": "deploy a preview",
+      "request": {
+        "method": "POST",
+        "path": "/v13/deployments?skipAutoDetectionConfirmation=1",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json",
+          "accept": "application/json, application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"env\":{},\"build\":{\"env\":{}},\"name\":\"more-journey\",\"project\":\"{{projectId}}\",\"meta\":{},\"projectSettings\":{\"sourceFilesOutsideRootDirectory\":true,\"rootDirectory\":null},\"source\":\"cli\",\"version\":2,\"files\":[{\"file\":\"index.html\",\"data\":\"PCFkb2N0eXBlIGh0bWw+PGgxPm1vcmU8L2gxPgo=\",\"encoding\":\"base64\",\"mode\":33188}]}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "url"
+        ],
+        "equals": {
+          "readyState": "QUEUED",
+          "target": "null"
+        }
+      },
+      "capture": {
+        "deploymentId": "id"
+      }
+    },
+    {
+      "name": "poll while building",
+      "advance": "1s",
+      "request": {
+        "method": "GET",
+        "path": "/v13/deployments/{{deploymentId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "aliasAssigned": "false"
+        }
+      }
+    },
+    {
+      "name": "poll once ready",
+      "note": "a preview deployment is reachable at its own URL, an alias, so it is aliasAssigned as soon as it is READY",
+      "advance": "2s",
+      "request": {
+        "method": "GET",
+        "path": "/v13/deployments/{{deploymentId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "readyState": "READY",
+          "aliasAssigned": "true"
+        }
+      }
+    }
+  ]
+}

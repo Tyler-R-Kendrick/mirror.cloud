@@ -336,7 +336,11 @@ operations:
       # A production deployment is aliased to its project's own domain once it
       # is READY, and not before.
       alias: "((rec.__state == 'READY' && rec.target == 'production') ? [rec.projectName + '.vercel.app'] : []) + rec.aliases"
-      aliasAssigned: "rec.__state == 'READY' && (rec.target == 'production' || size(rec.aliases) > 0)"
+      # A READY deployment is reachable at its own URL, which is an alias, so a
+      # preview has one assigned as a production deployment does. The CLI waits
+      # for this member after READY ("Completing...") and polled a preview
+      # deployment forever while it stayed false.
+      aliasAssigned: "rec.__state == 'READY'"
       aliasError: "null"
       ready: "rec.__state == 'READY' ? rec.readyAt : null"
       canceledAt: "rec.__state == 'CANCELED' ? rec.canceledAt : null"
@@ -371,7 +375,7 @@ operations:
           'readyState': string(i.__state), 'state': string(i.__state),
           'creator': i.creator, 'inspectorUrl': null, 'target': i.target,
           'meta': i.meta, 'source': i.source, 'buildingAt': i.buildingAt,
-          'aliasAssigned': i.__state == 'READY' && (i.target == 'production' || size(i.aliases) > 0)
+          'aliasAssigned': i.__state == 'READY'
         }, i.__state == 'READY' ? {'ready': i.readyAt}
           : (i.__state == 'ERROR' ? {'errorCode': coalesce(i.errorCode, coalesce(i.failureCode, 'BUILD_FAILED'))} : {})))
       pagination: >

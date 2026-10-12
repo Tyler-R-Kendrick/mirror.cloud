@@ -17,6 +17,8 @@ Services are data, not Go. A new service is a `specs/mirror.set` entry and a Beh
 
 Worked path: `behavior/aws/shield/service.yaml`.
 
+A bundle that outgrows one file keeps `service.yaml` for the header, resources and error table and puts operation rules in `ops/*.yaml` beside it. The loader merges every document under the directory, a key defined in two files is an error, and `behavior/behaviors.go` embeds both patterns (`TestEveryBundleFileOnDiskIsEmbedded` fails on a file the pattern misses). Worked path: `behavior/vercel/api/`.
+
 A bundle is validated against its model at load time and every bundle is built in CI (`make equivalence`), so a bundle that references an operation the model does not have, or projects a member that is not in the output shape, fails the build rather than the first request.
 
 A bundle may set `shadow: <reason>` while it is being written: it is loaded, validated and replayed against its recording on every run, but it is not registered and the hand-written pack keeps serving. Use it only when a bundle covers a service's semantics but not yet every operation of its surface — registering both would mean two descriptions of one service, and deleting the pack early would lose operations. The reason is required, and it must say what is missing.

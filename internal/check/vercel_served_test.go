@@ -83,3 +83,25 @@ func TestVercelServedSurfaceIsCountedFromTheDocuments(t *testing.T) {
 		}
 	}
 }
+
+// TestVercelParityDoesNotCallAPagedListingUnpaginated holds the ledger to the
+// listings that page (cursor.go, docs/VERCEL.md § Pagination): a row for one of
+// them that says it does not is a row nobody updated.
+func TestVercelParityDoesNotCallAPagedListingUnpaginated(t *testing.T) {
+	root := findMod(t)
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "PARITY.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := strings.Split(string(raw), "\n")
+	for _, op := range []string{"GetProjects", "GetTeams", "GetDeployments", "GetDeploymentsV6", "ListAliases", "GetDomains", "GetProjectDomains", "GetDomainProjectDomains"} {
+		for _, row := range rows {
+			if !strings.HasPrefix(row, "|") || !strings.Contains(row, "(`"+op+"`)") {
+				continue
+			}
+			if strings.Contains(strings.ToLower(row), "unpaginated") {
+				t.Errorf("PARITY.md calls %s unpaginated, and it pages: %s", op, row)
+			}
+		}
+	}
+}

@@ -99,6 +99,16 @@ Aliases need a `READY` deployment. Assigning a hostname that already names anoth
 deployment moves it. A production deployment is aliased to `<project>.vercel.app`
 once it is ready.
 
+A hostname is the account's to alias only if it holds the domain: a `*.vercel.app` name
+needs none, and any other host must be a domain of the account, sit under one (the apex,
+which is the last two labels, three under the ccTLD second levels `apexOf` knows), or be a
+hostname one of its projects holds. Otherwise the answer is the document's `404` ("The
+domain used for the alias was not found"), under the code `domain_not_found`, which the
+document does not name: the CLI itself lists it beside `invalid_domain` for a domain the
+account cannot use, so it is the likeliest, not an observed one. The check comes after the
+hostname is known to be valid and before the deployment's state is looked at. Each team
+holds its own domains, so one team cannot alias under another's.
+
 ## Versions
 
 Vercel versions each route, keeps answering the old versions, and its clients were
@@ -225,7 +235,8 @@ What each journey walks, and how it ends now:
 | CLI `env pull` (all three targets, a git branch), `pull` | pass; `GET /v3/env/pull/{project}[/{target}[/{branch}]]` is authored, the document does not list it (below) |
 | CLI `build` | **not run**: it loads the framework builders, which the toolchain does not carry |
 | CLI `domains add`, `domains add <domain> <project>` (also against a host another project holds, and `--force`), `domains ls`, `domains inspect`, `domains rm` | pass; the project form posts the older `POST /projects/{project}/alias`, authored (below) |
-| CLI `alias set` to a hostname the account does not hold | **fail**: the CLI asks the registrar (`GET /v1/registrar/domains/{host}/availability`) whether the name is for sale, and the registrar is not served |
+| CLI `alias set` to a `*.vercel.app` name, or to a domain the account holds | pass |
+| CLI `alias set` to a hostname the account does not hold, or to a subdomain of one it does | **fail**: the CLI looks the name up as a domain (`GET /v5/domains/{host}`, a 404 for a subdomain) and then asks the registrar (`GET /v1/registrar/domains/{host}/availability`) whether it is for sale, and the registrar is not served. The API's own refusal is held by the Go tests, the acceptance script and the SDK journey |
 
 What running them changed, one entry per finding (the commit that made each change
 carries the request and the failure it fixed):
@@ -456,15 +467,17 @@ What a person deploying through this will run into, roughly in the order they wi
   `vercel env pull`, `vercel pull` and `vercel link`'s token refresh work (see
   [Pulling variables](#pulling-variables)); a pull of a deployment id (`env pull --id dpl_...`,
   which reads `buildEnv`) is not served, and no `VERCEL_OIDC_TOKEN` is ever issued.
-- **`vercel alias set` to a hostname the account does not hold** asks the registrar
-  whether it is for sale before it reaches the alias route, and the registrar is not
-  served. An alias to a `*.vercel.app` name needs no domain, and one under a domain the
-  account holds goes straight to the alias route.
+- **`vercel alias set` to a hostname the account does not hold**, or to a subdomain of
+  one it does, ends at the registrar, which is not served: the CLI looks the name up as a
+  domain, gets a 404, and asks whether it is for sale. What the real CLI does for a
+  subdomain of a domain it holds is not known here. The alias route itself refuses an
+  unheld hostname (above), and `vercel alias set` to a `*.vercel.app` name or to a domain
+  the account holds reaches it.
 - **`vercel domains inspect`** asks `GET /v1/registrar/domains/{domain}/price` for a renewal
   price and gets a 404; it takes that for "no price" and prints `-`.
 - **A domain is never resolved.** Verifying a project domain takes the TXT challenge
-  as met; there is no DNS to ask. An alias to a hostname the account does not hold is
-  accepted, where Vercel answers 404.
+  as met; there is no DNS to ask. Whether a held domain is verified does not matter to
+  an alias: the account holding it is enough.
 - **Edge Config:** the control plane only. Its data plane
   (`edge-config.vercel.com`, what an application reads through with a token) is
   another host and another product. Backups are not served. A config's schema is

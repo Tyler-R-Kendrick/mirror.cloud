@@ -116,6 +116,14 @@ errors:
     code: domain_already_exists
     http: 409
     fault: client
+  # The document's AssignAlias answers 404 "The domain used for the alias was not
+  # found" and names no code. This one is authored: it is the code the CLI itself
+  # lists beside invalid_domain for a domain the account cannot use
+  # (nextCommandsForDomainsAddFailure), so a client that keys on it finds it.
+  DomainNotFound:
+    code: domain_not_found
+    http: 404
+    fault: client
   # `vercel domains add <domain> <project>` posts the older
   # POST /projects/{project}/alias and keys on this code, with the project that
   # holds the host in the envelope (client-observed, vercel 63.1.2).
@@ -960,3 +968,14 @@ quirks:
       never reaches a listing. Generate honors a caller-chosen secret when the
       document's body carries one, and the scope is the document's
       `automation-bypass` enum value where the oracle writes `deployment`.
+  - operation: AssignAlias
+    note: >
+      A hostname is the account's to alias only if it holds the domain: a
+      *.vercel.app name needs none, and anything else must be a domain of the
+      account, sit under one (its apex), or be a hostname one of its projects
+      holds. Otherwise 404 under the code domain_not_found. The document says
+      "The domain used for the alias was not found" and names no code; this one
+      is authored, chosen because the CLI lists it beside invalid_domain for a
+      domain the account cannot use. This bundle accepted any hostname until
+      now. The check runs after the hostname is known valid and before the
+      deployment's state is looked at.

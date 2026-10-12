@@ -6,7 +6,8 @@
 #
 # It makes a project at the two versions clients create them at (v9 and v11),
 # sets a variable, uploads a file by its SHA-1, deploys it, waits for READY,
-# aliases the deployment, reads it back and deletes the project. Every step
+# holds a domain and aliases the deployment to it (refused first, while the account
+# does not hold it), reads it back and deletes the project. Every step
 # asserts on the body it gets; the first one that is wrong stops the run with the
 # body in front of you. Needs curl and jq.
 #
@@ -45,6 +46,7 @@ expect() {
 cleanup() {
   call DELETE "/v9/projects/$NAME" >/dev/null 2>&1 || true
   call DELETE "/v9/projects/$LEGACY" >/dev/null 2>&1 || true
+  call DELETE /v6/domains/accept.example.test >/dev/null 2>&1 || true
 }
 cleanup
 
@@ -98,7 +100,12 @@ done
 [ "$state" = READY ] || fail "the deployment is still $state after ${WAIT_SECONDS}s"
 expect 200 '.readyState == "READY" and .ready != null and .aliasAssigned == true' "poll to READY"
 
-# 6. An alias, then the deployment read back by id and by its URL.
+# 6. An alias, then the deployment read back by id and by its URL. A hostname is
+# the account's to alias only once it holds the domain.
+call POST "/v2/deployments/$DEPLOYMENT_ID/aliases" '{"alias":"accept.example.test"}'
+expect 404 '.error.code == "domain_not_found"' "an alias to a domain the account does not hold is refused"
+call POST /v7/domains '{"name":"accept.example.test"}'
+expect 200 '.domain.name == "accept.example.test"' "hold the domain"
 call POST "/v2/deployments/$DEPLOYMENT_ID/aliases" '{"alias":"accept.example.test"}'
 expect 200 '.alias == "accept.example.test" and (.uid | length) > 0 and .created != null' "alias the deployment"
 call GET "/v13/deployments/$DEPLOYMENT_ID"
@@ -118,6 +125,9 @@ call GET "/v13/deployments/$DEPLOYMENT_ID"
 [ "$status" = 404 ] || fail "the deployment outlived its project: status $status"
 echo "ok   its deployment went with it"
 call DELETE "/v9/projects/$LEGACY" >/dev/null 2>&1 || true
+call DELETE /v6/domains/accept.example.test
+[ "$status" = 200 ] || fail "delete the domain: status $status"
+echo "ok   delete the domain"
 
 echo
 echo "accepted: $BASE answered the deploy path of a Vercel client"

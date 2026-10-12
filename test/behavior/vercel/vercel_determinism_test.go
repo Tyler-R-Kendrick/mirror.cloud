@@ -24,6 +24,8 @@ func transcript(t *testing.T, v *vx) []string {
 	id := str(dep.body, "id")
 	v.advance(3 * time.Second)
 	note(v.do(http.MethodGet, "/v13/deployments/"+id, nil))
+	// The account holds the domain before it can alias a host under it.
+	note(v.do(http.MethodPost, "/v7/domains", map[string]any{"name": "example.com"}))
 	note(v.do(http.MethodPost, "/v2/deployments/"+id+"/aliases", map[string]any{"alias": "det.example.com"}))
 	note(v.do(http.MethodPost, "/v10/projects/"+pid+"/domains", map[string]any{"name": "det.example.com"}))
 	note(v.do(http.MethodPost, "/v1/edge-config", map[string]any{"slug": "det_cfg", "items": map[string]any{"k": "v"}}))

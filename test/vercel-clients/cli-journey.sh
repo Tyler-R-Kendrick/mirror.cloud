@@ -91,9 +91,6 @@ listed="$(vcn domains ls 2>&1)"
 case "$listed" in *example.dev*) ;; *) fail "domains ls does not list example.dev: $listed" ;; esac
 inspected="$(vcn domains inspect example.dev 2>&1)"
 case "$inspected" in *"$NAME-other"*"www.example.dev"*) ;; *) fail "domains inspect does not show $NAME-other holding www.example.dev: $inspected" ;; esac
-vcn domains rm example.dev --yes
-listed="$(vcn domains ls 2>&1)"
-case "$listed" in *example.dev*) fail "example.dev is still listed after domains rm: $listed" ;; esac
 
 out="$(vc deploy --prod --yes)"
 # A person's terminal gets the URL; a JSON document comes back when the CLI took the run for an agent's.
@@ -108,6 +105,15 @@ vc inspect "$url"
 # A *.vercel.app hostname needs no domain of the account's, which a custom one does.
 vc alias set "$url" "$NAME-alias.vercel.app"
 vc alias ls
+# A hostname is the account's to alias only once it holds the domain. The CLI looks the
+# domain up itself (GET /v5/domains/{host}) and goes to the registrar for a name the account
+# lacks, which is not served, so the refusal of an unheld name is held by the Go tests and
+# the SDK journey; here the account holds example.dev and the CLI aliases it.
+vc alias set "$url" example.dev
+vc alias rm example.dev --yes
+vcn domains rm example.dev --yes
+listed="$(vcn domains ls 2>&1)"
+case "$listed" in *example.dev*) fail "example.dev is still listed after domains rm: $listed" ;; esac
 vc ls
 vc project ls
 vc alias rm "$NAME-alias.vercel.app" --yes

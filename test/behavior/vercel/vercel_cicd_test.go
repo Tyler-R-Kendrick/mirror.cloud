@@ -71,6 +71,10 @@ func TestVercelCICDParity(t *testing.T) {
 		if err := rt.Deps.Clock.Advance(3 * time.Second); err != nil {
 			t.Fatal(err)
 		}
+		// The hostname is the account's to alias once it holds the domain.
+		if code, dom := call(http.MethodPost, "/v7/domains", `{"name":"cicd.example"}`); code != 200 {
+			t.Fatalf("hold the domain %d %#v", code, dom)
+		}
 		code, als := call(http.MethodPost, "/v2/deployments/"+did+"/aliases", `{"alias":"cicd.example"}`)
 		if code != 200 || als["alias"] != "cicd.example" {
 			t.Fatalf("assign %d %#v", code, als)

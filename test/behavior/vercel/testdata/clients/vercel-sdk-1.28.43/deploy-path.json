@@ -164,6 +164,57 @@
       "advance": "2s"
     },
     {
+      "name": "assignAlias to a domain the account does not hold",
+      "request": {
+        "method": "POST",
+        "path": "/v2/deployments/{{deploymentId}}/aliases",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "content-type": "application/json",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"alias\":\"sdk.example.test\"}"
+      },
+      "want": {
+        "status": 404,
+        "equals": {
+          "error.code": "domain_not_found"
+        }
+      },
+      "note": "A hostname is the account's to alias only once it holds the domain. This was accepted before, and the journey aliased without one."
+    },
+    {
+      "name": "createOrTransferDomain",
+      "request": {
+        "method": "POST",
+        "path": "/v7/domains",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "content-type": "application/json",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"sdk.example.test\",\"method\":\"add\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "domain.id"
+        ],
+        "equals": {
+          "domain.name": "sdk.example.test"
+        }
+      },
+      "note": "The SDK holds the domain with POST /v7/domains {method: add, name}, then assignAlias succeeds."
+    },
+    {
       "name": "assignAlias",
       "request": {
         "method": "POST",

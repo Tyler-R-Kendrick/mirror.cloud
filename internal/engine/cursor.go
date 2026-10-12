@@ -120,11 +120,14 @@ func parseCursor(v any) (cursor, error) {
 	return cursorOf(f)
 }
 
-// cursorOf reads a number as a cursor.
+// cursorOf reads a number as a cursor. A number past the range an integer and a
+// float64 share is the bound it is: every item is before 1e19 and after -1e19, and
+// converting it to a millisecond count would overflow into some other bound.
 func cursorOf(f float64) (cursor, error) {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return cursor{}, fmt.Errorf("the cursor %v is not a number: %s", f, cursorForm)
 	}
+	f = min(max(f, -maxCursorMS), maxCursorMS)
 	ms := math.Floor(f)
 	frac := f - ms
 	if frac == 0 {

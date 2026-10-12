@@ -529,7 +529,9 @@ compared with api.vercel.com.
   creations of each other (a creation counts for every listing that draws on its counter): a
   longer run is ambiguous at a page boundary again, and the page can repeat or skip an item
   there. A bare integer timestamp still means what it did (the items strictly before it for
-  `until`, after it for `since`), and anything that is not a number is a 400. Projects page
+  `until`, after it for `since`), a number past what a float64 holds as an integer (beyond
+  2^53 either way) is the bound it is, every item being before 1e19 and after -1e19, and
+  anything that is not a number is a 400. Projects page
   by creation, since that is the order of the listing (an update moves nothing in it); the
   document words `from` as "updated after". The paged listings are teams, projects,
   deployments (`/v6` and `/v7`), aliases, the account's domains, a project's domains and the

@@ -114,3 +114,35 @@ func TestNoCursorCutsNothingAndABadOneIsAnError(t *testing.T) {
 		}
 	}
 }
+
+// TestACursorBeyondTheRangeIsTheBoundItIs holds what converting a huge number to a
+// millisecond count used to overflow: 1e19 and the largest integer are after every
+// item, -1e19 and the smallest before every item.
+func TestACursorBeyondTheRangeIsTheBoundItIs(t *testing.T) {
+	item := entry{ms: today, seq: 3}
+	for _, in := range []string{"1e19", "9223372036854775807", "99999999999999999999", "1e300", "9007199254740993"} {
+		c, err := parseCursor(in)
+		if err != nil || !c.set || c.slot != 0 {
+			t.Fatalf("parseCursor(%q) = %+v, %v; want a bare timestamp", in, c, err)
+		}
+		b := bound{cursor: c}
+		if !b.olderThan(item) || b.newerThan(item) {
+			t.Errorf("%s: an item of today is older than it and not newer", in)
+		}
+	}
+	for _, in := range []string{"-1", "-1e19", "-9223372036854775808", "-1e300"} {
+		c, err := parseCursor(in)
+		if err != nil || !c.set || c.slot != 0 {
+			t.Fatalf("parseCursor(%q) = %+v, %v; want a bare timestamp", in, c, err)
+		}
+		b := bound{cursor: c}
+		if b.olderThan(item) || !b.newerThan(item) {
+			t.Errorf("%s: an item of today is newer than it and not older", in)
+		}
+	}
+	for _, in := range []string{"1e400", "-1e400"} {
+		if _, err := parseCursor(in); err == nil {
+			t.Errorf("parseCursor(%q) read a number that is not one a float64 holds", in)
+		}
+	}
+}

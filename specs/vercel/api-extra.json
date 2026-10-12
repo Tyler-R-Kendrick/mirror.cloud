@@ -902,7 +902,90 @@
             "type": "number"
           }
         }
+      },
+      "SupplementDuration": {
+        "type": "object",
+        "description": "How long a deployment took, in milliseconds. Nothing builds here, so nothing is timed and the object is empty.",
+        "properties": {
+          "endTime": {
+            "type": "number"
+          },
+          "endTimeCapped": {
+            "type": "number"
+          },
+          "startTime": {
+            "type": "number"
+          },
+          "timeForBilling": {
+            "type": "number"
+          },
+          "timeToContainerExit": {
+            "type": "number"
+          },
+          "timeToContainerExitCapped": {
+            "type": "number"
+          },
+          "timeToReady": {
+            "type": "number"
+          }
+        }
       }
     }
-  }
+  },
+  "x-mirror-members": [
+    {
+      "shape": "CreateDeploymentResponse.oneOf0",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "CreateDeploymentResponse.oneOf1",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "GetDeploymentResponse.oneOf0",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "GetDeploymentResponse.oneOf1",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "GetDeploymentResponse.oneOf2",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "CancelDeploymentResponse",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    }
+  ]
 }

@@ -84,6 +84,7 @@ func Fuse(ctx context.Context, provider model.Provider, in [][]model.Service) (m
 			}
 			merged := existing
 			merged.RouteAliases = append(append([]model.RouteAlias(nil), existing.RouteAliases...), svc.RouteAliases...)
+			merged.ShapeMembers = append(append([]model.ShapeMember(nil), existing.ShapeMembers...), svc.ShapeMembers...)
 			merged.Operations = merged.Operations[:0]
 			names := make([]string, 0, len(ops))
 			for n := range ops {
@@ -118,6 +119,9 @@ func Fuse(ctx context.Context, provider model.Provider, in [][]model.Service) (m
 	for _, id := range ids {
 		svc := byID[id]
 		if err := foldAliases(&svc); err != nil {
+			return model.Bundle{}, nil, err
+		}
+		if err := foldShapeMembers(&svc); err != nil {
 			return model.Bundle{}, nil, err
 		}
 		out.Services = append(out.Services, svc)
@@ -169,6 +173,48 @@ func foldAliases(svc *model.Service) error {
 		sort.Strings(svc.Operations[i].HTTP.AltURIs)
 	}
 	svc.RouteAliases = nil
+	return nil
+}
+
+// foldShapeMembers adds each ShapeMember to the structure it names and clears
+// the list. A member for a shape no fragment declares, for a shape that is not a
+// structure, or for a name the shape already has fails the build: each would be
+// a claim about the vendor's API that the model does not carry out, and the
+// last would silently choose between two descriptions of one member.
+func foldShapeMembers(svc *model.Service) error {
+	if len(svc.ShapeMembers) == 0 {
+		return nil
+	}
+	// A copy: the map belongs to the fragment fusion was handed, and writing
+	// into it would make fusing the same fragments twice give a different answer.
+	shapes := make(map[string]model.Shape, len(svc.Shapes))
+	for id, shape := range svc.Shapes {
+		shapes[id] = shape
+	}
+	svc.Shapes = shapes
+	for _, m := range svc.ShapeMembers {
+		shape, ok := svc.Shapes[m.Shape]
+		if !ok || (shape.Kind != model.KindStructure && shape.Kind != model.KindUnion) {
+			return fmt.Errorf("fusion: %s: member %s names shape %q, which no fragment declares as a structure", svc.ID, m.Name, m.Shape)
+		}
+		if _, dup := shape.Members[m.Name]; dup {
+			return fmt.Errorf("fusion: %s: shape %s already declares %s", svc.ID, m.Shape, m.Name)
+		}
+		if _, ok := svc.Shapes[m.Member.Shape]; !ok {
+			return fmt.Errorf("fusion: %s: member %s.%s names shape %q, which no fragment declares", svc.ID, m.Shape, m.Name, m.Member.Shape)
+		}
+		members := make(map[string]model.Member, len(shape.Members)+1)
+		for k, v := range shape.Members {
+			members[k] = v
+		}
+		members[m.Name] = m.Member
+		shape.Members = members
+		if len(shape.MemberOrder) > 0 {
+			shape.MemberOrder = append(append([]string(nil), shape.MemberOrder...), m.Name)
+		}
+		svc.Shapes[m.Shape] = shape
+	}
+	svc.ShapeMembers = nil
 	return nil
 }
 

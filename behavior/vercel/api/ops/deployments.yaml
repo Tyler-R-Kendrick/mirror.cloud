@@ -327,6 +327,10 @@ operations:
       build: "{'env': []}"
       projectSettings: rec.projectSettings
       buildSkipped: "false"
+      # The SDK (1.28.43) requires this object on every deployment it reads and
+      # every member inside it is optional. Nothing builds here, so nothing is
+      # timed: an empty object is the honest answer.
+      duration: "{}"
       isInConcurrentBuildsQueue: "false"
       isInSystemBuildsQueue: "false"
       # A production deployment is aliased to its project's own domain once it

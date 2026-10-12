@@ -720,3 +720,32 @@ func TestAliasesAreReadAndNeedASource(t *testing.T) {
 		}
 	}
 }
+
+func TestMembersAreReadAndNeedASource(t *testing.T) {
+	mk := func(members string) []byte {
+		return []byte(`{"openapi":"3.0.3","info":{"title":"t"},"x-mirror-service":"vendor.api","servers":[{"url":"https://api.example.com"}],"paths":{},"x-mirror-members":` + members + `}`)
+	}
+	svcs, err := (openapi.Receiver{}).Ingest(context.Background(), model.SourceRef{Path: "vendor/extra.json"},
+		mk(`[{"shape":"Thing","members":{"duration":{"type":"object","properties":{"startTime":{"type":"number"}}}},"source":"a client"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := svcs[0].ShapeMembers
+	if len(got) != 1 || got[0].Shape != "Thing" || got[0].Name != "duration" {
+		t.Fatalf("members read as %+v", got)
+	}
+	shape, ok := svcs[0].Shapes[got[0].Member.Shape]
+	if !ok || shape.Kind != model.KindStructure || shape.Members["startTime"].Shape == "" {
+		t.Fatalf("the member's shape %q is %+v", got[0].Member.Shape, shape)
+	}
+	for _, bad := range []string{
+		`[{"shape":"Thing","members":{"d":{"type":"object"}}}]`,               // no source
+		`[{"shape":"Thing","members":{},"source":"x"}]`,                       // no members
+		`[{"members":{"d":{"type":"object"}},"source":"x"}]`,                  // no shape
+		`[{"shape":"Thing","members":{"d":{"type":"object"}},"source":"  "}]`, // blank source
+	} {
+		if _, err := (openapi.Receiver{}).Ingest(context.Background(), model.SourceRef{Path: "vendor/extra.json"}, mk(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

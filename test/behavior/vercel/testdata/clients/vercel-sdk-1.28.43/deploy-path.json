@@ -1,0 +1,282 @@
+{
+  "client": "@vercel/sdk 1.28.43 (node v22.22.0, linux x64)",
+  "observed": "client-observed: recorded by a proxy between the real SDK and a running emulator (test/vercel-clients/sdk-journey.mjs). The SDK validates every answer against the schema generated from Vercel's document. Never compared with api.vercel.com.",
+  "steps": [
+    {
+      "name": "getAuthUser",
+      "request": {
+        "method": "GET",
+        "path": "/v2/user",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "user.id",
+          "user.email"
+        ]
+      }
+    },
+    {
+      "name": "createProject",
+      "request": {
+        "method": "POST",
+        "path": "/v11/projects",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "content-type": "application/json",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"framework\":\"vite\",\"name\":\"sdk-journey\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "name",
+          "framework"
+        ],
+        "equals": {
+          "name": "sdk-journey"
+        }
+      },
+      "capture": {
+        "projectId": "id"
+      }
+    },
+    {
+      "name": "createProjectEnv",
+      "request": {
+        "method": "POST",
+        "path": "/v10/projects/{{projectId}}/env",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "content-type": "application/json",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"key\":\"API_URL\",\"value\":\"https://api.example.test\",\"type\":\"plain\",\"target\":[\"production\",\"preview\"]}"
+      },
+      "want": {
+        "status": 201,
+        "members": [
+          "created.id",
+          "created.key"
+        ]
+      }
+    },
+    {
+      "name": "createDeployment",
+      "request": {
+        "method": "POST",
+        "path": "/v13/deployments",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "content-type": "application/json",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"files\":[{\"data\":\"<h1>sdk</h1>\",\"file\":\"index.html\"}],\"name\":\"sdk-journey\",\"project\":\"sdk-journey\",\"target\":\"production\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "url",
+          "readyState",
+          "duration",
+          "aliasAssigned"
+        ],
+        "equals": {
+          "readyState": "QUEUED"
+        }
+      },
+      "capture": {
+        "deploymentId": "id"
+      },
+      "note": "the SDK's schema requires duration on every deployment it reads; the pinned document does not list it (SDK 1.28.43, published after the document)"
+    },
+    {
+      "name": "getDeployment while building",
+      "request": {
+        "method": "GET",
+        "path": "/v13/deployments/{{deploymentId}}",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "duration",
+          "readyState"
+        ]
+      },
+      "advance": "1s"
+    },
+    {
+      "name": "getDeployment once ready",
+      "request": {
+        "method": "GET",
+        "path": "/v13/deployments/{{deploymentId}}",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "duration"
+        ],
+        "equals": {
+          "readyState": "READY"
+        }
+      },
+      "advance": "2s"
+    },
+    {
+      "name": "assignAlias",
+      "request": {
+        "method": "POST",
+        "path": "/v2/deployments/{{deploymentId}}/aliases",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "content-type": "application/json",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"alias\":\"sdk.example.test\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "uid",
+          "alias"
+        ],
+        "equals": {
+          "alias": "sdk.example.test"
+        }
+      }
+    },
+    {
+      "name": "addProjectDomain",
+      "request": {
+        "method": "POST",
+        "path": "/v10/projects/{{projectId}}/domains",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "content-type": "application/json",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"www.sdk.example.test\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "name",
+          "verified",
+          "verification.0.value"
+        ]
+      }
+    },
+    {
+      "name": "createEdgeConfig",
+      "request": {
+        "method": "POST",
+        "path": "/v1/global-config",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "content-type": "application/json",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"slug\":\"sdk_journey\",\"items\":{\"greeting\":\"hello\"}}"
+      },
+      "want": {
+        "status": 201,
+        "members": [
+          "id",
+          "slug"
+        ]
+      },
+      "capture": {
+        "edgeConfigId": "id"
+      }
+    },
+    {
+      "name": "deleteEdgeConfig",
+      "request": {
+        "method": "DELETE",
+        "path": "/v1/global-config/{{edgeConfigId}}",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 204
+      }
+    },
+    {
+      "name": "deleteProject",
+      "request": {
+        "method": "DELETE",
+        "path": "/v9/projects/{{projectId}}",
+        "headers": {
+          "user-agent": "speakeasy-sdk/typescript 1.28.43 2.946.0 0.0.1 @vercel/sdk",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 204
+      }
+    }
+  ]
+}

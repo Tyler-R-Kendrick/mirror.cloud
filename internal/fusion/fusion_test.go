@@ -94,3 +94,54 @@ func TestFuseFoldsRouteAliasesOntoTheirOperations(t *testing.T) {
 		t.Error("an alias landing on another operation's address was accepted")
 	}
 }
+
+func TestFuseFoldsShapeMembersOntoTheirShapes(t *testing.T) {
+	doc := []model.Service{{
+		ID: "vendor.api",
+		Shapes: map[string]model.Shape{
+			"Thing":       {ID: "Thing", Kind: model.KindStructure, Members: map[string]model.Member{"id": {Shape: "String"}}},
+			"Either":      {ID: "Either", Kind: model.KindUnion, Members: map[string]model.Member{"option0": {Shape: "Thing"}}},
+			"String":      {ID: "String", Kind: model.KindString},
+			"Scalar":      {ID: "Scalar", Kind: model.KindString},
+			"ThingTiming": {ID: "ThingTiming", Kind: model.KindStructure},
+		},
+	}}
+	extra := func(members ...model.ShapeMember) []model.Service {
+		return []model.Service{{ID: "vendor.api", ShapeMembers: members}}
+	}
+	fuse := func(parts ...[]model.Service) (model.Bundle, error) {
+		b, _, err := Fuse(context.Background(), model.ProviderAWS, parts)
+		return b, err
+	}
+
+	for _, order := range [][2]int{{0, 1}, {1, 0}} {
+		parts := [][]model.Service{doc, extra(model.ShapeMember{Shape: "Thing", Name: "duration", Member: model.Member{Shape: "ThingTiming"}})}
+		b, err := fuse(parts[order[0]], parts[order[1]])
+		if err != nil {
+			t.Fatal(err)
+		}
+		svc := b.Services[0]
+		if svc.ShapeMembers != nil {
+			t.Fatalf("members survived fusion: %v", svc.ShapeMembers)
+		}
+		got := svc.Shapes["Thing"].Members
+		if len(got) != 2 || got["duration"].Shape != "ThingTiming" || got["id"].Shape != "String" {
+			t.Fatalf("Thing has %+v", got)
+		}
+	}
+
+	// A union's variants are structures of their own; the union itself may
+	// not be told it has a member the variants lack.
+	if _, err := fuse(doc, extra(model.ShapeMember{Shape: "NoSuchShape", Name: "x", Member: model.Member{Shape: "String"}})); err == nil {
+		t.Error("a member for a shape nobody declares was accepted")
+	}
+	if _, err := fuse(doc, extra(model.ShapeMember{Shape: "String", Name: "x", Member: model.Member{Shape: "String"}})); err == nil {
+		t.Error("a member for a shape that is not a structure was accepted")
+	}
+	if _, err := fuse(doc, extra(model.ShapeMember{Shape: "Thing", Name: "id", Member: model.Member{Shape: "Scalar"}})); err == nil {
+		t.Error("a member the shape already declares was accepted")
+	}
+	if _, err := fuse(doc, extra(model.ShapeMember{Shape: "Thing", Name: "x", Member: model.Member{Shape: "NoSuchShape"}})); err == nil {
+		t.Error("a member of a shape nobody declares was accepted")
+	}
+}

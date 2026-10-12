@@ -102,6 +102,14 @@ type Service struct {
 	// so a generated model never carries one. Omitted when empty for the reason
 	// Hosts is.
 	RouteAliases []RouteAlias `json:",omitempty"`
+	// ShapeMembers are members a fragment adds to structures another fragment
+	// declared. A vendored document is pinned bytes and a client generated from
+	// a later revision of the vendor's API may require a member the pinned one
+	// never listed (the Vercel SDK reads `duration` off every deployment);
+	// the supplement says so here, with the source that establishes it, and
+	// fusion folds each onto its shape and clears the list. Omitted when empty
+	// for the reason Hosts is.
+	ShapeMembers []ShapeMember `json:",omitempty"`
 	Operations   []Operation
 	Shapes       map[string]Shape // shape ID -> shape
 	Source       SourceRef
@@ -144,6 +152,14 @@ type HTTPBinding struct {
 type RouteAlias struct {
 	Operation string
 	URI       string
+}
+
+// ShapeMember asks for Name to be a member of the structure Shape in the
+// service it is declared for. See Service.ShapeMembers.
+type ShapeMember struct {
+	Shape  string
+	Name   string
+	Member Member
 }
 
 // Pagination describes token-based paging members.

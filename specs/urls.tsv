@@ -22,8 +22,10 @@
 # the pin, so editing it is a visible diff -- what is gone is the ability to
 # notice that a VENDOR changed something, because no vendor publishes it.
 #
-# That is a real loss and the category is meant to stay almost empty. One entry
-# is in it. vercel.kv is the Vercel KV data plane, which is Upstash Redis on a
+# That is a real loss and the category was meant to stay almost empty. It began
+# with one entry, vercel.kv, and has grown past it: the rows below say which
+# documents are authored, and the vercel.api supplements are described beside
+# theirs. vercel.kv is the Vercel KV data plane, which is Upstash Redis on a
 # Vercel host: Upstash publishes OpenAPI for QStash, for Workflow and for the
 # management plane at api.upstash.com/v2, and for the command endpoint nothing;
 # Vercel's own document has blob-store management and no KV commands. Both

@@ -56,7 +56,7 @@
     },
     "vercel.api": {
       "source": "authored",
-      "ref": "2026-10-11T20:50:31Z"
+      "ref": "2026-10-11T21:32:03Z"
     },
     "vercel.kv": {
       "source": "authored",
@@ -1447,6 +1447,14 @@
       "path": "vercel/clients.json",
       "sha256": "1bdd2f380b118f849c59dbdeb55d8a146a8971c6da61af364dc886b0a183b6d0",
       "ingested": "2026-10-11T20:50:31Z"
+    },
+    {
+      "serviceId": "vercel.api",
+      "source": "authored",
+      "ref": "2026-10-11T21:32:03Z",
+      "path": "vercel/control.json",
+      "sha256": "d6ce0db6e66e5c894e0108f1a2d2133c6fe2960a97d00c0854a82c1871b74b40",
+      "ingested": "2026-10-11T21:32:03Z"
     },
     {
       "serviceId": "vercel.kv",

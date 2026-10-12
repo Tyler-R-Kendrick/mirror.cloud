@@ -136,3 +136,6 @@ func str(m map[string]any, key string) string {
 	s, _ := m[key].(string)
 	return s
 }
+
+// unmarshalJSON decodes a body that may be an array.
+func unmarshalJSON(raw []byte, into any) error { return json.Unmarshal(raw, into) }

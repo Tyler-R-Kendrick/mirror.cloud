@@ -101,20 +101,23 @@ func (s *Server) vercelPrologue(w http.ResponseWriter, r *http.Request, id *spi.
 		s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, f, rid)
 		return true
 	}
-	if strings.HasPrefix(r.URL.Path, vercelControlPrefix) {
-		return false // the control surface is not the API, so it is not refused like it
-	}
-	// The covenant says any credentials work, and by default none at all do. A
-	// client's own handling of "you are not signed in" is worth testing, so a
-	// deployment can ask for Vercel's refusals; they are the real ones (the CLI
-	// keys on the code and on invalidToken), not a new shape.
-	if s.cfg.VercelStrictAuth {
-		if f := vercelAuthFault(r); f != nil {
-			return refuse(f)
+	// The control surface is mirror's, not the API's: it takes no credential
+	// and is never rate limited, but it acts on the team it names like
+	// everything else does, or a test could not break a team's deployments.
+	if !strings.HasPrefix(r.URL.Path, vercelControlPrefix) {
+		// The covenant says any credentials work, and by default none at all
+		// do. A client's own handling of "you are not signed in" is worth
+		// testing, so a deployment can ask for Vercel's refusals; they are the
+		// real ones (the CLI keys on the code and on invalidToken), not a new
+		// shape.
+		if s.cfg.VercelStrictAuth {
+			if f := vercelAuthFault(r); f != nil {
+				return refuse(f)
+			}
 		}
-	}
-	if retryAfter, total, limited := s.vercelLimit.take(); limited {
-		return refuse(vercelRateLimited(s.deps.Clock.Now().Unix(), retryAfter, total))
+		if retryAfter, total, limited := s.vercelLimit.take(); limited {
+			return refuse(vercelRateLimited(s.deps.Clock.Now().Unix(), retryAfter, total))
+		}
 	}
 	// A request acts for a team when it says so, by id or by slug; otherwise it
 	// acts for the caller's own account. The engine scopes every record by the

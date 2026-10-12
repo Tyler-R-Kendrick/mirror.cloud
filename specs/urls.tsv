@@ -54,3 +54,4 @@ aws.appsync	appsync-graphql.json	authored
 aws.es	es-dataplane.json	authored
 aws.timestream	timestream-query.json	authored
 vercel.api	vercel/clients.json	authored
+vercel.api	vercel/control.json	authored

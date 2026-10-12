@@ -144,63 +144,6 @@ resources:
         ('environmentSlugOrId' in input && input.environmentSlugOrId != null) ? string(input.environmentSlugOrId)
           : (('slug' in input && input.slug != null) ? string(input.slug) : '')
 
-  deployment:
-    collection: vdeploy
-    # Keyed on uid, which is what the record carries; see the note below.
-    key: uid
-    id:
-      # No `generate`, for the reason the project has none, and with a second:
-      # a deployment costs TWO draws, the id and the six random bytes in its
-      # hostname, and they have to be drawn in that order. A resource generate
-      # cannot express the second at all.
-      # A get names it `idOrUrl` and a delete names it `id`; the first member
-      # the request carries is the one that addresses it.
-      input_members: [idOrUrl, id]
-    record:
-      # `uid` is the key itself, spelled `id` because that is what a record
-      # calls its own key. The one writer passes the key explicitly -- it has
-      # to, since the value is drawn by an effect and a record sees `input` and
-      # `id` but never `fx` -- and this carries it into the record, which is
-      # where the validator requires the key member to be set.
-      #
-      # `uid` and not `id`: the listed deployment's item shape declares uid,
-      # where the single-deployment response declares id. The pack stored both
-      # with the same value, which an unprojected list cannot do -- the record
-      # IS the item, so every member it carries has to be one the item shape
-      # declares. The two operations that answer `id` project it from here.
-      #
-      # Input-independent, as the project's is: CancelDeployment patches this
-      # resource, and `name` read from `input` would fail on a request that
-      # does not carry one. It lives on the create effect instead.
-      #
-      # readyState/state are views over __state. A create is born QUEUED;
-      # start_build (+1s) moves to BUILDING, finish_build (+2s) to READY.
-      # Cancel is reachable from QUEUED or BUILDING before finish_build.
-      uid: id
-      createdAt: "int(now) * 1000"
-      created: "int(now) * 1000"
-      type: "'LAMBDAS'"
-    views:
-      readyState: "string(rec.__state)"
-      state: "string(rec.__state)"
-    statechart:
-      initial: QUEUED
-      states:
-        QUEUED:
-          timers:
-            - { deadline: start_build, target: BUILDING }
-          on:
-            CANCEL: [{ target: CANCELED }]
-        BUILDING:
-          timers:
-            - { deadline: finish_build, target: READY }
-          on:
-            CANCEL: [{ target: CANCELED }]
-            FAIL: [{ target: ERROR }]
-        READY: {}
-        CANCELED: {}
-        ERROR: {}
-
   # A team is an account fixture: the vendored document has no create for one
   # (POST /v2/teams exists only in emulate's routes), so nothing here writes
   # one and a listing answers whatever records exist -- initially none. The
@@ -278,35 +221,6 @@ resources:
       uid: "''"
       deploymentId: "''"
 
-  # A deployment's build events, written by CreateDeployment (created,
-  # building, ready -- the three the oracle pushes) and CancelDeployment. The
-  # key is the deployment id plus a serial suffix so one flat collection holds
-  # every deployment's events in per-deployment order.
-  deployment_event:
-    collection: vdevent
-    id:
-      derive: "''"
-
-  # A deployment's file descriptors, from the create body's `files`. Keyed
-  # deployment id plus digest; the list filters on the record's deploymentId.
-  deployment_file:
-    collection: vdfile
-    id:
-      derive: "''"
-
-  # An uploaded file's registration, keyed by its digest -- which is how both
-  # writers name it: UploadFile carries it as the digest header, a deployment
-  # create as each file entry's `sha`.
-  file:
-    collection: vfile
-    id:
-      derive: >
-        ('x-vercel-digest' in input && input['x-vercel-digest'] != null) ? string(input['x-vercel-digest'])
-          : (('x-now-digest' in input && input['x-now-digest'] != null) ? string(input['x-now-digest']) : '')
-    record:
-      digest: id
-      contentType: "'application/octet-stream'"
-
 errors:
   BadRequest:
     code: bad_request
@@ -319,6 +233,12 @@ errors:
   Conflict:
     code: conflict
     http: 409
+    fault: client
+  # A deployment that names files nobody uploaded. The code and the `missing`
+  # list in the envelope are what every Vercel client uploads by.
+  MissingFiles:
+    code: missing_files
+    http: 400
     fault: client
   # The oracle's invite route answers a second 409 under its own code; the
   # generic Conflict stays for project names.
@@ -639,189 +559,6 @@ operations:
       verified: rec.verified
       createdAt: rec.createdAt
       updatedAt: rec.updatedAt
-
-  CreateDeployment:
-    reads:
-      # A deployment names its project by name, and creates it when there is
-      # none. The index answers whether there is.
-      by_name: { resource: project_name, key: "('project' in input && input.project != null) ? string(input.project) : (('name' in input && input.name != null) ? string(input.name) : '')" }
-    require:
-      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Deployment name is required" }
-    effects:
-      # Three draws, in this order, because that is the order the pack drew
-      # them and the recording gates every identifier after them: the project
-      # id ONLY when there is no project, then the deployment id, then the six
-      # bytes in the hostname. A generate effect binds under `fx` and rebinds
-      # neither `rec` nor `id`, where every write effect rebinds both -- and a
-      # generate carrying `when` does not draw at all when the guard is false,
-      # which is what keeps a deployment into an existing project costing two
-      # draws rather than three.
-      - generate: { bind: newproj, kind: hex, bytes: 12, when: "!by_name_found" }
-      - generate: { bind: depid, kind: hex, bytes: 16 }
-      - generate: { bind: host, kind: hex, bytes: 6 }
-      - put:
-          resource: project_name
-          when: "!by_name_found"
-          record:
-            project: "'prj_' + fx.newproj"
-      - create:
-          resource: project
-          key: "'prj_' + fx.newproj"
-          when: "!by_name_found"
-          record:
-            id: "'prj_' + fx.newproj"
-            name: "('project' in input && input.project != null) ? string(input.project) : string(input.name)"
-            # A deployment create carries no framework; the member stays null,
-            # which is what the resource record answered for it before the
-            # member moved onto the creates.
-            framework: "null"
-      # The sub-resource rows the oracle writes beside a deployment: one alias
-      # (the deployment's own URL), three build events, and a file descriptor
-      # per entry in the body's `files`, each with its digest registered. None
-      # of these draws -- the alias id reuses the deployment's draw and the
-      # event keys are serials -- so the recorded draw sequence is untouched.
-      - put:
-          resource: deployment_alias
-          key: "'als_' + fx.depid"
-          record:
-            uid: "'als_' + fx.depid"
-            alias: "string(input.name) + '-' + fx.host + '.vercel.app'"
-            deploymentId: "'dpl_' + fx.depid"
-            projectId: "by_name_found ? string(by_name.project) : 'prj_' + fx.newproj"
-      - put:
-          resource: deployment_alias_by_alias
-          key: "string(input.name) + '-' + fx.host + '.vercel.app'"
-          record:
-            uid: "'als_' + fx.depid"
-            deploymentId: "'dpl_' + fx.depid"
-      - put:
-          resource: deployment_event
-          key: "'dpl_' + fx.depid + ':1'"
-          record:
-            deploymentId: "'dpl_' + fx.depid"
-            type: "'created'"
-            payload: "{'text': 'Deployment created'}"
-            date: "int(now) * 1000"
-            serial: "'1'"
-      - put:
-          resource: deployment_event
-          key: "'dpl_' + fx.depid + ':2'"
-          record:
-            deploymentId: "'dpl_' + fx.depid"
-            type: "'building'"
-            payload: "{'text': 'Building'}"
-            date: "int(now) * 1000"
-            serial: "'2'"
-      - put:
-          resource: deployment_event
-          key: "'dpl_' + fx.depid + ':3'"
-          record:
-            deploymentId: "'dpl_' + fx.depid"
-            type: "'ready'"
-            payload: "{'text': 'Deployment ready'}"
-            date: "int(now) * 1000"
-            serial: "'3'"
-      # An entry the oracle skips -- no path or no digest -- is skipped here
-      # too, and the two writes share the guard so they never disagree.
-      - put:
-          resource: file
-          for_each: "('files' in input && input.files != null) ? input.files : []"
-          key: "string(item.sha)"
-          when: "'sha' in item && item.sha != null && string(item.sha) != '' && 'file' in item && item.file != null && string(item.file) != ''"
-          record:
-            size: "('size' in item && item.size != null) ? int(item.size) : 0"
-      - put:
-          resource: deployment_file
-          for_each: "('files' in input && input.files != null) ? input.files : []"
-          key: "'dpl_' + fx.depid + ':' + string(item.sha)"
-          when: "'sha' in item && item.sha != null && string(item.sha) != '' && 'file' in item && item.file != null && string(item.file) != ''"
-          record:
-            uid: "'f_' + string(item.sha)"
-            deploymentId: "'dpl_' + fx.depid"
-            name: "string(item.file)"
-            type: "'file'"
-            mode: "420"
-            contentType: "'application/octet-stream'"
-      - create:
-          resource: deployment
-          key: "'dpl_' + fx.depid"
-          # Born QUEUED; start_build at +1s, finish_build at +2s so BUILDING
-          # is observable between advances and CANCEL still works from there.
-          # Create answer stays QUEUED until the clock moves; cancel is
-          # reachable before start_build. Advance(2s) settles to READY.
-          state: "'QUEUED'"
-          deadline: { name: start_build, after: "seconds(1)" }
-          record:
-            # `name` lives here rather than on the resource, because the
-            # resource record must stay input-independent: CancelDeployment's
-            # patch re-evaluates it.
-            name: "string(input.name)"
-            # Six random bytes in the hostname, which is what makes two
-            # deployments of one project addressable apart.
-            url: "string(input.name) + '-' + fx.host + '.vercel.app'"
-            projectId: "by_name_found ? string(by_name.project) : 'prj_' + fx.newproj"
-      - patch:
-          resource: deployment
-          key: "'dpl_' + fx.depid"
-          deadline: { name: finish_build, after: "seconds(2)" }
-          record:
-            uid: id
-    output:
-      # `id` from `uid`, because the record is also the listed item and the
-      # item shape declares uid where this response declares id.
-      id: rec.uid
-      name: rec.name
-      url: rec.url
-      projectId: rec.projectId
-      readyState: "string(rec.__state)"
-      type: rec.type
-      createdAt: rec.createdAt
-
-  GetDeployments:
-    list: { resource: deployment, member: deployments }
-    output:
-      # Projected: the raw row carries __state/__deadlines, and readyState is
-      # a view. Listing must match GetDeployment after the same settle.
-      deployments: >
-        items.map(i, {'uid': i.uid, 'name': i.name, 'url': i.url,
-          'projectId': i.projectId, 'readyState': string(i.__state),
-          'state': string(i.__state), 'type': i.type,
-          'createdAt': i.createdAt, 'created': i.created})
-      pagination: "{'count': size(items)}"
-
-  GetDeployment:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: dep.uid
-      name: dep.name
-      url: dep.url
-      projectId: dep.projectId
-      readyState: "string(dep.__state)"
-      type: dep.type
-      createdAt: dep.createdAt
-
-  DeleteDeployment:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      # Cascade: aliases/events/files plus CI/CD children scoped under this
-      # deployment (checks, check-runs, runtime logs).
-      - delete: { resource: deployment_alias_by_alias, where: "item.deploymentId == string(dep.uid)" }
-      - delete: { resource: deployment_alias, where: "item.deploymentId == string(dep.uid)" }
-      - delete: { resource: deployment_event, where: "item.deploymentId == string(dep.uid)" }
-      - delete: { resource: deployment_file, where: "item.deploymentId == string(dep.uid)" }
-      - delete: { resource: check, where: "true" }
-      - delete: { resource: check_run, where: "true" }
-      - delete: { resource: runtime_log, where: "true" }
-      - delete: { resource: deployment }
-    output:
-      uid: dep.uid
-      state: "'DELETED'"
 
   # The twelve below have no pack behind them: the pack never served them, so
   # there was nothing to transcribe. Each is written from the document alone
@@ -1383,97 +1120,6 @@ operations:
       # omitted, as the oracle omits it.
       aliases: "items.map(a, {'uid': a.uid, 'alias': a.alias})"
 
-  GetDeploymentEvents:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    list:
-      resource: deployment_event
-      member: _list
-      filter: "item.deploymentId == string(dep.uid)"
-    output:
-      # The store orders by key, which is serial order; the oracle's default
-      # direction is backward -- newest first -- so the projection reverses.
-      # `direction`, `limit` and the rest are accepted and read by nothing,
-      # as GetProjects' pagination members are.
-      _list: "indices(items).map(i, items[size(items) - 1 - i]).map(e, {'type': e.type, 'payload': e.payload, 'date': e.date, 'serial': e.serial})"
-
-  ListDeploymentFiles:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      # The tree's root node carries a drawn uid, as the oracle's does.
-      - generate: { bind: root, kind: hex, bytes: 10 }
-    list:
-      resource: deployment_file
-      member: _list
-      filter: "item.deploymentId == string(dep.uid)"
-    output:
-      # The document answers a bare FileTree array where the oracle wraps the
-      # same tree in {files: [...]}; the document wins, as it does everywhere
-      # here. The tree is flat -- paths are not split into directory nodes the
-      # way the oracle splits them -- which `quirks` records.
-      _list: >
-        [{'uid': 'file_' + fx.root, 'name': '/', 'type': 'directory', 'mode': 16877, 'contentType': null,
-          'children': items.map(f, {'uid': f.uid, 'name': f.name, 'type': 'file', 'mode': f.mode, 'contentType': f.contentType, 'children': []})}]
-
-  CancelDeployment:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      # Cancel is legal only while the chart is still in QUEUED or BUILDING.
-      # A create answer is QUEUED; after the clock advances, get/list settle to
-      # READY and cancel answers 400 -- which is what the oracle corpus hits.
-      - { cond: "dep.__state == 'QUEUED' || dep.__state == 'BUILDING'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
-    effects:
-      - put:
-          resource: deployment_event
-          key: "string(dep.uid) + ':canceled'"
-          record:
-            deploymentId: "string(dep.uid)"
-            type: "'canceled'"
-            payload: "{'text': 'Deployment canceled'}"
-            date: "int(now) * 1000"
-            serial: "string(int(now) * 1000)"
-      - send_event:
-          resource: deployment
-          key: "string(dep.uid)"
-          event: CANCEL
-      # Rebind rec after send_event (which loads its own copy) and stamp canceledAt.
-      - patch:
-          resource: deployment
-          key: "string(dep.uid)"
-          record:
-            uid: id
-            canceledAt: "int(now) * 1000"
-    output:
-      id: rec.uid
-      name: rec.name
-      url: rec.url
-      projectId: rec.projectId
-      readyState: "string(rec.__state)"
-      type: rec.type
-      createdAt: rec.createdAt
-      canceledAt: "('canceledAt' in rec) ? rec.canceledAt : int(now) * 1000"
-
-  UploadFile:
-    require:
-      - { cond: "('x-vercel-digest' in input && input['x-vercel-digest'] != null && string(input['x-vercel-digest']) != '') || ('x-now-digest' in input && input['x-now-digest'] != null && string(input['x-now-digest']) != '')", error: BadRequest, message: "Missing x-vercel-digest header" }
-    effects:
-      # A re-upload of a known digest merges where the oracle keeps the first
-      # registration; the quirk records it.
-      - put:
-          resource: file
-          record:
-            size: "('Content-Length' in input && input['Content-Length'] != null) ? int(input['Content-Length']) : 0"
-    # No output: the document's 200 is a oneOf of {urls: [...]} and an empty
-    # object, and the oracle answers a bare empty array, which is neither. The
-    # empty object is the one arm the model can serialize.
-
   ListPromoteAliases:
     reads:
       # The label is spelled `projectId`, as RequestPromote's is, so the index
@@ -1687,18 +1333,6 @@ operations:
     # The oracle's constant: registration is closed.
     output:
       registration: "false"
-
-  GetDeploymentsV6:
-    # The v6 listing is the v7 listing: the oracle serves both versions from
-    # one handler, and the vendored document declares only v7.
-    list: { resource: deployment, member: deployments }
-    output:
-      deployments: >
-        items.map(i, {'uid': i.uid, 'name': i.name, 'url': i.url,
-          'projectId': i.projectId, 'readyState': string(i.__state),
-          'state': string(i.__state), 'type': i.type,
-          'createdAt': i.createdAt, 'created': i.created})
-      pagination: "{'count': size(items)}"
 
   GetProjectEnv:
     reads:
@@ -1928,14 +1562,6 @@ operations:
             uid: id
             protectionBypass: "('protectionBypass' in input && input.protectionBypass != null) ? input.protectionBypass : {}"
     # Document declares an empty response.
-    output: {}
-
-  GetDeploymentFileContents:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    # Empty body: UploadFile stores size only. Quirk: contents are not retained.
     output: {}
 
   RequestRollback:

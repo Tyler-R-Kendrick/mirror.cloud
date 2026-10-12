@@ -2,7 +2,7 @@
   "schema": "trace/1",
   "service": "vercel.api",
   "source": "pack:internal/services/vercel/api",
-  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.\n\nMost steps carry recorded_as, because the pack invented names for operations the document already names: GetUser for GetAuthUser, ListProjects for GetProjects, ListProjectEnv for FilterProjectEnvs, DeleteProjectEnv for RemoveProjectEnv, ListProjectDomains for GetProjectDomains, ListDeployments for GetDeployments. `operation` is what the replay invokes; `recorded_as` is the pack operation the expectation came from.\n\nInput members were renamed the same way, and there is no field to say so, so it is said here. The pack read a project from `id` where the document calls that label `idOrName`; it read an environment variable from `envId` where the document calls it `id`; and it read a deployment from `id` where a get calls it `idOrUrl`. Everything else -- name, framework, key, value, type, target, project -- the pack and the document already agreed on. The recorder that drove the pack and applied both renames went with the pack, because it imported it.\n\nCreateProjectEnv's members arrive splatted rather than under `body`, which is how the REST/JSON codec delivers a structure payload: it unmarshals the body into the input map. That is why a required payload member absent from the input is not a validation failure.\n\nThe KV half of the same pack is recorded separately as vercel.kv, because it was always a different product on a different host.\n\nSteps 41 onward are authored, not recorded: the pack never served the twelve operations they cover (UpdateProject through RequestPromote), so there was nothing to record them from. Their expected outputs are the bundle's own answers, frozen in place -- including the identifiers its deterministic draw sequence produces after the 41 recorded steps -- so a regression in those operations fails here and not only in the behavior tests. The provenance is weaker by construction, and it is stated rather than smoothed over: the recorded steps gate the bundle against the pack, and these gate it against itself.\n\nSteps 74 onward are authored for the emulate-widening: teams, the deployment sub-resources (aliases, events, files, cancel), upload registration, promote aliases and protection bypass. Like the 41-73 block they freeze the bundle's own answers -- teams included, whose happy paths are unreachable because the vendored document declares no team create, so their steps are the faults.\n",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real Vercel API; a probe run replaces cells with observed evidence and cites the cassette.\n\nMost steps carry recorded_as, because the pack invented names for operations the document already names: GetUser for GetAuthUser, ListProjects for GetProjects, ListProjectEnv for FilterProjectEnvs, DeleteProjectEnv for RemoveProjectEnv, ListProjectDomains for GetProjectDomains, ListDeployments for GetDeployments. `operation` is what the replay invokes; `recorded_as` is the pack operation the expectation came from.\n\nInput members were renamed the same way, and there is no field to say so, so it is said here. The pack read a project from `id` where the document calls that label `idOrName`; it read an environment variable from `envId` where the document calls it `id`; and it read a deployment from `id` where a get calls it `idOrUrl`. Everything else -- name, framework, key, value, type, target, project -- the pack and the document already agreed on. The recorder that drove the pack and applied both renames went with the pack, because it imported it.\n\nCreateProjectEnv's members arrive splatted rather than under `body`, which is how the REST/JSON codec delivers a structure payload: it unmarshals the body into the input map. That is why a required payload member absent from the input is not a validation failure.\n\nThe KV half of the same pack is recorded separately as vercel.kv, because it was always a different product on a different host.\n\nSteps 41 onward are authored, not recorded: the pack never served the twelve operations they cover (UpdateProject through RequestPromote), so there was nothing to record them from. Their expected outputs are the bundle's own answers, frozen in place -- including the identifiers its deterministic draw sequence produces after the 41 recorded steps -- so a regression in those operations fails here and not only in the behavior tests. The provenance is weaker by construction, and it is stated rather than smoothed over: the recorded steps gate the bundle against the pack, and these gate it against itself.\n\nSteps 74 onward are authored for the emulate-widening: teams, the deployment sub-resources (aliases, events, files, cancel), upload registration, promote aliases and protection bypass. Like the 41-73 block they freeze the bundle's own answers -- teams included, whose happy paths are unreachable because the vendored document declares no team create, so their steps are the faults.\n\nTwo inputs were changed when deployments learned the upload protocol, and they are the only inputs in this file that were: step 79 named a file by a digest nobody had uploaded (`aa11bb22cc33dd44`), which the real protocol refuses with 400 missing_files and the list of what to upload, so it now inlines the file (`data`, hashed server side); step 88 uploaded with a digest that was not the SHA-1 of the (empty) body, which the server now checks, so it carries the SHA-1 of the empty file. Each answer that moved with them is re-cut, with the reason on the step.",
   "steps": [
     {
       "operation": "GetAuthUser",
@@ -645,23 +645,48 @@
         "Project": ""
       },
       "output": {
-        "created": 0,
+        "alias": [],
+        "aliasAssigned": false,
+        "aliasError": null,
+        "bootedAt": 0,
+        "build": {
+          "env": []
+        },
+        "buildSkipped": false,
+        "buildingAt": 1000,
         "createdAt": 0,
+        "createdIn": "iad1",
+        "creator": {
+          "type": "user",
+          "uid": "usr_000000000000",
+          "username": "test"
+        },
+        "env": [],
         "id": "dpl_83d4958a39f75457",
+        "inspectorUrl": null,
+        "isInConcurrentBuildsQueue": false,
+        "isInSystemBuildsQueue": false,
+        "meta": {},
         "name": "web",
+        "ownerId": "000000000000",
+        "plan": "hobby",
         "projectId": "prj_7c5891299f64",
-        "readyState": "READY",
-        "state": "READY",
+        "projectSettings": {
+          "framework": "nextjs"
+        },
+        "public": false,
+        "readyState": "QUEUED",
+        "regions": [
+          "iad1"
+        ],
+        "routes": null,
+        "status": "QUEUED",
+        "target": null,
         "type": "LAMBDAS",
-        "uid": "dpl_83d4958a39f75457",
-        "url": "web-100aa4.vercel.app"
+        "url": "web-100aa4.vercel.app",
+        "version": 2
       },
-      "superseded_members": {
-        "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "The vendored document's deployment object (specs/vercel/api.json, POST /v13/deployments, 200) requires 27 members the pack never sent -- aliasAssigned, bootedAt, build, buildSkipped, buildingAt, createdIn, creator, env, inspectorUrl, isInConcurrentBuildsQueue, isInSystemBuildsQueue, meta, ownerId, plan, projectSettings, public, regions, routes, status, version -- and a client generated from it reads them. The members the pack did send keep their recorded values."
     },
     {
       "operation": "CreateDeployment",
@@ -676,23 +701,48 @@
         "Project": ""
       },
       "output": {
-        "created": 0,
+        "alias": [],
+        "aliasAssigned": false,
+        "aliasError": null,
+        "bootedAt": 0,
+        "build": {
+          "env": []
+        },
+        "buildSkipped": false,
+        "buildingAt": 1000,
         "createdAt": 0,
+        "createdIn": "iad1",
+        "creator": {
+          "type": "user",
+          "uid": "usr_000000000000",
+          "username": "test"
+        },
+        "env": [],
         "id": "dpl_4da7b6a4902c3235",
+        "inspectorUrl": null,
+        "isInConcurrentBuildsQueue": false,
+        "isInSystemBuildsQueue": false,
+        "meta": {},
         "name": "ghost",
+        "ownerId": "000000000000",
+        "plan": "hobby",
         "projectId": "prj_3ed10eca83a2",
-        "readyState": "READY",
-        "state": "READY",
+        "projectSettings": {
+          "framework": null
+        },
+        "public": false,
+        "readyState": "QUEUED",
+        "regions": [
+          "iad1"
+        ],
+        "routes": null,
+        "status": "QUEUED",
+        "target": null,
         "type": "LAMBDAS",
-        "uid": "dpl_4da7b6a4902c3235",
-        "url": "ghost-e7175e.vercel.app"
+        "url": "ghost-e7175e.vercel.app",
+        "version": 2
       },
-      "superseded_members": {
-        "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "As step 26: the deployment object's required members, from the vendored document."
     },
     {
       "operation": "CreateDeployment",
@@ -744,23 +794,48 @@
         "Project": ""
       },
       "output": {
-        "created": 0,
+        "alias": [],
+        "aliasAssigned": false,
+        "aliasError": null,
+        "bootedAt": 0,
+        "build": {
+          "env": []
+        },
+        "buildSkipped": false,
+        "buildingAt": 1000,
         "createdAt": 0,
+        "createdIn": "iad1",
+        "creator": {
+          "type": "user",
+          "uid": "usr_000000000000",
+          "username": "test"
+        },
+        "env": [],
         "id": "dpl_83d4958a39f75457",
+        "inspectorUrl": null,
+        "isInConcurrentBuildsQueue": false,
+        "isInSystemBuildsQueue": false,
+        "meta": {},
         "name": "web",
+        "ownerId": "000000000000",
+        "plan": "hobby",
         "projectId": "prj_7c5891299f64",
-        "readyState": "READY",
-        "state": "READY",
+        "projectSettings": {
+          "framework": "nextjs"
+        },
+        "public": false,
+        "readyState": "QUEUED",
+        "regions": [
+          "iad1"
+        ],
+        "routes": null,
+        "status": "QUEUED",
+        "target": null,
         "type": "LAMBDAS",
-        "uid": "dpl_83d4958a39f75457",
-        "url": "web-100aa4.vercel.app"
+        "url": "web-100aa4.vercel.app",
+        "version": 2
       },
-      "superseded_members": {
-        "created": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "uid": "Not a member CreateDeploymentResponse or GetDeploymentResponse declares. The pack stored `uid`, `state` and `created` beside `id`, `readyState` and `createdAt` and answered all six; the document declares the second three for a single deployment and the first three only on a LISTED deployment, whose item shape is a different shape. The record carries `uid`, `state` and `created` because it IS that listed item, and the two single-deployment responses project the three the document declares.",
-        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "As step 26: GET /v13/deployments/{idOrUrl} answers the same object."
     },
     {
       "operation": "GetDeployment",
@@ -793,43 +868,58 @@
       "output": {
         "deployments": [
           {
+            "aliasAssigned": false,
+            "buildingAt": 1000,
             "created": 0,
             "createdAt": 0,
-            "id": "dpl_4da7b6a4902c3235",
+            "creator": {
+              "type": "user",
+              "uid": "usr_000000000000",
+              "username": "test"
+            },
+            "inspectorUrl": null,
+            "meta": {},
             "name": "ghost",
             "projectId": "prj_3ed10eca83a2",
-            "readyState": "READY",
-            "state": "READY",
+            "readyState": "QUEUED",
+            "source": "cli",
+            "state": "QUEUED",
+            "target": null,
             "type": "LAMBDAS",
             "uid": "dpl_4da7b6a4902c3235",
             "url": "ghost-e7175e.vercel.app"
           },
           {
+            "aliasAssigned": false,
+            "buildingAt": 1000,
             "created": 0,
             "createdAt": 0,
-            "id": "dpl_83d4958a39f75457",
+            "creator": {
+              "type": "user",
+              "uid": "usr_000000000000",
+              "username": "test"
+            },
+            "inspectorUrl": null,
+            "meta": {},
             "name": "web",
             "projectId": "prj_7c5891299f64",
-            "readyState": "READY",
-            "state": "READY",
+            "readyState": "QUEUED",
+            "source": "cli",
+            "state": "QUEUED",
+            "target": null,
             "type": "LAMBDAS",
             "uid": "dpl_83d4958a39f75457",
             "url": "web-100aa4.vercel.app"
           }
         ],
         "pagination": {
-          "count": 2
+          "count": 2,
+          "next": null,
+          "prev": null
         }
       },
       "recorded_as": "ListDeployments",
-      "superseded_members": {
-        "deployments[0].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it.",
-        "deployments[1].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it.",
-        "deployments[0].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[1].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[0].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[1].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "The vendored document's listed deployment (GET /v7/deployments, 200) requires creator, inspectorUrl and the pagination cursors next and prev, which the pack never sent; the members it did send keep their recorded values."
     },
     {
       "operation": "DeleteDeployment",
@@ -885,28 +975,36 @@
       "output": {
         "deployments": [
           {
+            "aliasAssigned": false,
+            "buildingAt": 1000,
             "created": 0,
             "createdAt": 0,
-            "id": "dpl_4da7b6a4902c3235",
+            "creator": {
+              "type": "user",
+              "uid": "usr_000000000000",
+              "username": "test"
+            },
+            "inspectorUrl": null,
+            "meta": {},
             "name": "ghost",
             "projectId": "prj_3ed10eca83a2",
-            "readyState": "READY",
-            "state": "READY",
+            "readyState": "QUEUED",
+            "source": "cli",
+            "state": "QUEUED",
+            "target": null,
             "type": "LAMBDAS",
             "uid": "dpl_4da7b6a4902c3235",
             "url": "ghost-e7175e.vercel.app"
           }
         ],
         "pagination": {
-          "count": 1
+          "count": 1,
+          "next": null,
+          "prev": null
         }
       },
       "recorded_as": "ListDeployments",
-      "superseded_members": {
-        "deployments[0].id": "The listed deployment's item shape declares `uid` and not `id`. The pack stored both with the same value and its listing answered both; a bundle's listing is the record itself, so every member in it has to be one the item shape declares. The identifier is still gated -- it is `uid` in the same row, and every step that addresses a deployment afterwards goes through it.",
-        "deployments[0].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[0].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "As step 32."
     },
     {
       "operation": "DeleteProject",
@@ -1673,17 +1771,48 @@
         "Project": ""
       },
       "output": {
+        "alias": [],
+        "aliasAssigned": false,
+        "aliasError": null,
+        "bootedAt": 0,
+        "build": {
+          "env": []
+        },
+        "buildSkipped": false,
+        "buildingAt": 1000,
         "createdAt": 0,
+        "createdIn": "iad1",
+        "creator": {
+          "type": "user",
+          "uid": "usr_000000000000",
+          "username": "test"
+        },
+        "env": [],
         "id": "dpl_71a868c4bfb93e84",
+        "inspectorUrl": null,
+        "isInConcurrentBuildsQueue": false,
+        "isInSystemBuildsQueue": false,
+        "meta": {},
         "name": "web2",
+        "ownerId": "000000000000",
+        "plan": "hobby",
         "projectId": "prj_77df676fe2a7",
-        "readyState": "READY",
+        "projectSettings": {
+          "framework": "astro"
+        },
+        "public": false,
+        "readyState": "QUEUED",
+        "regions": [
+          "iad1"
+        ],
+        "routes": null,
+        "status": "QUEUED",
+        "target": null,
         "type": "LAMBDAS",
-        "url": "web2-34ee92.vercel.app"
+        "url": "web2-34ee92.vercel.app",
+        "version": 2
       },
-      "superseded_members": {
-        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "As step 26: the deployment object's required members, from the vendored document."
     },
     {
       "operation": "RequestPromote",
@@ -1789,8 +1918,8 @@
     {
       "operation": "PatchTeam",
       "input": {
-        "teamId": "team_nope",
-        "name": "x"
+        "name": "x",
+        "teamId": "team_nope"
       },
       "identity": {
         "Account": "000000000000",
@@ -1808,12 +1937,12 @@
     {
       "operation": "InviteUserToTeam",
       "input": {
-        "teamId": "team_nope",
         "body": [
           {
             "email": "a@b.c"
           }
-        ]
+        ],
+        "teamId": "team_nope"
       },
       "identity": {
         "Account": "000000000000",
@@ -1852,15 +1981,14 @@
     {
       "operation": "CreateDeployment",
       "input": {
-        "name": "orb",
-        "project": "orb",
         "files": [
           {
-            "file": "index.html",
-            "sha": "aa11bb22cc33dd44",
-            "size": 42
+            "data": "hello",
+            "file": "index.html"
           }
-        ]
+        ],
+        "name": "orb",
+        "project": "orb"
       },
       "identity": {
         "Account": "000000000000",
@@ -1870,17 +1998,48 @@
         "Project": ""
       },
       "output": {
+        "alias": [],
+        "aliasAssigned": false,
+        "aliasError": null,
+        "bootedAt": 0,
+        "build": {
+          "env": []
+        },
+        "buildSkipped": false,
+        "buildingAt": 1000,
         "createdAt": 0,
+        "createdIn": "iad1",
+        "creator": {
+          "type": "user",
+          "uid": "usr_000000000000",
+          "username": "test"
+        },
+        "env": [],
         "id": "dpl_842605a09b0619a8",
+        "inspectorUrl": null,
+        "isInConcurrentBuildsQueue": false,
+        "isInSystemBuildsQueue": false,
+        "meta": {},
         "name": "orb",
+        "ownerId": "000000000000",
+        "plan": "hobby",
         "projectId": "prj_39bb7163b1cb",
-        "readyState": "READY",
+        "projectSettings": {
+          "framework": null
+        },
+        "public": false,
+        "readyState": "QUEUED",
+        "regions": [
+          "iad1"
+        ],
+        "routes": null,
+        "status": "QUEUED",
+        "target": null,
         "type": "LAMBDAS",
-        "url": "orb-a0e8b5.vercel.app"
+        "url": "orb-a0e8b5.vercel.app",
+        "version": 2
       },
-      "superseded_members": {
-        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "As step 26, and the file is inlined (see the file's note): the answer is the same deployment object."
     },
     {
       "operation": "ListDeploymentAliases",
@@ -1900,8 +2059,8 @@
       "output": {
         "aliases": [
           {
-            "uid": "als_842605a09b0619a8",
-            "alias": "orb-a0e8b5.vercel.app"
+            "alias": "orb-a0e8b5.vercel.app",
+            "uid": "als_842605a09b0619a8"
           }
         ]
       }
@@ -1924,31 +2083,24 @@
       "output": {
         "_list": [
           {
-            "date": 0,
+            "created": 0,
             "payload": {
-              "text": "Deployment ready"
+              "date": 0,
+              "deploymentId": "dpl_842605a09b0619a8",
+              "id": "dpl_842605a09b0619a8:1",
+              "info": {
+                "name": "bld_842605a09b0619a8",
+                "readyState": "QUEUED",
+                "type": "build"
+              },
+              "serial": "001",
+              "text": "Deployment queued"
             },
-            "serial": "3",
-            "type": "ready"
-          },
-          {
-            "date": 0,
-            "payload": {
-              "text": "Building"
-            },
-            "serial": "2",
-            "type": "building"
-          },
-          {
-            "date": 0,
-            "payload": {
-              "text": "Deployment created"
-            },
-            "serial": "1",
-            "type": "created"
+            "type": "deployment-state"
           }
         ]
-      }
+      },
+      "recut": "The vendored document's events are deployment-state, stdout and stderr rows with a payload {deploymentId, id, date, serial, info, text}, oldest first, derived from the states the deployment reached; the pack's {type: created|building|ready} rows newest first are not in it."
     },
     {
       "operation": "ListDeploymentFiles",
@@ -1971,21 +2123,21 @@
             "children": [
               {
                 "children": [],
-                "contentType": "application/octet-stream",
+                "contentType": "text/html",
                 "mode": 420,
                 "name": "index.html",
                 "type": "file",
-                "uid": "f_aa11bb22cc33dd44"
+                "uid": "f_aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"
               }
             ],
-            "contentType": null,
             "mode": 16877,
             "name": "/",
             "type": "directory",
             "uid": "file_9434407c2d"
           }
         ]
-      }
+      },
+      "recut": "The file's identifier is the SHA-1 of its bytes, the name an upload is made under, and a directory carries no contentType: the document types it a string and does not allow null."
     },
     {
       "operation": "CancelDeployment",
@@ -2002,16 +2154,50 @@
         "ARN": "",
         "Project": ""
       },
-      "superseded_members": {
-        "id": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
-        "name": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
-        "url": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
-        "projectId": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
-        "readyState": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
-        "type": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
-        "createdAt": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted.",
-        "canceledAt": "Cancel while QUEUED succeeds and answers the canceled deployment; the pack always faulted."
-      }
+      "output": {
+        "alias": [],
+        "aliasAssigned": false,
+        "aliasError": null,
+        "bootedAt": 0,
+        "build": {
+          "env": []
+        },
+        "buildSkipped": false,
+        "buildingAt": 1000,
+        "canceledAt": 0,
+        "createdAt": 0,
+        "createdIn": "iad1",
+        "creator": {
+          "type": "user",
+          "uid": "usr_000000000000",
+          "username": "test"
+        },
+        "env": [],
+        "id": "dpl_842605a09b0619a8",
+        "inspectorUrl": null,
+        "isInConcurrentBuildsQueue": false,
+        "isInSystemBuildsQueue": false,
+        "meta": {},
+        "name": "orb",
+        "ownerId": "000000000000",
+        "plan": "hobby",
+        "projectId": "prj_39bb7163b1cb",
+        "projectSettings": {
+          "framework": null
+        },
+        "public": false,
+        "readyState": "CANCELED",
+        "regions": [
+          "iad1"
+        ],
+        "routes": null,
+        "status": "CANCELED",
+        "target": null,
+        "type": "LAMBDAS",
+        "url": "orb-a0e8b5.vercel.app",
+        "version": 2
+      },
+      "recut": "As step 26: PATCH /v12/deployments/{id}/cancel answers the deployment object."
     },
     {
       "operation": "CancelDeployment",
@@ -2070,34 +2256,71 @@
       "output": {
         "_list": [
           {
-            "date": 0,
+            "created": 0,
             "payload": {
-              "text": "Deployment ready"
+              "date": 0,
+              "deploymentId": "dpl_842605a09b0619a8",
+              "id": "dpl_842605a09b0619a8:1",
+              "info": {
+                "name": "bld_842605a09b0619a8",
+                "readyState": "QUEUED",
+                "type": "build"
+              },
+              "serial": "001",
+              "text": "Deployment queued"
             },
-            "serial": "3",
-            "type": "ready"
+            "type": "deployment-state"
           },
           {
-            "date": 0,
+            "created": 1000,
             "payload": {
+              "date": 1000,
+              "deploymentId": "dpl_842605a09b0619a8",
+              "id": "dpl_842605a09b0619a8:2",
+              "info": {
+                "name": "bld_842605a09b0619a8",
+                "readyState": "BUILDING",
+                "type": "build"
+              },
+              "serial": "100002",
               "text": "Building"
             },
-            "serial": "2",
-            "type": "building"
+            "type": "deployment-state"
           },
           {
-            "date": 0,
+            "created": 1000,
             "payload": {
-              "text": "Deployment created"
+              "date": 1000,
+              "deploymentId": "dpl_842605a09b0619a8",
+              "id": "dpl_842605a09b0619a8:3",
+              "info": {
+                "name": "bld_842605a09b0619a8",
+                "type": "build"
+              },
+              "serial": "100003",
+              "text": "Running build in Washington, D.C., USA (East) - iad1"
             },
-            "serial": "1",
-            "type": "created"
+            "type": "stdout"
+          },
+          {
+            "created": 0,
+            "payload": {
+              "date": 0,
+              "deploymentId": "dpl_842605a09b0619a8",
+              "id": "dpl_842605a09b0619a8:8",
+              "info": {
+                "name": "bld_842605a09b0619a8",
+                "readyState": "CANCELED",
+                "type": "build"
+              },
+              "serial": "008",
+              "text": "Canceled"
+            },
+            "type": "deployment-state"
           }
         ]
       },
-      "superseded_members": {
-        "_list": "Cancel while QUEUED appends a canceled event, so the listing has four events rather than the pack's three."
-      }
+      "recut": "As step 81."
     },
     {
       "operation": "GetDeployment",
@@ -2115,22 +2338,54 @@
         "Project": ""
       },
       "output": {
+        "alias": [],
+        "aliasAssigned": false,
+        "aliasError": null,
+        "bootedAt": 0,
+        "build": {
+          "env": []
+        },
+        "buildSkipped": false,
+        "buildingAt": 1000,
+        "canceledAt": 0,
         "createdAt": 0,
+        "createdIn": "iad1",
+        "creator": {
+          "type": "user",
+          "uid": "usr_000000000000",
+          "username": "test"
+        },
+        "env": [],
         "id": "dpl_842605a09b0619a8",
+        "inspectorUrl": null,
+        "isInConcurrentBuildsQueue": false,
+        "isInSystemBuildsQueue": false,
+        "meta": {},
         "name": "orb",
+        "ownerId": "000000000000",
+        "plan": "hobby",
         "projectId": "prj_39bb7163b1cb",
-        "readyState": "READY",
+        "projectSettings": {
+          "framework": null
+        },
+        "public": false,
+        "readyState": "CANCELED",
+        "regions": [
+          "iad1"
+        ],
+        "routes": null,
+        "status": "CANCELED",
+        "target": null,
         "type": "LAMBDAS",
-        "url": "orb-a0e8b5.vercel.app"
+        "url": "orb-a0e8b5.vercel.app",
+        "version": 2
       },
-      "superseded_members": {
-        "readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "As step 26."
     },
     {
       "operation": "UploadFile",
       "input": {
-        "x-vercel-digest": "00112233445566778899aabbccddeeff"
+        "x-vercel-digest": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
       },
       "identity": {
         "Account": "000000000000",
@@ -2210,11 +2465,11 @@
     {
       "operation": "UpdateProjectProtectionBypass",
       "input": {
-        "idOrName": "orb",
         "generate": {
-          "secret": "0123456789abcdeffedcba9876543210",
-          "note": "ci"
-        }
+          "note": "ci",
+          "secret": "0123456789abcdeffedcba9876543210"
+        },
+        "idOrName": "orb"
       },
       "identity": {
         "Account": "000000000000",
@@ -2239,8 +2494,8 @@
       "input": {
         "idOrName": "orb",
         "update": {
-          "secret": "0123456789abcdeffedcba9876543210",
-          "note": "ci2"
+          "note": "ci2",
+          "secret": "0123456789abcdeffedcba9876543210"
         }
       },
       "identity": {
@@ -2267,8 +2522,8 @@
       "input": {
         "idOrName": "orb",
         "revoke": {
-          "secret": "0123456789abcdeffedcba9876543210",
-          "regenerate": true
+          "regenerate": true,
+          "secret": "0123456789abcdeffedcba9876543210"
         }
       },
       "identity": {
@@ -2309,8 +2564,8 @@
     {
       "operation": "UpdateProjectProtectionBypass",
       "input": {
-        "idOrName": "prj_nope",
-        "generate": {}
+        "generate": {},
+        "idOrName": "prj_nope"
       },
       "identity": {
         "Account": "000000000000",
@@ -2566,8 +2821,8 @@
       "operation": "PatchTeam",
       "input": {
         "authorization": "Bearer test",
-        "teamId": "team_ba094efe",
-        "name": "Acme Inc"
+        "name": "Acme Inc",
+        "teamId": "team_ba094efe"
       },
       "identity": {
         "Account": "000000000000",
@@ -2577,6 +2832,13 @@
         "Project": ""
       },
       "output": {
+        "billing": {
+          "addons": null,
+          "cancelation": null,
+          "period": null,
+          "plan": "hobby",
+          "trial": null
+        },
         "createdAt": 0,
         "creatorId": "usr_000000000000",
         "id": "team_ba094efe",
@@ -2585,20 +2847,13 @@
           "role": "OWNER"
         },
         "name": "Acme Inc",
-        "slug": "acme",
-        "updatedAt": 0,
-        "billing": {
-          "addons": null,
-          "cancelation": null,
-          "period": null,
-          "plan": "hobby",
-          "trial": null
-        },
         "resourceConfig": {
           "concurrentBuilds": 1,
           "nodeType": "standard"
         },
-        "stagingPrefix": ""
+        "slug": "acme",
+        "stagingPrefix": "",
+        "updatedAt": 0
       }
     },
     {
@@ -2671,57 +2926,85 @@
       "output": {
         "deployments": [
           {
+            "aliasAssigned": false,
+            "buildingAt": 1000,
             "created": 0,
             "createdAt": 0,
-            "name": "ghost",
-            "projectId": "prj_3ed10eca83a2",
-            "readyState": "READY",
-            "state": "READY",
+            "creator": {
+              "type": "user",
+              "uid": "usr_000000000000",
+              "username": "test"
+            },
+            "inspectorUrl": null,
+            "meta": {},
+            "name": "orb",
+            "projectId": "prj_39bb7163b1cb",
+            "readyState": "CANCELED",
+            "source": "cli",
+            "state": "CANCELED",
+            "target": null,
             "type": "LAMBDAS",
-            "uid": "dpl_4da7b6a4902c3235",
-            "url": "ghost-e7175e.vercel.app"
+            "uid": "dpl_842605a09b0619a8",
+            "url": "orb-a0e8b5.vercel.app"
           },
           {
+            "aliasAssigned": false,
+            "buildingAt": 1000,
             "created": 0,
             "createdAt": 0,
+            "creator": {
+              "type": "user",
+              "uid": "usr_000000000000",
+              "username": "test"
+            },
+            "inspectorUrl": null,
+            "meta": {},
             "name": "web2",
             "projectId": "prj_77df676fe2a7",
-            "readyState": "READY",
-            "state": "READY",
+            "readyState": "QUEUED",
+            "source": "cli",
+            "state": "QUEUED",
+            "target": null,
             "type": "LAMBDAS",
             "uid": "dpl_71a868c4bfb93e84",
             "url": "web2-34ee92.vercel.app"
           },
           {
+            "aliasAssigned": false,
+            "buildingAt": 1000,
             "created": 0,
             "createdAt": 0,
-            "name": "orb",
-            "projectId": "prj_39bb7163b1cb",
-            "readyState": "READY",
-            "state": "READY",
+            "creator": {
+              "type": "user",
+              "uid": "usr_000000000000",
+              "username": "test"
+            },
+            "inspectorUrl": null,
+            "meta": {},
+            "name": "ghost",
+            "projectId": "prj_3ed10eca83a2",
+            "readyState": "QUEUED",
+            "source": "cli",
+            "state": "QUEUED",
+            "target": null,
             "type": "LAMBDAS",
-            "uid": "dpl_842605a09b0619a8",
-            "url": "orb-a0e8b5.vercel.app"
+            "uid": "dpl_4da7b6a4902c3235",
+            "url": "ghost-e7175e.vercel.app"
           }
         ],
         "pagination": {
-          "count": 3
+          "count": 3,
+          "next": null,
+          "prev": null
         }
       },
-      "superseded_members": {
-        "deployments[0].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[1].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[2].readyState": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[0].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[1].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY.",
-        "deployments[2].state": "CreateDeployment births QUEUED (CI/CD lifecycle); pack/emulate birthed READY."
-      }
+      "recut": "As step 32: GET /v6/deployments answers the listing GET /v7/deployments does."
     },
     {
       "operation": "GetProjectEnv",
       "input": {
-        "idOrName": "web",
-        "id": "ghost"
+        "id": "ghost",
+        "idOrName": "web"
       },
       "identity": {
         "Account": "000000000000",
@@ -2845,8 +3128,7 @@
         "AccessKeyID": "",
         "ARN": "",
         "Project": ""
-      },
-      "output": {}
+      }
     },
     {
       "operation": "ListApiKeys",
@@ -2879,16 +3161,16 @@
         "Project": ""
       },
       "output": {
-        "page": "<!doctype html><html><head><title>Sign in to Vercel</title></head><body><h1>Sign in to Vercel</h1><form method=\"post\" action=\"/oauth/authorize/callback\"><input type=\"hidden\" name=\"client_id\" value=\"client_x\"><input type=\"hidden\" name=\"redirect_uri\" value=\"http://localhost:3000/cb\"><input type=\"hidden\" name=\"scope\" value=\"\"><input type=\"hidden\" name=\"state\" value=\"s9\"><input type=\"hidden\" name=\"code_challenge\" value=\"\"><input type=\"hidden\" name=\"code_challenge_method\" value=\"\"><button type=\"submit\" name=\"username\" value=\"test\">Continue as test</button></form></body></html>"
+        "page": "\u003c!doctype html\u003e\u003chtml\u003e\u003chead\u003e\u003ctitle\u003eSign in to Vercel\u003c/title\u003e\u003c/head\u003e\u003cbody\u003e\u003ch1\u003eSign in to Vercel\u003c/h1\u003e\u003cform method=\"post\" action=\"/oauth/authorize/callback\"\u003e\u003cinput type=\"hidden\" name=\"client_id\" value=\"client_x\"\u003e\u003cinput type=\"hidden\" name=\"redirect_uri\" value=\"http://localhost:3000/cb\"\u003e\u003cinput type=\"hidden\" name=\"scope\" value=\"\"\u003e\u003cinput type=\"hidden\" name=\"state\" value=\"s9\"\u003e\u003cinput type=\"hidden\" name=\"code_challenge\" value=\"\"\u003e\u003cinput type=\"hidden\" name=\"code_challenge_method\" value=\"\"\u003e\u003cbutton type=\"submit\" name=\"username\" value=\"test\"\u003eContinue as test\u003c/button\u003e\u003c/form\u003e\u003c/body\u003e\u003c/html\u003e"
       }
     },
     {
       "operation": "OauthAuthorizeCallback",
       "input": {
-        "username": "test",
+        "client_id": "client_x",
         "redirect_uri": "http://localhost:3000/cb",
         "state": "s9",
-        "client_id": "client_x"
+        "username": "test"
       },
       "identity": {
         "Account": "000000000000",
@@ -2899,15 +3181,15 @@
       },
       "output": {
         "code": "7130d138d77772d809f2",
-        "location": "http://localhost:3000/cb?code=7130d138d77772d809f2&state=s9"
+        "location": "http://localhost:3000/cb?code=7130d138d77772d809f2\u0026state=s9"
       }
     },
     {
       "operation": "OauthToken",
       "input": {
+        "client_id": "client_x",
         "code": "7130d138d77772d809f2",
-        "redirect_uri": "http://localhost:3000/cb",
-        "client_id": "client_x"
+        "redirect_uri": "http://localhost:3000/cb"
       },
       "identity": {
         "Account": "000000000000",

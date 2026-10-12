@@ -314,7 +314,26 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		}
 	})
 	t.Run("Given a deployment with a file When its sub-resources are read Then they answer", func(t *testing.T) {
-		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-sub","project":"bdd-app2","files":[{"file":"index.html","sha":"aa11bb22","size":42}]}`, "")
+		// A deployment names its files by the SHA-1 of their bytes, and the
+		// server refuses one whose files nobody uploaded (missing_files), so the
+		// file goes up first, the way a client sends it.
+		upReq, err := http.NewRequest(http.MethodPost, ts.URL+"/v2/files", strings.NewReader("hello"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		upReq.Host = "api.vercel.com"
+		upReq.Header.Set("Authorization", "Bearer test")
+		upReq.Header.Set("Content-Type", "application/octet-stream")
+		upReq.Header.Set("x-vercel-digest", "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d")
+		upRes, err := http.DefaultClient.Do(upReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		upRes.Body.Close()
+		if upRes.StatusCode != 200 {
+			t.Fatalf("upload %d", upRes.StatusCode)
+		}
+		code, dpl, _ := call(http.MethodPost, "/v13/deployments", `{"name":"bdd-sub","project":"bdd-app2","files":[{"file":"index.html","sha":"aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d","size":5}]}`, "")
 		if code != 200 {
 			t.Fatalf("deploy %d %#v", code, dpl)
 		}
@@ -327,9 +346,21 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 			t.Fatalf("aliases %d %#v", code, aliases)
 		}
 		code, events := callList(http.MethodGet, "/v3/deployments/"+id+"/events", "")
-		// Newest first, the oracle's default direction: ready, building, created.
-		if code != 200 || len(events) != 3 || events[0].(map[string]any)["type"] != "ready" {
-			t.Fatalf("events %d %#v", code, events)
+		// The document's shape, oldest first: the deployment-state events a
+		// client waits on are queued, building, ready, in that order, with the
+		// build's stdout between them. The oracle's {type: created|building|
+		// ready} newest-first rows are the pack's shape, which the document
+		// does not describe.
+		var states []string
+		for _, e := range events {
+			ev := e.(map[string]any)
+			if ev["type"] == "deployment-state" {
+				info := ev["payload"].(map[string]any)["info"].(map[string]any)
+				states = append(states, info["readyState"].(string))
+			}
+		}
+		if code != 200 || strings.Join(states, ",") != "QUEUED,BUILDING,READY" {
+			t.Fatalf("events %d %#v (states %v)", code, events, states)
 		}
 		code, files := callList(http.MethodGet, "/v6/deployments/"+id+"/files", "")
 		root := files[0].(map[string]any)
@@ -354,7 +385,8 @@ func TestVercelProjectDeployKVBehavior(t *testing.T) {
 		}
 		req.Host = "api.vercel.com"
 		req.Header.Set("Authorization", "Bearer test")
-		req.Header.Set("x-vercel-digest", "00112233445566778899aabbccddeeff")
+		// The digest is the SHA-1 of the bytes, which the server checks.
+		req.Header.Set("x-vercel-digest", "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d")
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

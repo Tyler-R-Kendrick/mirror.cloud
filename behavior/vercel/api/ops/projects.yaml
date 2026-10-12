@@ -257,6 +257,10 @@ operations:
       - delete: { resource: deployment_file, where: "item.projectId == string(rec.id)" }
       - delete: { resource: deployment, where: "item.projectId == string(rec.id)" }
       - delete: { resource: env, where: "true" }
+      - delete: { resource: check_run, where: "item.projectId == string(rec.id)" }
+      - delete: { resource: project_check, where: "true" }
+      - delete: { resource: rolling_release_config, where: "true" }
+      - delete: { resource: rolling_release, where: "true" }
       - delete: { resource: domain, where: "true" }
       - delete: { resource: domain_owner, where: "item.projectId == string(rec.id)" }
       - delete: { resource: custom_environment, where: "true" }

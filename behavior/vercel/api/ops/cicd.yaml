@@ -1,16 +1,23 @@
 schema: bir/1
 service: vercel.api
 
-# CI/CD and distribution surface: deployment checks (v1), project checks and
-# check runs (v2), remote cache artifacts, rolling release and runtime logs.
-# Split out of service.yaml unchanged when bundles learned to span files
-# (behavior/behaviors.go); nothing here calls a real builder or GitHub, the
-# records are the API surface. Provenance is the bundle's: authored.
+# CI/CD and distribution surface: the checks an integration or a project runs
+# against a deployment (v1 checks, v2 project checks and check runs), the remote
+# cache's artifacts, rolling releases and runtime logs.
+#
+# Nothing here builds, calls GitHub or serves traffic: the records are the API
+# surface. A check is created, moves through registered/running/completed and
+# concludes because a client says so; a rolling release steps through its stages
+# because a client approves them. What each answer carries is the document's, and
+# test/behavior/vercel holds every one of them to it.
+#
+# Provenance is the bundle's, authored.
 
 resources:
-  # CI/CD: deployment checks (v1), project checks / check-runs (v2), remote
-  # cache artifacts, rolling release, and runtime logs. Nothing here calls a
-  # real builder or GitHub; the records are the API surface.
+  # A deployment's checks (v1). Parent-scoped: each deployment's are their own
+  # collection. The optional members the document names -- conclusion, startedAt,
+  # completedAt, path, detailsUrl, externalId, output -- are stored as null until
+  # something sets them, and an answer leaves out what is null.
   check:
     collection: "vcheck:{deployment.id}"
     parent: deployment
@@ -20,12 +27,13 @@ resources:
       input_members: [checkId]
     record:
       id: "'chk_' + id"
-      name: "('name' in input && input.name != null) ? string(input.name) : 'check'"
       status: "'registered'"
-      conclusion: "null"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
+      createdAt: "now_ms"
+      updatedAt: "now_ms"
+      seq: { counter: "vcheck" }
 
+  # A project's checks (v2): the definition, which runs against each deployment
+  # (a check run) the project makes.
   project_check:
     collection: "vpcheck:{project.id}"
     parent: project
@@ -34,27 +42,28 @@ resources:
       generate: { kind: hex, bytes: 8 }
       input_members: [checkId]
     record:
-      # No status: the list item shape has none, and an unprojected list is the
-      # record. Name/id/timestamps are what Create/Get/Update project.
       id: "'pchk_' + id"
-      name: "('name' in input && input.name != null) ? string(input.name) : 'check'"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
+      createdAt: "now_ms"
+      updatedAt: "now_ms"
+      seq: { counter: "vpcheck" }
 
+  # A run of a project check against one deployment. Account-wide rather than
+  # per deployment, because a project check lists its runs across deployments.
   check_run:
-    collection: "vcheckrun:{deployment.id}"
-    parent: deployment
+    collection: vcheckrun
     key: id
     id:
       generate: { kind: hex, bytes: 8 }
       input_members: [checkRunId]
     record:
       id: "'crun_' + id"
-      status: "'registered'"
-      conclusion: "null"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
+      status: "'queued'"
+      createdAt: "now_ms"
+      updatedAt: "now_ms"
+      seq: { counter: "vcheckrun" }
 
+  # The remote cache. The bytes are kept, base64 in the record, so a build that
+  # uploads an artifact and downloads it again gets what it put.
   artifact:
     collection: vartifact
     key: hash
@@ -64,8 +73,10 @@ resources:
     record:
       hash: id
       size: "('Content-Length' in input && input['Content-Length'] != null) ? int(input['Content-Length']) : 0"
-      duration: "0"
-      createdAt: "int(now) * 1000"
+      duration: "('x-artifact-duration' in input && input['x-artifact-duration'] != null) ? int(input['x-artifact-duration']) : 0"
+      tag: "('x-artifact-tag' in input && input['x-artifact-tag'] != null) ? dyn(string(input['x-artifact-tag'])) : null"
+      data: "('body' in input && input.body != null) ? b64(string(input.body)) : ''"
+      createdAt: "now_ms"
 
   rolling_release_config:
     collection: "vrrcfg:{project.id}"
@@ -74,16 +85,29 @@ resources:
     record:
       target: "'production'"
       stages: "[]"
-      updatedAt: "int(now) * 1000"
+      updatedAt: "now_ms"
 
+  # The release in progress, or the last one. `shown` is the document's
+  # RollingRelease object: the stages as the release numbered them, the active
+  # one, and the one an approval would move to.
   rolling_release:
     collection: "vrr:{project.id}"
     parent: project
     singleton: active
     record:
       state: "'ACTIVE'"
-      startedAt: "int(now) * 1000"
-      approvedStage: "0"
+      substate: "null"
+      startedAt: "now_ms"
+      updatedAt: "now_ms"
+    views:
+      shown: >
+        {'state': rec.state, 'substate': rec.substate,
+         'currentDeployment': rec.currentDeployment, 'canaryDeployment': rec.canaryDeployment,
+         'queuedDeploymentId': null, 'advancementType': rec.advancementType,
+         'stages': rec.stages, 'activeStage': rec.stages[int(rec.activeIndex)],
+         'nextStage': (rec.state == 'ACTIVE' && int(rec.activeIndex) + 1 < size(rec.stages)) ? dyn(rec.stages[int(rec.activeIndex) + 1]) : null,
+         'startedAt': rec.startedAt, 'updatedAt': rec.updatedAt,
+         'currentCanaryPercentage': rec.stages[int(rec.activeIndex)].targetPercentage}
 
   runtime_log:
     collection: "vrlog:{deployment.id}"
@@ -92,74 +116,111 @@ resources:
       derive: "''"
     record:
       message: "''"
-      timestamp: "int(now) * 1000"
+      timestamp: "now_ms"
 
 operations:
+  # --- Deployment checks (v1) ----------------------------------------------
+
   CreateCheck:
     reads:
       dep:
         resource: deployment
         key: "string(input.deploymentId)"
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+      # A check gates a build, so one cannot be added to a build that is over.
+      - { cond: "string(dep.__state) in ['QUEUED', 'BUILDING']", error: BadRequest, message: "Cannot create check for finished deployment" }
     effects:
-      - create: { resource: check }
-    output:
+      - create:
+          resource: check
+          record:
+            name: "string(input.name)"
+            deploymentId: "string(dep.uid)"
+            blocking: "input.blocking"
+            rerequestable: "('rerequestable' in input && input.rerequestable != null) ? input.rerequestable : false"
+            integrationId: "'oac_mirror'"
+            path: "('path' in input && input.path != null) ? dyn(string(input.path)) : null"
+            detailsUrl: "('detailsUrl' in input && input.detailsUrl != null) ? dyn(string(input.detailsUrl)) : null"
+            externalId: "('externalId' in input && input.externalId != null) ? dyn(string(input.externalId)) : null"
+            conclusion: "null"
+            startedAt: "null"
+            completedAt: "null"
+            output: "null"
+    omit_null: &check_optional [conclusion, externalId, output, completedAt, path, detailsUrl, startedAt]
+    output: &check
       id: rec.id
       name: rec.name
-      status: rec.status
       createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      deploymentId: rec.deploymentId
+      status: rec.status
+      conclusion: rec.conclusion
+      externalId: rec.externalId
+      output: rec.output
+      completedAt: rec.completedAt
+      path: rec.path
+      blocking: rec.blocking
+      detailsUrl: rec.detailsUrl
+      integrationId: rec.integrationId
+      startedAt: rec.startedAt
+      rerequestable: rec.rerequestable
 
   GetAllChecks:
     reads:
       dep: { resource: deployment, key: "string(input.deploymentId)" }
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
     list:
       resource: check
       member: checks
-    output: {}
+    output:
+      checks: "sortBy(items, 'seq', false).map(c, compact(without(c, ['seq', 'deploymentId', 'externalId'])))"
 
   GetCheck:
     reads:
       dep: { resource: deployment, key: "string(input.deploymentId)" }
-      chk: { resource: check }
+      rec: { resource: check }
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: chk.id
-      name: chk.name
-      status: chk.status
-      conclusion: chk.conclusion
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+      - { cond: rec_found, error: NotFound, message: "Check was not found" }
+    omit_null: *check_optional
+    output: *check
 
   UpdateCheck:
     reads:
       dep: { resource: deployment, key: "string(input.deploymentId)" }
       chk: { resource: check }
+    let:
+      status: "('status' in input && input.status != null) ? string(input.status) : string(chk.status)"
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+      - { cond: chk_found, error: NotFound, message: "Check was not found" }
     effects:
       - patch:
           resource: check
           record:
             id: id
-            status: "('status' in input && input.status != null) ? string(input.status) : chk.status"
-            conclusion: "('conclusion' in input && input.conclusion != null) ? input.conclusion : chk.conclusion"
-            updatedAt: "int(now) * 1000"
-    output:
-      id: rec.id
-      status: rec.status
-      conclusion: rec.conclusion
+            name: "('name' in input && input.name != null) ? string(input.name) : string(chk.name)"
+            path: "('path' in input && input.path != null) ? dyn(string(input.path)) : chk.path"
+            detailsUrl: "('detailsUrl' in input && input.detailsUrl != null) ? dyn(string(input.detailsUrl)) : chk.detailsUrl"
+            externalId: "('externalId' in input && input.externalId != null) ? dyn(string(input.externalId)) : chk.externalId"
+            output: "('output' in input && input.output != null) ? input.output : chk.output"
+            status: "status"
+            conclusion: "('conclusion' in input && input.conclusion != null) ? dyn(string(input.conclusion)) : chk.conclusion"
+            startedAt: "(status == 'running' && chk.startedAt == null) ? dyn(now_ms) : chk.startedAt"
+            completedAt: "(status == 'completed' && chk.completedAt == null) ? dyn(now_ms) : chk.completedAt"
+            updatedAt: "now_ms"
+    omit_null: *check_optional
+    output: *check
 
+  # A rerequest puts the check back where it started.
   RerequestCheck:
     reads:
       dep: { resource: deployment, key: "string(input.deploymentId)" }
       chk: { resource: check }
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+      - { cond: chk_found, error: NotFound, message: "Check was not found" }
     effects:
       - patch:
           resource: check
@@ -167,35 +228,71 @@ operations:
             id: id
             status: "'registered'"
             conclusion: "null"
-            updatedAt: "int(now) * 1000"
+            startedAt: "null"
+            completedAt: "null"
+            updatedAt: "now_ms"
     output: {}
+
+  # --- Project checks (v2) -------------------------------------------------
 
   ListProjectChecks:
-    reads:
+    reads: &project_check_reads
       by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
       proj:
         resource: project
         key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    list: { resource: project_check, member: checks }
-    output: {}
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+    list:
+      resource: project_check
+      member: checks
+      filter: "!('blocks' in input && input.blocks != null && string(input.blocks) != '') || item.blocks == string(input.blocks)"
+    output:
+      checks: "sortBy(items, 'seq', false).map(c, compact(without(c, ['seq'])))"
 
   CreateProjectCheck:
-    reads:
-      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
+    reads: *project_check_reads
+    let:
+      requires: "('requires' in input && input.requires != null) ? string(input.requires) : ''"
+      blocks: "('blocks' in input && input.blocks != null) ? string(input.blocks) : 'none'"
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: "requires in ['build-ready', 'deployment-url', 'none']", error: BadRequest, message: "requires must be build-ready, deployment-url or none" }
+      - { cond: "blocks in ['build-start', 'deployment-start', 'deployment-alias', 'deployment-promotion', 'none']", error: BadRequest, message: "blocks is not one of the stages a check can block" }
+      - { cond: "!('source' in input) || input.source == null || !('kind' in input.source) || input.source.kind in ['integration', 'webhook', 'git-provider']", error: BadRequest, message: "source.kind must be integration, webhook or git-provider" }
     effects:
-      - create: { resource: project_check }
-    output:
+      - create:
+          resource: project_check
+          record:
+            name: "string(input.name)"
+            ownerId: "identity.account"
+            projectId: "string(proj.id)"
+            isRerequestable: "('isRerequestable' in input && input.isRerequestable != null) ? input.isRerequestable : false"
+            requires: "requires"
+            # A check made through the API has no integration or git provider
+            # behind it; the document's source for that is a webhook.
+            source: "('source' in input && input.source != null) ? input.source : {'kind': 'webhook'}"
+            blocks: "blocks"
+            targets: "('targets' in input && input.targets != null) ? input.targets : []"
+            sourceKind: "('source' in input && input.source != null && 'kind' in input.source) ? dyn(string(input.source.kind)) : dyn('webhook')"
+            timeout: "('timeout' in input && input.timeout != null) ? input.timeout : 300000"
+            deletedAt: "null"
+    omit_null: &project_check_optional [deletedAt]
+    output: &project_check
       id: rec.id
       name: rec.name
+      ownerId: rec.ownerId
+      projectId: rec.projectId
+      isRerequestable: rec.isRerequestable
+      requires: rec.requires
+      source: rec.source
+      blocks: rec.blocks
+      targets: rec.targets
+      sourceKind: rec.sourceKind
+      timeout: rec.timeout
       createdAt: rec.createdAt
       updatedAt: rec.updatedAt
+      deletedAt: rec.deletedAt
 
   GetProjectCheck:
     reads:
@@ -203,15 +300,12 @@ operations:
       proj:
         resource: project
         key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
-      chk: { resource: project_check }
+      rec: { resource: project_check }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: chk.id
-      name: chk.name
-      createdAt: chk.createdAt
-      updatedAt: chk.updatedAt
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: rec_found, error: NotFound, message: "Check was not found" }
+    omit_null: *project_check_optional
+    output: *project_check
 
   UpdateProjectCheck:
     reads:
@@ -221,19 +315,24 @@ operations:
         key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
       chk: { resource: project_check }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: chk_found, error: NotFound, message: "Check was not found" }
+      - { cond: "!('requires' in input) || input.requires == null || string(input.requires) in ['build-ready', 'deployment-url']", error: BadRequest, message: "requires must be build-ready or deployment-url" }
+      - { cond: "!('blocks' in input) || input.blocks == null || string(input.blocks) in ['build-start', 'deployment-start', 'deployment-alias', 'deployment-promotion', 'none']", error: BadRequest, message: "blocks is not one of the stages a check can block" }
     effects:
       - patch:
           resource: project_check
           record:
             id: id
-            name: "('name' in input && input.name != null) ? string(input.name) : chk.name"
-            updatedAt: "int(now) * 1000"
-    output:
-      id: rec.id
-      name: rec.name
-      updatedAt: rec.updatedAt
+            name: "('name' in input && input.name != null) ? string(input.name) : string(chk.name)"
+            isRerequestable: "('isRerequestable' in input && input.isRerequestable != null) ? input.isRerequestable : chk.isRerequestable"
+            requires: "('requires' in input && input.requires != null) ? string(input.requires) : string(chk.requires)"
+            blocks: "('blocks' in input && input.blocks != null) ? string(input.blocks) : string(chk.blocks)"
+            targets: "('targets' in input && input.targets != null) ? input.targets : chk.targets"
+            timeout: "('timeout' in input && input.timeout != null) ? input.timeout : chk.timeout"
+            updatedAt: "now_ms"
+    omit_null: *project_check_optional
+    output: *project_check
 
   DeleteProjectCheck:
     reads:
@@ -243,11 +342,14 @@ operations:
         key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
       chk: { resource: project_check }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: chk_found, error: NotFound, message: "Check was not found" }
     effects:
       - delete: { resource: project_check }
+    output:
+      success: "true"
 
+  # The runs of one project check, across the project's deployments.
   ListCheckRuns:
     reads:
       by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
@@ -256,95 +358,162 @@ operations:
         key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
       chk: { resource: project_check }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    # No separate run store for project checks yet; rerequest is a status flip.
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: chk_found, error: NotFound, message: "Check was not found" }
+    list:
+      resource: check_run
+      member: runs
+      filter: "item.checkId == string(chk.id)"
     output:
-      runs: "[]"
+      runs: "sortBy(items, 'seq', false).map(r, compact(without(r, ['seq'])))"
+
+  # --- Check runs (v2) -----------------------------------------------------
 
   ListDeploymentCheckRuns:
     reads:
       dep: { resource: deployment, key: "string(input.deploymentId)" }
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    list: { resource: check_run, member: runs }
-    output: {}
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+    list:
+      resource: check_run
+      member: runs
+      filter: "item.deploymentId == string(dep.uid)"
+    output:
+      runs: "sortBy(items, 'seq', false).map(r, compact(without(r, ['seq'])))"
 
+  # A run is made from a project check and a deployment: it takes the check's
+  # name, what it requires, what it blocks, its targets and its timeout, and
+  # starts queued.
   CreateDeploymentCheckRun:
     reads:
       dep: { resource: deployment, key: "string(input.deploymentId)" }
+      # Named after `dep` and before `project`, which it waits for: the
+      # project is the deployment's, and the check is one of its.
+      proj: { resource: project, key: "dep_found ? string(dep.projectId) : ''" }
+      pchk: { resource: project_check, key: "('checkId' in input && input.checkId != null) ? string(input.checkId) : ''" }
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+      - { cond: pchk_found, error: NotFound, message: "Check was not found" }
     effects:
-      - create: { resource: check_run }
-    output:
+      - create:
+          resource: check_run
+          record:
+            name: "string(pchk.name)"
+            ownerId: "identity.account"
+            deploymentId: "string(dep.uid)"
+            projectId: "string(dep.projectId)"
+            requires: "string(pchk.requires)"
+            blocks: "string(pchk.blocks)"
+            targets: "pchk.targets"
+            conclusion: "null"
+            conclusionText: "null"
+            externalId: "null"
+            externalUrl: "null"
+            output: "null"
+            timeout: "pchk.timeout"
+            completedAt: "null"
+            checkId: "string(pchk.id)"
+            source: "pchk.source"
+    omit_null: &check_run_optional [conclusion, conclusionText, externalId, externalUrl, output, completedAt]
+    output: &check_run
       id: rec.id
+      name: rec.name
+      ownerId: rec.ownerId
+      deploymentId: rec.deploymentId
+      projectId: rec.projectId
+      requires: rec.requires
+      blocks: rec.blocks
+      targets: rec.targets
       status: rec.status
+      conclusion: rec.conclusion
+      conclusionText: rec.conclusionText
+      externalId: rec.externalId
+      externalUrl: rec.externalUrl
+      output: rec.output
+      timeout: rec.timeout
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      completedAt: rec.completedAt
+      checkId: rec.checkId
+      source: rec.source
 
   GetDeploymentCheckRun:
     reads:
       dep: { resource: deployment, key: "string(input.deploymentId)" }
-      run: { resource: check_run }
+      rec: { resource: check_run }
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: run_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: run.id
-      status: run.status
-      conclusion: run.conclusion
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+      - { cond: "rec_found && string(rec.deploymentId) == string(dep.uid)", error: NotFound, message: "Check run was not found" }
+    omit_null: *check_run_optional
+    output: *check_run
 
   UpdateDeploymentCheckRun:
     reads:
       dep: { resource: deployment, key: "string(input.deploymentId)" }
       run: { resource: check_run }
+    let:
+      status: "('status' in input && input.status != null) ? string(input.status) : string(run.status)"
     require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: run_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+      - { cond: "run_found && string(run.deploymentId) == string(dep.uid)", error: NotFound, message: "Check run was not found" }
     effects:
       - patch:
           resource: check_run
           record:
             id: id
-            status: "('status' in input && input.status != null) ? string(input.status) : run.status"
-            conclusion: "('conclusion' in input && input.conclusion != null) ? input.conclusion : run.conclusion"
-            updatedAt: "int(now) * 1000"
-    output:
-      id: rec.id
-      status: rec.status
-      conclusion: rec.conclusion
+            status: "status"
+            conclusion: "('conclusion' in input && input.conclusion != null) ? dyn(string(input.conclusion)) : run.conclusion"
+            conclusionText: "('conclusionText' in input && input.conclusionText != null) ? dyn(string(input.conclusionText)) : run.conclusionText"
+            externalId: "('externalId' in input && input.externalId != null) ? dyn(string(input.externalId)) : run.externalId"
+            externalUrl: "('externalUrl' in input && input.externalUrl != null) ? dyn(string(input.externalUrl)) : run.externalUrl"
+            output: "('output' in input && input.output != null) ? input.output : run.output"
+            completedAt: "('completedAt' in input && input.completedAt != null) ? dyn(input.completedAt) : ((status == 'completed' && run.completedAt == null) ? dyn(now_ms) : run.completedAt)"
+            updatedAt: "now_ms"
+    omit_null: *check_run_optional
+    output: *check_run
+
+  # --- Remote cache --------------------------------------------------------
 
   UploadArtifact:
     effects:
       - put: { resource: artifact }
     output:
-      urls: "[string(rec.hash)]"
+      urls: "['https://api.vercel.com/v2/now/artifact/' + string(rec.hash)]"
 
   DownloadArtifact:
     reads:
       art: { resource: artifact }
     require:
-      - { cond: art_found, error: NotFound, message: "The requested resource was not found." }
-    # Bytes are not retained; empty blob body.
+      - { cond: art_found, error: NotFound, message: "The artifact was not found" }
     output:
-      _raw: "''"
+      _raw: "b64decode(string(art.data))"
 
   ArtifactExists:
     reads:
       art: { resource: artifact }
     require:
-      - { cond: art_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: art_found, error: NotFound, message: "The artifact was not found" }
     output: {}
 
+  # Digest -> what the cache holds for it, or why it holds nothing.
   ArtifactQuery:
-    # Document answers digest→metadata for requested hashes. Map-shaped
-    # root output from a filtered list is not expressible yet; empty map
-    # is the honest stub (Upload/Exists/Download cover the store itself).
-    output: {}
+    let:
+      hashes: "('hashes' in input && input.hashes != null) ? input.hashes : []"
+    select:
+      binding: found
+      resource: artifact
+      filter: "item.hash in hashes"
+    output:
+      _object: >
+        rollup(hashes.map(h, {'k': string(h), 'v': found.exists(a, a.hash == h)
+          ? compact({'size': found.filter(a, a.hash == h)[0].size, 'taskDurationMs': found.filter(a, a.hash == h)[0].duration, 'tag': found.filter(a, a.hash == h)[0].tag})
+          : {'error': {'message': 'Artifact not found'}}}), 'k', 'v')
 
   Status:
     output:
       status: "'enabled'"
 
+  # Cache events are accepted and not kept: they are the client's telemetry.
   RecordEvents:
     output: {}
 
@@ -354,47 +523,59 @@ operations:
     output:
       deletedCount: deleted_count
 
+  # --- Rolling release -----------------------------------------------------
+
   GetRollingReleaseConfig:
-    reads:
+    reads: &rolling_reads
       by_name: { resource: project_name, key: "string(input.idOrName)" }
       proj:
         resource: project
         key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
       cfg: { resource: rolling_release_config }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
     output:
-      rollingRelease: "cfg_found ? {'target': cfg.target, 'stages': cfg.stages} : {}"
+      rollingRelease: "cfg_found ? dyn(compact({'target': cfg.target, 'stages': cfg.stages, 'canaryResponseHeader': cfg.canaryResponseHeader, 'gate': cfg.gate})) : null"
 
+  # The body is the configuration (the document declares none, and a client
+  # sends either the members themselves or the rollingRelease object that holds
+  # them). A null rollingRelease takes the configuration away.
   UpdateRollingReleaseConfig:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+    reads: *rolling_reads
+    let:
+      nested: "'rollingRelease' in input"
+      body: "(nested && input.rollingRelease != null) ? input.rollingRelease : input"
+      stages: "('stages' in body && body.stages != null) ? body.stages : []"
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: "stages.all(s, 'targetPercentage' in s && s.targetPercentage != null && s.targetPercentage > 0 && s.targetPercentage <= 100)", error: BadRequest, message: "A stage's targetPercentage is a number up to 100" }
+      - { cond: "size(stages) == 0 || stages[size(stages) - 1].targetPercentage == 100", error: BadRequest, message: "The final stage must target 100 percent" }
+      - { cond: "indices(stages).all(i, i == 0 || stages[i].targetPercentage > stages[i - 1].targetPercentage)", error: BadRequest, message: "Stages must increase" }
     effects:
+      - delete:
+          resource: rolling_release_config
+          when: "nested && input.rollingRelease == null"
+          missing: ignore
       - put:
           resource: rolling_release_config
+          when: "!(nested && input.rollingRelease == null)"
           record:
-            target: "('target' in input && input.target != null) ? string(input.target) : 'production'"
-            stages: "('stages' in input && input.stages != null) ? input.stages : []"
-            updatedAt: "int(now) * 1000"
+            target: "('target' in body && body.target != null) ? string(body.target) : 'production'"
+            stages: "stages"
+            canaryResponseHeader: "('canaryResponseHeader' in body && body.canaryResponseHeader != null) ? dyn(body.canaryResponseHeader) : null"
+            gate: "('gate' in body && body.gate != null) ? dyn(body.gate) : null"
+            updatedAt: "now_ms"
     output:
-      rollingRelease: "{'target': rec.target, 'stages': rec.stages}"
+      rollingRelease: "(nested && input.rollingRelease == null) ? null : dyn(compact({'target': rec.target, 'stages': rec.stages, 'canaryResponseHeader': rec.canaryResponseHeader, 'gate': rec.gate}))"
 
   DeleteRollingReleaseConfig:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-      cfg: { resource: rolling_release_config }
+    reads: *rolling_reads
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
     effects:
       - delete: { resource: rolling_release_config, missing: ignore }
+    output:
+      rollingRelease: "null"
 
   GetRollingRelease:
     reads:
@@ -404,9 +585,11 @@ operations:
         key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
       rr: { resource: rolling_release }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
     output:
-      rollingRelease: "rr_found ? {'state': rr.state, 'startedAt': rr.startedAt, 'approvedStage': rr.approvedStage} : {}"
+      rollingRelease: >
+        (rr_found && (!('state' in input) || input.state == null || string(input.state) == '' || string(input.state) == string(rr.state)))
+          ? dyn(rr.shown) : null
 
   StartRollingRelease:
     reads:
@@ -414,18 +597,47 @@ operations:
       proj:
         resource: project
         key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
+      cfg: { resource: rolling_release_config }
+      rr: { resource: rolling_release }
+      canary: { resource: deployment, key: "('canaryDeploymentId' in input && input.canaryDeploymentId != null) ? string(input.canaryDeploymentId) : ''" }
+      # After `proj`, which names it: what production serves now.
+      released:
+        resource: deployment
+        key: "(proj_found && 'productionDeploymentId' in proj && proj.productionDeploymentId != null) ? string(proj.productionDeploymentId) : ''"
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: "cfg_found && size(cfg.stages) > 0", error: BadRequest, message: "Rolling release is not configured for this project" }
+      - { cond: canary_found, error: NotFound, message: "The deployment was not found" }
+      - { cond: "string(canary.__state) == 'READY'", error: BadRequest, message: "The canary deployment is not READY" }
+      - { cond: "!(rr_found && rr.state == 'ACTIVE')", error: Conflict, message: "A rolling release is already active for this project" }
     effects:
       - put:
           resource: rolling_release
           record:
             state: "'ACTIVE'"
-            startedAt: "int(now) * 1000"
-            approvedStage: "0"
+            substate: "null"
+            currentDeployment: >
+              released_found ? dyn({'name': released.name, 'createdAt': released.createdAt, 'readyState': string(released.__state),
+                'id': released.uid, 'target': released.target, 'url': released.url}) : null
+            canaryDeployment: >
+              {'name': canary.name, 'createdAt': canary.createdAt, 'readyState': string(canary.__state),
+                'id': canary.uid, 'target': canary.target, 'url': canary.url}
+            advancementType: "cfg.stages.exists(s, 'requireApproval' in s && s.requireApproval == true) ? 'manual-approval' : 'automatic'"
+            stages: >
+              indices(cfg.stages).map(i, {'index': i, 'isFinalStage': i == size(cfg.stages) - 1,
+                'targetPercentage': cfg.stages[i].targetPercentage,
+                'requireApproval': 'requireApproval' in cfg.stages[i] && cfg.stages[i].requireApproval == true,
+                'duration': ('duration' in cfg.stages[i] && cfg.stages[i].duration != null) ? dyn(cfg.stages[i].duration) : null})
+            activeIndex: "0"
+            startedAt: "now_ms"
+            updatedAt: "now_ms"
+    list:
+      resource: rolling_release
+      member: rollingRelease
     output:
-      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
+      rollingRelease: "items[0].shown"
 
+  # An approval moves the release to the next stage, and only the next.
   ApproveRollingReleaseStage:
     reads:
       by_name: { resource: project_name, key: "string(input.idOrName)" }
@@ -434,17 +646,23 @@ operations:
         key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
       rr: { resource: rolling_release }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: rr_found, error: NotFound, message: "No active rolling release" }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: "rr_found && rr.state == 'ACTIVE'", error: NotFound, message: "No active rolling release" }
+      - { cond: "string(rr.canaryDeployment.id) == string(input.canaryDeploymentId)", error: BadRequest, message: "That deployment is not the release's canary" }
+      - { cond: "int(input.nextStageIndex) == int(rr.activeIndex) + 1 && int(input.nextStageIndex) < size(rr.stages)", error: BadRequest, message: "nextStageIndex must be the stage after the active one" }
     effects:
       - patch:
           resource: rolling_release
           record:
-            state: "'ACTIVE'"
-            approvedStage: "int(rr.approvedStage) + 1"
+            activeIndex: "int(input.nextStageIndex)"
+            updatedAt: "now_ms"
+    list:
+      resource: rolling_release
+      member: rollingRelease
     output:
-      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
+      rollingRelease: "items[0].shown"
 
+  # Completing finishes the release: the canary is what production serves.
   CompleteRollingRelease:
     reads:
       by_name: { resource: project_name, key: "string(input.idOrName)" }
@@ -453,17 +671,29 @@ operations:
         key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
       rr: { resource: rolling_release }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: rr_found, error: NotFound, message: "No active rolling release" }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: "rr_found && rr.state == 'ACTIVE'", error: NotFound, message: "No active rolling release" }
+      - { cond: "string(rr.canaryDeployment.id) == string(input.canaryDeploymentId)", error: BadRequest, message: "That deployment is not the release's canary" }
     effects:
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          record:
+            id: id
+            productionDeploymentId: "string(rr.canaryDeployment.id)"
       - patch:
           resource: rolling_release
           record:
-            state: "'COMPLETED'"
-            approvedStage: "rr.approvedStage"
+            state: "'COMPLETE'"
+            activeIndex: "size(rr.stages) - 1"
+            updatedAt: "now_ms"
+    list:
+      resource: rolling_release
+      member: rollingRelease
     output:
-      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
+      rollingRelease: "items[0].shown"
 
+  # No billing store: the answer is the plan with no limit.
   GetRollingReleaseBillingStatus:
     reads:
       by_name: { resource: project_name, key: "string(input.idOrName)" }
@@ -471,14 +701,16 @@ operations:
         resource: project
         key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
     output:
-      # Fixed fixture; no billing store. Recorded as a quirk.
-      availableSlots: "1"
-      enabledProjects: "[]"
-      message: "'ok'"
-      reason: "'fixture'"
+      availableSlots: "'unlimited'"
+      reason: "'unlimited_slots'"
+      message: "'Rolling releases are not limited.'"
 
+  # --- Runtime logs --------------------------------------------------------
+
+  # The document streams log rows. Nothing is served here, so there is nothing
+  # to log; the stream is the delimiter row that opens it.
   GetRuntimeLogs:
     reads:
       by_name: { resource: project_name, key: "string(input.projectId)" }
@@ -487,18 +719,16 @@ operations:
         key: "by_name_found ? string(by_name.project) : string(input.projectId)"
       dep: { resource: deployment, key: "string(input.deploymentId)" }
     require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    # Document shapes this as one log row, not a list wrapper. Empty until a
-    # writer exists; return a stub row rather than inventing a logs member.
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
     output:
-      domain: "''"
+      domain: "string(dep.url)"
       level: "'info'"
       message: "''"
       messageTruncated: "false"
       requestMethod: "''"
       requestPath: "''"
       responseStatusCode: "0"
-      rowId: "''"
-      source: "'edge'"
-      timestampInMs: "int(now) * 1000"
+      rowId: "'row_' + string(dep.uid)"
+      source: "'delimiter'"
+      timestampInMs: "now_ms"

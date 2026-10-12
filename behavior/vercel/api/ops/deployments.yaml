@@ -416,7 +416,7 @@ operations:
       - delete: { resource: deployment_alias, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: deployment_file, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: check, where: "true" }
-      - delete: { resource: check_run, where: "true" }
+      - delete: { resource: check_run, where: "item.deploymentId == string(dep.uid)" }
       - delete: { resource: runtime_log, where: "true" }
       - delete: { resource: deployment }
     output:

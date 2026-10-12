@@ -116,7 +116,9 @@ func TestVercelCICDParity(t *testing.T) {
 		if code != 200 || runs["runs"] == nil {
 			t.Fatalf("list runs %d %#v", code, runs)
 		}
-		code, crun := call(http.MethodPost, "/v2/deployments/"+did+"/check-runs", `{"checkId":"`+chk["id"].(string)+`"}`)
+		// A run is of a project check: the definition the project holds, run
+		// against this deployment.
+		code, crun := call(http.MethodPost, "/v2/deployments/"+did+"/check-runs", `{"checkId":"`+pchk["id"].(string)+`"}`)
 		if code != 200 || crun["id"] == nil {
 			t.Fatalf("check-run %d %#v", code, crun)
 		}
@@ -156,13 +158,17 @@ func TestVercelCICDParity(t *testing.T) {
 		if code != 200 || gone["deletedCount"] != float64(1) {
 			t.Fatalf("delete all artifacts %d %#v", code, gone)
 		}
-		code, cfg := call(http.MethodPatch, "/v1/projects/"+pid+"/rolling-release/config", `{"target":"production","stages":[]}`)
+		code, cfg := call(http.MethodPatch, "/v1/projects/"+pid+"/rolling-release/config", `{"target":"production","stages":[{"targetPercentage":50},{"targetPercentage":100}]}`)
 		if code != 200 || cfg["rollingRelease"] == nil {
 			t.Fatalf("rr config %d %#v", code, cfg)
 		}
 		code, dpl := call(http.MethodPost, "/v13/deployments", `{"name":"cicd-app","project":"cicd-app"}`)
 		if code != 200 {
 			t.Fatalf("deploy %d %#v", code, dpl)
+		}
+		// A canary is a deployment that has finished building.
+		if err := rt.Deps.Clock.Advance(3 * time.Second); err != nil {
+			t.Fatal(err)
 		}
 		code, started := call(http.MethodPost, "/v1/projects/"+pid+"/rolling-release/start", `{"canaryDeploymentId":"`+dpl["id"].(string)+`"}`)
 		if code != 200 || started["rollingRelease"] == nil {

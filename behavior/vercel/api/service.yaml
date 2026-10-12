@@ -641,7 +641,12 @@ operations:
           record:
             id: id
             productionDeploymentId: "string(dep.uid)"
-            rollbackDescription: "''"
+            # A rollback begins undescribed; the update-description route says why.
+            rollbackDescription:
+              userId: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+              username: "'test'"
+              description: "''"
+              createdAt: "now_ms"
     output: {}
 
   UpdateProjectsByProjectIdRollbackByDeploymentIdUpdateDescription:
@@ -656,13 +661,18 @@ operations:
             : (('projectId' in input && input.projectId != null) ? string(input.projectId) : '')
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "!('description' in input) || input.description == null || size(string(input.description)) <= 250", error: BadRequest, message: "A rollback description is limited to 250 characters" }
     effects:
       - patch:
           resource: project
           key: "string(proj.id)"
           record:
             id: id
-            rollbackDescription: "('description' in input && input.description != null) ? string(input.description) : ''"
+            rollbackDescription:
+              userId: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+              username: "'test'"
+              description: "('description' in input && input.description != null) ? string(input.description) : ''"
+              createdAt: "now_ms"
     output: {}
 
 
@@ -734,6 +744,50 @@ quirks:
       another) is a 409 domain_already_in_use. The error codes are this
       bundle's reading of Vercel's: the document names the statuses and not the
       codes.
+  - operation: CreateCheck
+    note: >
+      A check can be added only while the build runs (QUEUED or BUILDING), as the
+      document says, and starts registered. Its integrationId is a constant:
+      there is no integration behind it. Status, conclusion and the timestamps
+      move because a client patches them; nothing runs the check.
+  - operation: CreateDeploymentCheckRun
+    note: >
+      `checkId` names a project check, the definition the run is made from
+      (name, requires, blocks, targets, timeout, source); the run starts queued.
+      The pack and the oracle took any identifier, including a deployment check's.
+  - operation: CreateProjectCheck
+    note: >
+      A check made through the API has no integration or git provider behind it,
+      so its source is a webhook unless the request names another kind. The
+      timeout defaults to five minutes (the document sets a floor of one
+      second and no default).
+  - operation: UpdateRollingReleaseConfig
+    note: >
+      The document declares this route with no request body, so the members are
+      taken from the body whether they arrive flat or inside rollingRelease; a
+      null rollingRelease takes the configuration away. The final stage must be
+      100 percent and stages must rise.
+  - operation: StartRollingRelease
+    note: >
+      Needs configured stages and a READY canary, and moves nothing: there is no
+      traffic to split, so the stages are a state machine a client steps
+      through (approve-stage moves to the next, complete finishes and makes the
+      canary production). The answer is the document's RollingRelease object.
+  - operation: GetRollingReleaseBillingStatus
+    note: >
+      Answers the plan with no limit (unlimited_slots); there is no billing.
+  - operation: GetRuntimeLogs
+    note: >
+      Nothing serves traffic, so there is nothing to log; the stream is the
+      delimiter row that opens it.
+  - operation: UploadArtifact
+    note: >
+      The bytes are kept (base64 in the record, in memory), so an upload is what
+      the next download returns, byte for byte. The pack kept the size alone and
+      answered an empty body.
+  - operation: RecordEvents
+    note: >
+      Accepted and not kept: cache events are the client's telemetry.
   - operation: CreateDeployment
     note: >
       Creating a deployment for a project that does not exist creates the

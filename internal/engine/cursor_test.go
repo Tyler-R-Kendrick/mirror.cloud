@@ -146,3 +146,36 @@ func TestACursorBeyondTheRangeIsTheBoundItIs(t *testing.T) {
 		}
 	}
 }
+
+// TestACursorIsADecimalNumberAndNothingAParserWouldTake is the grammar of the text
+// of a cursor, one row per form: what pagination.next prints and a client computes
+// is read as the place it names, and the forms a number parser takes that no
+// client prints are refused.
+func TestACursorIsADecimalNumberAndNothingAParserWouldTake(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		ms   int64
+		slot int64
+	}{
+		{"0", 0, 0}, {"-0", 0, 0}, {"-1", -1, 0}, {"1791836623140", today, 0},
+		{"1791836623140.5", today, 2048}, {"1791836623140.4", today, 1638}, // every fraction here is a multiple of 1/4096
+		{"1791836623140.0002", today, 1}, {"1791836623140.00001", today, 0},
+		{"0.000244140625", 0, 1}, {"0.5", 0, 2048},
+		{"1.5e3", 1500, 0}, {"1E3", 1000, 0}, {"5e+2", 500, 0}, {"5e02", 500, 0}, {"1e-0", 1, 0},
+		{"1e19", maxCursorMS, 0}, {"-1e300", -maxCursorMS, 0},
+	} {
+		c, err := parseCursor(tc.in)
+		if err != nil || !c.set || c.ms != tc.ms || c.slot != tc.slot {
+			t.Errorf("parseCursor(%q) = %+v, %v; want ms %d slot %d", tc.in, c, err, tc.ms, tc.slot)
+		}
+	}
+	for _, in := range []string{
+		".5", "5.", "-.5", "1_000", "0x1p4", "0x10", "0b11", "0o7", "+5", "+1e3", "00012", "01", "-01", "1e", "1e+", "e5", "1e5.5",
+		"--1", "- 1", "1 000", " 5", "5 ", "\t5", "5\n", "1,5", "1.2.3", "NaN", "nan", "Inf", "+Inf", "-Inf", "infinity", "1e400", "-1e400",
+		"true", "null", "\uff11\uff12", "\u0661\u0662", "0.4", "1.3", "1e-7", "1e-1", "\u00bd", "1\u00a0",
+	} {
+		if c, err := parseCursor(in); err == nil {
+			t.Errorf("parseCursor(%q) = %+v, want an error: it is not a number a cursor is", in, c)
+		}
+	}
+}

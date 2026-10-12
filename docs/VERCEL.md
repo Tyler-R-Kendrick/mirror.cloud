@@ -531,7 +531,9 @@ compared with api.vercel.com.
   there. A bare integer timestamp still means what it did (the items strictly before it for
   `until`, after it for `since`), a number past what a float64 holds as an integer (beyond
   2^53 either way) is the bound it is, every item being before 1e19 and after -1e19, and
-  anything that is not a number is a 400. Projects page
+  anything that is not a decimal number, in the form a client prints one (a minus sign, digits
+  with no leading zero, a fraction, an exponent: not `.5`, `1_000`, `0x10`, `+5`, `00012`,
+  padding, NaN or Inf), is a 400, as is a fraction that names no place. Projects page
   by creation, since that is the order of the listing (an update moves nothing in it); the
   document words `from` as "updated after". The paged listings are teams, projects,
   deployments (`/v6` and `/v7`), aliases, the account's domains, a project's domains and the

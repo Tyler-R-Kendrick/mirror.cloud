@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -91,23 +92,31 @@ type cursor struct {
 	slot int64 // the place among that millisecond's items; 0 for a bare timestamp
 }
 
+// cursorGrammar is the text of a cursor: what a JavaScript client prints for a
+// number (a minus sign, digits with no leading zero, a fraction, an exponent) and
+// nothing else a number parser would take.
+var cursorGrammar = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$`)
+
 // parseCursor reads what a request carried as `until`, `since` or `from`: a
-// number, or the text of one. Nothing, or the empty string, is no cursor. Text
-// that is not a number is an error rather than no cursor: a typo that quietly
-// returned the first page again would loop a client for ever.
+// number, or the text of one. Nothing, or text of nothing but spaces, is no
+// cursor. Anything else that is not a decimal number is an error rather than no
+// cursor: a typo that quietly returned the first page again would loop a client
+// for ever, and ParseFloat alone takes `.5`, `1_000`, `0x1p4`, `+5` and `00012`.
 func parseCursor(v any) (cursor, error) {
 	var f float64
 	switch t := v.(type) {
 	case nil:
 		return cursor{}, nil
 	case string:
-		s := strings.TrimSpace(t)
-		if s == "" {
+		if strings.TrimSpace(t) == "" {
 			return cursor{}, nil
 		}
-		n, err := strconv.ParseFloat(s, 64)
-		if err != nil {
+		if !cursorGrammar.MatchString(t) {
 			return cursor{}, fmt.Errorf("the cursor %q is not a number: %s", t, cursorForm)
+		}
+		n, err := strconv.ParseFloat(t, 64)
+		if err != nil {
+			return cursor{}, fmt.Errorf("the cursor %q is not a number in range: %s", t, cursorForm)
 		}
 		f = n
 	default:

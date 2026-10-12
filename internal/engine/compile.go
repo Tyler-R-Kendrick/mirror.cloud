@@ -306,6 +306,20 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
+		// compact drops the members whose value is null. See the declaration in
+		// internal/bir/celenv.go for why a record stores a null at all.
+		cel.Function("compact", cel.Overload("compact_1", []*cel.Type{dyn}, dyn,
+			cel.UnaryBinding(func(m ref.Val) ref.Val {
+				src, _ := fromCEL(m).(map[string]any)
+				out := map[string]any{}
+				for k, v := range src {
+					if v != nil {
+						out[k] = v
+					}
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
 		// merge layers maps left to right, which is how a service states
 		// "defaults, then what was stored, then what was set".
 		cel.Function("merge", cel.Overload("merge_2", []*cel.Type{dyn, dyn}, dyn,

@@ -120,6 +120,15 @@ func TestValidationRejects(t *testing.T) {
 			want: "projects the body itself but",
 		},
 		{
+			// `_object` names the body itself and is only meaningful when the
+			// document leaves the object open. MakeThingResponse declares a
+			// member, so naming `_object` there would answer a body the model
+			// does not describe.
+			name: "open-object output on a structure that declares members",
+			edit: func(b string) string { return strings.Replace(b, "      ThingId: id", "      _object: id", 1) },
+			want: "projects an open object but",
+		},
+		{
 			name: "output member not in the model",
 			edit: func(b string) string { return strings.Replace(b, "      ThingId: id", "      Nonsense: id", 1) },
 			want: "is not a member of",
@@ -568,5 +577,23 @@ func TestUnaddressableReadIsRefused(t *testing.T) {
 		"    collection: things\n    singleton: only", 1)
 	if _, err := loadDemo(t, asSingleton); err != nil {
 		t.Fatalf("a singleton resource was refused: %v", err)
+	}
+}
+
+// TestOpenObjectOutputIsAcceptedOnAShapeWithNoMembers is the other half of the
+// rule above: `_object` is how a bundle answers an object the document leaves
+// open, and it has to load there.
+func TestOpenObjectOutputIsAcceptedOnAShapeWithNoMembers(t *testing.T) {
+	for name, shape := range map[string]model.Shape{
+		"a structure with no members": {Kind: model.KindStructure},
+		"a map":                       {Kind: model.KindMap, Member: "smithy.api#String"},
+	} {
+		m := demoModel()
+		m.Shapes["com.demo#MakeThingResponse"] = shape
+		bundle := strings.Replace(demoBundle, "      ThingId: id", "      _object: \"{'any': 'thing'}\"", 1)
+		fsys := fstest.MapFS{"aws/demo/service.yaml": &fstest.MapFile{Data: []byte(bundle)}}
+		if _, err := Load(fsys, "aws/demo", m); err != nil {
+			t.Errorf("%s answered by _object did not load: %v", name, err)
+		}
 	}
 }

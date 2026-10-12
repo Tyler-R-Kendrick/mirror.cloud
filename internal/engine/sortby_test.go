@@ -81,3 +81,16 @@ func TestSortByOrdersRecordsByOneMember(t *testing.T) {
 }
 
 func timeZero() time.Time { return time.Unix(0, 0).UTC() }
+
+// TestCompactDropsNullMembers pins what a record that stores "not yet" as null
+// answers: the members that have a value, and nothing for the rest.
+func TestCompactDropsNullMembers(t *testing.T) {
+	got := evalCEL(t, `compact({'id': 'chk_1', 'conclusion': null, 'blocking': false, 'path': null, 'n': 0})`, nil)
+	want := map[string]any{"id": "chk_1", "blocking": false, "n": int64(0)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("compact = %#v, want %#v", got, want)
+	}
+	if got := evalCEL(t, `size(compact({'a': null}))`, nil); got != int64(0) {
+		t.Fatalf("size = %v", got)
+	}
+}

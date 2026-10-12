@@ -307,6 +307,22 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	if w.Code != 200 || strings.Contains(w.Body.String(), `"_list"`) || !strings.Contains(w.Body.String(), `"domain":"ex.test"`) {
 		t.Fatalf("hs list encode %d %s", w.Code, w.Body.String())
 	}
+	// `_object` is the body itself, and a null is the body `null`.
+	for _, c := range []struct {
+		out  any
+		want string
+	}{
+		{map[string]any{"type": "object", "x": 1}, `{"type":"object","x":1}`},
+		{nil, `null`},
+	} {
+		w = httptest.NewRecorder()
+		if err := codec.Encode(hs, &model.Operation{Name: "GetSchema"}, w, &spi.Response{Output: map[string]any{"_object": c.out}}); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 200 || strings.TrimSpace(w.Body.String()) != c.want {
+			t.Fatalf("open object %v: %d %q, want %q", c.out, w.Code, w.Body.String(), c.want)
+		}
+	}
 	w = httptest.NewRecorder()
 	if err := codec.Encode(hs, &model.Operation{Name: "CreateDomain"}, w, &spi.Response{Output: map[string]any{"domain": "ex.test", "status": "active"}}); err != nil {
 		t.Fatal(err)

@@ -327,6 +327,23 @@ func (s *Service) ScalarBody(shapeID string) bool {
 	return false
 }
 
+// OpenObjectBody reports whether a shape is a JSON object the document leaves
+// open: a structure that declares no members, or a map, whose keys are the
+// caller's. Vercel's Edge Config schema is the first -- the answer is whatever
+// JSON schema was uploaded -- and the remote cache's digest-to-metadata answer
+// is the second. A shape like that has nothing for an output expression to
+// name, so a bundle that answers one says that the body is the object itself.
+func (s *Service) OpenObjectBody(shapeID string) bool {
+	if s == nil {
+		return false
+	}
+	shape, ok := s.Shapes[shapeID]
+	if !ok {
+		return false
+	}
+	return shape.Kind == KindMap || (shape.Kind == KindStructure && len(shape.Members) == 0)
+}
+
 // PayloadMember names the input member an operation binds to the whole request
 // body, when that member is an opaque body rather than a structure. The second
 // result is false when the operation has no such member.

@@ -646,6 +646,12 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if lst, ok := resp.Output[bir.TopLevelList]; ok {
 		return json.NewEncoder(w).Encode(lst)
 	}
+	// `_object` is the same idea for an open object: the body is the value, with
+	// no member around it. A null is the body `null`, which the document allows
+	// where it marks the object nullable.
+	if obj, ok := resp.Output[bir.TopLevelObject]; ok {
+		return json.NewEncoder(w).Encode(obj)
+	}
 	return json.NewEncoder(w).Encode(resp.Output)
 }
 

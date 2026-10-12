@@ -663,6 +663,18 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 		}
 		return
 	}
+	if member == TopLevelObject {
+		// The body is this object, whatever members it has. Only a shape the
+		// document leaves open has none to name; on a shape that declares
+		// members it would let a bundle answer a body no member of the model
+		// describes.
+		if !svc.OpenObjectBody(op.Output) {
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s: %q projects an open object but %s declares members (%s); name them",
+				s.ServiceID, where, member, op.Output, strings.Join(sortedKeys(svc.BodyMembers(op.Output)), ", ")))
+		}
+		return
+	}
 	if member == TopLevelList {
 		// A REST body that is a bare JSON array has no member to name, and
 		// `_list` is what the codec calls it (internal/proto/aws/restjson).
@@ -693,6 +705,15 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 // every collection endpoint -- and without it such an operation cannot be
 // expressed as a bundle at all, only as a Go pack.
 const TopLevelList = "_list"
+
+// TopLevelObject is the output member name that means "the body is this object",
+// for the operations whose response is a JSON object the document leaves open:
+// it declares the type and no members, because the content is the caller's.
+//
+// Like `_list` it is a convention between the engine and the REST/JSON codec,
+// it cannot collide with a real member, and it is only accepted on a shape that
+// declares none.
+const TopLevelObject = "_object"
 
 // TopLevelRaw is the output member name that means "the body is this opaque
 // string", for the operations whose response is neither an object nor an

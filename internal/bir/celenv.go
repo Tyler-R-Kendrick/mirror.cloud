@@ -157,6 +157,11 @@ func celFuncs() []cel.EnvOption {
 		// Untag* and every "defaults, then stored, then set" attribute merge
 		// needs one of these.
 		binaryDyn("without", dyn, dyn, dyn),
+		// compact drops the members of a map whose value is null. A document
+		// that makes a member optional without making it nullable (every
+		// Vercel check's conclusion, until the check finishes) wants it absent,
+		// and a record that stores "not yet" as null would otherwise answer it.
+		unaryDyn("compact", dyn, dyn),
 		binaryDyn("merge", dyn, dyn, dyn),
 		// rollup turns a list of records into a map: element[key] ->
 		// element[value]. The map-shaped answer to a list-shaped store (Secrets
